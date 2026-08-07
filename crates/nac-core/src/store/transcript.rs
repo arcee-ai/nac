@@ -717,6 +717,30 @@ impl TranscriptLogWriter {
         Ok(())
     }
 
+    /// Atomically admits an `admitting` queued run as the next canonical User
+    /// message. The transcript append, session summary, receipt transition,
+    /// and queue deletion either all commit or all roll back.
+    #[allow(dead_code)] // consumed by the queued-run lifecycle layer in the next lane
+    pub fn append_admitting_queued_user(
+        &self,
+        session_id: &str,
+        queued_run_id: &str,
+        admitted_run_id: &str,
+        idx: u64,
+    ) -> Result<Message> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        super::queued_runs::append_admitting_user_and_consume(
+            &mut connection,
+            session_id,
+            queued_run_id,
+            admitted_run_id,
+            idx,
+        )
+    }
+
     /// Read the full log tail relative to a snapshot blob of `blob_len`
     /// messages: every row with `idx >= blob_len`, in log order. This is the
     /// hot-path equivalent of `read_from` for store-backed transcript reads:

@@ -1,9 +1,9 @@
 use super::*;
 
-// Version 11 adds immutable session-lineage audit rows. Version 10 remains the
-// branch's SSH/schema-reconciliation milestone; do not reuse historical PR #60
-// version literals for lineage.
-const STORE_SCHEMA_VERSION: i64 = 11;
+// Version 12 adds the durable single-slot queued orchestrator run and its
+// session-lifetime idempotency receipts. Version 11 remains the immutable
+// session-lineage milestone.
+const STORE_SCHEMA_VERSION: i64 = 12;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -92,6 +92,8 @@ fn inspect_schema_shape(conn: &Connection) -> Result<SchemaShape> {
         "model_configurations",
         "ssh_configurations",
         "session_lineage",
+        "session_queued_runs",
+        "session_message_receipts",
     ];
     let has_run_count = column_exists(conn, "sessions", "run_count")?;
     let has_visible_message_count = column_exists(conn, "sessions", "visible_message_count")?;
@@ -227,7 +229,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -289,6 +291,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     create_model_configurations_table(&transaction)?;
     create_ssh_configurations_table(&transaction)?;
     create_session_lineage_table(&transaction)?;
+    create_queued_run_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -856,12 +859,65 @@ fn create_session_lineage_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn create_queued_run_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_queued_runs (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             queued_run_id TEXT NOT NULL UNIQUE
+                 CHECK (length(queued_run_id) BETWEEN 1 AND 256),
+             client_message_id TEXT NOT NULL
+                 CHECK (length(client_message_id) BETWEEN 1 AND 256),
+             display_prompt TEXT NOT NULL CHECK (length(display_prompt) BETWEEN 1 AND 1048576),
+             agent_prompt TEXT NOT NULL CHECK (length(agent_prompt) BETWEEN 1 AND 1048576),
+             after_run_id TEXT NOT NULL CHECK (length(after_run_id) BETWEEN 1 AND 256),
+             state TEXT NOT NULL CHECK (state IN ('pending', 'admitting')),
+             admitted_run_id TEXT,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             CHECK (
+                 (state = 'pending' AND admitted_run_id IS NULL) OR
+                 (state = 'admitting' AND admitted_run_id IS NOT NULL
+                    AND length(admitted_run_id) BETWEEN 1 AND 256)
+             )
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_session_queued_runs_client_message
+             ON session_queued_runs(session_id, client_message_id);
+         CREATE TABLE IF NOT EXISTS session_message_receipts (
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             client_message_id TEXT NOT NULL
+                 CHECK (length(client_message_id) BETWEEN 1 AND 256),
+             payload_sha256 TEXT NOT NULL
+                 CHECK (length(payload_sha256) = 64),
+             disposition TEXT NOT NULL
+                 CHECK (disposition IN ('queued', 'admitting', 'admitted', 'deleted')),
+             queued_run_id TEXT,
+             run_id TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             PRIMARY KEY (session_id, client_message_id),
+             CHECK (
+                 (disposition = 'queued' AND queued_run_id IS NOT NULL AND run_id IS NULL) OR
+                 (disposition = 'admitting' AND queued_run_id IS NOT NULL AND run_id IS NOT NULL) OR
+                 (disposition = 'admitted' AND queued_run_id IS NOT NULL AND run_id IS NOT NULL) OR
+                 (disposition = 'deleted' AND queued_run_id IS NOT NULL AND run_id IS NULL)
+             )
+         );",
+    )?;
+    Ok(())
+}
+
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
     for table in [
         "thread_steering",
         "thread_events",
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
+        "session_lineage",
+        "session_queued_runs",
+        "session_message_receipts",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

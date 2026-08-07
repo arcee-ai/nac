@@ -32,6 +32,17 @@ pub mod lineage {
     pub use crate::store::{create_session_fork, load_session_lineage, SessionLineageRecord};
 }
 
+/// Durable storage primitives for the single next-run slot. Lifecycle and HTTP
+/// admission are intentionally layered above this module.
+pub mod queued_runs {
+    pub use crate::store::{
+        begin_queued_run_admission, create_queued_run, delete_queued_run, edit_queued_run,
+        load_message_receipt, load_queued_run, rollback_queued_run_admission, CreateQueuedRun,
+        CreateQueuedRunOutcome, MessageReceiptDisposition, MessageReceiptRecord, QueuedRunRecord,
+        QueuedRunState, QueuedRunStoreError, MAX_QUEUED_ID_BYTES, MAX_QUEUED_PROMPT_BYTES,
+    };
+}
+
 mod paths;
 mod process;
 pub mod runtime;

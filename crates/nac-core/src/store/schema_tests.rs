@@ -253,6 +253,38 @@ fn assert_current_schema(conn: &Connection) {
         )
         .unwrap();
     assert!(latest_index_exists);
+    assert_eq!(
+        table_columns(conn, "session_queued_runs"),
+        [
+            "session_id",
+            "queued_run_id",
+            "client_message_id",
+            "display_prompt",
+            "agent_prompt",
+            "after_run_id",
+            "state",
+            "admitted_run_id",
+            "version",
+            "created_at",
+            "updated_at",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "session_message_receipts"),
+        [
+            "session_id",
+            "client_message_id",
+            "payload_sha256",
+            "disposition",
+            "queued_run_id",
+            "run_id",
+            "created_at",
+            "updated_at",
+        ]
+    );
+    for table in ["session_queued_runs", "session_message_receipts"] {
+        assert_session_cascade(conn, table);
+    }
 
     let violation_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -1031,4 +1063,95 @@ fn pr_style_v5_shape_is_recognized_without_reusing_its_version_meaning() {
     assert_eq!(version, STORE_SCHEMA_VERSION);
     drop(reconciled);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v11_store_migrates_to_v12_without_changing_existing_data() {
+    let path = temp_store_path("v11_to_v12");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "preserved");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "DROP TABLE session_message_receipts;
+         DROP TABLE session_queued_runs;
+         INSERT INTO threads (name, session_id, created_at, updated_at)
+         VALUES ('kept', 'preserved', 'created', 'updated');
+         PRAGMA user_version = 11;",
+    )
+    .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_current_schema(&migrated);
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        12
+    );
+    let kept: String = migrated
+        .query_row(
+            "SELECT name FROM threads WHERE session_id='preserved'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, "kept");
+    drop(migrated);
+    let (backup, _) = super::super::backup::pinned_backup_paths(&path);
+    let backup = Connection::open(backup).unwrap();
+    assert_eq!(
+        backup
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        11
+    );
+    assert!(!table_exists(&backup, "session_queued_runs").unwrap());
+    drop(backup);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn queued_run_tables_enforce_state_shape_and_cascade_with_session() {
+    let path = temp_store_path("queued_constraints");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "owned");
+    let conn = open_runtime_connection(&path).unwrap();
+    let invalid = conn.execute(
+        "INSERT INTO session_queued_runs
+         (session_id, queued_run_id, client_message_id, display_prompt, agent_prompt,
+          after_run_id, state, admitted_run_id, version, created_at, updated_at)
+         VALUES ('owned', 'q', 'c', 'display', 'agent', 'old', 'pending', 'new', 0, 't', 't')",
+        [],
+    );
+    assert!(invalid.is_err());
+    conn.execute(
+        "INSERT INTO session_queued_runs
+         (session_id, queued_run_id, client_message_id, display_prompt, agent_prompt,
+          after_run_id, state, admitted_run_id, version, created_at, updated_at)
+         VALUES ('owned', 'q', 'c', 'display', 'agent', 'old', 'pending', NULL, 0, 't', 't')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session_message_receipts
+         (session_id, client_message_id, payload_sha256, disposition, queued_run_id,
+          run_id, created_at, updated_at)
+         VALUES ('owned', 'c', ?1, 'queued', 'q', NULL, 't', 't')",
+        params!["0".repeat(64)],
+    )
+    .unwrap();
+    conn.execute("DELETE FROM sessions WHERE session_id='owned'", [])
+        .unwrap();
+    for table in ["session_queued_runs", "session_message_receipts"] {
+        let count: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+    drop(conn);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
