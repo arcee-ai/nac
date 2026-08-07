@@ -385,6 +385,9 @@ async fn run_server(cli: ServerCli) -> Result<()> {
         store_path: cli.store_path,
         worker_executable: cli.worker_executable,
     })?;
+    // Reconcile and validate before accepting requests. Future schema changes
+    // are gated by the core store's create-once pinned backup policy here.
+    nac_core::initialize_store(&manager.store_info().store_path)?;
     // Fire-and-forget models.dev catalog overlay refresh (4h cadence,
     // ETag-revalidated, never on picker/resume/validation paths).
     nac_core::model::spawn_overlay_refresh();

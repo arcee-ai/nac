@@ -910,3 +910,125 @@ fn opening_v4_store_is_idempotent() {
     drop(reopened);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn migration_creates_and_reuses_a_valid_pinned_online_backup() {
+    let path = temp_store_path("pinned_backup");
+    initialize(&path).unwrap();
+    let (backup_path, digest_path) = super::super::backup::pinned_backup_paths(&path);
+    assert!(!backup_path.exists());
+    assert!(!digest_path.exists());
+    let conn = Connection::open(&path).unwrap();
+    conn.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+    insert_legacy_session(&conn, "committed-in-wal");
+    conn.pragma_update(None, "user_version", 9).unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+    assert!(backup_path.is_file());
+    let backup = Connection::open(&backup_path).unwrap();
+    let backed_up_version: i64 = backup
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(backed_up_version, 9);
+    let backed_up_rows: i64 = backup
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE session_id = 'committed-in-wal'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(backed_up_rows, 1);
+    let first_digest = std::fs::read_to_string(&digest_path).unwrap();
+    drop(backup);
+
+    let conn = Connection::open(&path).unwrap();
+    conn.pragma_update(None, "user_version", 9).unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+    assert_eq!(std::fs::read_to_string(&digest_path).unwrap(), first_digest);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn invalid_pinned_backup_blocks_migration_without_schema_changes() {
+    let path = temp_store_path("invalid_backup");
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.pragma_update(None, "user_version", 9).unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+
+    let conn = Connection::open(&path).unwrap();
+    conn.pragma_update(None, "user_version", 9).unwrap();
+    drop(conn);
+    let (_, digest_path) = super::super::backup::pinned_backup_paths(&path);
+    std::fs::write(&digest_path, "not-the-digest\n").unwrap();
+
+    let error = initialize(&path).unwrap_err();
+    assert!(
+        error.to_string().contains("valid pinned backup"),
+        "{error:#}"
+    );
+    let unchanged = Connection::open(&path).unwrap();
+    let version: i64 = unchanged
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 9);
+    drop(unchanged);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v10_shape_drift_is_reconciled_and_the_original_shape_is_backed_up() {
+    let path = temp_store_path("v10_shape");
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE ssh_configurations").unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+    let current = Connection::open(&path).unwrap();
+    assert!(table_exists(&current, "ssh_configurations").unwrap());
+    assert_eq!(
+        current
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    drop(current);
+
+    let (backup_path, _) = super::super::backup::pinned_backup_paths(&path);
+    let backup = Connection::open(backup_path).unwrap();
+    assert!(!table_exists(&backup, "ssh_configurations").unwrap());
+    drop(backup);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn pr_style_v5_shape_is_recognized_without_reusing_its_version_meaning() {
+    let path = temp_store_path("branch_v5_shape");
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "DROP TABLE ssh_configurations;
+         DROP TABLE model_configurations;
+         DROP TABLE workspace_revisions;
+         ALTER TABLE sessions DROP COLUMN ssh_identity_file;
+         ALTER TABLE sessions DROP COLUMN ssh_port;
+         ALTER TABLE sessions DROP COLUMN run_count;
+         PRAGMA user_version = 5;",
+    )
+    .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+    let reconciled = Connection::open(&path).unwrap();
+    assert!(inspect_schema_shape(&reconciled).unwrap().current);
+    let version: i64 = reconciled
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORE_SCHEMA_VERSION);
+    drop(reconciled);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

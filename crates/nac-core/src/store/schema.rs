@@ -53,6 +53,70 @@ fn connect(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+#[derive(Debug)]
+struct SchemaShape {
+    has_run_count: bool,
+    has_visible_message_count: bool,
+    has_last_user_prompt: bool,
+    current: bool,
+}
+
+fn inspect_schema_shape(conn: &Connection) -> Result<SchemaShape> {
+    let required_session_columns = [
+        "backend",
+        "reasoning_effort",
+        "last_response_duration_ms",
+        "previous_response_duration_ms",
+        "response_durations_ms_json",
+        "host_id",
+        "api_key_env",
+        "extra_headers_json",
+        "token_usages_json",
+        "config_version",
+        "orchestrator_compaction_threshold",
+        "run_count",
+        "visible_message_count",
+        "last_user_prompt",
+        "ssh_port",
+        "ssh_identity_file",
+    ];
+    let required_tables = [
+        "threads",
+        "episodes",
+        "worksets",
+        "workset_items",
+        "sessions",
+        "thread_steering",
+        "thread_events",
+        "orchestrator_compaction_checkpoints",
+        "workspace_revisions",
+        "model_configurations",
+        "ssh_configurations",
+    ];
+    let has_run_count = column_exists(conn, "sessions", "run_count")?;
+    let has_visible_message_count = column_exists(conn, "sessions", "visible_message_count")?;
+    let has_last_user_prompt = column_exists(conn, "sessions", "last_user_prompt")?;
+    let current = required_tables.iter().try_fold(true, |current, table| {
+        Ok::<_, anyhow::Error>(current && table_exists(conn, table)?)
+    })? && required_session_columns
+        .iter()
+        .try_fold(true, |current, column| {
+            Ok::<_, anyhow::Error>(current && column_exists(conn, "sessions", column)?)
+        })?
+        && column_exists(conn, "workset_items", "acceptance")?
+        && column_exists(conn, "workspace_revisions", "transcript_len")?;
+    Ok(SchemaShape {
+        has_run_count,
+        has_visible_message_count,
+        has_last_user_prompt,
+        current,
+    })
+}
+
+fn schema_version_is_supported(version: i64) -> bool {
+    (0..=STORE_SCHEMA_VERSION).contains(&version)
+}
+
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
     let conn = connect(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -64,7 +128,7 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
     }
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if schema_version != STORE_SCHEMA_VERSION {
+    if schema_version != STORE_SCHEMA_VERSION || !inspect_schema_shape(&conn)?.current {
         drop(conn);
         return open_connection(path);
     }
@@ -89,7 +153,25 @@ pub(crate) fn tracked_connection_opens(path: &Path) -> usize {
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
+    let store_existed = path.is_file();
     let mut conn = connect(path)?;
+    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if !schema_version_is_supported(schema_version) {
+        return Err(anyhow!(
+            "unsupported store schema version {schema_version}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
+        ));
+    }
+    let shape = inspect_schema_shape(&conn)?;
+    let needs_mutation = schema_version != STORE_SCHEMA_VERSION || !shape.current;
+    if store_existed && needs_mutation {
+        super::backup::ensure_pinned_backup(&conn, path).with_context(|| {
+            format!(
+                "refusing to migrate store {} without a valid pinned backup",
+                path.display()
+            )
+        })?;
+    }
+
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA journal_mode = WAL;",
@@ -98,7 +180,11 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let schema_version: i64 =
         transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
+    let needs_run_count_backfill =
+        schema_version < RUN_COUNT_BACKFILL_VERSION || !shape.has_run_count;
+    let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION
+        || !shape.has_visible_message_count
+        || !shape.has_last_user_prompt;
     match schema_version {
         0 | 1 => {
             create_base_schema(&transaction)?;
@@ -149,6 +235,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         }
     }
 
+    ensure_workset_items_acceptance_column(&transaction)?;
     ensure_column(
         &transaction,
         "sessions",
@@ -182,7 +269,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535))",
     )?;
     ensure_column(&transaction, "sessions", "ssh_identity_file", "TEXT")?;
-    if schema_version < RUN_COUNT_BACKFILL_VERSION {
+    if needs_run_count_backfill {
         backfill_run_counts(&transaction)?;
     }
     if needs_session_summary_backfill {

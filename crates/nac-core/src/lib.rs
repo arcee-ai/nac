@@ -36,6 +36,7 @@ pub mod session_service;
 pub mod sessions;
 mod skills;
 mod store;
+pub use store::{initialize as initialize_store, pinned_backup_paths as pinned_store_backup_paths};
 mod terminal;
 mod tools;
 pub mod types;
