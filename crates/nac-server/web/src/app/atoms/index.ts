@@ -8,6 +8,7 @@ export {
   ButtonVariant,
 } from "./button";
 export { default as CopyButton } from "./button/CopyButton";
+export { default as StickyButton } from "./button/StickyButton";
 export { default as ChatLoader, ChatLoaderSize } from "./chat-loader";
 export { default as Checkbox } from "./checkbox";
 export { default as CodeBlock, CodeBlockSize } from "./code-block";
@@ -38,6 +39,10 @@ export {
   InputTrailing,
 } from "./input";
 export { default as InputWrapper } from "./input/InputWrapper";
+export {
+  default as StickyInput,
+  StickyInputVariant,
+} from "./input/StickyInput";
 export { default as TextArea, TextAreaSize } from "./input/TextArea";
 export { default as KeyboardShortcut } from "./keyboard-shortcut";
 export {

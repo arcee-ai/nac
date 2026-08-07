@@ -15,6 +15,7 @@ import {
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import {
   useRunStateSync,
   useSessionStream,
@@ -108,6 +109,7 @@ export default function SessionPage() {
   const actions = useSessionActions();
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
+  const isMobile = useIsMobile();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
@@ -142,7 +144,7 @@ export default function SessionPage() {
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
 
   const focusPanel = (next: SessionPanel) => {
-    revealSidePanel();
+    revealSidePanel(isMobile);
     goToPanel(next);
   };
 
@@ -157,46 +159,52 @@ export default function SessionPage() {
 
   return (
     <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
-      {/* Yields the box's half of the row to the chat as the box slides away. */}
-      <div
-        className={cn(
-          "h-full shrink-0 transition-[width] duration-150 ease-out",
-          collapsed ? "w-0" : "w-1/2",
-        )}
-      />
+      {/* A phone has no room for the split: the chat takes the screen and the
+          box comes up as the dialog below instead. */}
+      {isMobile ? null : (
+        <>
+          {/* Yields the box's half of the row to the chat as the box slides away. */}
+          <div
+            className={cn(
+              "h-full shrink-0 transition-[width] duration-150 ease-out",
+              collapsed ? "w-0" : "w-1/2",
+            )}
+          />
 
-      {/*
-        Pinned to half the section rather than laid out in the row: a box that
-        kept its width while the row shrank would reflow its whole tree over
-        the animation, so it slides out at full size instead.
-      */}
-      <div
-        className={cn(
-          "absolute inset-y-0 left-0 flex flex-col w-1/2 min-w-0",
-          "pt-[72px] pb-2 pl-2 pr-6",
-          "transition-transform duration-150 ease-out",
-          collapsed && "-translate-x-full",
-        )}
-        aria-hidden={collapsed}
-        inert={collapsed}
-      >
-        <div
-          className={cn(
-            "flex flex-col flex-1 min-h-0 transition-opacity duration-150 ease-out",
-            collapsed && "opacity-0",
-          )}
-        >
-          {/* While the dialog is up it owns the panels, so this half stays
-              empty behind the scrim instead of running them twice. */}
-          <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
-        </div>
-      </div>
+          {/*
+            Pinned to half the section rather than laid out in the row: a box
+            that kept its width while the row shrank would reflow its whole tree
+            over the animation, so it slides out at full size instead.
+          */}
+          <div
+            className={cn(
+              "absolute inset-y-0 left-0 flex flex-col w-1/2 min-w-0",
+              "pt-[72px] pb-2 pl-2 pr-6",
+              "transition-transform duration-150 ease-out",
+              collapsed && "-translate-x-full",
+            )}
+            aria-hidden={collapsed}
+            inert={collapsed}
+          >
+            <div
+              className={cn(
+                "flex flex-col flex-1 min-h-0 transition-opacity duration-150 ease-out",
+                collapsed && "opacity-0",
+              )}
+            >
+              {/* While the dialog is up it owns the panels, so this half stays
+                  empty behind the scrim instead of running them twice. */}
+              <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
+            </div>
+          </div>
+        </>
+      )}
 
       <div
         className={cn(
-          "flex flex-col items-center flex-1 min-w-0 h-full pr-2",
+          "flex flex-col items-center flex-1 min-w-0 h-full",
           "transition-[padding] duration-150 ease-out",
-          collapsed ? "pl-2" : "pl-6",
+          isMobile ? "px-2" : collapsed ? "pl-2 pr-2" : "pl-6 pr-2",
         )}
       >
         <div className="flex flex-col flex-1 min-h-0 w-full relative">
@@ -208,14 +216,19 @@ export default function SessionPage() {
             errorNotice={errorNotice}
           />
 
-          <div className="mx-auto max-w-[840px] absolute bottom-0 left-0 right-0 pb-2">
+          <div
+            className={cn(
+              "absolute bottom-0 left-0 right-0 pb-2",
+              isMobile ? null : "mx-auto max-w-[840px]",
+            )}
+          >
             <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
           </div>
         </div>
       </div>
 
       {/* Floats where the box's own header sat, so the toggle stays put. */}
-      {collapsed ? (
+      {collapsed && !isMobile ? (
         <div className="fade absolute left-2 top-[77px] z-10">
           <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
             <Button

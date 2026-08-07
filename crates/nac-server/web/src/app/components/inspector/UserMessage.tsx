@@ -73,6 +73,8 @@ export const UserMessage = memo(function UserMessage({
             "opacity-0 pointer-events-none transition-opacity duration-150",
             "group-hover/user-msg:opacity-100 group-hover/user-msg:pointer-events-auto",
             "group-focus-within/user-msg:opacity-100 group-focus-within/user-msg:pointer-events-auto",
+            // Nothing hovers on a touch screen, so the row simply stays out.
+            "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
           )}
         >
           {timestamp ? (

@@ -239,6 +239,8 @@ export const ModelMessage = memo(function ModelMessage({
               "opacity-0 pointer-events-none transition-opacity duration-150",
               "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
               "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",
+              // Nothing hovers on a touch screen, so the row simply stays out.
+              "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
             )}
           >
             {canRefresh ? (

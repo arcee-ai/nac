@@ -27,6 +27,7 @@ import {
   runMetrics,
   sessionEnvLabel,
 } from "@/app/lib/format";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { perfRender } from "@/app/lib/perfDebug";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -71,7 +72,12 @@ function StatBadge({
 }) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter}>
-      <div className={cn("flex items-center gap-[2px] py-1", className)}>
+      <div
+        className={cn(
+          "flex items-center gap-[2px] py-1 whitespace-nowrap",
+          className,
+        )}
+      >
         <Icon iconName={iconName} size={iconSize} />
         <span className="label-micro">{value}</span>
       </div>
@@ -117,6 +123,7 @@ export function ChatInputBox({
 }: ChatInputBoxProps) {
   perfRender("ChatInputBox");
   const [value, setValue] = useState("");
+  const isMobile = useIsMobile();
   const running = useRunning();
   const toast = useToast();
   const actions = useSessionActions();
@@ -177,70 +184,119 @@ export function ChatInputBox({
     if (summary) await actions.stopRun(summary);
   }, [actions, entry]);
 
+  const settingsButton = (
+    <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
+      <Button
+        size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+        variant={ButtonVariant.Ghost}
+        content={ButtonContent.Icon}
+        aria-label="Session settings"
+        onClick={() => actions.settings(sessionId)}
+      >
+        <Icon iconName={IconName.Gear} size={isMobile ? 24 : 16} />
+      </Button>
+    </Tooltip>
+  );
+
+  const sendButton = (
+    <Button
+      className={isMobile ? "shrink-0 rounded-[32px]" : "absolute bottom-0 right-0"}
+      size={ButtonSize.Large}
+      variant={ButtonVariant.Primary}
+      content={ButtonContent.Icon}
+      type={running ? "button" : "submit"}
+      disabled={!running && !canSend}
+      aria-label={running ? "Stop run" : "Send"}
+      onClick={running ? () => void stop() : undefined}
+    >
+      <Icon iconName={running ? IconName.Stop : IconName.Plane} size={24} />
+    </Button>
+  );
+
+  const field = (
+    <div
+      className={cn(
+        "relative flex items-end bg-input",
+        isMobile
+          ? "flex-1 min-w-0 rounded-[20px] shadow-2xl pr-[44px]"
+          : "rounded-[4px] shadow-concave pr-[48px]",
+      )}
+    >
+      <textarea
+        ref={ref}
+        className={cn(
+          "flex-1 min-w-0 bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder",
+          isMobile ? "px-4 py-3" : "p-3",
+        )}
+        rows={1}
+        placeholder={running ? "Run in progress…" : "Send a message"}
+        spellCheck={false}
+        value={value}
+        disabled={busy}
+        style={{ minHeight: "48px", maxHeight: `${MAX_HEIGHT_PX}px` }}
+        onChange={(e) => {
+          setValue(e.target.value);
+          const el = e.target;
+          el.style.height = "auto";
+          el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          // Shift+Enter inserts a newline; a bare Enter (or Cmd/Ctrl+Enter) sends.
+          if (e.shiftKey) return;
+          // Enter also commits an in-flight IME composition, so it must not send.
+          if (e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          void submit();
+        }}
+      />
+      {/* On a phone the settings glyph rides inside the pill and Send sits
+          outside it, the way the design draws the two controls. */}
+      {isMobile ? (
+        <div className="absolute top-0 right-0">{settingsButton}</div>
+      ) : (
+        sendButton
+      )}
+    </div>
+  );
+
   return (
     <form
       className={cn(
-        "flex flex-col gap-4 p-4 rounded-[8px]",
-        "bg-elevation-level-1 shadow-2xl",
+        "flex flex-col",
+        isMobile
+          ? "gap-2"
+          : "gap-4 p-4 rounded-[8px] bg-elevation-level-1 shadow-2xl",
       )}
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
     >
-      <div className="relative flex items-end rounded-[4px] bg-input shadow-concave pr-[48px]">
-        <textarea
-          ref={ref}
-          className="flex-1 min-w-0 bg-transparent resize-none border-none outline-none p-3 text-medium text-input placeholder:text-input-placeholder"
-          rows={1}
-          placeholder={running ? "Run in progress…" : "Send a message"}
-          spellCheck={false}
-          value={value}
-          disabled={busy}
-          style={{ minHeight: "48px", maxHeight: `${MAX_HEIGHT_PX}px` }}
-          onChange={(e) => {
-            setValue(e.target.value);
-            const el = e.target;
-            el.style.height = "auto";
-            el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return;
-            // Shift+Enter inserts a newline; a bare Enter (or Cmd/Ctrl+Enter) sends.
-            if (e.shiftKey) return;
-            // Enter also commits an in-flight IME composition, so it must not send.
-            if (e.nativeEvent.isComposing) return;
-            e.preventDefault();
-            void submit();
-          }}
-        />
-        <Button
-          className="absolute bottom-0 right-0"
-          size={ButtonSize.Large}
-          variant={ButtonVariant.Primary}
-          content={ButtonContent.Icon}
-          type={running ? "button" : "submit"}
-          disabled={!running && !canSend}
-          aria-label={running ? "Stop run" : "Send"}
-          onClick={running ? () => void stop() : undefined}
-        >
-          <Icon iconName={running ? IconName.Stop : IconName.Plane} size={24} />
-        </Button>
-      </div>
+      {isMobile ? (
+        <div className="flex items-end gap-2">
+          {field}
+          {sendButton}
+        </div>
+      ) : (
+        field
+      )}
 
-      <div className="flex items-center gap-[10px]">
-        <div className="flex flex-1 min-w-0 items-center gap-4">
-          <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
-            <Button
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label="Session settings"
-              onClick={() => actions.settings(sessionId)}
-            >
-              <Icon iconName={IconName.Gear} size={16} />
-            </Button>
-          </Tooltip>
+      {/* The status line wraps rather than letting its `shrink-0` chips run
+          into each other once the chat column is narrow. */}
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-[10px]",
+          isMobile && "px-1 pb-1",
+        )}
+      >
+        <div
+          className={cn(
+            "flex flex-1 min-w-0 flex-wrap items-center gap-y-1",
+            isMobile ? "gap-x-2" : "gap-x-4",
+          )}
+        >
+          {isMobile ? null : settingsButton}
 
           <ModelPicker
             sessionId={sessionId}
@@ -270,18 +326,24 @@ export function ChatInputBox({
                 className="text-info-primary"
                 title={context.title}
               />
-              <StatBadge
-                iconName={IconName.ArrowTop}
-                value={formatTokensCompact(metrics.usage.input_tokens)}
-                className="text-info-secondary opacity-75"
-                title="Input tokens"
-              />
-              <StatBadge
-                iconName={IconName.ArrowDown}
-                value={formatTokensCompact(metrics.usage.output_tokens)}
-                className="text-info-secondary opacity-75"
-                title="Output tokens"
-              />
+              {/* The per-direction columns are the first thing to go when the
+                  row has a phone's width to work with. */}
+              {isMobile ? null : (
+                <>
+                  <StatBadge
+                    iconName={IconName.ArrowTop}
+                    value={formatTokensCompact(metrics.usage.input_tokens)}
+                    className="text-info-secondary opacity-75"
+                    title="Input tokens"
+                  />
+                  <StatBadge
+                    iconName={IconName.ArrowDown}
+                    value={formatTokensCompact(metrics.usage.output_tokens)}
+                    className="text-info-secondary opacity-75"
+                    title="Output tokens"
+                  />
+                </>
+              )}
             </div>
           ) : null}
         </div>

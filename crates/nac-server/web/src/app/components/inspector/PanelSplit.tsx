@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import {
   clampPanelListWidth,
@@ -30,6 +31,7 @@ export function PanelSplit({
   children: ReactNode;
 }) {
   const storedWidth = usePanelListWidth();
+  const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const dragging = useRef(false);
@@ -85,6 +87,24 @@ export function PanelSplit({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   };
+
+  // A phone panel is too narrow to hold both columns, so the list becomes a
+  // band above the detail and the drag handle goes away with the column.
+  if (isMobile) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0 w-full">
+        <div className="flex flex-col shrink-0 max-h-[45%] min-h-0 border-b border-muted bg-elevation-level-1">
+          {listHeader}
+          <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-1 [&>*]:shrink-0">
+            {list}
+          </div>
+        </div>
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
+          {children}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

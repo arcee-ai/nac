@@ -1,6 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useLocation } from "react-router-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useModalStack } from "../../hooks/useModalStack";
 import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import CoverBackground from "../cover-background";
@@ -9,11 +11,8 @@ import Icon, { IconName } from "../icon";
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/**
- * Open dialogs, oldest first. Escape is a document-level listener, so without
- * this a dialog opened on top of another would dismiss both at once.
- */
-const openModals: object[] = [];
+/** Kept in step with the mobile slide transition. */
+const MOBILE_EXIT_MS = 300;
 
 export enum ModalSize {
   Small = "max-w-[400px]",
@@ -50,8 +49,9 @@ interface ModalProps {
 }
 
 /**
- * Generic dialog: scrim + centered card, or a full-screen sheet on a phone.
- * Closes on overlay click / Escape.
+ * Generic dialog: scrim + centered card on desktop, or a full-screen panel
+ * that slides in from the right on a phone (same pattern as ArceeFM's
+ * ModalBoxMobile). Overlay tap dismisses only on desktop.
  */
 const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   open,
@@ -71,29 +71,85 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
 }) => {
   const isMobile = useIsMobile();
   const cardRef = useRef<HTMLDivElement>(null);
-  const token = useRef({});
+  // Identity of this dialog in the shared stack. It is state rather than a ref
+  // because the render below compares it against the top of the stack.
+  const [token] = useState(() => ({}));
+  const previousPathnameRef = useRef("");
+  const location = useLocation();
+  const { modalStack, pushModal, popModal, isModalOnTop, getStackLength } =
+    useModalStack();
+
+  // Mobile keeps the panel mounted through the exit slide; desktop unmounts
+  // immediately because the enter animation is a one-shot fade.
+  const [mounted, setMounted] = useState(open);
+  const [wasOpen, setWasOpen] = useState(open);
+  const [offscreen, setOffscreen] = useState(true);
+
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    if (open) {
+      setMounted(true);
+      if (isMobile) setOffscreen(true);
+    } else if (isMobile) {
+      // Send the panel back off-screen; the timer below unmounts it once the
+      // slide has run.
+      setOffscreen(true);
+    } else {
+      setMounted(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!open || !isMobile || !mounted) return undefined;
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => setOffscreen(false));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [open, isMobile, mounted]);
+
+  useEffect(() => {
+    if (open || !isMobile || !mounted) return undefined;
+    const timer = setTimeout(() => setMounted(false), MOBILE_EXIT_MS);
+    return () => clearTimeout(timer);
+  }, [open, isMobile, mounted]);
 
   useEffect(() => {
     if (!open) return undefined;
-    const self = token.current;
-    openModals.push(self);
+    const self = token;
+    pushModal({ id: self });
     // Keep the app behind out of the tab order; the card is portalled to the
-    // body, so it stays reachable.
+    // body, so it stays reachable. Desktop only: on a phone the panel covers
+    // the viewport and inert is unnecessary (matches ArceeFM).
     const root = document.getElementById("root");
-    root?.setAttribute("inert", "");
+    if (!isMobile) root?.setAttribute("inert", "");
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (openModals[openModals.length - 1] !== self) return;
+      if (!isModalOnTop(self)) return;
       onClose?.();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      const index = openModals.indexOf(self);
-      if (index >= 0) openModals.splice(index, 1);
-      if (openModals.length === 0) root?.removeAttribute("inert");
+      popModal(self);
+      // Only clear inert when nothing else is left open.
+      if (!isMobile && getStackLength() === 0) {
+        root?.removeAttribute("inert");
+      }
     };
-  }, [open, onClose]);
+  }, [
+    open,
+    onClose,
+    isMobile,
+    token,
+    pushModal,
+    popModal,
+    isModalOnTop,
+    getStackLength,
+  ]);
 
   // Move focus into the dialog and trap Tab within it. The card itself takes
   // the focus rather than the first field: landing in a text input pops up the
@@ -127,11 +183,28 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     return () => card.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (!open) return null;
+  // Close when navigating away — leftover dialogs over a new route are wrong.
+  useEffect(() => {
+    if (
+      previousPathnameRef.current &&
+      previousPathnameRef.current !== location.pathname &&
+      open
+    ) {
+      onClose?.();
+    }
+    previousPathnameRef.current = location.pathname;
+  }, [location.pathname, open, onClose]);
+
+  if (!mounted) return null;
 
   // A phone gets the same full-bleed chrome as `flush`, because a padded card
   // makes no sense once the dialog covers the whole screen.
   const chrome = flush || isMobile;
+  const onTop =
+    modalStack.length === 0 ||
+    modalStack[modalStack.length - 1]?.id === token;
+  // On a phone the scrim never dismisses — only the back/close control does.
+  const overlayCloses = closeOnOverlay && !isMobile;
 
   const closeButton = (iconName: IconName, leading: boolean) => (
     <Button
@@ -162,7 +235,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       className={cn(
         "flex items-start justify-between gap-4",
         chrome && "items-center px-4 py-3",
-        isMobile && "min-h-[56px]",
+        isMobile && "min-h-[64px] h-[64px] max-h-[64px] px-3",
       )}
     >
       {closeLeads && onClose ? closeButton(mobileCloseIcon, true) : null}
@@ -193,14 +266,21 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       )
     ) : null;
 
+  const mobileTransform = open
+    ? onTop
+      ? "translate-x-0"
+      : "translate-x-[-30px]"
+    : "translate-x-full";
+
   return createPortal(
     <>
       <CoverBackground
-        open={open}
+        open={open && (!isMobile || !offscreen)}
         zIndex={100}
         opacity={0.55}
         blur={0}
-        onClick={closeOnOverlay ? onClose : undefined}
+        className={isMobile ? "!duration-300" : undefined}
+        onClick={overlayCloses ? onClose : undefined}
       />
       <div
         className={cn(
@@ -213,11 +293,16 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           role="dialog"
           aria-modal="true"
           tabIndex={-1}
+          data-modal-open={open ? "true" : undefined}
           className={cn(
             "relative flex flex-col shadow-2xl pointer-events-auto outline-none",
             isMobile
               ? cn(
-                  "slide-in-right w-full h-[100dvh] rounded-none",
+                  "w-full h-[100dvh] rounded-none",
+                  "transition-transform duration-300 ease-in-out",
+                  offscreen && open
+                    ? "translate-x-full"
+                    : mobileTransform,
                   !chromeless && "bg-elevation-level-1",
                 )
               : cn(

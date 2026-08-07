@@ -13,7 +13,9 @@ import {
 } from "@/app/atoms";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
+import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import {
   displayPromptFromMessageText,
@@ -187,6 +189,8 @@ export function Transcript({
     setRevertTarget({ messageIdx, prompt });
   }, []);
 
+  const isMobile = useIsMobile();
+
   const model = snapshot?.metadata.model ?? "";
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
@@ -290,7 +294,12 @@ export function Transcript({
             needs to clear it. */}
         <div
           ref={contentRef}
-          className="flex flex-col pt-[72px] pb-[320px] [&>*]:shrink-0 mx-auto max-w-[840px]"
+          className={cn(
+            "flex flex-col pt-[72px] [&>*]:shrink-0",
+            // The phone's input is a bare pill rather than a padded card, so
+            // the run-out under the last message shrinks with it.
+            isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[840px]",
+          )}
         >
           {!snapshot && !errorNotice ? (
             <div className="text-basic-muted label-small">Loading…</div>

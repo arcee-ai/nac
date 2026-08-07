@@ -20,3 +20,14 @@ export const routes = {
     `/session/${encodeURIComponent(sessionId)}/${panel}`,
   designPreview: () => "/design",
 };
+
+/**
+ * Session the path points at, or null on any other screen. The top bar sits in
+ * the layout route, above the match that carries `:sessionId`, so it cannot
+ * read the parameter from the router.
+ */
+export function sessionIdFromPath(pathname: string): string | null {
+  const [, section, id] = pathname.split("/");
+  if (section !== "session" || !id) return null;
+  return decodeURIComponent(id);
+}

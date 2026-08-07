@@ -15,6 +15,7 @@ import { FilesView } from "@/app/components/inspector/FilesView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
@@ -52,18 +53,30 @@ interface SessionSideBoxProps {
 function FooterChip({
   iconName,
   label,
+  compact = false,
 }: {
   iconName: IconName;
   label: string;
+  compact?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-[6px] shrink-0 min-w-0 pl-1 pr-3 py-1 rounded-[4px]">
+    <div
+      className={cn(
+        "flex items-center gap-[6px] shrink-0 min-w-0 py-1 rounded-[4px]",
+        compact ? "pl-1 pr-1" : "pl-1 pr-3",
+      )}
+    >
       <Icon
         iconName={iconName}
         size={16}
         color="var(--color-fill-basic-tertiary)"
       />
-      <span className="label-micro text-basic-tertiary truncate max-w-[128px]">
+      <span
+        className={cn(
+          "label-micro text-basic-tertiary truncate",
+          compact ? "max-w-[80px]" : "max-w-[128px]",
+        )}
+      >
         {label}
       </span>
     </div>
@@ -75,10 +88,13 @@ function SideBoxFooter({
   sessionId,
   workspace,
   revision,
+  compact,
 }: {
   sessionId: string;
   workspace: WorkspaceSnapshot | null;
   revision: number | null;
+  /** Phone width: the chips give up room so the diff total stays visible. */
+  compact: boolean;
 }) {
   const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
   const branch = workspace?.branch ?? null;
@@ -92,9 +108,25 @@ function SideBoxFooter({
   const deletions = totals?.total_deletions ?? 0;
 
   return (
-    <div className="flex h-10 items-center gap-[10px] px-4 shrink-0 border-t border-muted bg-elevation-level-1">
-      <div className="flex flex-1 min-w-0 items-center gap-[10px]">
-        {repo ? <FooterChip iconName={IconName.Folder} label={repo} /> : null}
+    <div
+      className={cn(
+        "flex h-10 items-center gap-[10px] shrink-0 border-t border-muted bg-elevation-level-1",
+        compact ? "px-2 gap-1" : "px-4",
+      )}
+    >
+      <div
+        className={cn(
+          "flex flex-1 min-w-0 items-center",
+          compact ? "gap-1" : "gap-[10px]",
+        )}
+      >
+        {repo ? (
+          <FooterChip
+            iconName={IconName.Folder}
+            label={repo}
+            compact={compact}
+          />
+        ) : null}
         {branch ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
         <RevisionPicker
           sessionId={sessionId}
@@ -123,6 +155,7 @@ export function SessionSideBox({
   onPanelChange,
 }: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
+  const isMobile = useIsMobile();
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
@@ -150,8 +183,9 @@ export function SessionSideBox({
             </HorizontalTabsItem>
           ))}
         </div>
-        {/* Expand/hide live here in the split; once fullscreen the Modal owns Close. */}
-        {expanded ? null : (
+        {/* Expand/hide live here in the split; once fullscreen the Modal owns
+            Close, and a phone only ever sees the fullscreen form. */}
+        {expanded || isMobile ? null : (
           <div className="flex items-center gap-2 pb-[2px] shrink-0">
             <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft}>
               <Button
@@ -207,6 +241,7 @@ export function SessionSideBox({
         sessionId={sessionId}
         workspace={snapshot?.workspace ?? null}
         revision={selectedRevision}
+        compact={isMobile}
       />
     </div>
   );

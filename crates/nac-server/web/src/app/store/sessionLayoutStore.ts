@@ -58,8 +58,15 @@ export function toggleSidePanelCollapsed(): void {
   setState({ collapsed: !getState().collapsed });
 }
 
-/** Bring the side box back on screen when the chat points at one of its rows. */
-export function revealSidePanel(): void {
+/**
+ * Bring the side box back on screen when the chat points at one of its rows.
+ * On a phone there is no row to slide back into, so it comes up as the dialog.
+ */
+export function revealSidePanel(asDialog = false): void {
+  if (asDialog) {
+    if (!getState().expanded) setState({ expanded: true });
+    return;
+  }
   if (getState().collapsed) setState({ collapsed: false });
 }
 
