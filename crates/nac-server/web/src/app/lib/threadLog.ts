@@ -111,3 +111,87 @@ export function mergeThreadLog(
   const seen = new Set(persisted.map((line) => line.key));
   return [...persisted, ...live.filter((line) => !seen.has(line.key))];
 }
+
+// ---------------------------------------------------------------------------
+// Paired tool-call / result grouping
+//
+// The flat log interleaves `call-` and `result-` lines for the same call id.
+// Grouping them lets the panel render a call and its outcome as one entry,
+// with the result indented beneath the call rather than separated by every
+// other command the thread issued in between.
+// ---------------------------------------------------------------------------
+
+export interface ToolCallEntry {
+  kind: "tool_call";
+  callId: string;
+  toolName: string;
+  keyArg: string;
+  status: "pending" | "success" | "error";
+  resultPreview: string | null;
+  isError: boolean;
+}
+
+export interface StandaloneLine {
+  kind: "log";
+  key: string;
+  text: string;
+  isError: boolean;
+}
+
+export type LogEntry = ToolCallEntry | StandaloneLine;
+
+/**
+ * Folds a merged `ThreadLogLine[]` into `LogEntry[]`, pairing each tool-call
+ * start with its matching finish. Lines whose key does not name a tool call
+ * (worker log output) pass through as `StandaloneLine`.
+ *
+ * A `result-` line whose `call-` partner is missing — the persisted window was
+ * trimmed, or the start arrived on a different channel — is emitted as a
+ * standalone line so the outcome is not silently dropped.
+ */
+export function groupThreadLog(lines: ThreadLogLine[]): LogEntry[] {
+  const entries: LogEntry[] = [];
+  const byCallId = new Map<string, ToolCallEntry>();
+
+  for (const line of lines) {
+    if (line.key.startsWith("call-")) {
+      const callId = line.key.slice("call-".length);
+      const entry: ToolCallEntry = {
+        kind: "tool_call",
+        callId,
+        toolName: line.name ?? "",
+        keyArg: line.body,
+        status: "pending",
+        resultPreview: null,
+        isError: false,
+      };
+      byCallId.set(callId, entry);
+      entries.push(entry);
+    } else if (line.key.startsWith("result-")) {
+      const callId = line.key.slice("result-".length);
+      const match = byCallId.get(callId);
+      if (match) {
+        match.status = line.isError ? "error" : "success";
+        match.resultPreview = line.body;
+        match.isError = line.isError;
+      } else {
+        // Orphan result — surface it rather than swallow it.
+        entries.push({
+          kind: "log",
+          key: line.key,
+          text: line.text,
+          isError: line.isError,
+        });
+      }
+    } else {
+      entries.push({
+        kind: "log",
+        key: line.key,
+        text: line.text,
+        isError: line.isError,
+      });
+    }
+  }
+
+  return entries;
+}

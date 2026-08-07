@@ -740,7 +740,7 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             thread_name,
             call_id,
             name,
-            content_preview: safe_tool_result(&content_preview, is_error),
+            content_preview,
             is_error,
         },
         AgentEvent::ThreadStarted {
@@ -991,34 +991,6 @@ fn copy_array_length(
             target_key.to_string(),
             serde_json::Value::from(value.len() as u64),
         );
-    }
-}
-
-fn safe_tool_result(content: &str, is_error: bool) -> String {
-    let normalized = content.trim().to_ascii_lowercase();
-    if normalized.contains("timed out") || normalized.contains("timeout") {
-        return "timed out".to_string();
-    }
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(content) {
-        if let Some(exit_code) = value.get("exit_code").and_then(serde_json::Value::as_i64) {
-            return format!("exit code {exit_code}");
-        }
-    }
-    for prefix in ["exit code ", "exit code:", "exit "] {
-        if let Some(value) = normalized.strip_prefix(prefix) {
-            if let Some(code) = value
-                .split(|character: char| character.is_whitespace() || character == ':')
-                .next()
-                .and_then(|code| code.parse::<i64>().ok())
-            {
-                return format!("exit code {code}");
-            }
-        }
-    }
-    if is_error {
-        "failed".to_string()
-    } else {
-        "succeeded".to_string()
     }
 }
 
@@ -1986,7 +1958,7 @@ mod tests {
             thread_name: Some("worker".to_string()),
             call_id: "call-safe".to_string(),
             name: "exec_command".to_string(),
-            content_preview: "exit 7: CANARY_RESULT".to_string(),
+            content_preview: "exit 7: test result".to_string(),
             is_error: true,
         });
         bus_sink.emit(AgentEvent::Error {
@@ -2041,7 +2013,7 @@ mod tests {
             .join("\n");
         assert!(!serialized.contains("CANARY"));
         assert!(serialized.contains("/safe/work"));
-        assert!(serialized.contains("exit code 7"));
+        assert!(serialized.contains("exit 7: test result"));
         assert!(serialized.contains("operation failed"));
         assert!(serialized.contains("thread dispatched"));
         assert!(serialized.contains("thread timed out"));

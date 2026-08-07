@@ -3,11 +3,13 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 
 import {
+  DropdownContent,
   Icon,
   IconName,
   Loader,
@@ -35,9 +37,12 @@ import {
   scrollToBottomInstantly,
 } from "@/app/lib/scroll";
 import {
+  groupThreadLog,
   mergeThreadLog,
   persistedThreadLog,
+  type LogEntry,
   type ThreadLogLine,
+  type ToolCallEntry,
 } from "@/app/lib/threadLog";
 import { dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
 import { useLiveThreads } from "@/app/store/runtimeStore";
@@ -91,35 +96,114 @@ function waveRankByName(
 type ListKind = "pending" | "running" | "done";
 
 /**
- * One log line, with the glyph and the tool name lifted out of the command so
- * the eye can find where an entry starts and what issued it.
+ * One tool call and, when it has arrived, the result beneath it. Pending calls
+ * shimmer so the eye lands on the command the thread is on right now.
  */
-const LogLine = memo(function LogLine({ line }: { line: ThreadLogLine }) {
-  const className =
-    "pt-1 code code-small whitespace-pre-wrap break-words " +
-    (line.isError ? "text-error-primary" : "text-basic-tertiary");
-
-  // A failed call reads as one red line; picking it apart would bury the mark.
-  if (line.isError) return <p className={className}>{line.text}</p>;
-
+const ToolCallView = memo(function ToolCallView({ entry }: { entry: ToolCallEntry }) {
+  const pending = entry.status === "pending";
   return (
-    <p className={className}>
-      {line.mark ? (
-        <span
+    <div className="pt-1">
+      <p
+        className={
+          "code code-small whitespace-pre-wrap break-words " +
+          (pending ? "text-shimmer-basic" : "text-basic-tertiary")
+        }
+      >
+        <span className="text-info-primary">{"▸ "}</span>
+        <span className="text-basic-primary">{`${entry.toolName}: `}</span>
+        {entry.keyArg}
+      </p>
+      {entry.resultPreview !== null ? (
+        <p
           className={
-            line.mark === "▸" ? "text-info-primary" : "text-success-primary"
+            "pl-4 pt-0.5 code code-small whitespace-pre-wrap break-words " +
+            (entry.isError ? "text-error-primary" : "text-basic-tertiary")
           }
         >
-          {`${line.mark} `}
-        </span>
+          <span className={entry.isError ? "text-error-primary" : "text-success-primary"}>
+            {`${entry.isError ? "✕" : "✓"} `}
+          </span>
+          {entry.resultPreview}
+        </p>
       ) : null}
-      {line.name ? (
-        <span className="text-basic-primary">{`${line.name}: `}</span>
-      ) : null}
-      {line.body}
+    </div>
+  );
+});
+
+/**
+ * A line the worker printed that is not a tool call — its plain log output.
+ */
+const StandaloneView = memo(function StandaloneView({
+  entry,
+}: {
+  entry: { kind: "log"; key: string; text: string; isError: boolean };
+}) {
+  return (
+    <p
+      className={
+        "pt-1 code code-small whitespace-pre-wrap break-words " +
+        (entry.isError ? "text-error-primary" : "text-basic-tertiary")
+      }
+    >
+      {entry.text}
     </p>
   );
 });
+
+/**
+ * Dispatches a grouped log entry to its view. Kept as a switch so the compiler
+ * flags any new `LogEntry` kind that is not handled.
+ */
+const LogEntryView = memo(function LogEntryView({ entry }: { entry: LogEntry }) {
+  if (entry.kind === "tool_call") return <ToolCallView entry={entry} />;
+  return <StandaloneView entry={entry} />;
+});
+
+/**
+ * One retained episode as a collapsible tab. Collapsed it shows the index,
+ * timestamp, and a truncated action preview; expanded it reveals the full
+ * action and the episode content beneath. Each tab owns its own open state so
+ * several can be read at once.
+ */
+function EpisodeTab({
+  episode,
+  index,
+}: {
+  episode: EpisodeSnapshot;
+  index: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="flex flex-col items-start w-full">
+      <button
+        type="button"
+        className="group flex items-center gap-2 py-2 pl-3 pr-2 rounded-[4px] w-full btn-ghost"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <Icon
+          iconName={expanded ? IconName.Down : IconName.Right}
+          size={16}
+          className="shrink-0 text-basic-muted"
+        />
+        <span className="shrink-0 label-micro text-basic-primary">
+          {`Episode ${index + 1}`}
+        </span>
+        <span className="flex-1 min-w-0 label-micro text-basic-secondary truncate">
+          {episode.action}
+        </span>
+      </button>
+      <DropdownContent isOpen={expanded} className="w-full">
+        <div className="flex flex-col gap-4 pl-3 pr-2 py-3">
+          <Markdown className="text-basic-secondary">{episode.action}</Markdown>
+          <Separator />
+          <Markdown className="text-basic-secondary">{episode.content}</Markdown>
+        </div>
+      </DropdownContent>
+    </div>
+  );
+}
 
 const LIST_KIND_ORDER: Record<ListKind, number> = {
   // Last to execute (queued on deps) above currently running, done last.
@@ -129,18 +213,16 @@ const LIST_KIND_ORDER: Record<ListKind, number> = {
 };
 
 /**
- * Everything the thread has run, oldest first, followed by the operation it is
- * on right now. The view follows the bottom edge the way `tail -f` does and
- * lets go as soon as the user scrolls back to read something.
+ * Everything the thread has run, oldest first. The view follows the bottom
+ * edge the way `tail -f` does and lets go as soon as the user scrolls back to
+ * read something.
  */
 function LogTail({
   lines,
-  action,
   running,
   paneRef,
 }: {
   lines: ThreadLogLine[];
-  action: string;
   running: boolean;
   /** Detail pane whose height the log is sized against. */
   paneRef: RefObject<HTMLDivElement | null>;
@@ -151,12 +233,13 @@ function LogTail({
   const stuck = useRef(true);
   const dragging = useRef(false);
   const ratio = useThreadLogHeightRatio();
+  const entries = useMemo(() => groupThreadLog(lines), [lines]);
 
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || !stuck.current) return;
     scrollToBottomInstantly(element);
-  }, [lines.length, action]);
+  }, [entries.length]);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -229,7 +312,7 @@ function LogTail({
           {`Command log`}
         </p>
         <span className="tag-label text-basic-tertiary shrink-0">
-          {`${lines.length} total`}
+          {`${entries.length} total`}
         </span>
       </div>
       <div
@@ -242,13 +325,13 @@ function LogTail({
           }
         }}
       >
-        {lines.map((line) => (
-          <LogLine key={line.key} line={line} />
+        {entries.map((entry) => (
+          <LogEntryView
+            key={entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key}
+            entry={entry}
+          />
         ))}
-        {running && action ? (
-          <p className="pt-1 code code-small text-shimmer-basic">{`▸ ${action}`}</p>
-        ) : null}
-        {!lines.length && !running ? (
+        {!entries.length && !running ? (
           <p className="pt-4 code code-small text-basic-muted">
             No commands recorded.
           </p>
@@ -264,7 +347,6 @@ function Detail({
   events,
   liveLog,
   running,
-  currentAction,
 }: {
   thread: ThreadSnapshot;
   episodes: EpisodeSnapshot[];
@@ -273,7 +355,6 @@ function Detail({
   /** The same commands as the stream reported them, plus whatever came after. */
   liveLog: ThreadLogLine[];
   running: boolean;
-  currentAction: string;
 }) {
   const paneRef = useRef<HTMLDivElement>(null);
   const log = useMemo(
@@ -300,19 +381,8 @@ function Detail({
 
       {episodes.length ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-auto p-4 border-t border-muted [&>*]:shrink-0">
-          <p className="code code-small text-info-primary">
-            {`Thread "${thread.name}" retained episodes (${episodes.length} total):`}
-          </p>
           {episodes.map((episode, index) => (
-            <div key={episode.id} className="pt-4 flex flex-col gap-8">
-              <p className="code code-small text-info-primary opacity-75">
-                {`=== Episode ${index + 1} | ${episode.created_at} | action: ${episode.action} ===`}
-              </p>
-              <Separator />
-              <Markdown className="text-basic-secondary">
-                {episode.content}
-              </Markdown>
-            </div>
+            <EpisodeTab key={episode.id} episode={episode} index={index} />
           ))}
         </div>
       ) : (
@@ -320,7 +390,6 @@ function Detail({
       )}
       <LogTail
         lines={log}
-        action={currentAction}
         running={running}
         paneRef={paneRef}
       />
@@ -475,7 +544,6 @@ export function ThreadsView({
           events={snapshot.thread_events?.[current.name]}
           liveLog={live?.log ?? []}
           running={runningNames.has(current.name)}
-          currentAction={live?.action || current.latest_action || ""}
         />
       ) : (
         <PanelEmpty>No threads yet for this session.</PanelEmpty>
