@@ -76,6 +76,7 @@ test-rust:
 # stale one has to fail here rather than in CI.
 test-assets:
 	npm --prefix $(WEB_DIR) run lint
+	npm --prefix $(WEB_DIR) test
 	npm --prefix $(WEB_DIR) run typecheck
 	npm --prefix $(WEB_DIR) run build
 	@if [ -n "$$(git status --porcelain -- crates/$(PKG)/assets/dist)" ]; then \
@@ -112,7 +113,7 @@ help:
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  test         Run Rust tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
-		'  test-assets  Lint, typecheck and rebuild the web app' \
+		'  test-assets  Lint, test, typecheck and rebuild the web app' \
 		'  check        Run cargo check --workspace --locked' \
 		'  fmt          Run rustfmt' \
 		'  clippy       Run clippy (CLIPPY_ARGS=-D warnings to fail on lints)' \

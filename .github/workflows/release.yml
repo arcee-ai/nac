@@ -27,10 +27,11 @@ jobs:
         working-directory: crates/nac-server/web
         run: npm ci
 
-      - name: Lint and typecheck the web app
+      - name: Lint, test, and typecheck the web app
         working-directory: crates/nac-server/web
         run: |
           npm run lint
+          npm test
           npm run typecheck
 
       # The build output is committed so that building nac-web never needs Node.
