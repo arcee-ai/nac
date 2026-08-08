@@ -1162,6 +1162,10 @@ impl EventSink {
         }
     }
 
+    pub fn run_id(&self) -> Option<&SessionRunId> {
+        self.run_id.as_ref()
+    }
+
     pub fn emit(&self, event: AgentEvent) {
         if matches!(event, AgentEvent::ModelCallStarted { .. }) {
             if self.stderr_prefixed {

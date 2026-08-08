@@ -161,20 +161,42 @@ impl ActiveThreadRegistry {
     }
 
     pub fn try_accept(&self, key: ThreadDispatchKey) -> bool {
+        self.try_accept_batch(vec![key])
+            .into_iter()
+            .next()
+            .unwrap_or(false)
+    }
+
+    /// Atomically reserve every available thread name in one parsed batch.
+    /// The returned flags correspond to `keys`; a name already active (or a
+    /// duplicate in the supplied batch) is rejected without allowing another
+    /// launcher to interleave between reservations.
+    pub fn try_accept_batch(&self, keys: Vec<ThreadDispatchKey>) -> Vec<bool> {
         let mut state = self.lock();
-        if state.shutting_down || state.active_by_name.contains_key(&key.thread_name) {
-            return false;
+        let mut accepted_names = HashSet::new();
+        let mut accepted = Vec::with_capacity(keys.len());
+        for key in keys {
+            let available = !state.shutting_down
+                && !state.active_by_name.contains_key(&key.thread_name)
+                && accepted_names.insert(key.thread_name.clone());
+            if available {
+                state.active_by_name.insert(
+                    key.thread_name.clone(),
+                    ActiveThreadDispatch {
+                        key,
+                        state: ThreadDispatchState::PendingDependency,
+                        coordinator_abort: None,
+                        worker_abort: None,
+                    },
+                );
+            }
+            accepted.push(available);
         }
-        state.active_by_name.insert(
-            key.thread_name.clone(),
-            ActiveThreadDispatch {
-                key,
-                state: ThreadDispatchState::PendingDependency,
-                coordinator_abort: None,
-                worker_abort: None,
-            },
-        );
-        true
+        drop(state);
+        if accepted.iter().any(|accepted| *accepted) {
+            self.activity.notify_waiters();
+        }
+        accepted
     }
 
     pub fn mark_running(&self, key: &ThreadDispatchKey) -> bool {

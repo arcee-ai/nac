@@ -4,11 +4,13 @@ use tokio::task::JoinSet;
 
 use super::*;
 use crate::tools::thread::{self, ParsedDispatchParams};
+use crate::tools::ThreadDispatchKey;
 
 /// A successfully parsed `thread` tool call, ready for DAG-ordered execution.
 pub(crate) struct ParsedThreadDispatch {
     pub original_index: usize,
     pub tool_call_id: String,
+    pub key: ThreadDispatchKey,
     /// Original JSON arguments string — preserved for `ToolCallStarted` event
     /// previews.
     pub args_str: String,
@@ -34,6 +36,7 @@ pub(crate) struct DagExecContext {
 pub(crate) fn partition_tool_calls(
     tool_calls: Vec<ToolCall>,
     runtime: &ToolRuntime,
+    run_id: &crate::events::SessionRunId,
 ) -> (
     Vec<ParsedThreadDispatch>,
     Vec<(usize, String, String, String)>,
@@ -70,9 +73,16 @@ pub(crate) fn partition_tool_calls(
 
             match thread::parse_dispatch_args(&args, runtime) {
                 Ok(params) => {
+                    let key = ThreadDispatchKey::new(
+                        run_id.clone(),
+                        params.thread_name.clone(),
+                        params.dispatch_id.clone(),
+                        id.clone(),
+                    );
                     thread_dispatches.push(ParsedThreadDispatch {
                         original_index: index,
                         tool_call_id: id,
+                        key,
                         args_str,
                         params,
                     });
@@ -303,19 +313,245 @@ pub(crate) fn spawn_non_thread_into(
 }
 
 // ------------------------------------------------------------------
-// DAG execution
+// Background DAG execution
 // ------------------------------------------------------------------
 
-/// Execute a batch of tool calls using the DAG coordinator.
-///
-/// Thread dispatches are executed in topological waves.  Non-thread tool calls
-/// run concurrently in a separate `JoinSet` alongside all waves, so they
-/// neither block wave progression nor affect thread failure tracking.  Parse
-/// errors are returned immediately.
-///
-/// The caller is responsible for calling [`partition_tool_calls`] and
-/// [`build_dag`] first.  This function manages the `active_threads` lifecycle
-/// for all thread dispatches in the batch.
+struct CoordinatorCleanup {
+    runtime: ToolRuntime,
+    session_id: String,
+    keys: Vec<ThreadDispatchKey>,
+}
+
+impl Drop for CoordinatorCleanup {
+    fn drop(&mut self) {
+        // Covers coordinator cancellation and panic. Normal completions have
+        // already removed their exact keys, so these closes become no-ops.
+        for key in &self.keys {
+            if let Err(error) =
+                self.runtime
+                    .active_threads
+                    .close(&self.runtime.store_path, &self.session_id, key)
+            {
+                self.runtime.event_sink.emit(AgentEvent::Error {
+                    thread_name: Some(key.thread_name.clone()),
+                    message: format!("failed to clean up background coordinator: {error}"),
+                });
+            }
+        }
+    }
+}
+
+/// Atomically reserve the parsed dispatches, publish immediate acceptance
+/// results, and launch one registry-owned coordinator for the accepted DAG.
+fn accept_and_launch_background(
+    thread_dispatches: Vec<ParsedThreadDispatch>,
+    dag: Dag,
+    ctx: DagExecContext,
+) -> Vec<(usize, String, String, ToolResult)> {
+    let keys = thread_dispatches
+        .iter()
+        .map(|dispatch| dispatch.key.clone())
+        .collect::<Vec<_>>();
+    let accepted = ctx.runtime.active_threads.try_accept_batch(keys);
+    let mut failed_indices = HashSet::new();
+    let mut immediate = Vec::with_capacity(thread_dispatches.len());
+
+    for (index, dispatch) in thread_dispatches.iter().enumerate() {
+        ctx.event_sink.emit(AgentEvent::ToolCallStarted {
+            thread_name: ctx.agent_thread_name.clone(),
+            call_id: dispatch.tool_call_id.clone(),
+            name: "thread".to_string(),
+            args_preview: preview_tool_args("thread", &dispatch.args_str),
+            key_arg_preview: None,
+            args_detail: Some(tool_args_detail(&dispatch.args_str)),
+        });
+        let result = if accepted[index] {
+            ToolResult {
+                content: format!(
+                    "Thread '{}' accepted for background execution.",
+                    dispatch.params.thread_name
+                ),
+                is_error: false,
+            }
+        } else {
+            failed_indices.insert(index);
+            ToolResult {
+                content: format!(
+                    "Thread '{}' is already running; retry after the current dispatch completes.",
+                    dispatch.params.thread_name
+                ),
+                is_error: true,
+            }
+        };
+        ctx.event_sink.emit(AgentEvent::ToolCallFinished {
+            thread_name: ctx.agent_thread_name.clone(),
+            call_id: dispatch.tool_call_id.clone(),
+            name: "thread".to_string(),
+            content_preview: preview_tool_result("thread", &result),
+            is_error: result.is_error,
+        });
+        immediate.push((
+            dispatch.original_index,
+            dispatch.tool_call_id.clone(),
+            "thread".to_string(),
+            result,
+        ));
+    }
+
+    if accepted.iter().any(|accepted| *accepted) {
+        let accepted_keys = thread_dispatches
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| accepted[*index])
+            .map(|(_, dispatch)| dispatch.key.clone())
+            .collect::<Vec<_>>();
+        let registry = ctx.runtime.active_threads.clone();
+        let task = tokio::spawn(run_background_dag(
+            thread_dispatches,
+            dag,
+            ctx,
+            failed_indices,
+            accepted_keys.clone(),
+        ));
+        let abort = task.abort_handle();
+        // Every accepted member owns the same coordinator. Cancelling any
+        // exact member through run/session cleanup therefore cannot detach the
+        // rest of its DAG.
+        for key in accepted_keys {
+            registry.attach_coordinator(&key, abort.clone());
+        }
+        // Ownership is exclusively in the registry; dropping JoinHandle does
+        // not detach an unowned task because every accepted key has its abort.
+        drop(task);
+    }
+
+    immediate
+}
+
+async fn run_background_dag(
+    thread_dispatches: Vec<ParsedThreadDispatch>,
+    dag: Dag,
+    ctx: DagExecContext,
+    mut failed_indices: HashSet<usize>,
+    accepted_keys: Vec<ThreadDispatchKey>,
+) {
+    let session_id = thread_dispatches
+        .first()
+        .map(|dispatch| dispatch.params.session_id.clone())
+        .unwrap_or_default();
+    let _cleanup = CoordinatorCleanup {
+        runtime: ctx.runtime.clone(),
+        session_id,
+        keys: accepted_keys,
+    };
+    let Dag {
+        waves,
+        in_batch_deps,
+    } = dag;
+
+    for wave in waves {
+        let mut workers: JoinSet<(usize, ToolResult)> = JoinSet::new();
+        let mut in_flight = HashSet::new();
+
+        for dispatch_idx in wave {
+            if failed_indices.contains(&dispatch_idx) {
+                continue;
+            }
+            let dispatch = &thread_dispatches[dispatch_idx];
+            if let Some(dependency) = in_batch_deps[dispatch_idx]
+                .iter()
+                .find(|dependency| failed_indices.contains(dependency))
+                .copied()
+            {
+                let result = ToolResult {
+                    content: format!(
+                        "Source thread '{}' failed; dispatch '{}' skipped.",
+                        thread_dispatches[dependency].params.thread_name,
+                        dispatch.params.thread_name
+                    ),
+                    is_error: true,
+                };
+                ctx.event_sink.emit(AgentEvent::Error {
+                    thread_name: Some(dispatch.params.thread_name.clone()),
+                    message: result.content.clone(),
+                });
+                thread::complete_thread_dispatch(
+                    &ctx.runtime,
+                    &dispatch.params.session_id,
+                    dispatch.key.clone(),
+                    &result,
+                );
+                failed_indices.insert(dispatch_idx);
+                continue;
+            }
+
+            if !ctx.runtime.active_threads.mark_running(&dispatch.key) {
+                failed_indices.insert(dispatch_idx);
+                continue;
+            }
+            let runtime = ctx.runtime.clone();
+            let client = ctx.client.clone();
+            let params = dispatch.params.clone();
+            let abort = workers.spawn(async move {
+                let result = thread::execute_parsed_dispatch(params, &runtime, &client).await;
+                (dispatch_idx, result)
+            });
+            if ctx
+                .runtime
+                .active_threads
+                .attach_worker(&dispatch.key, abort)
+            {
+                in_flight.insert(dispatch_idx);
+            } else {
+                failed_indices.insert(dispatch_idx);
+            }
+        }
+
+        while let Some(join_result) = workers.join_next().await {
+            match join_result {
+                Ok((dispatch_idx, result)) => {
+                    in_flight.remove(&dispatch_idx);
+                    let dispatch = &thread_dispatches[dispatch_idx];
+                    if result.is_error {
+                        failed_indices.insert(dispatch_idx);
+                    }
+                    thread::complete_thread_dispatch(
+                        &ctx.runtime,
+                        &dispatch.params.session_id,
+                        dispatch.key.clone(),
+                        &result,
+                    );
+                }
+                Err(error) if !error.is_cancelled() => {
+                    workers.abort_all();
+                    let message = format!("Background thread task failed: {error}");
+                    for dispatch_idx in in_flight.drain() {
+                        let dispatch = &thread_dispatches[dispatch_idx];
+                        let result = ToolResult {
+                            content: message.clone(),
+                            is_error: true,
+                        };
+                        ctx.event_sink.emit(AgentEvent::Error {
+                            thread_name: Some(dispatch.params.thread_name.clone()),
+                            message: message.clone(),
+                        });
+                        thread::complete_thread_dispatch(
+                            &ctx.runtime,
+                            &dispatch.params.session_id,
+                            dispatch.key.clone(),
+                            &result,
+                        );
+                        failed_indices.insert(dispatch_idx);
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    }
+}
+
+/// Execute non-thread calls normally, but return thread acceptance results as
+/// soon as those calls finish rather than waiting for worker terminal output.
 pub(crate) async fn execute_with_dag(
     thread_dispatches: Vec<ParsedThreadDispatch>,
     other_calls: Vec<(usize, String, String, String)>,
@@ -323,298 +559,22 @@ pub(crate) async fn execute_with_dag(
     dag: Dag,
     ctx: DagExecContext,
 ) -> Vec<(String, String, ToolResult)> {
-    let DagExecContext {
-        runtime,
-        client,
-        event_sink,
-        agent_thread_name,
-    } = ctx;
-
-    // Results: (original_index, tool_call_id, tool_name, ToolResult)
-    let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
-
-    // 1. Collect parse errors immediately.
-    all_results.extend(collect_parse_errors(
-        parse_errors,
-        &event_sink,
-        &agent_thread_name,
-    ));
-
-    // 2. Pre-mark ALL thread names in active_threads.
-    // Track which threads we successfully marked so we only unmark those
-    // at the end — unmarking a thread that was already active from a prior
-    // turn would clobber its mutual-exclusion guarantee.
-    let mut failed_indices: HashSet<usize> = HashSet::new();
-    let mut marked_by_us: HashMap<String, (String, String)> = HashMap::new();
-    for (i, dispatch) in thread_dispatches.iter().enumerate() {
-        if thread::mark_thread_active(
-            &runtime,
-            &dispatch.params.thread_name,
-            &dispatch.params.dispatch_id,
-        ) {
-            marked_by_us.insert(
-                dispatch.params.thread_name.clone(),
-                (
-                    dispatch.params.session_id.clone(),
-                    dispatch.params.dispatch_id.clone(),
-                ),
-            );
-        } else {
-            let result = ToolResult {
-                content: format!(
-                    "Thread '{}' is already running; retry after the current dispatch completes.",
-                    dispatch.params.thread_name
-                ),
-                is_error: true,
-            };
-            event_sink.emit(AgentEvent::ToolCallStarted {
-                thread_name: agent_thread_name.clone(),
-                call_id: dispatch.tool_call_id.clone(),
-                name: "thread".to_string(),
-                args_preview: preview_tool_args("thread", &dispatch.args_str),
-                key_arg_preview: None,
-                args_detail: Some(tool_args_detail(&dispatch.args_str)),
-            });
-            event_sink.emit(AgentEvent::ToolCallFinished {
-                thread_name: agent_thread_name.clone(),
-                call_id: dispatch.tool_call_id.clone(),
-                name: "thread".to_string(),
-                content_preview: preview_tool_result("thread", &result),
-                is_error: true,
-            });
-            all_results.push((
-                dispatch.original_index,
-                dispatch.tool_call_id.clone(),
-                "thread".to_string(),
-                result,
-            ));
-            failed_indices.insert(i);
-        }
-    }
-
-    // 3. Spawn non-thread tools into a separate JoinSet that runs
-    //    concurrently with all waves.  This isolates non-thread tool panics
-    //    from thread failure tracking and prevents long-running non-thread
-    //    tools from blocking wave progression.
-    let mut non_thread_join_set: JoinSet<(usize, Option<usize>, String, String, ToolResult)> =
-        JoinSet::new();
+    let mut all_results =
+        collect_parse_errors(parse_errors, &ctx.event_sink, &ctx.agent_thread_name);
+    let mut non_threads = JoinSet::new();
     spawn_non_thread_into(
-        &mut non_thread_join_set,
+        &mut non_threads,
         other_calls,
-        &runtime,
-        &client,
-        &event_sink,
-        &agent_thread_name,
+        &ctx.runtime,
+        &ctx.client,
+        &ctx.event_sink,
+        &ctx.agent_thread_name,
     );
+    let event_sink = ctx.event_sink.clone();
+    let agent_thread_name = ctx.agent_thread_name.clone();
+    all_results.extend(accept_and_launch_background(thread_dispatches, dag, ctx));
 
-    // Track whether the non-thread JoinSet has been fully drained.  Once
-    // empty, we skip polling it in the wave loop to avoid a busy-wait spin.
-    let mut non_thread_empty = non_thread_join_set.is_empty();
-
-    // 4. Execute waves.
-    let Dag {
-        waves,
-        in_batch_deps,
-    } = dag;
-
-    for wave in waves.iter() {
-        let mut join_set: JoinSet<(usize, Option<usize>, String, String, ToolResult)> =
-            JoinSet::new();
-        // Track which thread dispatches are in-flight (spawned but not yet
-        // completed).  If a task panics, all remaining in-flight dispatches
-        // are marked as failed so their dependents are skipped.
-        let mut in_flight: HashSet<usize> = HashSet::new();
-
-        // Spawn thread dispatches for this wave.
-        for &dispatch_idx in wave {
-            if failed_indices.contains(&dispatch_idx) {
-                continue;
-            }
-
-            let dispatch = &thread_dispatches[dispatch_idx];
-
-            // Check if any in-batch deps failed in a previous wave.
-            let deps = &in_batch_deps[dispatch_idx];
-            let any_dep_failed = deps.iter().any(|dep_idx| failed_indices.contains(dep_idx));
-
-            if any_dep_failed {
-                let failed_dep_name = deps
-                    .iter()
-                    .find(|dep_idx| failed_indices.contains(dep_idx))
-                    .map(|dep_idx| &thread_dispatches[*dep_idx].params.thread_name)
-                    .cloned()
-                    .unwrap_or_default();
-
-                let result = ToolResult {
-                    content: format!(
-                        "Source thread '{}' failed; dispatch '{}' skipped.",
-                        failed_dep_name, dispatch.params.thread_name
-                    ),
-                    is_error: true,
-                };
-
-                event_sink.emit(AgentEvent::ToolCallStarted {
-                    thread_name: agent_thread_name.clone(),
-                    call_id: dispatch.tool_call_id.clone(),
-                    name: "thread".to_string(),
-                    args_preview: preview_tool_args("thread", &dispatch.args_str),
-                    key_arg_preview: None,
-                    args_detail: Some(tool_args_detail(&dispatch.args_str)),
-                });
-                event_sink.emit(AgentEvent::ToolCallFinished {
-                    thread_name: agent_thread_name.clone(),
-                    call_id: dispatch.tool_call_id.clone(),
-                    name: "thread".to_string(),
-                    content_preview: preview_tool_result("thread", &result),
-                    is_error: true,
-                });
-
-                all_results.push((
-                    dispatch.original_index,
-                    dispatch.tool_call_id.clone(),
-                    "thread".to_string(),
-                    result,
-                ));
-
-                failed_indices.insert(dispatch_idx);
-                continue;
-            }
-
-            // Emit ToolCallStarted for the thread dispatch.
-            event_sink.emit(AgentEvent::ToolCallStarted {
-                thread_name: agent_thread_name.clone(),
-                call_id: dispatch.tool_call_id.clone(),
-                name: "thread".to_string(),
-                args_preview: preview_tool_args("thread", &dispatch.args_str),
-                key_arg_preview: None,
-                args_detail: Some(tool_args_detail(&dispatch.args_str)),
-            });
-
-            // Spawn execute_parsed_dispatch.
-            let runtime = runtime.clone();
-            let client = client.clone();
-            let params = dispatch.params.clone();
-            let id = dispatch.tool_call_id.clone();
-            let original_index = dispatch.original_index;
-
-            in_flight.insert(dispatch_idx);
-
-            join_set.spawn(async move {
-                let result = thread::execute_parsed_dispatch(params, &runtime, &client).await;
-                (
-                    original_index,
-                    Some(dispatch_idx),
-                    id,
-                    "thread".to_string(),
-                    result,
-                )
-            });
-        }
-
-        // Drain the wave JoinSet, concurrently polling the non-thread
-        // JoinSet so `ToolCallFinished` events for non-thread tools are
-        // emitted promptly.  Using `select!` (instead of a detached
-        // `tokio::spawn`) keeps everything in this async function — when
-        // the outer future is dropped via `task.abort()`, both JoinSets
-        // are dropped, which aborts all spawned tasks.  A detached spawn
-        // would survive the abort and keep running non-thread tools after
-        // the user pressed stop.
-        //
-        // `biased` prioritises the non-thread branch so finish events are
-        // emitted as early as possible.  The non-thread branch never
-        // breaks the loop — only the wave branch returning `None` (JoinSet
-        // drained) advances to the next wave.
-        loop {
-            let wave_res = if non_thread_empty {
-                join_set.join_next().await
-            } else {
-                tokio::select! {
-                    biased;
-                    nt_res = non_thread_join_set.join_next() => {
-                        match nt_res {
-                            Some(Ok((index, _, tool_call_id, tool_name, result))) => {
-                                event_sink.emit(AgentEvent::ToolCallFinished {
-                                    thread_name: agent_thread_name.clone(),
-                                    call_id: tool_call_id.clone(),
-                                    name: tool_name.clone(),
-                                    content_preview: preview_tool_result(&tool_name, &result),
-                                    is_error: result.is_error,
-                                });
-                                all_results.push((index, tool_call_id, tool_name, result));
-                            }
-                            Some(Err(error)) => {
-                                all_results.push((
-                                    usize::MAX,
-                                    "unknown".to_string(),
-                                    "unknown".to_string(),
-                                    ToolResult {
-                                        content: format!("Tool task panicked: {}", error),
-                                        is_error: true,
-                                    },
-                                ));
-                            }
-                            None => {
-                                non_thread_empty = true;
-                            }
-                        }
-                        continue;
-                    }
-                    wave_res = join_set.join_next() => wave_res
-                }
-            };
-
-            match wave_res {
-                Some(Ok((index, dispatch_idx_opt, tool_call_id, tool_name, result))) => {
-                    // Remove from in-flight and track failures for thread dispatches.
-                    if let Some(dispatch_idx) = dispatch_idx_opt {
-                        in_flight.remove(&dispatch_idx);
-                        if result.is_error {
-                            failed_indices.insert(dispatch_idx);
-                        } else if failed_indices.contains(&dispatch_idx) {
-                            // Was marked failed by the panic handler but actually
-                            // succeeded — un-fail it so dependents in later waves
-                            // are not incorrectly skipped.
-                            failed_indices.remove(&dispatch_idx);
-                        }
-                    }
-
-                    event_sink.emit(AgentEvent::ToolCallFinished {
-                        thread_name: agent_thread_name.clone(),
-                        call_id: tool_call_id.clone(),
-                        name: tool_name.clone(),
-                        content_preview: preview_tool_result(&tool_name, &result),
-                        is_error: result.is_error,
-                    });
-
-                    all_results.push((index, tool_call_id, tool_name, result));
-                }
-                Some(Err(error)) => {
-                    // A task panicked.  Mark all remaining in-flight thread
-                    // dispatches as failed so dependents are skipped.
-                    for &dispatch_idx in in_flight.iter() {
-                        failed_indices.insert(dispatch_idx);
-                    }
-                    in_flight.clear();
-
-                    all_results.push((
-                        usize::MAX,
-                        "unknown".to_string(),
-                        "unknown".to_string(),
-                        ToolResult {
-                            content: format!("Tool task panicked: {}", error),
-                            is_error: true,
-                        },
-                    ));
-                }
-                None => break,
-            }
-        }
-    }
-
-    // 5. Drain any remaining non-thread tools that did not finish during
-    //    wave execution.  `ToolCallFinished` events are emitted as each
-    //    completes.
-    while let Some(join_result) = non_thread_join_set.join_next().await {
+    while let Some(join_result) = non_threads.join_next().await {
         match join_result {
             Ok((index, _, tool_call_id, tool_name, result)) => {
                 event_sink.emit(AgentEvent::ToolCallFinished {
@@ -626,25 +586,17 @@ pub(crate) async fn execute_with_dag(
                 });
                 all_results.push((index, tool_call_id, tool_name, result));
             }
-            Err(error) => {
-                all_results.push((
-                    usize::MAX,
-                    "unknown".to_string(),
-                    "unknown".to_string(),
-                    ToolResult {
-                        content: format!("Tool task panicked: {}", error),
-                        is_error: true,
-                    },
-                ));
-            }
+            Err(error) => all_results.push((
+                usize::MAX,
+                "unknown".to_string(),
+                "unknown".to_string(),
+                ToolResult {
+                    content: format!("Tool task panicked: {error}"),
+                    is_error: true,
+                },
+            )),
         }
     }
-
-    for (name, (session_id, dispatch_id)) in &marked_by_us {
-        thread::close_thread_dispatch(&runtime, session_id, name, dispatch_id);
-    }
-
-    // 7. Sort by original index and return.
     sort_and_strip_index(all_results)
 }
 
@@ -667,13 +619,21 @@ mod tests {
             "threads": source_threads,
         });
         let args_str = serde_json::to_string(&args).unwrap();
+        let tool_call_id = format!("call_{}", index);
+        let dispatch_id = format!("dispatch-{index}");
         ParsedThreadDispatch {
             original_index: index,
-            tool_call_id: format!("call_{}", index),
+            tool_call_id: tool_call_id.clone(),
+            key: ThreadDispatchKey::new(
+                crate::events::SessionRunId::new(),
+                name,
+                dispatch_id.clone(),
+                tool_call_id,
+            ),
             args_str,
             params: ParsedDispatchParams {
                 thread_name: name.to_string(),
-                dispatch_id: format!("dispatch-{index}"),
+                dispatch_id,
                 action: "test action".to_string(),
                 source_threads: source_threads.iter().map(|s| s.to_string()).collect(),
                 scheduled_skills: Vec::new(),
@@ -839,7 +799,7 @@ mod tests {
         ];
 
         let (thread_dispatches, other_calls, parse_errors) =
-            partition_tool_calls(tool_calls, &runtime);
+            partition_tool_calls(tool_calls, &runtime, &crate::events::SessionRunId::new());
 
         assert_eq!(thread_dispatches.len(), 2);
         assert_eq!(thread_dispatches[0].params.thread_name, "A");
@@ -864,7 +824,7 @@ mod tests {
         )];
 
         let (thread_dispatches, other_calls, parse_errors) =
-            partition_tool_calls(tool_calls, &runtime);
+            partition_tool_calls(tool_calls, &runtime, &crate::events::SessionRunId::new());
 
         assert!(thread_dispatches.is_empty());
         assert!(other_calls.is_empty());
@@ -1056,7 +1016,7 @@ mod tests {
         ];
 
         let (thread_dispatches, other_calls, parse_errors) =
-            partition_tool_calls(tool_calls, &runtime);
+            partition_tool_calls(tool_calls, &runtime, &crate::events::SessionRunId::new());
 
         assert_eq!(thread_dispatches.len(), 3);
         assert_eq!(thread_dispatches[0].params.thread_name, "A");
@@ -1093,7 +1053,7 @@ mod tests {
         )];
 
         let (thread_dispatches, other_calls, parse_errors) =
-            partition_tool_calls(tool_calls, &runtime);
+            partition_tool_calls(tool_calls, &runtime, &crate::events::SessionRunId::new());
 
         assert!(thread_dispatches.is_empty());
         assert!(other_calls.is_empty());
@@ -1120,11 +1080,323 @@ mod tests {
         )];
 
         let (thread_dispatches, other_calls, parse_errors) =
-            partition_tool_calls(tool_calls, &runtime);
+            partition_tool_calls(tool_calls, &runtime, &crate::events::SessionRunId::new());
 
         assert_eq!(thread_dispatches.len(), 1);
         assert!(thread_dispatches[0].params.scheduled_skills.is_empty());
         assert!(other_calls.is_empty());
         assert!(parse_errors.is_empty());
+    }
+
+    #[cfg(unix)]
+    fn background_runtime(script_body: &str) -> (ToolRuntime, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Arc;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "nac_background_dag_{}_{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = root.join("store.db");
+        crate::store::initialize(&store).unwrap();
+        let worker = root.join("worker.sh");
+        std::fs::write(&worker, format!("#!/bin/sh\nset -eu\n{script_body}\n")).unwrap();
+        std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.store_path = store;
+        runtime.worker_executable = Some(worker);
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+        runtime.active_threads = Arc::new(crate::tools::ActiveThreadRegistry::default());
+        (runtime, root)
+    }
+
+    #[cfg(unix)]
+    async fn launch_calls(
+        runtime: ToolRuntime,
+        calls: Vec<ToolCall>,
+        run_id: crate::events::SessionRunId,
+    ) -> Vec<(String, String, ToolResult)> {
+        let (dispatches, others, errors) = partition_tool_calls(calls, &runtime, &run_id);
+        let dag = build_dag(&dispatches).unwrap();
+        execute_with_dag(
+            dispatches,
+            others,
+            errors,
+            dag,
+            DagExecContext {
+                client: ModelClient::new_for_test(),
+                event_sink: EventSink::none(),
+                agent_thread_name: None,
+                runtime,
+            },
+        )
+        .await
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_completions(
+        runtime: &ToolRuntime,
+        run_id: &crate::events::SessionRunId,
+        count: usize,
+    ) -> Vec<crate::tools::ThreadCompletion> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut completions = Vec::new();
+        while completions.len() < count && tokio::time::Instant::now() < deadline {
+            completions.extend(
+                runtime
+                    .active_threads
+                    .take_completions(run_id, &HashSet::new()),
+            );
+            if completions.len() < count {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
+        completions
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn background_acceptance_is_immediate_and_completion_is_terminal() {
+        let (runtime, root) = background_runtime("sleep 1\necho terminal-result");
+        let run_id = crate::events::SessionRunId::new();
+        let started = tokio::time::Instant::now();
+        let results = launch_calls(
+            runtime.clone(),
+            vec![make_tool_call(
+                "call-a",
+                "thread",
+                json!({"name": "A", "action": "slow"}),
+            )],
+            run_id.clone(),
+        )
+        .await;
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        assert!(!results[0].2.is_error);
+        assert!(results[0].2.content.contains("accepted"));
+        assert!(!results[0].2.content.contains("terminal-result"));
+        let initial_state = runtime
+            .active_threads
+            .active_for_run(&run_id, &HashSet::new())[0]
+            .state;
+        assert!(matches!(
+            initial_state,
+            crate::tools::ThreadDispatchState::PendingDependency
+                | crate::tools::ThreadDispatchState::Running
+        ));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(
+            runtime
+                .active_threads
+                .active_for_run(&run_id, &HashSet::new())[0]
+                .state,
+            crate::tools::ThreadDispatchState::Running
+        );
+
+        let completions = wait_for_completions(&runtime, &run_id, 1).await;
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].key.tool_call_id, "call-a");
+        assert!(completions[0].content.contains("terminal-result"));
+        assert!(!completions[0].is_error);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn same_name_is_rejected_while_first_background_dispatch_runs() {
+        let (runtime, root) = background_runtime("sleep 1\necho done");
+        let run_id = crate::events::SessionRunId::new();
+        let first = launch_calls(
+            runtime.clone(),
+            vec![make_tool_call(
+                "first",
+                "thread",
+                json!({"name": "A", "action": "one"}),
+            )],
+            run_id.clone(),
+        )
+        .await;
+        let second = launch_calls(
+            runtime.clone(),
+            vec![make_tool_call(
+                "second",
+                "thread",
+                json!({"name": "A", "action": "two"}),
+            )],
+            run_id.clone(),
+        )
+        .await;
+        assert!(!first[0].2.is_error);
+        assert!(second[0].2.is_error);
+        assert!(second[0].2.content.contains("already running"));
+        assert_eq!(wait_for_completions(&runtime, &run_id, 1).await.len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn independent_wave_workers_start_in_parallel() {
+        let (runtime, root) = background_runtime(
+            r#"echo started >> starts
+for i in $(seq 1 100); do
+  [ "$(wc -l < starts | tr -d ' ')" -ge 2 ] && { echo parallel; exit 0; }
+  sleep 0.02
+done
+exit 23"#,
+        );
+        let run_id = crate::events::SessionRunId::new();
+        let results = launch_calls(
+            runtime.clone(),
+            vec![
+                make_tool_call("a", "thread", json!({"name": "A", "action": "one"})),
+                make_tool_call("b", "thread", json!({"name": "B", "action": "two"})),
+            ],
+            run_id.clone(),
+        )
+        .await;
+        assert!(results.iter().all(|(_, _, result)| !result.is_error));
+        let completions = wait_for_completions(&runtime, &run_id, 2).await;
+        assert_eq!(completions.len(), 2);
+        assert!(completions.iter().all(|completion| !completion.is_error));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_predecessor_queues_skip_without_starting_descendant() {
+        let (runtime, root) = background_runtime(
+            r#"action=""
+previous=""
+for argument in "$@"; do
+  [ "$previous" = "--action" ] && action="$argument"
+  previous="$argument"
+done
+echo "$action" >> actions
+[ "$action" = "fail" ] && exit 7
+echo should-not-run"#,
+        );
+        let run_id = crate::events::SessionRunId::new();
+        let results = launch_calls(
+            runtime.clone(),
+            vec![
+                make_tool_call("a", "thread", json!({"name": "A", "action": "fail"})),
+                make_tool_call(
+                    "b",
+                    "thread",
+                    json!({"name": "B", "action": "dependent", "threads": ["A"]}),
+                ),
+            ],
+            run_id.clone(),
+        )
+        .await;
+        assert!(results.iter().all(|(_, _, result)| !result.is_error));
+        let completions = wait_for_completions(&runtime, &run_id, 2).await;
+        assert_eq!(completions.len(), 2);
+        let skipped = completions
+            .iter()
+            .find(|completion| completion.key.thread_name == "B")
+            .unwrap();
+        assert!(skipped.is_error);
+        assert!(skipped.content.contains("Source thread 'A' failed"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("actions")).unwrap(),
+            "fail\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn registry_cancellation_aborts_owned_coordinator_and_worker() {
+        let (runtime, root) = background_runtime("sleep 30\necho survived > survived");
+        let run_id = crate::events::SessionRunId::new();
+        launch_calls(
+            runtime.clone(),
+            vec![make_tool_call(
+                "a",
+                "thread",
+                json!({"name": "A", "action": "slow"}),
+            )],
+            run_id.clone(),
+        )
+        .await;
+        runtime
+            .active_threads
+            .abort_run(&runtime.store_path, "test-session", &run_id)
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(runtime
+            .active_threads
+            .active_for_run(&run_id, &HashSet::new())
+            .is_empty());
+        assert!(!root.join("survived").exists());
+        assert!(!runtime.active_threads.has_completions_for_run(&run_id));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn scheduled_skills_reach_background_worker_arguments() {
+        use std::sync::Arc;
+        let (mut runtime, root) =
+            background_runtime("printf '%s\\n' \"$@\" > arguments\necho done");
+        runtime.skills = Some(Arc::new(crate::skills::SkillRegistry::load_for_test(vec![
+            crate::skills::SkillRecord {
+                name: "lint".to_string(),
+                description: "lint".to_string(),
+                compatibility: None,
+                skill_root_visible: root.join("lint"),
+                body: "lint body".to_string(),
+                resources: Vec::new(),
+            },
+        ])));
+        let run_id = crate::events::SessionRunId::new();
+        launch_calls(
+            runtime.clone(),
+            vec![make_tool_call(
+                "a",
+                "thread",
+                json!({"name": "A", "action": "work", "skills": ["lint"]}),
+            )],
+            run_id.clone(),
+        )
+        .await;
+        assert_eq!(wait_for_completions(&runtime, &run_id, 1).await.len(), 1);
+        let arguments = std::fs::read_to_string(root.join("arguments")).unwrap();
+        assert!(arguments
+            .lines()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair == ["--skill", "lint"]));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn coordinator_cleanup_drop_removes_pending_entries_after_panic_or_cancel() {
+        let mut runtime = test_runtime();
+        let root =
+            std::env::temp_dir().join(format!("nac_coordinator_cleanup_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        runtime.store_path = root.join("store.db");
+        crate::store::initialize(&runtime.store_path).unwrap();
+        let key =
+            ThreadDispatchKey::new(crate::events::SessionRunId::new(), "A", "dispatch", "call");
+        assert!(runtime.active_threads.try_accept(key.clone()));
+        drop(CoordinatorCleanup {
+            runtime: runtime.clone(),
+            session_id: "test-session".to_string(),
+            keys: vec![key],
+        });
+        assert!(!runtime.active_threads.is_active("A"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -4,7 +4,9 @@ use crate::events::AgentEvent;
 use crate::model::ModelClient;
 use crate::skills::SkillRegistry;
 use crate::store;
-use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
+use crate::tools::{
+    require_str, require_string_array, ThreadCompletion, ThreadDispatchKey, ToolResult, ToolRuntime,
+};
 use crate::types::ToolDefinition;
 
 mod worker;
@@ -178,8 +180,6 @@ pub async fn execute_parsed_dispatch(
         },
     )
     .await;
-
-    close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
 
     // Fold worker token usage into the shared runtime accumulator so the
     // orchestrator's agent loop can include it in session totals.
@@ -474,6 +474,38 @@ fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
         .and_then(|v| v.as_u64())
         .unwrap_or(default_timeout_secs)
         .max(MIN_THREAD_TIMEOUT_SECS)
+}
+
+pub(crate) fn complete_thread_dispatch(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    key: ThreadDispatchKey,
+    result: &ToolResult,
+) {
+    let thread_name = key.thread_name.clone();
+    match runtime.active_threads.complete(
+        &runtime.store_path,
+        session_id,
+        ThreadCompletion {
+            key,
+            content: result.content.clone(),
+            is_error: result.is_error,
+        },
+    ) {
+        Ok(expired) => {
+            for record in expired {
+                runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
+                    name: record.thread_name,
+                    steering_id: record.id,
+                    instruction_preview: record.instruction.chars().take(160).collect(),
+                });
+            }
+        }
+        Err(error) => runtime.event_sink.emit(AgentEvent::Error {
+            thread_name: Some(thread_name),
+            message: format!("failed to complete background thread dispatch: {error}"),
+        }),
+    }
 }
 
 pub(crate) fn mark_thread_active(

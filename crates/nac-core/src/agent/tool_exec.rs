@@ -9,8 +9,12 @@ pub(super) async fn execute_tools_parallel(
 ) -> Vec<(String, String, ToolResult)> {
     // 1. Partition tool calls into thread dispatches, non-thread calls, and
     //    parse errors.
+    let run_id = event_sink
+        .run_id()
+        .cloned()
+        .unwrap_or_else(crate::events::SessionRunId::new);
     let (thread_dispatches, other_calls, parse_errors) =
-        dag::partition_tool_calls(tool_calls, &runtime);
+        dag::partition_tool_calls(tool_calls, &runtime, &run_id);
 
     // 2. If there are no thread dispatches, use the simple path — just spawn
     //    all non-thread calls into a JoinSet, same as the original logic.
