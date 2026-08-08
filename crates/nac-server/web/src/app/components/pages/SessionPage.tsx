@@ -17,7 +17,7 @@ import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import {
   useRunStateSync,
   useSessionStream,
@@ -50,6 +50,7 @@ import {
   useSelectedFile,
   useSelectedRevision,
   useSelectedThread,
+  useSelectedThreadRunning,
   useSelectedWorkset,
   useSidePanelCollapsed,
   useSidePanelExpanded,
@@ -120,10 +121,12 @@ export default function SessionPage() {
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
+  const selectedThreadRunning = useSelectedThreadRunning();
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const isMobile = useIsMobile();
+  const isDesktop = useIsDesktop();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
@@ -190,6 +193,11 @@ export default function SessionPage() {
       </div>
     ) : null;
 
+  // ThreadsView syncs the open thread's name and running bit into the store so
+  // this header stays aligned with the detail pane (including title shimmer).
+  const currentThreadName = selectedThread;
+  const threadTitleRunning = panel === "threads" && selectedThreadRunning;
+
   const sideBox = (
     <SessionSideBox
       sessionId={id}
@@ -221,7 +229,7 @@ export default function SessionPage() {
           <div
             className={cn(
               "absolute inset-y-0 left-0 flex flex-col w-1/2 min-w-0",
-              "pt-[72px] pb-2 pl-2 pr-6",
+              "pt-[72px] pb-2 pl-2 pr-2 xl:pr-6",
               "transition-transform duration-150 ease-out",
               collapsed && "-translate-x-full",
             )}
@@ -246,7 +254,13 @@ export default function SessionPage() {
         className={cn(
           "flex flex-col items-center flex-1 min-w-0 h-full",
           "transition-[padding] duration-150 ease-out",
-          isMobile ? "px-4" : collapsed ? "pl-2 pr-2" : "pl-6 pr-2",
+          isMobile
+            ? "px-0"
+            : collapsed
+              ? "pl-2 pr-2"
+              : isDesktop
+                ? "pl-6 pr-2"
+                : "pl-2 pr-2",
         )}
       >
         <div className="flex flex-col flex-1 min-h-0 w-full relative">
@@ -297,23 +311,32 @@ export default function SessionPage() {
           title={
             <div className="flex items-center gap-2 min-w-0">
               <div className="flex flex-col flex-1 min-w-0 justify-center">
-                <span className="header-small truncate">
-                  {panel === "threads"
-                    ? (selectedThread ??
-                      snapshot?.threads?.[0]?.name ??
-                      SESSION_PANEL_LABEL.threads)
-                    : panel === "worksets"
-                      ? (selectedWorkset ??
-                        snapshot?.worksets.items[0]?.id ??
-                        SESSION_PANEL_LABEL.worksets)
-                      : panel === "files"
-                        ? (selectedFile?.split("/").pop() ??
-                          snapshot?.workspace?.changed_files?.[0]?.path
-                            .split("/")
-                            .pop() ??
-                          SESSION_PANEL_LABEL.files)
-                        : SESSION_PANEL_LABEL.history}
-                </span>
+                {/* Truncate on the wrapper — `overflow: hidden` on the same
+                    node as `background-clip: text` kills the shimmer. */}
+                <div className="min-w-0 truncate">
+                  <span
+                    className={cn(
+                      "header-small",
+                      threadTitleRunning
+                        ? "text-shimmer-basic"
+                        : "text-basic-primary",
+                    )}
+                  >
+                    {panel === "threads"
+                      ? (currentThreadName ?? SESSION_PANEL_LABEL.threads)
+                      : panel === "worksets"
+                        ? (selectedWorkset ??
+                          snapshot?.worksets.items[0]?.id ??
+                          SESSION_PANEL_LABEL.worksets)
+                        : panel === "files"
+                          ? (selectedFile?.split("/").pop() ??
+                            snapshot?.workspace?.changed_files?.[0]?.path
+                              .split("/")
+                              .pop() ??
+                            SESSION_PANEL_LABEL.files)
+                          : SESSION_PANEL_LABEL.history}
+                  </span>
+                </div>
                 {panel === "files" ? fileBadge : null}
               </div>
               {snapshot?.workspace?.branch ? (

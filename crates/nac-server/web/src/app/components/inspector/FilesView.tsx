@@ -18,7 +18,7 @@ import {
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { statusLabelClass } from "@/app/lib/fileStatus";
 import {
@@ -374,7 +374,7 @@ function Section({
     return <Notice>No hunks for this section.</Notice>;
 
   return (
-    <>
+    <div className="pb-[128px] md:pb-0">
       {section.hunks.map((hunk, index) => (
         <div key={index} className="flex flex-col w-full">
           <div className="flex items-start w-full border-l-2 border-transparent bg-info-tertiary">
@@ -398,7 +398,7 @@ function Section({
       {section.truncated ? (
         <Notice>Diff was truncated by the backend.</Notice>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -412,8 +412,8 @@ function PaneHeader({
 }) {
   // On a phone the dialog chrome already names the file and carries the badge,
   // so this bar would only repeat them.
-  const isMobile = useIsMobile();
-  if (isMobile) return null;
+  const isDesktop = useIsDesktop();
+  if (!isDesktop) return null;
 
   return (
     <div

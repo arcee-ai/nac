@@ -24,6 +24,11 @@ interface SessionLayoutState {
    * episode, and only the card clicked belongs highlighted.
    */
   selectedThreadEpisode: string | null;
+  /**
+   * Whether the Threads detail pane considers the open thread running. The
+   * phone dialog header reads this so its title shimmer matches the panel.
+   */
+  selectedThreadRunning: boolean;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
   /** Revision the panels are looking at, or null for the live working tree. */
@@ -47,6 +52,7 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   panelList: false,
   selectedThread: null,
   selectedThreadEpisode: null,
+  selectedThreadRunning: false,
   selectedWorkset: null,
   selectedRevision: null,
   selectedFile: null,
@@ -101,6 +107,13 @@ export function selectThread(
   if (selectedThread) showSidePanelList(false);
 }
 
+/** Drive the phone dialog title shimmer from the Threads detail pane. */
+export function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
+  if (getState().selectedThreadRunning !== selectedThreadRunning) {
+    setState({ selectedThreadRunning });
+  }
+}
+
 export function selectWorkset(selectedWorkset: string | null): void {
   setState({ selectedWorkset });
   if (selectedWorkset) showSidePanelList(false);
@@ -139,6 +152,7 @@ export function resetSessionSelection(): void {
     selectedFile: null,
     toggledFolders: new Set(),
     panelList: false,
+    selectedThreadRunning: false,
   });
 }
 
@@ -148,6 +162,8 @@ export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
 export const useSelectedThreadEpisode = () =>
   useStore((s) => s.selectedThreadEpisode);
+export const useSelectedThreadRunning = () =>
+  useStore((s) => s.selectedThreadRunning);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);

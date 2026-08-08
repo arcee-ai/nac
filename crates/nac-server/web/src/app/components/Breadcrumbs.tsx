@@ -124,8 +124,7 @@ export function Breadcrumbs() {
                 <div
                   className={cn(
                     "flex flex-col",
-                    isMobile &&
-                      "flex-1 min-h-0 overflow-auto [&>*]:shrink-0",
+                    isMobile && "flex-1 min-h-0 overflow-auto [&>*]:shrink-0",
                   )}
                 >
                   {sessions.length === 0 ? (
@@ -180,14 +179,14 @@ export function Breadcrumbs() {
               // atom's own font size would override.
               <button
                 type="button"
-                className="flex items-center gap-2 w-[128px] rounded-[8px] text-btn-secondary"
+                className="flex items-center gap-2 rounded-[8px] text-btn-secondary"
                 onClick={() => setOpen((v) => !v)}
                 aria-expanded={open}
                 aria-label="Switch session"
               >
                 <span
                   className={cn(
-                    "label-medium flex-1 min-w-0 truncate text-left",
+                    "label-medium min-w-0 max-w-[128px] truncate text-left",
                     currentRunning && "text-shimmer-basic",
                   )}
                 >

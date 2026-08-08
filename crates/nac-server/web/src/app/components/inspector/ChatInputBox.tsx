@@ -380,7 +380,7 @@ export function ChatInputBox({
       className={cn(
         "flex flex-col",
         isMobile
-          ? "gap-3 px-2 pt-8 pb-8"
+          ? "gap-3 px-4 pt-8 pb-8"
           : isTablet
             ? "gap-3 px-2 pt-2 pb-4 rounded-[12px] bg-elevation-level-1 shadow-2xl"
             : "gap-4 p-4 rounded-[8px] bg-elevation-level-1 shadow-2xl",

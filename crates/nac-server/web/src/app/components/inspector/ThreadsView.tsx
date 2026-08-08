@@ -51,6 +51,7 @@ import {
 } from "@/app/lib/threadLog";
 import { dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
 import { useLiveThreads } from "@/app/store/runtimeStore";
+import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
 import type {
   AgentEvent,
   EpisodeSnapshot,
@@ -113,14 +114,26 @@ const ToolCallView = memo(function ToolCallView({
   return (
     <div className="pt-1">
       <p
-        className={
-          "code code-small whitespace-pre-wrap break-words " +
-          (pending ? "text-shimmer-basic" : "text-basic-tertiary")
-        }
+        className={cn(
+          "code code-small whitespace-pre-wrap break-words",
+          // Solid colours on child spans would override the fill the shimmer
+          // needs, so a pending line stays one clipped gradient.
+          pending ? "text-shimmer-basic" : "text-basic-tertiary",
+        )}
       >
-        <span className="text-info-primary">{"▸ "}</span>
-        <span className="text-basic-primary">{`${entry.toolName}: `}</span>
-        {entry.keyArg}
+        {pending ? (
+          <>
+            {"▸ "}
+            {`${entry.toolName}: `}
+            {entry.keyArg}
+          </>
+        ) : (
+          <>
+            <span className="text-info-primary">{"▸ "}</span>
+            <span className="text-basic-primary">{`${entry.toolName}: `}</span>
+            {entry.keyArg}
+          </>
+        )}
       </p>
       {entry.resultPreview !== null ? (
         <p
@@ -267,17 +280,21 @@ function LogScroller({
         }
       }}
     >
-      {entries.map((entry) => (
-        <LogEntryView
-          key={entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key}
-          entry={entry}
-        />
-      ))}
-      {!entries.length && !running ? (
-        <p className="pt-4 code code-small text-basic-muted">
-          No commands recorded.
-        </p>
-      ) : null}
+      <div className="pb-[128px] md:pb-4">
+        {entries.map((entry) => (
+          <LogEntryView
+            key={
+              entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key
+            }
+            entry={entry}
+          />
+        ))}
+        {!entries.length && !running ? (
+          <p className="pt-4 code code-small text-basic-muted">
+            No commands recorded.
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -451,12 +468,14 @@ function Episodes({
         className,
       )}
     >
-      {episodes.map((episode, index) => (
-        <div key={episode.id} className="flex flex-col">
-          {index > 0 ? <Separator /> : null}
-          <EpisodeTab episode={episode} index={index} />
-        </div>
-      ))}
+      <div className="pb-[128px] md:pb-4 flex flex-col">
+        {episodes.map((episode, index) => (
+          <div key={episode.id} className="flex flex-col">
+            {index > 0 ? <Separator /> : null}
+            <EpisodeTab episode={episode} index={index} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -580,17 +599,22 @@ function Detail({
 
   return (
     <div ref={paneRef} className="flex flex-col flex-1 min-h-0 min-w-0">
-      <div className="flex items-center gap-[10px] h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
-        <span className="label-micro text-btn-secondary truncate">
-          {thread.name}
-        </span>
-        {running ? (
-          <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
-        ) : null}
-        <span className="flex-1 min-w-0 code code-small text-basic-muted truncate">
+      <div className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
+        <div className="min-w-0 truncate">
+          <span
+            className={cn(
+              "label-small",
+              running ? "text-shimmer-basic" : "text-basic-primary",
+            )}
+          >
+            {thread.name}
+          </span>
+        </div>
+
+        <span className="flex-1 min-w-0 code code-small text-basic-muted truncate translate-y-[2px]">
           {thread.updated_at}
         </span>
-        <span className="shrink-0 code code-small text-basic-muted">
+        <span className="shrink-0 code code-small text-basic-muted translate-y-[2px]">
           {thread.episode_count} ep
         </span>
       </div>
@@ -658,12 +682,24 @@ export function ThreadsView({
 
   const ordered = useMemo(() => {
     const persisted = new Set(threads.map((thread) => thread.name));
-    const extras = [...runningNames, ...pendingNames].filter(
-      (name) => !persisted.has(name),
-    );
+    // Live-only rows fill the gap until the snapshot retains them. Finished
+    // ones stay too — otherwise the row blinks out between `thread_finished`
+    // and the refetch that brings episodes.
+    const extras = new Set<string>();
+    for (const name of runningNames) {
+      if (!persisted.has(name)) extras.add(name);
+    }
+    for (const name of pendingNames) {
+      if (!persisted.has(name)) extras.add(name);
+    }
+    for (const [name, thread] of Object.entries(liveThreads)) {
+      if (thread.status === "finished" && !persisted.has(name)) {
+        extras.add(name);
+      }
+    }
     const rows = [
       ...threads,
-      ...extras.map((name) => pendingThread(name, sessionId)),
+      ...[...extras].map((name) => pendingThread(name, sessionId)),
     ];
     const kindOf = (name: string): ListKind => {
       if (pendingNames.has(name)) return "pending";
@@ -680,16 +716,34 @@ export function ThreadsView({
       if (rankDiff !== 0) return rankDiff;
       return 0;
     });
-  }, [threads, runningNames, pendingNames, sessionId, waveRank]);
+  }, [threads, runningNames, pendingNames, liveThreads, sessionId, waveRank]);
 
-  if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
-
-  const selectable = ordered.filter((thread) => !pendingNames.has(thread.name));
+  const selectable = useMemo(
+    () => ordered.filter((thread) => !pendingNames.has(thread.name)),
+    [ordered, pendingNames],
+  );
   const current =
     selectable.find((thread) => thread.name === selected) ??
     selectable[0] ??
     null;
   const live = current ? liveThreads[current.name] : undefined;
+
+  // Keep the layout store on the thread the detail pane is showing, so the
+  // phone dialog header names that thread instead of the panel label.
+  const currentName = current?.name ?? null;
+  const currentRunning = Boolean(currentName && runningNames.has(currentName));
+  useEffect(() => {
+    if (selected || !currentName) return;
+    onSelect(currentName);
+  }, [selected, currentName, onSelect]);
+
+  // Same running bit the detail pane uses — the dialog title shimmer reads it.
+  useEffect(() => {
+    setSelectedThreadRunning(currentRunning);
+    return () => setSelectedThreadRunning(false);
+  }, [currentRunning]);
+
+  if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
 
   return (
     <PanelSplit

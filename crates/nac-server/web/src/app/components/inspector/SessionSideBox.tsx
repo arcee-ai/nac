@@ -201,11 +201,7 @@ export function SessionSideBox({
   );
 
   if (isMobile) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0 pb-[96px] md:pb-0">
-        {body}
-      </div>
-    );
+    return <div className="flex flex-col flex-1 min-h-0">{body}</div>;
   }
 
   return (
