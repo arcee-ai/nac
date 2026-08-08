@@ -479,6 +479,7 @@ export function ConfigurationsPanel({
               <ConfigRow
                 label="Model"
                 required
+                verticalOnMobile
                 hint="Every model this build knows about; picking one names its provider."
                 control={
                   <CatalogModelPicker
@@ -500,9 +501,12 @@ export function ConfigurationsPanel({
                   <ConfigRow
                     label="Base URL"
                     hint="Endpoint the catalog names for this provider."
+                    verticalOnMobile
                     control={
                       <Input
-                        inputSize={InputSize.Medium}
+                        inputSize={
+                          isMobile ? InputSize.Large : InputSize.Medium
+                        }
                         className={CONTROL_WIDTH}
                         value={catalogPick.baseUrl}
                         isDisabled
@@ -516,6 +520,7 @@ export function ConfigurationsPanel({
                       {catalogCredential ? (
                         <ConfigRow
                           label="Credential"
+                          verticalOnMobile
                           hint="This provider's conventional environment variable is set on the server; the session reuses it."
                           control={
                             <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
@@ -534,10 +539,13 @@ export function ConfigurationsPanel({
                           <ConfigRow
                             label="Name"
                             required
+                            verticalOnMobile
                             hint="How this setup is listed the next time a session is created."
                             control={
                               <Input
-                                inputSize={InputSize.Medium}
+                                inputSize={
+                                  isMobile ? InputSize.Large : InputSize.Medium
+                                }
                                 className={CONTROL_WIDTH}
                                 value={name}
                                 onChange={(event) =>
@@ -550,6 +558,7 @@ export function ConfigurationsPanel({
                           <ConfigRow
                             label="API Key"
                             required
+                            verticalOnMobile
                             invalid={keyInvalid}
                             hint={
                               catalogProvider?.auth_hint
@@ -558,7 +567,9 @@ export function ConfigurationsPanel({
                             }
                             control={
                               <Input
-                                inputSize={InputSize.Medium}
+                                inputSize={
+                                  isMobile ? InputSize.Large : InputSize.Medium
+                                }
                                 className={CONTROL_WIDTH}
                                 type="password"
                                 autoComplete="off"
@@ -595,9 +606,10 @@ export function ConfigurationsPanel({
                 required
                 hint="A config.toml on this machine; its [model] section is read."
                 invalid={Boolean(resolveError)}
+                verticalOnMobile
                 control={
                   <Input
-                    inputSize={InputSize.Medium}
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                     className={CONTROL_WIDTH}
                     placeholder="Select Config File"
                     trailing={InputTrailing.Button}

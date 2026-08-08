@@ -17,6 +17,8 @@ interface SelectProps {
   value?: string;
   onValueChange?: (id: string) => void;
   size?: ButtonSize;
+  /** Panel rows; defaults to matching `size`. */
+  itemSize?: TabButtonSize;
   variant?: ButtonVariant;
   placement?: AnchorPlacement;
   placeholder?: string;
@@ -43,6 +45,7 @@ const Select: React.FC<SelectProps> = ({
   value,
   onValueChange,
   size = ButtonSize.Medium,
+  itemSize,
   variant = ButtonVariant.Secondary,
   placement = AnchorPlacement.BottomRight,
   placeholder = "Select...",
@@ -53,6 +56,7 @@ const Select: React.FC<SelectProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const selected = items.find((item) => item.id === value);
+  const rowSize = itemSize ?? tabSizeFor[size];
 
   const select = (id: string) => {
     onValueChange?.(id);
@@ -72,7 +76,7 @@ const Select: React.FC<SelectProps> = ({
           {items.map((item) => (
             <TabButton
               key={item.id}
-              size={tabSizeFor[size]}
+              size={rowSize}
               variant={TabButtonVariant.Regular}
               active={item.id === value}
               onClick={() => select(item.id)}

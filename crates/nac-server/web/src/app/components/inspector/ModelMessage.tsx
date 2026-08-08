@@ -133,7 +133,7 @@ export const ModelMessage = memo(function ModelMessage({
       )}
     >
       <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
-        <div className="flex gap-3 items-center mb-4 md:mb-1 min-w-0">
+        <div className="flex gap-3 items-center mb-4 min-w-0">
           <ModelPill active={active} />
           <span className="label-small text-basic-primary truncate">
             {model}

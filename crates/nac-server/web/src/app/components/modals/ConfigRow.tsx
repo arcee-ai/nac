@@ -4,7 +4,7 @@ import { HoverHint, TooltipPosition } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 /** Width every control on the right-hand side of a row shares. */
-export const CONTROL_WIDTH = "w-[280px]";
+export const CONTROL_WIDTH = "w-full md:w-[280px]";
 
 export function FieldLabel({
   label,
@@ -107,7 +107,14 @@ export function ConfigRow({
           <HoverHint title={hint} position={TooltipPosition.TopCenter} />
         ) : null}
       </div>
-      <div className="shrink-0">{control}</div>
+      <div
+        className={cn(
+          "shrink-0",
+          verticalOnMobile && "w-full md:w-auto",
+        )}
+      >
+        {control}
+      </div>
     </div>
   );
 }

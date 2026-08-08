@@ -366,8 +366,11 @@ function ConfigurationForm({
 
   const saveRef = useRef(save);
   const removeRef = useRef(remove);
-  saveRef.current = save;
-  removeRef.current = remove;
+
+  useLayoutEffect(() => {
+    saveRef.current = save;
+    removeRef.current = remove;
+  });
 
   useLayoutEffect(() => {
     const saving = createConfig.isPending || updateConfig.isPending;
