@@ -7,9 +7,11 @@ import {
   Popover,
   PopoverPlacement,
   PopoverSize,
+  StickyButton,
   TextArea,
   TextAreaSize,
 } from "@/app/atoms";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCommitWorkspace } from "@/app/services/queries";
 import { useRunning } from "@/app/store/runtimeStore";
@@ -51,6 +53,7 @@ export function CommitPopover({
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
 
+  const isMobile = useIsMobile();
   const running = useRunning();
   const toast = useToast();
   const commit = useCommitWorkspace(sessionId);
@@ -145,17 +148,32 @@ export function CommitPopover({
         </>
       }
     >
-      <Button
-        className="max-w-[120px] shrink-0"
-        size={ButtonSize.Small}
-        variant={ButtonVariant.Primary}
-        disabled={Boolean(reason)}
-        aria-expanded={open}
-        title={reason ?? "Commit every change in the checkout"}
-        onClick={() => (open ? close() : setOpen(true))}
-      >
-        Commit
-      </Button>
+      {isMobile ? (
+        // Floating over the file list on a phone, so it takes the design's
+        // 40px pill rather than the toolbar's flat 24px button.
+        <StickyButton
+          className="shrink-0"
+          variant={ButtonVariant.Primary}
+          disabled={Boolean(reason)}
+          aria-expanded={open}
+          title={reason ?? "Commit every change in the checkout"}
+          onClick={() => (open ? close() : setOpen(true))}
+        >
+          Commit
+        </StickyButton>
+      ) : (
+        <Button
+          className="max-w-[120px] shrink-0"
+          size={ButtonSize.Small}
+          variant={ButtonVariant.Primary}
+          disabled={Boolean(reason)}
+          aria-expanded={open}
+          title={reason ?? "Commit every change in the checkout"}
+          onClick={() => (open ? close() : setOpen(true))}
+        >
+          Commit
+        </Button>
+      )}
     </Popover>
   );
 }

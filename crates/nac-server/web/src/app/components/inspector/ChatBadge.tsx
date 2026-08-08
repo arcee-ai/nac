@@ -89,7 +89,7 @@ export function ChatBadge({
               "shrink-0",
               open
                 ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
+                : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
             )}
           />
         ) : null}

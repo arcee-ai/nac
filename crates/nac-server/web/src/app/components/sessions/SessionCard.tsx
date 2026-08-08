@@ -18,6 +18,7 @@ import {
   sessionEnvLabel,
 } from "@/app/lib/format";
 import { providerLabel } from "@/app/lib/providers";
+import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { SessionCardActions } from "@/app/components/sessions/SessionCardActions";
 import type {
@@ -82,7 +83,7 @@ function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
         {sessionEnvLabel(summary)}
       </span>
       {provider ? (
-        <span className="text-micro text-basic-muted truncate max-w-[128px]">
+        <span className="text-micro text-basic-muted truncate md:max-w-[128px]">
           {provider}
         </span>
       ) : null}
@@ -125,20 +126,25 @@ export function SessionCard({
       )
     : null;
 
+  const isMobile = useIsMobile();
+  const isDesktop = useIsDesktop();
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pressed, setPressed] = useState(false);
 
   // The bottom row swaps provenance for actions as soon as the card is the
-  // user's focus, which is also how the design shows the Focused state.
-  const showActions = hover || focused || selected;
+  // user's focus, which is also how the design shows the Focused state. A touch
+  // screen never reaches that state, so the actions stay out and the
+  // provenance moves up under the title instead.
+  const showActions = !isDesktop || hover || focused || selected;
 
   const activate = () => onOpen(id);
 
   return (
     <div
       className={cn(
-        "group fade relative flex flex-col gap-4 px-6 pt-5 pb-3 rounded-[8px] overflow-hidden cursor-default",
+        "group fade relative flex flex-col rounded-[8px] overflow-hidden cursor-default",
+        isMobile ? "gap-4 px-4 pt-4 pb-2" : "gap-4 px-6 pt-5 pb-3",
         "shadow-convex",
         running ? "bg-elevation-level-3" : "bg-elevation-level-1",
       )}
@@ -239,6 +245,7 @@ export function SessionCard({
           </div>
         </div>
       </div>
+      {!isDesktop ? <Provenance summary={summary} /> : null}
 
       <div className="relative flex items-center justify-between w-full h-6 gap-2">
         <Metrics summary={summary} />

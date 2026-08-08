@@ -64,7 +64,7 @@ export function SessionCardActions({
   onStop,
 }: SessionCardActionsProps) {
   return (
-    <div className="flex items-center gap-1.5 shrink-0">
+    <div className="flex items-center gap-4 xl:gap-1.5 shrink-0">
       <IconAction
         title={pinned ? "Unpin session" : "Pin session"}
         icon={pinned ? IconName.Unpin : IconName.Pin}

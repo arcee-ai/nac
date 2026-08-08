@@ -10,6 +10,12 @@ export const BACKEND_OPTIONS: SelectItem[] = [
   ...PROVIDER_KINDS.map((kind) => ({ id: kind, label: providerLabel(kind) })),
 ];
 
+/** The providers themselves, for a row that has to name one. */
+export const PROTOCOL_ITEMS: SelectItem[] = PROVIDER_KINDS.map((kind) => ({
+  id: kind,
+  label: providerLabel(kind),
+}));
+
 export const REASONING_OPTIONS: SelectItem[] = [
   { id: "", label: "Inherit config" },
   { id: CLEAR_EFFORT, label: "Clear configured effort" },

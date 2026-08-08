@@ -22,7 +22,7 @@ function FileChip({
     <button
       type="button"
       className={cn(
-        "flex items-center gap-[6px] max-w-full py-1 px-2 rounded-[4px] shrink-0",
+        "flex items-center gap-[6px] max-w-full py-2 md:py-1 px-2 rounded-[4px] shrink-0",
         active ? "btn-ghost-highlighted" : "btn-ghost",
       )}
       aria-pressed={active}
@@ -65,7 +65,7 @@ export function SnapshotFiles({
   const rest = files.length - shown.length;
 
   return (
-    <div className="flex flex-col gap-0 w-full pl-2 pr-4 pb-1 items-start">
+    <div className="flex flex-col gap-1 md:gap-0 w-full pl-2 pr-4 pb-1 items-start">
       {shown.map((file) => (
         <FileChip
           key={file.path}

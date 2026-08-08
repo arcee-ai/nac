@@ -30,6 +30,7 @@ const HoverHint: React.FC<HoverHintProps> & { Size: typeof HoverHintSize } = ({
     description={description}
     position={position}
     sticky
+    showTooltipOnMobile
     className={className}
   >
     <Icon

@@ -28,7 +28,12 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
   <div className={cn("flex text-left flex-col gap-1", className)}>
     {label ? (
       <div className="flex gap-2 items-center">
-        <Label validation={validation} hoverHint={hoverHint} className="flex-1">
+        <Label
+          validation={validation}
+          hoverHint={hoverHint}
+          tone="primary"
+          className="flex-1"
+        >
           {label}
         </Label>
         {required ? (

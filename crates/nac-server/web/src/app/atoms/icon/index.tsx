@@ -141,6 +141,7 @@ export enum IconName {
   SearchPage = "searchPage",
   Pin = "pin",
   Unpin = "unpin",
+  OpenMobileModal = "openMobileModal",
 }
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {

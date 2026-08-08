@@ -1,6 +1,7 @@
 import {
   Button,
   ButtonContent,
+  ButtonSize,
   ButtonVariant,
   Modal,
   ModalSize,
@@ -57,7 +58,8 @@ export function RevertModal({
       footer={
         <>
           <Button
-            variant={ButtonVariant.Tertiary}
+            variant={ButtonVariant.Ghost}
+            size={ButtonSize.Large}
             content={ButtonContent.Text}
             onClick={onClose}
             disabled={revert.isPending}
@@ -66,6 +68,7 @@ export function RevertModal({
           </Button>
           <Button
             variant={ButtonVariant.SecondaryDestructive}
+            size={ButtonSize.Large}
             content={ButtonContent.Text}
             onClick={submit}
             loading={revert.isPending}

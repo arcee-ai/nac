@@ -10,33 +10,25 @@ import {
   Input,
   InputSize,
   InputTrailing,
-  Loader,
-  LoaderSize,
-  Popover,
-  PopoverPlacement,
-  Select,
   type SelectItem,
   Separator,
-  TabButton,
-  TabButtonSize,
-  TabButtonVariant,
 } from "@/app/atoms";
+import { AuthenticationRow } from "@/app/components/modals/AuthenticationRow";
 import {
   CatalogModelPicker,
   type CatalogPick,
 } from "@/app/components/modals/CatalogModelPicker";
-import { ConfigRow } from "@/app/components/modals/ConfigRow";
+import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
+import { PROTOCOL_ITEMS } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
+import { ResolvedRows } from "@/app/components/modals/ResolvedRows";
+import { SmallSelect } from "@/app/components/modals/SmallSelect";
+import { type Source, SourceMenu } from "@/app/components/modals/SourceMenu";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
-import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
-import {
-  KEY_DEBOUNCE_MS,
-  MASKED_KEY,
-  modelItems,
-  type Validation,
-} from "@/app/lib/apiKey";
+import { KEY_DEBOUNCE_MS, modelItems, type Validation } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import {
   PROVIDER_KINDS,
@@ -46,7 +38,6 @@ import {
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useDeleteModelConfig,
-  useManagedLogout,
   useManagedProviderModels,
   useModelCatalog,
   useModelConfigs,
@@ -56,7 +47,6 @@ import {
 import type {
   BackendKind,
   CreateModelConfigurationRequest,
-  ResolvedModelConfiguration,
 } from "@/app/types/api";
 
 /** What the panel hands the launch form once a provider setup is complete. */
@@ -72,12 +62,6 @@ export type LaunchModelSelection =
       extra_headers: Record<string, string> | null;
     };
 
-type Source =
-  | { kind: "catalog" }
-  | { kind: "new" }
-  | { kind: "file" }
-  | { kind: "saved"; configId: string };
-
 /** A base URL the user writes by hand, for a gateway nac has no defaults for. */
 const CUSTOM = "custom";
 type ProviderChoice = BackendKind | typeof CUSTOM;
@@ -87,130 +71,7 @@ const PROVIDER_ITEMS: SelectItem[] = [
   { id: CUSTOM, label: "Custom" },
 ];
 
-const PROTOCOL_ITEMS: SelectItem[] = PROVIDER_KINDS.map((kind) => ({
-  id: kind,
-  label: providerLabel(kind),
-}));
-
-const CONTROL_WIDTH = "w-[280px]";
-
 const PATH_DEBOUNCE_MS = 400;
-
-/**
- * The Authentication row a managed provider shows in place of the API key: the
- * credential is a browser login, so there is nothing to paste.
- *
- * The login belongs to the provider rather than to this configuration — one
- * file in NAC home backs every session using that backend — which is why the
- * row reports being signed in even when the sign-in happened elsewhere.
- */
-export function AuthenticationRow({ backend }: { backend: BackendKind }) {
-  const { provider, signedIn } = useManagedSignIn(backend);
-  const { state, start, cancel } = useDeviceLogin();
-  const logout = useManagedLogout();
-  // Being signed in only says the credential is on file. Whether it still works
-  // is answered by the one request that spends it, so the row asks for the model
-  // index rather than reporting success on the strength of a file existing.
-  const reach = useManagedProviderModels(
-    backend,
-    Boolean(provider) && signedIn,
-  );
-
-  if (!provider) return null;
-
-  const failed = state.status === "failed";
-  const expired = signedIn && reach.isError;
-
-  const control =
-    state.status === "waiting" ? (
-      <div className="flex items-center gap-2">
-        <Loader size={LoaderSize.Micro} />
-        {state.prompt.user_code ? (
-          <>
-            <span className="text-micro text-basic-muted">Code</span>
-            <span className="label-small text-basic-primary tabular-nums">
-              {state.prompt.user_code}
-            </span>
-          </>
-        ) : (
-          <span className="text-micro text-basic-muted">
-            Waiting for the browser
-          </span>
-        )}
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={ButtonSize.Medium}
-          content={ButtonContent.Text}
-          onClick={() => void cancel()}
-        >
-          Cancel
-        </Button>
-      </div>
-    ) : signedIn ? (
-      <div className="flex items-center gap-2">
-        {failed || expired ? null : (
-          <Button
-            variant={ButtonVariant.Ghost}
-            size={ButtonSize.Medium}
-            content={ButtonContent.Text}
-            loading={logout.isPending}
-            onClick={() => void logout.mutateAsync(provider).catch(() => {})}
-          >
-            Logout
-          </Button>
-        )}
-        {expired ? (
-          <Button
-            variant={ButtonVariant.Primary}
-            size={ButtonSize.Medium}
-            content={ButtonContent.IconRight}
-            loading={state.status === "starting"}
-            onClick={() => void start(provider)}
-          >
-            <span>Login again</span>
-            <Icon iconName={IconName.External} />
-          </Button>
-        ) : (
-          <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
-            <Icon
-              iconName={IconName.CheckCircle}
-              className="text-success-primary"
-            />
-            <span className="label-small text-success-primary">Success</span>
-          </div>
-        )}
-      </div>
-    ) : (
-      <Button
-        variant={ButtonVariant.Primary}
-        size={ButtonSize.Medium}
-        content={ButtonContent.IconRight}
-        loading={state.status === "starting"}
-        onClick={() => void start(provider)}
-      >
-        <span>Login</span>
-        <Icon iconName={IconName.External} />
-      </Button>
-    );
-
-  return (
-    <ConfigRow
-      label="Authentication"
-      invalid={failed || expired}
-      hint="Signs in through the browser; every session on this provider shares the login."
-      control={
-        <div className="flex flex-col items-end gap-1">
-          {control}
-          {failed || expired ? (
-            <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] text-right pt-1 opacity-70">
-              {failed ? state.message : errorMessage(reach.error)}
-            </p>
-          ) : null}
-        </div>
-      }
-    />
-  );
-}
 
 /**
  * Picks the provider setup a new session launches with: a model chosen out of
@@ -305,7 +166,7 @@ export function ConfigurationsPanel({
 
   const configId = source.kind === "saved" ? source.configId : null;
   const configFile = source.kind === "file" ? debouncedPath : "";
-
+  const isMobile = useIsMobile();
   const { signedIn } = useManagedSignIn(backend);
 
   const catalogProvider =
@@ -555,8 +416,8 @@ export function ConfigurationsPanel({
     loginQuery.isError ||
     Boolean(
       resolved &&
-        !providerUsesApiKey(resolved.backend) &&
-        resolved.models_error,
+      !providerUsesApiKey(resolved.backend) &&
+      resolved.models_error,
     );
   const message =
     errorText ??
@@ -591,7 +452,8 @@ export function ConfigurationsPanel({
         <div className="flex items-center gap-4 px-3 py-2 bg-elevation-level-3 rounded-t-[8px] border-b border-muted">
           <div
             className={cn(
-              "label-small flex-1 min-w-0 truncate",
+              "flex-1 min-w-0 truncate",
+              isMobile ? "label-medium" : "label-small",
               boxInvalid ? "text-error-primary" : "text-basic-primary",
             )}
           >
@@ -611,12 +473,13 @@ export function ConfigurationsPanel({
         </div>
         <Separator />
 
-        <div className="flex flex-col gap-2 p-3">
+        <div className="flex flex-col gap-4 md:gap-2 p-3">
           {source.kind === "catalog" ? (
             <>
               <ConfigRow
                 label="Model"
                 required
+                verticalOnMobile
                 hint="Every model this build knows about; picking one names its provider."
                 control={
                   <CatalogModelPicker
@@ -638,9 +501,12 @@ export function ConfigurationsPanel({
                   <ConfigRow
                     label="Base URL"
                     hint="Endpoint the catalog names for this provider."
+                    verticalOnMobile
                     control={
                       <Input
-                        inputSize={InputSize.Medium}
+                        inputSize={
+                          isMobile ? InputSize.Large : InputSize.Medium
+                        }
                         className={CONTROL_WIDTH}
                         value={catalogPick.baseUrl}
                         isDisabled
@@ -654,6 +520,7 @@ export function ConfigurationsPanel({
                       {catalogCredential ? (
                         <ConfigRow
                           label="Credential"
+                          verticalOnMobile
                           hint="This provider's conventional environment variable is set on the server; the session reuses it."
                           control={
                             <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
@@ -672,10 +539,13 @@ export function ConfigurationsPanel({
                           <ConfigRow
                             label="Name"
                             required
+                            verticalOnMobile
                             hint="How this setup is listed the next time a session is created."
                             control={
                               <Input
-                                inputSize={InputSize.Medium}
+                                inputSize={
+                                  isMobile ? InputSize.Large : InputSize.Medium
+                                }
                                 className={CONTROL_WIDTH}
                                 value={name}
                                 onChange={(event) =>
@@ -688,6 +558,7 @@ export function ConfigurationsPanel({
                           <ConfigRow
                             label="API Key"
                             required
+                            verticalOnMobile
                             invalid={keyInvalid}
                             hint={
                               catalogProvider?.auth_hint
@@ -696,7 +567,9 @@ export function ConfigurationsPanel({
                             }
                             control={
                               <Input
-                                inputSize={InputSize.Medium}
+                                inputSize={
+                                  isMobile ? InputSize.Large : InputSize.Medium
+                                }
                                 className={CONTROL_WIDTH}
                                 type="password"
                                 autoComplete="off"
@@ -733,9 +606,10 @@ export function ConfigurationsPanel({
                 required
                 hint="A config.toml on this machine; its [model] section is read."
                 invalid={Boolean(resolveError)}
+                verticalOnMobile
                 control={
                   <Input
-                    inputSize={InputSize.Medium}
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                     className={CONTROL_WIDTH}
                     placeholder="Select Config File"
                     trailing={InputTrailing.Button}
@@ -967,313 +841,5 @@ export function ConfigurationsPanel({
         }}
       />
     </div>
-  );
-}
-
-/**
- * The same rows as a fresh setup, filled in from a configuration the server
- * resolved. Everything stays editable — an edit rides along with the session
- * being created and leaves the stored configuration alone — except the key,
- * which never leaves the server and so can only be shown as a stand-in.
- */
-function ResolvedRows({
-  resolving,
-  resolved,
-  backend,
-  onBackend,
-  baseUrl,
-  onBaseUrl,
-  model,
-  onModel,
-  failed,
-}: {
-  resolving: boolean;
-  resolved: ResolvedModelConfiguration | null;
-  backend: BackendKind | null;
-  onBackend: (backend: BackendKind) => void;
-  baseUrl: string;
-  onBaseUrl: (url: string) => void;
-  model: string;
-  onModel: (model: string) => void;
-  failed: boolean;
-}) {
-  if (resolving) {
-    return (
-      <div className="flex items-center gap-2 py-1">
-        <Loader size={LoaderSize.Micro} />
-        <span className="text-micro text-basic-muted">
-          Checking the key and reading the model list…
-        </span>
-      </div>
-    );
-  }
-  if (!resolved || !backend) {
-    return failed ? null : (
-      <p className="text-micro text-basic-muted py-1">
-        Pick a configuration to see its provider and models.
-      </p>
-    );
-  }
-
-  const usesKey = providerUsesApiKey(backend);
-  // A setup the server could list models for is driven by its provider; one it
-  // could not is a hand-written endpoint, so it spells out model and URL.
-  const listed = resolved.models.length > 0;
-  // A login that stopped answering leaves the list just as empty as a provider
-  // with no index, so without the reason the rows would turn a broken sign-in
-  // into a hand-written endpoint and quietly ask the user to type a model.
-  const failedListing = Boolean(resolved.models_error);
-  const modelChoices = listed
-    ? modelItems(resolved.models)
-    : model
-      ? [{ id: model, label: model }]
-      : [];
-
-  return (
-    <>
-      <ConfigRow
-        label="Provider"
-        required
-        hint="Which provider the session talks to, and how it authenticates."
-        control={
-          <SmallSelect
-            items={PROTOCOL_ITEMS}
-            value={backend}
-            onValueChange={(id) => onBackend(id as BackendKind)}
-          />
-        }
-      />
-      {usesKey ? (
-        <>
-          <Separator />
-          <ConfigRow
-            label="API Key"
-            required
-            hint="Held by nac for this configuration; save a new setup to use a different key."
-            control={
-              <Input
-                inputSize={InputSize.Medium}
-                className={CONTROL_WIDTH}
-                value={MASKED_KEY}
-                isDisabled
-                readOnly
-                leadingSlot={<KeyStatus status="ready" />}
-              />
-            }
-          />
-        </>
-      ) : (
-        <>
-          <Separator />
-          <AuthenticationRow backend={backend} />
-        </>
-      )}
-      <Separator />
-      {listed || failedListing ? (
-        <ConfigRow
-          label="Default Model"
-          invalid={failedListing}
-          hint="Model the session starts with; the key reaches all of these."
-          control={
-            <SmallSelect
-              items={failedListing ? [] : modelChoices}
-              value={failedListing ? "" : model}
-              onValueChange={onModel}
-              disabled={failedListing}
-              placeholder="–"
-            />
-          }
-        />
-      ) : (
-        <>
-          <ConfigRow
-            label="Model"
-            required
-            hint="Model identifier the endpoint expects."
-            control={
-              <Input
-                inputSize={InputSize.Medium}
-                className={CONTROL_WIDTH}
-                placeholder="gpt-5.5"
-                value={model}
-                onChange={(event) => onModel(event.target.value)}
-              />
-            }
-          />
-          <Separator />
-          <ConfigRow
-            label="Base URL"
-            required
-            hint="Endpoint the session sends its requests to."
-            control={
-              <Input
-                inputSize={InputSize.Medium}
-                className={CONTROL_WIDTH}
-                placeholder="https://api.openai.com/v1"
-                value={baseUrl}
-                onChange={(event) => onBaseUrl(event.target.value)}
-              />
-            }
-          />
-        </>
-      )}
-    </>
-  );
-}
-
-function SmallSelect({
-  items,
-  value,
-  onValueChange,
-  placeholder,
-  disabled = false,
-}: {
-  items: SelectItem[];
-  value: string;
-  onValueChange: (id: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <Select
-      items={items}
-      value={value}
-      onValueChange={onValueChange}
-      placeholder={placeholder}
-      disabled={disabled}
-      size={ButtonSize.Medium}
-      variant={ButtonVariant.Ghost}
-      placement={PopoverPlacement.CenterLeft}
-      panelClassName="max-h-[200px] overflow-auto min-w-[220px]"
-    />
-  );
-}
-
-/** Create a setup, read one from a file, or reuse one saved earlier. */
-function SourceMenu({
-  label,
-  configurations,
-  activeId,
-  source,
-  onSelect,
-  onDelete,
-}: {
-  label: string;
-  configurations: { id: string; name: string }[];
-  activeId: string | null;
-  source: Source["kind"];
-  onSelect: (source: Source) => void;
-  onDelete: (id: string, name: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  const pick = (next: Source) => {
-    onSelect(next);
-    setOpen(false);
-  };
-
-  return (
-    <Popover
-      open={open}
-      onClose={() => setOpen(false)}
-      placement={PopoverPlacement.BottomLeft}
-      size="min-w-[260px]"
-      className="shrink-0"
-      panelClassName="max-h-72 overflow-auto"
-      content={
-        <>
-          <TabButton
-            size={TabButtonSize.Medium}
-            variant={
-              source === "catalog"
-                ? TabButtonVariant.Accent
-                : TabButtonVariant.Regular
-            }
-            active={source === "catalog"}
-            onClick={() => pick({ kind: "catalog" })}
-          >
-            <Icon iconName={IconName.Search} />
-            <span className="text-left flex-grow">Browse Models</span>
-          </TabButton>
-          <TabButton
-            size={TabButtonSize.Medium}
-            variant={
-              source === "new"
-                ? TabButtonVariant.Accent
-                : TabButtonVariant.Regular
-            }
-            active={source === "new"}
-            onClick={() => pick({ kind: "new" })}
-          >
-            <Icon iconName={IconName.Add} />
-            <span className="text-left flex-grow">Create New</span>
-          </TabButton>
-          <TabButton
-            size={TabButtonSize.Medium}
-            variant={
-              source === "file"
-                ? TabButtonVariant.Accent
-                : TabButtonVariant.Regular
-            }
-            active={source === "file"}
-            onClick={() => pick({ kind: "file" })}
-          >
-            <Icon iconName={IconName.File} />
-            <span className="text-left flex-grow">From a .toml file</span>
-          </TabButton>
-          {configurations.length > 0 ? (
-            <div className="h-px w-full bg-divider-muted my-1" />
-          ) : null}
-          {configurations.map((entry) => (
-            <div key={entry.id} className="flex items-center gap-1">
-              <TabButton
-                size={TabButtonSize.Medium}
-                variant={
-                  activeId === entry.id
-                    ? TabButtonVariant.Accent
-                    : TabButtonVariant.Regular
-                }
-                active={activeId === entry.id}
-                className="flex-1 min-w-0"
-                onClick={() => pick({ kind: "saved", configId: entry.id })}
-              >
-                <Icon iconName={IconName.Gear} />
-                <span className="text-left flex-grow truncate">
-                  {entry.name}
-                </span>
-              </TabButton>
-              <Button
-                variant={ButtonVariant.TertiaryDestructive}
-                size={ButtonSize.Medium}
-                content={ButtonContent.Icon}
-                aria-label={`Remove ${entry.name}`}
-                onClick={() => onDelete(entry.id, entry.name)}
-              >
-                <Icon iconName={IconName.Trash} />
-              </Button>
-            </div>
-          ))}
-        </>
-      }
-    >
-      <Button
-        variant={ButtonVariant.Secondary}
-        size={ButtonSize.Medium}
-        content={ButtonContent.IconRight}
-        onClick={() => setOpen((current) => !current)}
-        aria-expanded={open}
-      >
-        <span className="text-left flex-grow truncate max-w-[220px]">
-          {label}
-        </span>
-        <Icon
-          iconName={IconName.Down}
-          className={cn(
-            "transition-transform duration-150 ease-out",
-            open ? "rotate-180" : "rotate-0",
-          )}
-        />
-      </Button>
-    </Popover>
   );
 }

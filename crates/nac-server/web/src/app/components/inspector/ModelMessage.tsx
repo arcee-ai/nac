@@ -27,6 +27,7 @@ import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import type { ModelTurn } from "@/app/lib/transcript";
 import type { WorkspaceRevision } from "@/app/types/api";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /** Exact assistant marker written by the agent on session cancel. */
 const RUN_CANCELLED_MARKER = "[run cancelled by user]";
@@ -123,7 +124,7 @@ export const ModelMessage = memo(function ModelMessage({
   const canRefresh = onRefresh != null && userMessageIndex != null;
   const canRevert = onRevert != null && userMessageIndex != null;
   const copyText = modelCopyText(turn);
-
+  const isMobile = useIsMobile();
   return (
     <div
       className={cn(
@@ -131,8 +132,8 @@ export const ModelMessage = memo(function ModelMessage({
         isLast && "min-h-[calc(70vh-316px)]",
       )}
     >
-      <div className="flex flex-col flex-grow gap-1 pt-2 max-w-[calc(100%-36px)] min-w-0">
-        <div className="flex gap-3 items-center mb-1 min-w-0">
+      <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
+        <div className="flex gap-3 items-center mb-4 min-w-0">
           <ModelPill active={active} />
           <span className="label-small text-basic-primary truncate">
             {model}
@@ -155,7 +156,7 @@ export const ModelMessage = memo(function ModelMessage({
 
         <div
           className={cn(
-            "chat-response chat-response-content paragraph-medium text-basic-secondary relative w-full min-w-0 pl-3",
+            "chat-response chat-response-content paragraph-medium text-basic-secondary relative w-full min-w-0 md:pl-3",
             active && "streaming",
           )}
         >
@@ -235,22 +236,26 @@ export const ModelMessage = memo(function ModelMessage({
         {!active ? (
           <div
             className={cn(
-              "flex items-center justify-start gap-3 pt-4 pl-3",
+              "flex items-center justify-start gap-3 pt-4 md:pl-3",
               "opacity-0 pointer-events-none transition-opacity duration-150",
               "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
               "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",
+              // Nothing hovers on a touch screen, so the row simply stays out.
+              "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
             )}
           >
             {canRefresh ? (
               <Tooltip title="Resend" position={TooltipPosition.TopCenter}>
                 <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Tertiary}
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Resend"
                   disabled={actionsDisabled}
                   onClick={() => onRefresh(userMessageIndex)}
-                  className="!h-4 !min-h-4 !p-0"
+                  className="md:!h-4 md:!min-h-4 md:!p-0"
                 >
                   <Icon iconName={IconName.Refresh} size={16} />
                 </Button>
@@ -263,13 +268,15 @@ export const ModelMessage = memo(function ModelMessage({
                 position={TooltipPosition.TopCenter}
               >
                 <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Tertiary}
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
                   onClick={() => onRevert(userMessageIndex, userText)}
-                  className="!h-4 !min-h-4 !p-0"
+                  className="md:!h-4 md:!min-h-4 md:!p-0"
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -281,12 +288,14 @@ export const ModelMessage = memo(function ModelMessage({
               >
                 <span className="inline-flex">
                   <Button
-                    size={ButtonSize.Small}
-                    variant={ButtonVariant.Tertiary}
+                    size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                    variant={
+                      isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                    }
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled
-                    className="!h-4 !min-h-4 !p-0"
+                    className="md:!h-4 md:!min-h-4 md:!p-0"
                   >
                     <Icon iconName={IconName.TurnLeft} size={16} />
                   </Button>
@@ -296,11 +305,11 @@ export const ModelMessage = memo(function ModelMessage({
 
             <CopyButton
               value={copyText}
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Tertiary}
+              size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+              variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
               title="Copy message"
               position={TooltipPosition.TopCenter}
-              className="!h-4 !min-h-4 !p-0"
+              className="md:!h-4 md:!min-h-4 md:!p-0"
             />
           </div>
         ) : null}

@@ -8,6 +8,7 @@ import {
   Modal,
   ModalSize,
 } from "@/app/atoms";
+import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { displaySessionTitle } from "@/app/lib/format";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useUpdatePresentation } from "@/app/services/queries";
@@ -22,10 +23,12 @@ interface RenameModalProps {
 
 /** Mounted only while open, so the fields start from the current presentation. */
 export function RenameModal({ open, onClose, summary }: RenameModalProps) {
-  if (!open || !summary) return null;
+  const mounted = useExitTransition(open);
+  if (!mounted || !summary) return null;
   return (
     <RenameForm
       key={summary.session_id}
+      open={open}
       summary={summary}
       onClose={onClose}
     />
@@ -33,9 +36,11 @@ export function RenameModal({ open, onClose, summary }: RenameModalProps) {
 }
 
 function RenameForm({
+  open,
   summary,
   onClose,
 }: {
+  open: boolean;
   summary: SessionSummarySnapshot;
   onClose: () => void;
 }) {
@@ -67,7 +72,7 @@ function RenameForm({
 
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title="Rename session"
       size={ModalSize.Small}
