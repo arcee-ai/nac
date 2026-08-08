@@ -215,7 +215,7 @@ export function BranchPicker({
           ) : null}
 
           {!failure && dirty && !running ? (
-            <div className="shrink-0">
+            <div className="shrink-0 px-4 pt-2 md:px-0 md:pt-0">
               <MessageBox
                 variant={MessageBoxVariant.Info}
                 title="Uncommitted changes: you can branch off them, but not switch away."

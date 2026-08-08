@@ -240,7 +240,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   const closeButton = (iconName: IconName, leading: boolean) => (
     <Button
       variant={ButtonVariant.Ghost}
-      size={ButtonSize.Medium}
+      size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
       content={ButtonContent.Icon}
       className={cn(
         "shrink-0",
@@ -269,7 +269,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   const headerRow = (
     <div
       className={cn(
-        "flex items-start justify-between gap-4",
+        "flex items-start justify-between gap-2 md:gap-4",
         chrome && "items-center px-4 py-3",
         isMobile && "min-h-[64px] h-[64px] max-h-[64px] px-3",
       )}

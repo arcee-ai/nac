@@ -79,6 +79,7 @@ interface TreeProps {
 
 /** One level of the file tree, indented by a guide line like Figma. */
 function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
+  const isMobile = useIsMobile();
   return (
     // No `w-full`: as a flex child this already stretches, and a full width on
     // top of the indent margin would push every deep level a few pixels past
@@ -124,7 +125,7 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
           labelClassName={statusLabelClass(file.status)}
           // The status letter used to sit here; the label colour already says
           // as much, so the slot shows what kind of file it is instead.
-          icon={<FileIcon path={file.path} />}
+          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
           onClick={() => onSelect(file.path)}
         />
       ))}
@@ -142,6 +143,7 @@ function ChangedList({
   selected: string | null;
   onSelect: (path: string) => void;
 }) {
+  const isMobile = useIsMobile();
   if (files.length === 0) {
     return (
       <div className="p-1 label-micro text-basic-muted">
@@ -159,7 +161,7 @@ function ChangedList({
           active={selected === file.path}
           title={file.path}
           labelClassName={statusLabelClass(file.status)}
-          icon={<FileIcon path={file.path} />}
+          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
           onClick={() => onSelect(file.path)}
         />
       ))}
