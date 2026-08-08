@@ -12,17 +12,24 @@ import {
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { FilesView } from "@/app/components/inspector/FilesView";
+import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
+import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import {
+  DEFAULT_SESSION_PANEL,
+  SESSION_PANEL_LABEL,
+  WIDE_SESSION_PANELS,
+  type SessionPanel,
+} from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
 import {
   selectRevision,
   selectThread,
   selectWorkset,
+  showSidePanelList,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
   useSelectedRevision,
@@ -34,14 +41,6 @@ import type {
   SessionSnapshotResponse,
   WorkspaceSnapshot,
 } from "@/app/types/api";
-
-// The `files` panel is called Changes in the design; its route keeps the older
-// name so links that are already out there still land on it.
-const PANEL_LABEL: Record<SessionPanel, string> = {
-  threads: "Threads",
-  files: "Files",
-  worksets: "Worksets",
-};
 
 interface SessionSideBoxProps {
   sessionId: string;
@@ -146,7 +145,9 @@ function SideBoxFooter({
 
 /**
  * The left half of the session screen: one box with the Threads / Files /
- * Worksets panels, sized by the shared layout store.
+ * Worksets panels, sized by the shared layout store. On a phone the panels are
+ * the body of the modal box that SessionPage puts them in, and its chrome —
+ * header, bottom bar — belongs to the dialog rather than to this box.
  */
 export function SessionSideBox({
   sessionId,
@@ -156,9 +157,56 @@ export function SessionSideBox({
 }: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
+
+  // History belongs to the phone's bottom bar: a wide box reaches revisions
+  // through its footer chip, so a link to that panel lands on the default one.
+  const active =
+    !isMobile && panel === "history" ? DEFAULT_SESSION_PANEL : panel;
+
+  const body = (
+    <>
+      {active === "files" ? (
+        <FilesView
+          sessionId={sessionId}
+          snapshot={snapshot}
+          revision={selectedRevision}
+        />
+      ) : null}
+      {active === "worksets" ? (
+        <WorksetsView
+          snapshot={snapshot}
+          selected={selectedWorkset}
+          onSelect={selectWorkset}
+        />
+      ) : null}
+      {active === "threads" ? (
+        <ThreadsView
+          snapshot={snapshot}
+          selected={selectedThread}
+          onSelect={selectThread}
+        />
+      ) : null}
+      {active === "history" ? (
+        <HistoryView
+          sessionId={sessionId}
+          selected={selectedRevision}
+          onSelect={selectRevision}
+        />
+      ) : null}
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0 pb-[96px] md:pb-0">
+        {body}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-md border border-muted">
@@ -170,22 +218,27 @@ export function SessionSideBox({
         )}
       >
         <div className="flex flex-1 min-w-0 items-center gap-1" role="tablist">
-          {SESSION_PANELS.map((name) => (
+          {WIDE_SESSION_PANELS.map((name) => (
             <HorizontalTabsItem
               key={name}
               role="tab"
-              aria-selected={panel === name}
-              active={panel === name}
+              aria-selected={active === name}
+              active={active === name}
               variant={HorizontalTabsItemVariant.Neutral}
-              onClick={() => onPanelChange(name)}
+              onClick={() => {
+                // A tablet shows one column at a time, and a new panel opens on
+                // its selected row; a desktop split ignores the flag entirely.
+                showSidePanelList(false);
+                onPanelChange(name);
+              }}
             >
-              {PANEL_LABEL[name]}
+              {SESSION_PANEL_LABEL[name]}
             </HorizontalTabsItem>
           ))}
         </div>
         {/* Expand/hide live here in the split; once fullscreen the Modal owns
-            Close, and a phone only ever sees the fullscreen form. */}
-        {expanded || isMobile ? null : (
+            Close. */}
+        {expanded ? null : (
           <div className="flex items-center gap-2 pb-[2px] shrink-0">
             <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft}>
               <Button
@@ -213,35 +266,13 @@ export function SessionSideBox({
         )}
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col">
-        {panel === "files" ? (
-          <FilesView
-            sessionId={sessionId}
-            snapshot={snapshot}
-            revision={selectedRevision}
-          />
-        ) : null}
-        {panel === "worksets" ? (
-          <WorksetsView
-            snapshot={snapshot}
-            selected={selectedWorkset}
-            onSelect={selectWorkset}
-          />
-        ) : null}
-        {panel === "threads" ? (
-          <ThreadsView
-            snapshot={snapshot}
-            selected={selectedThread}
-            onSelect={selectThread}
-          />
-        ) : null}
-      </div>
+      <div className="flex-1 min-h-0 flex flex-col">{body}</div>
 
       <SideBoxFooter
         sessionId={sessionId}
         workspace={snapshot?.workspace ?? null}
         revision={selectedRevision}
-        compact={isMobile}
+        compact={isTablet}
       />
     </div>
   );

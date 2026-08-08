@@ -18,6 +18,7 @@ import {
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { statusLabelClass } from "@/app/lib/fileStatus";
 import {
@@ -170,16 +171,20 @@ function ListingButton({
   iconName,
   label,
   active,
+  round = false,
   onClick,
 }: {
   iconName: IconName;
   label: string;
   active: boolean;
+  /** The phone's 40px circle around a 24px glyph, for the floating pill. */
+  round?: boolean;
   onClick: () => void;
 }) {
   return (
     <Button
-      size={ButtonSize.Small}
+      className={round ? "btn-round" : undefined}
+      size={round ? ButtonSize.Medium : ButtonSize.Small}
       variant={active ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
       content={ButtonContent.Icon}
       aria-pressed={active}
@@ -192,7 +197,7 @@ function ListingButton({
   );
 }
 
-/** The bar above the list: how the files are listed, and the commit action. */
+/** How the files are listed, and the commit action. */
 function ListToolbar({
   sessionId,
   listing,
@@ -204,27 +209,51 @@ function ListToolbar({
   changed: ChangedFileStat[];
   revision: number | null;
 }) {
+  const isMobile = useIsMobile();
+
+  const listingButtons = (
+    <>
+      <ListingButton
+        iconName={IconName.Folders}
+        label="Show every file"
+        active={listing === "tree"}
+        round={isMobile}
+        onClick={() => selectFileListing("tree")}
+      />
+      <ListingButton
+        iconName={IconName.Scheme}
+        label="Show changed files only"
+        active={listing === "changed"}
+        round={isMobile}
+        onClick={() => selectFileListing("changed")}
+      />
+    </>
+  );
+  const commit = (
+    <CommitPopover
+      sessionId={sessionId}
+      changed={changed}
+      revision={revision}
+    />
+  );
+
+  // A phone has no room for a bar of its own above the list, so the design
+  // floats the same two controls over its last rows instead.
+  if (isMobile) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-4 p-1 rounded-full bg-elevation-level-3 shadow-2xl">
+          {listingButtons}
+        </div>
+        {commit}
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
-      <div className="flex items-center gap-2 flex-1">
-        <ListingButton
-          iconName={IconName.Folders}
-          label="Show every file"
-          active={listing === "tree"}
-          onClick={() => selectFileListing("tree")}
-        />
-        <ListingButton
-          iconName={IconName.Scheme}
-          label="Show changed files only"
-          active={listing === "changed"}
-          onClick={() => selectFileListing("changed")}
-        />
-      </div>
-      <CommitPopover
-        sessionId={sessionId}
-        changed={changed}
-        revision={revision}
-      />
+      <div className="flex items-center gap-2 flex-1">{listingButtons}</div>
+      {commit}
     </div>
   );
 }
@@ -678,7 +707,22 @@ export function FilesView({
 
   return (
     <PanelSplit
-      listHeader={
+      listTitle="Files"
+      title={current?.split("/").pop()}
+      actions={
+        currentChange &&
+        (currentChange.additions || currentChange.deletions) ? (
+          <div className="flex items-center gap-2 shrink-0 code code-small">
+            <span className="text-success-primary">
+              +{currentChange.additions ?? 0}
+            </span>
+            <span className="text-error-primary">
+              -{currentChange.deletions ?? 0}
+            </span>
+          </div>
+        ) : null
+      }
+      listToolbar={
         <ListToolbar
           sessionId={sessionId}
           listing={fileListing}

@@ -18,6 +18,7 @@ import {
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useBranches, useSwitchBranch } from "@/app/services/queries";
 import { useRunning } from "@/app/store/runtimeStore";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /** Why the picker will not act right now, or null when it is free to. */
 function blockedReason(
@@ -53,10 +54,11 @@ function Row({
   title?: string;
   onClick: () => void;
 }) {
+  const isMobile = useIsMobile();
   return (
     <TabButton
       type="button"
-      size={TabButtonSize.Small}
+      size={isMobile ? TabButtonSize.Large : TabButtonSize.Small}
       active={active}
       disabled={disabled}
       title={title}
@@ -123,7 +125,7 @@ export function BranchPicker({
   // asked of the checkout, so both are settled once for the whole panel.
   const createReason = blockedReason(running, dirty, true);
   const switchReason = blockedReason(running, dirty, false);
-
+  const isMobile = useIsMobile();
   const act = (name: string, create: boolean) => {
     switchBranch.mutate({ name, create }, { onSuccess: close });
   };
@@ -142,35 +144,40 @@ export function BranchPicker({
       placement={PopoverPlacement.TopRight}
       className="min-w-0"
       content={
-        <>
-          <Input
-            autoFocus
-            inputSize={InputSize.Small}
-            placeholder="Find or create a branch"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-
-          {/* Directly under the field, because it acts on what was typed there
-              rather than on anything in the list below. */}
-          {needle && !exists && !error ? (
-            <Row
-              label={
-                <>
-                  Create <span className="text-basic-primary">{needle}</span>
-                </>
-              }
-              icon={IconName.Add}
-              disabled={Boolean(createReason)}
-              title={createReason ?? undefined}
-              onClick={() => act(needle, true)}
+        <div className="h-[calc(70dvh)] md:h-[280px] flex flex-col">
+          <div className="p-4 pt-0 md:pb-2 md:px-0 flex flex-col gap-2 shrink-0">
+            <Input
+              autoFocus
+              inputSize={isMobile ? InputSize.Large : InputSize.Small}
+              placeholder="Find or create a branch"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
             />
+
+            {/* Directly under the field, because it acts on what was typed there
+              rather than on anything in the list below. */}
+            {needle && !exists && !error ? (
+              <Row
+                label={
+                  <>
+                    Create <span className="text-basic-primary">{needle}</span>
+                  </>
+                }
+                icon={IconName.Add}
+                disabled={Boolean(createReason)}
+                title={createReason ?? undefined}
+                onClick={() => act(needle, true)}
+              />
+            ) : null}
+          </div>
+          {isLoading ? (
+            <div className="shrink-0">
+              <Status busy>Reading branches…</Status>
+            </div>
           ) : null}
 
-          {isLoading ? <Status busy>Reading branches…</Status> : null}
-
           {!isLoading && !error ? (
-            <div className="flex flex-col gap-1 max-h-[240px] overflow-auto [&>*]:shrink-0">
+            <div className="flex flex-col flex-1 min-h-0 gap-2 md:gap-1 p-2 md:p-0 overflow-auto [&>*]:shrink-0">
               {branches.map((item) => {
                 const reason = item.is_current ? null : switchReason;
                 return (
@@ -195,19 +202,27 @@ export function BranchPicker({
             </div>
           ) : null}
 
-          {switchBranch.isPending ? <Status busy>Working…</Status> : null}
+          {switchBranch.isPending ? (
+            <div className="shrink-0">
+              <Status busy>Working…</Status>
+            </div>
+          ) : null}
 
           {failure ? (
-            <MessageBox variant={MessageBoxVariant.Error} title={failure} />
+            <div className="shrink-0">
+              <MessageBox variant={MessageBoxVariant.Error} title={failure} />
+            </div>
           ) : null}
 
           {!failure && dirty && !running ? (
-            <MessageBox
-              variant={MessageBoxVariant.Info}
-              title="Uncommitted changes: you can branch off them, but not switch away."
-            />
+            <div className="shrink-0">
+              <MessageBox
+                variant={MessageBoxVariant.Info}
+                title="Uncommitted changes: you can branch off them, but not switch away."
+              />
+            </div>
           ) : null}
-        </>
+        </div>
       }
     >
       <button
@@ -218,7 +233,7 @@ export function BranchPicker({
         onClick={() => (open ? close() : setOpen(true))}
       >
         <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate">
+        <span className="label-micro text-btn-secondary truncate max-w-[64px] md:max-w-[128px]">
           {branch}
         </span>
       </button>

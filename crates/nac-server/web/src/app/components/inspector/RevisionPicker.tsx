@@ -12,11 +12,9 @@ import {
 import { cn } from "@/app/lib/cn";
 import { formatStoreTime } from "@/app/lib/format";
 import { errorMessage } from "@/app/providers/ToastProvider";
+import { revisionOrdinal, revisionTitle } from "@/app/lib/revisions";
 import { useWorkspaceRevisions } from "@/app/services/queries";
 import type { WorkspaceRevision } from "@/app/types/api";
-
-/** How a revision is named once it is no longer the working tree. */
-const revisionTitle = (ordinal: number) => `Snapshot ${ordinal}`;
 
 function Row({
   title,
@@ -78,8 +76,7 @@ export function RevisionPicker({
   const { data, isLoading, error } = useWorkspaceRevisions(sessionId);
 
   const revisions = data ?? [];
-  // The list arrives newest first, so the oldest revision is number one.
-  const ordinalOf = (index: number) => revisions.length - index;
+  const ordinalOf = (index: number) => revisionOrdinal(index, revisions.length);
   const selectedIndex = revisions.findIndex((item) => item.id === selected);
   const label =
     selectedIndex >= 0 ? revisionTitle(ordinalOf(selectedIndex)) : "Working tree";

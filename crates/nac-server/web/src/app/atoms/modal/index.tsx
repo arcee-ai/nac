@@ -39,11 +39,17 @@ interface ModalProps {
   title?: React.ReactNode;
   /** Secondary row under the title, inside the same header block. */
   subheader?: React.ReactNode;
+  /** Controls of the dialog's own, trailing the title in the header row. */
+  headerActions?: React.ReactNode;
   size?: ModalSize;
   closeOnOverlay?: boolean;
   /** Full-bleed chrome: header and footer span the card, only the body scrolls. */
   flush?: boolean;
-  /** Grow the card to fill the viewport instead of hugging its content. */
+  /**
+   * Grow the card to fill the viewport instead of hugging its content. Desktop
+   * only — a phone panel already is the viewport, and keeps the chrome every
+   * other dialog has there.
+   */
   fullScreen?: boolean;
   /**
    * Drop the card entirely: no header, no padding, no surface of its own. For
@@ -53,6 +59,16 @@ interface ModalProps {
   chromeless?: boolean;
   /** Glyph for the close button in the mobile header, where it leads the row. */
   mobileCloseIcon?: IconName;
+  /**
+   * Drop the close button a chromeless dialog floats over its content, for
+   * bodies that already carry a way out in a header of their own.
+   */
+  hideClose?: boolean;
+  /**
+   * Stay open across a route change, for a dialog whose own content is what
+   * puts the route there — the session side box switches panels by navigating.
+   */
+  keepOnNavigate?: boolean;
   className?: string;
   /** Overrides the body's own padding and scrolling, for full-bleed content. */
   bodyClassName?: string;
@@ -70,12 +86,15 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   onClose,
   title,
   subheader,
+  headerActions,
   size = ModalSize.Medium,
   closeOnOverlay = true,
   flush = false,
   fullScreen = false,
   chromeless = false,
   mobileCloseIcon = IconName.Left,
+  hideClose = false,
+  keepOnNavigate = false,
   className = "",
   bodyClassName = "",
   children,
@@ -200,12 +219,13 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     if (
       previousPathnameRef.current &&
       previousPathnameRef.current !== location.pathname &&
-      open
+      open &&
+      !keepOnNavigate
     ) {
       onClose?.();
     }
     previousPathnameRef.current = location.pathname;
-  }, [location.pathname, open, onClose]);
+  }, [location.pathname, open, onClose, keepOnNavigate]);
 
   if (!mounted) return null;
 
@@ -234,12 +254,17 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     </Button>
   );
 
+  // A phone panel is the viewport already, so `fullScreen` has nothing left to
+  // ask for there — and it must not reshape the chrome either, or the dialog
+  // would look unlike every other one on the phone.
+  const isFullScreen = fullScreen && !isMobile;
   // On a phone the close affordance leads the header, the way a back button
-  // does — unless the dialog is explicitly full screen.
-  const closeLeads = isMobile && !fullScreen;
-  // Chromeless fullscreen still needs a way out; regular chrome already puts
-  // Close in the header row.
-  const chromelessClose = chromeless && fullScreen && onClose;
+  // does.
+  const closeLeads = isMobile;
+  // Chromeless still needs a way out once it covers the screen; regular chrome
+  // already puts Close in the header row.
+  const chromelessClose =
+    chromeless && (isFullScreen || isMobile) && onClose && !hideClose;
 
   const headerRow = (
     <div
@@ -258,12 +283,15 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       >
         {title}
       </div>
+      {headerActions ? (
+        <div className="flex items-center gap-1 shrink-0">{headerActions}</div>
+      ) : null}
       {!closeLeads && onClose ? closeButton(IconName.Close, false) : null}
     </div>
   );
 
   const header =
-    !chromeless && (title || subheader || onClose) ? (
+    !chromeless && (title || subheader || headerActions || onClose) ? (
       chrome ? (
         <div className="shrink-0 border-b border-muted">
           {headerRow}
@@ -297,8 +325,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
         className={cn(
           "fixed inset-0 z-[100] flex pointer-events-none",
           // A phone panel is the viewport itself, so it never gets the inset
-          // the desktop card sits in — not even in full-screen mode.
-          !isMobile && (fullScreen ? "p-2" : "items-center justify-center p-4"),
+          // the desktop card sits in.
+          !isMobile &&
+            (isFullScreen ? "p-2" : "items-center justify-center p-4"),
         )}
       >
         <div
@@ -324,9 +353,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                       ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-1 border border-muted"
                       : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-muted",
                   // Fill the padded viewport (8px inset via parent `p-2`).
-                  fullScreen &&
+                  isFullScreen &&
                     "max-w-none w-full h-full min-w-0 min-h-0 max-h-none overflow-hidden",
-                  fullScreen && !chromeless && "rounded-[8px]",
+                  isFullScreen && !chromeless && "rounded-[8px]",
                 ),
             className,
             // Callers size the desktop card through `className` (LaunchModal
@@ -351,7 +380,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                 : cn(
                     "paragraph-medium text-basic-secondary",
                     chrome && "flex-1 min-h-0 overflow-auto px-4 py-6",
-                    fullScreen && "flex-1 min-h-0 w-full",
+                    isFullScreen && "flex-1 min-h-0 w-full",
                     isMobile && footer && MOBILE_FOOTER_CLEARANCE,
                   ),
               bodyClassName,
@@ -365,9 +394,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                 "flex justify-end gap-2",
                 chrome && "items-center p-4 shrink-0",
                 chrome && !isMobile && "border-t border-muted",
-                // The card's transform makes it the containing block, so the
-                // row pins to the bottom of the panel rather than the document.
-                isMobile && "fixed inset-x-0 bottom-0 z-10",
+                // Floats over the body rather than taking a row of its own, so
+                // the fade below shows the content it is covering.
+                isMobile && "absolute inset-x-0 bottom-0 z-10",
               )}
               style={isMobile ? MOBILE_FOOTER_SURFACE : undefined}
             >

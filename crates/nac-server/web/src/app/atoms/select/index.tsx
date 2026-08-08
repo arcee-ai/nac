@@ -90,7 +90,7 @@ const Select: React.FC<SelectProps> = ({
         aria-expanded={open}
       >
         {selected?.icon ? <Icon iconName={selected.icon} /> : null}
-        <span className="text-left flex-grow truncate max-w-[96px] md:max-w-full">
+        <span className="text-left flex-grow truncate md:max-w-full">
           {selected?.label ?? placeholder}
         </span>
         <Icon

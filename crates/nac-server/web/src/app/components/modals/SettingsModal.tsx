@@ -17,7 +17,9 @@ import {
   Select,
   type SelectItem,
   Separator,
+  StickyButton,
   TextArea,
+  TextAreaSize,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
@@ -73,6 +75,7 @@ import type {
   SessionSummarySnapshot,
   SshTarget,
 } from "@/app/types/api";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /** Stands in for the name a key gets while the form is only being checked. */
 const PENDING_KEY_NAME = "NAC_CONFIG_pending";
@@ -84,7 +87,9 @@ function headersToText(headers: Record<string, string>): string {
 }
 
 /** The persisted column is a JSON string; unparsable content means "repair me". */
-function parseHeadersJson(json: string | null | undefined): Record<string, string> {
+function parseHeadersJson(
+  json: string | null | undefined,
+): Record<string, string> {
   if (!json) return {};
   try {
     const parsed: unknown = JSON.parse(json);
@@ -225,6 +230,7 @@ function SettingsForm({
   diagnostics: string[];
   onClose: () => void;
 }) {
+  const isMobile = useIsMobile();
   const toast = useToast();
   const updateConfig = useUpdateConfig();
   const updatePresentation = useUpdatePresentation();
@@ -294,7 +300,10 @@ function SettingsForm({
   );
 
   const { provider, signedIn } = useManagedSignIn(kind);
-  const loginQuery = useManagedProviderModels(kind, Boolean(provider) && signedIn);
+  const loginQuery = useManagedProviderModels(
+    kind,
+    Boolean(provider) && signedIn,
+  );
   const models =
     (usesKey
       ? validation.status === "ready"
@@ -314,15 +323,17 @@ function SettingsForm({
     validation.status === "error" ||
     Boolean(provider && !signedIn);
   const busy =
-    updateConfig.isPending || updatePresentation.isPending || storeKey.isPending;
+    updateConfig.isPending ||
+    updatePresentation.isPending ||
+    storeKey.isPending;
 
   const seedTarget = sshTargetFromSummary(summary);
   const sshStatus = useSshConnectionStatus(seedTarget);
   // Null means "follow the shared store"; a concrete value is the user's last
   // Connect/Disconnect action in this dialog.
-  const [sshConnection, setSshConnection] = useState<SshTarget | null | undefined>(
-    undefined,
-  );
+  const [sshConnection, setSshConnection] = useState<
+    SshTarget | null | undefined
+  >(undefined);
   const connectedTarget =
     sshConnection === undefined
       ? sshStatus === "connected"
@@ -344,7 +355,8 @@ function SettingsForm({
         expectedVersion: summary?.presentation_version ?? 0,
       });
     } catch (saveError) {
-      const conflict = saveError instanceof ApiError && saveError.status === 409;
+      const conflict =
+        saveError instanceof ApiError && saveError.status === 409;
       toast.error(
         conflict
           ? "The title was not saved — the session changed in the meantime"
@@ -424,25 +436,48 @@ function SettingsForm({
 
   const footer = (
     <>
-      <Button
-        variant={ButtonVariant.Tertiary}
-        size={ButtonSize.Large}
-        content={ButtonContent.Text}
-        onClick={onClose}
-        disabled={busy}
-      >
-        Cancel
-      </Button>
-      <Button
-        variant={ButtonVariant.Primary}
-        size={ButtonSize.Large}
-        content={ButtonContent.Text}
-        onClick={submit}
-        disabled={blocked}
-        loading={busy}
-      >
-        Save
-      </Button>
+      {isMobile ? (
+        <StickyButton
+          variant={ButtonVariant.Tertiary}
+          content={ButtonContent.Text}
+          onClick={onClose}
+          disabled={busy}
+        >
+          Cancel
+        </StickyButton>
+      ) : (
+        <Button
+          variant={ButtonVariant.Tertiary}
+          size={ButtonSize.Large}
+          content={ButtonContent.Text}
+          onClick={onClose}
+          disabled={busy}
+        >
+          Cancel
+        </Button>
+      )}
+      {isMobile ? (
+        <StickyButton
+          variant={ButtonVariant.Primary}
+          content={ButtonContent.Text}
+          onClick={submit}
+          disabled={blocked}
+          loading={busy}
+        >
+          Save
+        </StickyButton>
+      ) : (
+        <Button
+          variant={ButtonVariant.Primary}
+          size={ButtonSize.Large}
+          content={ButtonContent.Text}
+          onClick={submit}
+          disabled={blocked}
+          loading={busy}
+        >
+          Save
+        </Button>
+      )}
     </>
   );
 
@@ -483,7 +518,7 @@ function SettingsForm({
 
         <Input
           label="Session title"
-          inputSize={InputSize.Medium}
+          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
           placeholder={displaySessionTitle(summary) || "Session name"}
           hintText="Leave empty to restore the automatic title (the last prompt)."
           value={title}
@@ -492,7 +527,7 @@ function SettingsForm({
 
         <Separator />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="flex flex-col gap-6 md:grid md:grid-cols-2 md:gap-4">
           <InputWrapper label="Provider">
             <Select
               items={BACKEND_OPTIONS}
@@ -501,11 +536,12 @@ function SettingsForm({
               className="w-full"
               triggerClassName="w-full"
               panelClassName="max-h-64 overflow-auto"
+              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             />
           </InputWrapper>
           <Input
             label="Base URL"
-            inputSize={InputSize.Medium}
+            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
             value={displayBaseUrl}
             isDisabled={locked}
             hintText={locked ? "Managed by the selected provider." : undefined}
@@ -527,7 +563,9 @@ function SettingsForm({
           <AuthenticationField backend={kind} />
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        {/* Touch-sized controls need the whole width, so the pair stacks until
+            the dialog has a desktop column to split. */}
+        <div className="flex flex-col gap-6 md:grid md:grid-cols-2 md:gap-4">
           <ModelField
             value={model}
             models={modelItems(models)}
@@ -542,6 +580,7 @@ function SettingsForm({
               className="w-full"
               triggerClassName="w-full"
               panelClassName="max-h-64 overflow-auto"
+              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             />
           </InputWrapper>
         </div>
@@ -550,6 +589,7 @@ function SettingsForm({
 
         <TextArea
           label="Extra headers (JSON object)"
+          textAreaSize={isMobile ? TextAreaSize.Large : TextAreaSize.Medium}
           hintText="Blank sends none; header values must be strings."
           placeholder='{ "X-Title": "nac" }'
           value={headers}
@@ -557,7 +597,9 @@ function SettingsForm({
           textAreaClassName="h-[160px] resize-none font-mono"
         />
 
-        {error ? <p className="text-error-primary text-micro">{error}</p> : null}
+        {error ? (
+          <p className="text-error-primary text-micro">{error}</p>
+        ) : null}
       </div>
     </SettingsShell>
   );
@@ -592,6 +634,7 @@ function ApiKeyField({
   onClear: () => void;
   onRestore: () => void;
 }) {
+  const isMobile = useIsMobile();
   const invalid = validation.status === "error";
   const hint = editing
     ? "Paste the provider key. nac keeps it and hands the session a selector, never the secret."
@@ -610,7 +653,7 @@ function ApiKeyField({
       <div className="flex items-center gap-2">
         <Input
           className="flex-1 min-w-0"
-          inputSize={InputSize.Medium}
+          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
           type="password"
           autoComplete="off"
           placeholder="Paste the provider key"
@@ -626,7 +669,7 @@ function ApiKeyField({
         >
           <Button
             variant={ButtonVariant.Secondary}
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             aria-label={editing ? "Keep the current key" : "Replace the key"}
             disabled={editing && !stored}
@@ -641,7 +684,7 @@ function ApiKeyField({
         >
           <Button
             variant={ButtonVariant.SecondaryDestructive}
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             aria-label="Remove the key from this session"
             disabled={editing && !draft}
@@ -661,12 +704,17 @@ function ApiKeyField({
  * rather than editing anything the session owns.
  */
 function AuthenticationField({ backend }: { backend: BackendKind }) {
+  const isMobile = useIsMobile();
+  const buttonSize = isMobile ? ButtonSize.Large : ButtonSize.Medium;
   const { provider, signedIn } = useManagedSignIn(backend);
   const { state, start, cancel } = useDeviceLogin();
   const logout = useManagedLogout();
   // A credential on file is not the same as a working one, so the row leans on
   // the request that actually spends it rather than on the file being there.
-  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
+  const reach = useManagedProviderModels(
+    backend,
+    Boolean(provider) && signedIn,
+  );
 
   if (!provider) return null;
 
@@ -690,7 +738,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
         )}
         <Button
           variant={ButtonVariant.Ghost}
-          size={ButtonSize.Medium}
+          size={buttonSize}
           content={ButtonContent.Text}
           onClick={() => void cancel()}
         >
@@ -702,7 +750,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
         {expired ? (
           <Button
             variant={ButtonVariant.Primary}
-            size={ButtonSize.Medium}
+            size={buttonSize}
             content={ButtonContent.IconRight}
             loading={state.status === "starting"}
             onClick={() => void start(provider)}
@@ -711,7 +759,11 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
             <Icon iconName={IconName.External} />
           </Button>
         ) : (
-          <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
+          <div
+            // Height rather than padding, so the chip lines up with whichever
+            // size the buttons beside it take.
+            className={`flex items-center gap-1.5 rounded-[4px] bg-success-secondary pl-2 pr-4 ${isMobile ? "h-12" : "py-2"}`}
+          >
             <Icon
               iconName={IconName.CheckCircle}
               className="text-success-primary"
@@ -721,7 +773,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
         )}
         <Button
           variant={ButtonVariant.Ghost}
-          size={ButtonSize.Medium}
+          size={buttonSize}
           content={ButtonContent.Text}
           loading={logout.isPending}
           onClick={() => void logout.mutateAsync(provider).catch(() => {})}
@@ -732,7 +784,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
     ) : (
       <Button
         variant={ButtonVariant.Primary}
-        size={ButtonSize.Medium}
+        size={buttonSize}
         content={ButtonContent.IconRight}
         loading={state.status === "starting"}
         onClick={() => void start(provider)}
@@ -777,11 +829,12 @@ function ModelField({
   available: boolean;
   onChange: (model: string) => void;
 }) {
+  const isMobile = useIsMobile();
   if (models.length === 0 && available) {
     return (
       <Input
         label="Model"
-        inputSize={InputSize.Medium}
+        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -807,6 +860,7 @@ function ModelField({
         className="w-full"
         triggerClassName="w-full"
         panelClassName="max-h-64 overflow-auto"
+        size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
       />
     </InputWrapper>
   );

@@ -150,6 +150,8 @@ export function WorksetsView({
 
   return (
     <PanelSplit
+      listTitle="Worksets"
+      title={current?.id}
       list={
         worksets.items.length === 0 ? (
           <div className="p-1 label-micro text-basic-muted">

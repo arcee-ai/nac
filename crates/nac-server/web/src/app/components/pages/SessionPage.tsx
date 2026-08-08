@@ -12,7 +12,9 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
+import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -28,6 +30,7 @@ import {
   DEFAULT_SESSION_PANEL,
   isSessionPanel,
   routes,
+  SESSION_PANEL_LABEL,
   type SessionPanel,
 } from "@/app/lib/routes";
 import {
@@ -39,8 +42,13 @@ import { clearAttention } from "@/app/store/attentionStore";
 import {
   resetSessionSelection,
   revealSidePanel,
+  showSidePanelList,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
+  toggleSidePanelList,
+  useSelectedFile,
+  useSelectedThread,
+  useSelectedWorkset,
   useSidePanelCollapsed,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
@@ -109,6 +117,9 @@ export default function SessionPage() {
   const actions = useSessionActions();
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
+  const selectedThread = useSelectedThread();
+  const selectedWorkset = useSelectedWorkset();
+  const selectedFile = useSelectedFile();
   const isMobile = useIsMobile();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
@@ -218,8 +229,10 @@ export default function SessionPage() {
 
           <div
             className={cn(
-              "absolute bottom-0 left-0 right-0 pb-2",
-              isMobile ? null : "mx-auto max-w-[840px]",
+              "absolute bottom-0 left-0 right-0",
+              // The phone composer paints its own ground fade and owns its
+              // padding, so it has to reach past the column's inset.
+              isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[840px]",
             )}
           >
             <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
@@ -244,14 +257,77 @@ export default function SessionPage() {
         </div>
       ) : null}
 
-      <Modal
-        open={expanded}
-        onClose={toggleSidePanelExpanded}
-        fullScreen
-        chromeless
-      >
-        <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
-      </Modal>
+      {isMobile ? (
+        <Modal
+          open={expanded}
+          onClose={toggleSidePanelExpanded}
+          // Its own tabs move the route, so a route change must not close it.
+          keepOnNavigate
+          title={
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="header-small truncate flex-1">
+                {panel === "threads"
+                  ? (selectedThread ??
+                    snapshot?.threads?.[0]?.name ??
+                    SESSION_PANEL_LABEL.threads)
+                  : panel === "worksets"
+                    ? (selectedWorkset ??
+                      snapshot?.worksets.items[0]?.id ??
+                      SESSION_PANEL_LABEL.worksets)
+                    : panel === "files"
+                      ? (selectedFile?.split("/").pop() ??
+                        snapshot?.workspace?.changed_files?.[0]?.path
+                          .split("/")
+                          .pop() ??
+                        SESSION_PANEL_LABEL.files)
+                      : SESSION_PANEL_LABEL.history}
+              </span>
+              {snapshot?.workspace?.branch ? (
+                <BranchPicker
+                  sessionId={id}
+                  branch={snapshot.workspace.branch}
+                />
+              ) : null}
+            </div>
+          }
+          headerActions={
+            panel === "history" ? null : (
+              <Button
+                size={ButtonSize.Large}
+                variant={ButtonVariant.Ghost}
+                content={ButtonContent.Icon}
+                aria-label="Open list"
+                onClick={toggleSidePanelList}
+              >
+                <Icon iconName={IconName.List} size={24} />
+              </Button>
+            )
+          }
+          // Full-bleed body; the bar floats over it the way Figma draws it,
+          // so it must not go through the dialog's own footer chrome.
+          bodyClassName="!p-0 relative flex flex-col overflow-hidden"
+        >
+          <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
+          <MobileBottomBar
+            panel={panel}
+            onPanelChange={(next) => {
+              // A fresh tab opens on the row it already has, not its list.
+              showSidePanelList(false);
+              goToPanel(next);
+            }}
+          />
+        </Modal>
+      ) : (
+        <Modal
+          open={expanded}
+          onClose={toggleSidePanelExpanded}
+          fullScreen
+          chromeless
+          keepOnNavigate
+        >
+          <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
+        </Modal>
+      )}
     </section>
   );
 }

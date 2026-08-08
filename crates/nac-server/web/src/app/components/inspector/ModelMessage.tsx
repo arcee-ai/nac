@@ -27,6 +27,7 @@ import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import type { ModelTurn } from "@/app/lib/transcript";
 import type { WorkspaceRevision } from "@/app/types/api";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /** Exact assistant marker written by the agent on session cancel. */
 const RUN_CANCELLED_MARKER = "[run cancelled by user]";
@@ -123,7 +124,7 @@ export const ModelMessage = memo(function ModelMessage({
   const canRefresh = onRefresh != null && userMessageIndex != null;
   const canRevert = onRevert != null && userMessageIndex != null;
   const copyText = modelCopyText(turn);
-
+  const isMobile = useIsMobile();
   return (
     <div
       className={cn(
@@ -246,13 +247,15 @@ export const ModelMessage = memo(function ModelMessage({
             {canRefresh ? (
               <Tooltip title="Resend" position={TooltipPosition.TopCenter}>
                 <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Tertiary}
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Resend"
                   disabled={actionsDisabled}
                   onClick={() => onRefresh(userMessageIndex)}
-                  className="!h-4 !min-h-4 !p-0"
+                  className="md:!h-4 md:!min-h-4 md:!p-0"
                 >
                   <Icon iconName={IconName.Refresh} size={16} />
                 </Button>
@@ -265,13 +268,15 @@ export const ModelMessage = memo(function ModelMessage({
                 position={TooltipPosition.TopCenter}
               >
                 <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Tertiary}
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
                   onClick={() => onRevert(userMessageIndex, userText)}
-                  className="!h-4 !min-h-4 !p-0"
+                  className="md:!h-4 md:!min-h-4 md:!p-0"
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -283,12 +288,14 @@ export const ModelMessage = memo(function ModelMessage({
               >
                 <span className="inline-flex">
                   <Button
-                    size={ButtonSize.Small}
-                    variant={ButtonVariant.Tertiary}
+                    size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                    variant={
+                      isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                    }
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled
-                    className="!h-4 !min-h-4 !p-0"
+                    className="md:!h-4 md:!min-h-4 md:!p-0"
                   >
                     <Icon iconName={IconName.TurnLeft} size={16} />
                   </Button>
@@ -298,11 +305,11 @@ export const ModelMessage = memo(function ModelMessage({
 
             <CopyButton
               value={copyText}
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Tertiary}
+              size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+              variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
               title="Copy message"
               position={TooltipPosition.TopCenter}
-              className="!h-4 !min-h-4 !p-0"
+              className="md:!h-4 md:!min-h-4 md:!p-0"
             />
           </div>
         ) : null}

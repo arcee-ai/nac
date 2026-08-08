@@ -9,6 +9,13 @@ interface SessionLayoutState {
   collapsed: boolean;
   /** Side box lifted out of the row into a full-screen dialog. */
   expanded: boolean;
+  /**
+   * Whether a narrow panel is showing its list of rows. There is no room for
+   * the list beside the detail at that width, so the panel opens on the row it
+   * has selected and the list comes over it — as a dialog of its own on a
+   * phone, in place of the detail on a tablet. Wide layouts ignore this.
+   */
+  panelList: boolean;
   /** Thread the chat last pointed the Threads panel at. */
   selectedThread: string | null;
   /**
@@ -37,6 +44,7 @@ export type FileListing = "tree" | "changed";
 export const sessionLayoutStore = createStore<SessionLayoutState>({
   collapsed: false,
   expanded: false,
+  panelList: false,
   selectedThread: null,
   selectedThreadEpisode: null,
   selectedWorkset: null,
@@ -48,9 +56,13 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
 
 const { getState, setState, useStore } = sessionLayoutStore;
 
-/** Show the side box as a dialog over the session, or put it back in the row. */
+/**
+ * Show the side box as a dialog over the session, or put it back in the row.
+ * It always comes up on the row it has open rather than on a list of rows.
+ */
 export function toggleSidePanelExpanded(): void {
-  setState({ expanded: !getState().expanded });
+  const expanded = !getState().expanded;
+  setState(expanded ? { expanded, panelList: false } : { expanded });
 }
 
 /** Hide the side box so the chat gets the full width, or bring it back. */
@@ -58,11 +70,22 @@ export function toggleSidePanelCollapsed(): void {
   setState({ collapsed: !getState().collapsed });
 }
 
+/** Swap a narrow panel between its list of rows and the row it has open. */
+export function showSidePanelList(panelList: boolean): void {
+  if (getState().panelList !== panelList) setState({ panelList });
+}
+
+export function toggleSidePanelList(): void {
+  setState({ panelList: !getState().panelList });
+}
+
 /**
  * Bring the side box back on screen when the chat points at one of its rows.
  * On a phone there is no row to slide back into, so it comes up as the dialog.
  */
 export function revealSidePanel(asDialog = false): void {
+  // The chat has already picked the row, so a narrow panel opens on the detail.
+  setState({ panelList: false });
   if (asDialog) {
     if (!getState().expanded) setState({ expanded: true });
     return;
@@ -75,10 +98,12 @@ export function selectThread(
   selectedThreadEpisode: string | null = null,
 ): void {
   setState({ selectedThread, selectedThreadEpisode });
+  if (selectedThread) showSidePanelList(false);
 }
 
 export function selectWorkset(selectedWorkset: string | null): void {
   setState({ selectedWorkset });
+  if (selectedWorkset) showSidePanelList(false);
 }
 
 /** Point the panels at a captured revision, or back at the working tree. */
@@ -88,6 +113,7 @@ export function selectRevision(selectedRevision: number | null): void {
 
 export function selectFile(selectedFile: string | null): void {
   setState({ selectedFile });
+  if (selectedFile) showSidePanelList(false);
 }
 
 /** Flip one folder away from whatever the tree opens by default. */
@@ -112,11 +138,13 @@ export function resetSessionSelection(): void {
     selectedRevision: null,
     selectedFile: null,
     toggledFolders: new Set(),
+    panelList: false,
   });
 }
 
 export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
 export const useSidePanelExpanded = () => useStore((s) => s.expanded);
+export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
 export const useSelectedThreadEpisode = () =>
   useStore((s) => s.selectedThreadEpisode);
