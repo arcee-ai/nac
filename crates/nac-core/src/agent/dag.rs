@@ -406,13 +406,20 @@ fn accept_and_launch_background(
             .map(|(_, dispatch)| dispatch.key.clone())
             .collect::<Vec<_>>();
         let registry = ctx.runtime.active_threads.clone();
-        let task = tokio::spawn(run_background_dag(
-            thread_dispatches,
-            dag,
-            ctx,
-            failed_indices,
-            accepted_keys.clone(),
-        ));
+        let run_id = accepted_keys[0].run_id.clone();
+        let coordinator_keys = accepted_keys.clone();
+        let task_guard = registry.register_task(run_id);
+        let task = tokio::spawn(async move {
+            let _task_guard = task_guard;
+            run_background_dag(
+                thread_dispatches,
+                dag,
+                ctx,
+                failed_indices,
+                coordinator_keys,
+            )
+            .await;
+        });
         let abort = task.abort_handle();
         // Every accepted member owns the same coordinator. Cancelling any
         // exact member through run/session cleanup therefore cannot detach the
@@ -492,7 +499,12 @@ async fn run_background_dag(
             let runtime = ctx.runtime.clone();
             let client = ctx.client.clone();
             let params = dispatch.params.clone();
+            let task_guard = ctx
+                .runtime
+                .active_threads
+                .register_task(dispatch.key.run_id.clone());
             let abort = workers.spawn(async move {
+                let _task_guard = task_guard;
                 let result = thread::execute_parsed_dispatch(params, &runtime, &client).await;
                 (dispatch_idx, result)
             });

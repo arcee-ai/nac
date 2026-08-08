@@ -112,6 +112,7 @@ struct ActiveThreadDispatch {
 struct ActiveThreadState {
     active_by_name: HashMap<String, ActiveThreadDispatch>,
     completions: VecDeque<ThreadCompletion>,
+    owned_tasks_by_run: HashMap<SessionRunId, usize>,
     shutting_down: bool,
 }
 
@@ -121,6 +122,29 @@ pub struct ActiveThreadRegistry {
     activity: Notify,
     activity_epoch: AtomicU64,
     live_thread_updates: AtomicBool,
+}
+
+/// Registration held by every spawned coordinator and worker until its future
+/// is dropped. Counting before spawn closes the abort-before-first-poll race;
+/// lifecycle cleanup can therefore wait until all task futures (and their
+/// process-owning locals) have been destroyed.
+pub struct ThreadTaskGuard {
+    registry: Arc<ActiveThreadRegistry>,
+    run_id: SessionRunId,
+}
+
+impl Drop for ThreadTaskGuard {
+    fn drop(&mut self) {
+        let mut state = self.registry.lock();
+        if let Some(count) = state.owned_tasks_by_run.get_mut(&self.run_id) {
+            *count -= 1;
+            if *count == 0 {
+                state.owned_tasks_by_run.remove(&self.run_id);
+            }
+        }
+        drop(state);
+        self.registry.notify_activity();
+    }
 }
 
 impl Default for ActiveThreadRegistry {
@@ -370,6 +394,7 @@ impl ActiveThreadRegistry {
                 .completions
                 .iter()
                 .any(|completion| completion.key.run_id == *run_id)
+            || state.owned_tasks_by_run.contains_key(run_id)
     }
 
     pub fn live_thread_updates(&self) -> bool {
@@ -422,6 +447,46 @@ impl ActiveThreadRegistry {
         self.abort_matching(store_path, session_id, Some(run_id))
     }
 
+    pub fn register_task(self: &Arc<Self>, run_id: SessionRunId) -> ThreadTaskGuard {
+        *self
+            .lock()
+            .owned_tasks_by_run
+            .entry(run_id.clone())
+            .or_default() += 1;
+        ThreadTaskGuard {
+            registry: self.clone(),
+            run_id,
+        }
+    }
+
+    async fn drain_tasks(&self, run_id: Option<&SessionRunId>) {
+        loop {
+            let observed = self.activity_epoch();
+            let drained = {
+                let state = self.lock();
+                match run_id {
+                    Some(run_id) => !state.owned_tasks_by_run.contains_key(run_id),
+                    None => state.owned_tasks_by_run.is_empty(),
+                }
+            };
+            if drained {
+                return;
+            }
+            self.wait_for_activity_since(observed).await;
+        }
+    }
+
+    pub async fn abort_run_and_drain(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        run_id: &SessionRunId,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let result = self.abort_run(store_path, session_id, run_id);
+        self.drain_tasks(Some(run_id)).await;
+        result
+    }
+
     pub fn shutdown(
         &self,
         store_path: &Path,
@@ -432,6 +497,16 @@ impl ActiveThreadRegistry {
             state.shutting_down = true;
         }
         self.abort_matching(store_path, session_id, None)
+    }
+
+    pub async fn shutdown_and_drain(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let result = self.shutdown(store_path, session_id);
+        self.drain_tasks(None).await;
+        result
     }
 
     fn abort_matching(
@@ -1191,6 +1266,32 @@ mod active_thread_registry_tests {
         assert!(registry.names().is_empty());
         assert!(!registry.has_completions_for_run(&run));
         assert!(!registry.try_accept(key(&run, "later", "dispatch", "call")));
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[tokio::test]
+    async fn abort_and_drain_waits_for_registered_task_future_drop() {
+        let registry = Arc::new(ActiveThreadRegistry::default());
+        let store = test_store();
+        let run = SessionRunId::new();
+        let dispatch = key(&run, "worker", "dispatch", "call");
+        assert!(registry.try_accept(dispatch.clone()));
+        let guard = registry.register_task(run.clone());
+        let task = tokio::spawn(async move {
+            let _guard = guard;
+            pending::<()>().await;
+        });
+        assert!(registry.attach_worker(&dispatch, task.abort_handle()));
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            registry.abort_run_and_drain(&store, "session", &run),
+        )
+        .await
+        .expect("drain deadlocked")
+        .unwrap();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(!registry.has_work_for_run(&run));
         let _ = std::fs::remove_file(store);
     }
 

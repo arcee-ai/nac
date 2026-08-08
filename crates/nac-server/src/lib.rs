@@ -1469,6 +1469,7 @@ impl SessionManager {
                         "session is busy with an active operation while its persisted configuration changed"
                     ));
                 }
+                service.shutdown_background().await?;
                 self.inner.active_sessions.write().await.remove(session_id);
                 self.attach_session_locked(session_id).await?
             }
@@ -2075,7 +2076,9 @@ impl SessionManager {
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         self.require_persisted_operation_session(session_id)?;
         if let Some(service) = service {
-            // Explicitly destroy the sandbox even if SSE handlers retain the service.
+            // Stop process-owning tasks before sandbox or durable state removal,
+            // even if SSE handlers retain the service Arc.
+            service.shutdown_background().await?;
             service.destroy_sandbox().await;
         }
 
@@ -2196,8 +2199,35 @@ impl SessionManager {
         // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.
         // A store failure or conflict leaves the active map untouched.
         sessions::update_raw_session_config(&self.inner.store_path, &prospective)?;
+        if let Some(service) = active.get(session_id).cloned() {
+            service.shutdown_background().await?;
+        }
         active.remove(session_id);
         Ok(())
+    }
+
+    /// Explicit server lifecycle cleanup. Registry abort handles remain the
+    /// synchronous fallback, while this path additionally waits for every
+    /// coordinator/worker future to drop its process-owning locals.
+    pub async fn shutdown(&self) -> Result<()> {
+        let services = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut first_error = None;
+        for service in services {
+            if let Err(error) = service.shutdown_background().await {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+        self.inner.active_sessions.write().await.clear();
+        first_error.map_or(Ok(()), Err)
     }
 
     async fn resume_session(&self, session_id: &str) -> Result<SessionService> {
@@ -2469,9 +2499,10 @@ pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
-    axum::serve(listener, router(manager))
-        .await
-        .context("server stopped unexpectedly")
+    let server = axum::serve(listener, router(manager.clone())).await;
+    let shutdown = manager.shutdown().await;
+    server.context("server stopped unexpectedly")?;
+    shutdown.context("failed to drain session workers during server shutdown")
 }
 
 async fn health() -> Json<serde_json::Value> {

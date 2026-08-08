@@ -169,6 +169,45 @@ pub fn expire_session_steering(path: &Path, session_id: &str) -> Result<Vec<Thre
     retry_busy(|| expire_thread_steering_once(path, session_id, None))
 }
 
+/// Expires worker guidance that cannot be recovered after a process restart,
+/// while preserving same-run orchestrator guidance and queued-run recovery.
+pub fn expire_unrecoverable_worker_steering(
+    path: &Path,
+    session_id: &str,
+) -> Result<Vec<ThreadSteeringRecord>> {
+    retry_busy(|| {
+        let mut conn = open_runtime_connection(path)?;
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut pending = {
+            let mut statement = transaction.prepare(&format!(
+                "SELECT {RECORD_COLUMNS} FROM thread_steering
+                 WHERE session_id = ?1 AND thread_name != ?2
+                   AND status IN ('queued', 'claimed') ORDER BY id ASC"
+            ))?;
+            let mapped = statement.query_map(
+                params![session_id, ORCHESTRATOR_STEERING_TARGET],
+                row_to_record,
+            )?;
+            mapped.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let expired_at = now_utc();
+        for record in &pending {
+            transaction.execute(
+                "UPDATE thread_steering SET status = 'expired', expired_at = ?1
+                 WHERE id = ?2 AND status IN ('queued', 'claimed')",
+                params![expired_at, record.id],
+            )?;
+        }
+        transaction.commit()?;
+        for record in &mut pending {
+            record.status = "expired".to_string();
+            record.expired_at = Some(expired_at.clone());
+        }
+        Ok(pending)
+    })
+}
+
 fn expire_thread_steering_once(
     path: &Path,
     session_id: &str,
@@ -336,6 +375,54 @@ mod tests {
                 .unwrap()
                 .into_iter()
                 .find(|record| record.id == reused.id)
+                .unwrap()
+                .status,
+            "queued"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn restart_reconciliation_expires_workers_but_preserves_orchestrator_guidance() {
+        let path = temp_store_path("restart_reconciliation");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let worker = queue_thread_steering(
+            &path,
+            "session",
+            "impl",
+            "worker-dispatch",
+            "worker guidance",
+        )
+        .unwrap();
+        let orchestrator = queue_thread_steering(
+            &path,
+            "session",
+            ORCHESTRATOR_STEERING_TARGET,
+            "run-id",
+            "orchestrator guidance",
+        )
+        .unwrap();
+        claim_thread_steering(&path, "session", "worker-dispatch").unwrap();
+
+        let expired = expire_unrecoverable_worker_steering(&path, "session").unwrap();
+        assert_eq!(
+            expired.iter().map(|item| item.id).collect::<Vec<_>>(),
+            [worker.id]
+        );
+        let records = list_thread_steering(&path, "session").unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .find(|item| item.id == worker.id)
+                .unwrap()
+                .status,
+            "expired"
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|item| item.id == orchestrator.id)
                 .unwrap()
                 .status,
             "queued"

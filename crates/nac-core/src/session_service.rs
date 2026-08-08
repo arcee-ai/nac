@@ -700,6 +700,17 @@ impl SessionService {
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
         };
+        if let Some(session_id) = service.metadata.session_id.as_deref() {
+            match crate::store::expire_unrecoverable_worker_steering(
+                &service.metadata.store_path,
+                session_id,
+            ) {
+                Ok(records) => service.emit_steering_expired(records),
+                Err(error) => {
+                    eprintln!("nac: failed to reconcile unrecoverable worker steering: {error:#}")
+                }
+            }
+        }
         let init = SessionServiceInit {
             metadata,
             restored_messages,
@@ -2041,7 +2052,8 @@ impl SessionService {
         }
 
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
-        self.close_active_thread_dispatches();
+        self.abort_run_background(&cancelling_run.snapshot.run_id)
+            .await;
 
         // A cancellation marker is itself a visible response. If the run task
         // was cancelled before capturing its baseline, record the count before
@@ -2314,7 +2326,8 @@ impl SessionService {
             let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
             let cleanup_error = self
                 .active_threads
-                .abort_run(&self.metadata.store_path, session_id, run_id)
+                .abort_run_and_drain(&self.metadata.store_path, session_id, run_id)
+                .await
                 .err()
                 .map(|error| format!("; cleanup also failed: {error:#}"))
                 .unwrap_or_default();
@@ -2632,17 +2645,28 @@ impl SessionService {
         }
     }
 
-    fn close_active_thread_dispatches(&self) {
-        let Some(session_id) = self.metadata.session_id.as_deref() else {
-            return;
-        };
+    async fn abort_run_background(&self, run_id: &SessionRunId) {
+        let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
         match self
             .active_threads
-            .close_all(&self.metadata.store_path, session_id)
+            .abort_run_and_drain(&self.metadata.store_path, session_id, run_id)
+            .await
         {
             Ok(records) => self.emit_steering_expired(records),
-            Err(error) => eprintln!("nac: failed to close active worker steering: {error:#}"),
+            Err(error) => eprintln!("nac: failed to abort background workers: {error:#}"),
         }
+    }
+
+    /// Stops and drains all session-owned coordinators/workers. Callers use
+    /// this before eviction, sandbox destruction, row deletion, or shutdown.
+    pub async fn shutdown_background(&self) -> anyhow::Result<()> {
+        let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
+        let records = self
+            .active_threads
+            .shutdown_and_drain(&self.metadata.store_path, session_id)
+            .await?;
+        self.emit_steering_expired(records);
+        Ok(())
     }
 
     fn emit_steering_expired(&self, records: Vec<crate::store::ThreadSteeringRecord>) {
@@ -6203,10 +6227,13 @@ pub(super) mod tests {
         });
         let mut events = parts.service.subscribe_events();
         let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
-        assert!(parts
-            .service
-            .active_threads
-            .mark("worker", "worker-dispatch"));
+        let worker_key = crate::tools::ThreadDispatchKey::new(
+            active.run_id.clone(),
+            "worker",
+            "worker-dispatch",
+            "worker-call",
+        );
+        assert!(parts.service.active_threads.try_accept(worker_key));
         crate::store::queue_thread_steering(
             &store_path,
             &session_id,
