@@ -407,6 +407,14 @@ export type CompactionFailure =
   | "checkpoint_persistence_failed"
   | "cancelled";
 
+export type ThreadDispatchStatus =
+  | "accepted"
+  | "dependency_pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 /** `nac_core::events::AgentEvent`, internally tagged on `type` (snake_case). */
 export type AgentEvent =
   | { type: "run_started"; thread_name?: string; prompt_preview: string }
@@ -432,12 +440,19 @@ export type AgentEvent =
       name: string;
       content_preview: string;
       is_error: boolean;
+      dispatch_thread_name?: string;
+      dispatch_id?: string;
+      dispatch_status?: ThreadDispatchStatus;
     }
   | {
       type: "thread_started";
       name: string;
       action: string;
       source_threads: string[];
+      run_id?: string;
+      dispatch_id?: string;
+      tool_call_id?: string;
+      status?: ThreadDispatchStatus;
     }
   /**
    * A line the thread's worker printed that was not itself an event — its plain
@@ -507,6 +522,10 @@ export type AgentEvent =
       timed_out: boolean;
       timeout_reason?: string;
       usage?: TokenUsage;
+      run_id?: string;
+      dispatch_id?: string;
+      tool_call_id?: string;
+      status?: ThreadDispatchStatus;
     }
   | {
       type: "assistant_message";
@@ -616,6 +635,14 @@ export interface MessagesPageResponse {
   page: MessagePageMetadata;
 }
 
+export interface ActiveThreadDispatchSnapshot {
+  run_id: string;
+  thread_name: string;
+  dispatch_id: string;
+  tool_call_id: string;
+  status: ThreadDispatchStatus;
+}
+
 export interface SessionFrontendSnapshot {
   metadata: SessionMetadata;
   messages: Message[];
@@ -632,6 +659,7 @@ export interface SessionFrontendSnapshot {
   queued_message?: QueuedRunRecord;
   sessions: SessionSummarySnapshot[];
   active_threads: string[];
+  active_thread_dispatches?: ActiveThreadDispatchSnapshot[];
   threads: ThreadSnapshot[];
   thread_episodes: Record<string, EpisodeSnapshot[]>;
   thread_events: Record<string, AgentEvent[]>;

@@ -174,6 +174,7 @@ pub fn parse_dispatch_args(
 /// completion closes that exact identity and expires unresolved steering.
 pub async fn execute_parsed_dispatch(
     params: ParsedDispatchParams,
+    dispatch_key: Option<&crate::tools::ThreadDispatchKey>,
     runtime: &ToolRuntime,
     client: &ModelClient,
 ) -> ToolResult {
@@ -191,6 +192,10 @@ pub async fn execute_parsed_dispatch(
         name: thread_name.clone(),
         action: action.clone(),
         source_threads: source_threads.clone(),
+        run_id: dispatch_key.map(|key| key.run_id.clone()),
+        dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
+        tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
+        status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Running),
     });
 
     let result = run_worker(
@@ -223,6 +228,17 @@ pub async fn execute_parsed_dispatch(
                 thread_name: Some(thread_name.clone()),
                 message: format!("Failed to spawn thread '{}': {}", thread_name, e),
             });
+            runtime.event_sink.emit(AgentEvent::ThreadFinished {
+                name: thread_name.clone(),
+                exit_code: -1,
+                timed_out: false,
+                timeout_reason: None,
+                usage: None,
+                run_id: dispatch_key.map(|key| key.run_id.clone()),
+                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
+                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
+                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Failed),
+            });
             ToolResult {
                 content: format!("Failed to spawn thread '{}': {}", thread_name, e),
                 is_error: true,
@@ -236,6 +252,10 @@ pub async fn execute_parsed_dispatch(
                 timed_out: true,
                 timeout_reason: timeout_reason.clone(),
                 usage: run.usage.clone(),
+                run_id: dispatch_key.map(|key| key.run_id.clone()),
+                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
+                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
+                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Failed),
             });
             ToolResult {
                 content: match timeout_reason {
@@ -255,6 +275,10 @@ pub async fn execute_parsed_dispatch(
                 timed_out: false,
                 timeout_reason: None,
                 usage: run.usage.clone(),
+                run_id: dispatch_key.map(|key| key.run_id.clone()),
+                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
+                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
+                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Failed),
             });
             let details = if !run.stderr.trim().is_empty() {
                 run.stderr.trim().to_string()
@@ -278,6 +302,10 @@ pub async fn execute_parsed_dispatch(
                 timed_out: false,
                 timeout_reason: None,
                 usage: run.usage.clone(),
+                run_id: dispatch_key.map(|key| key.run_id.clone()),
+                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
+                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
+                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Completed),
             });
             ToolResult {
                 content: run.stdout.trim().to_string(),
@@ -307,7 +335,7 @@ pub async fn execute_dispatch(
             is_error: true,
         };
     }
-    let result = execute_parsed_dispatch(params, runtime, client).await;
+    let result = execute_parsed_dispatch(params, None, runtime, client).await;
     if let Some(session_id) = runtime.session_id.as_deref() {
         close_thread_dispatch(runtime, session_id, &thread_name, &dispatch_id);
     }

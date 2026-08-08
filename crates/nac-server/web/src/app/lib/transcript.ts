@@ -15,6 +15,7 @@ import {
 import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
+  ActiveThreadDispatchSnapshot,
   SessionSnapshotResponse,
   ToolCall,
 } from "@/app/types/api";
@@ -34,7 +35,7 @@ const SILENT_TOOLS = new Set([
   "workset_list",
 ]);
 
-export type ThreadState = "running" | "pending" | "done" | "error";
+export type ThreadState = "running" | "pending" | "done" | "error" | "cancelled";
 
 export interface TranscriptThread {
   /**
@@ -124,6 +125,7 @@ interface BuildContext {
   threadEpisodes: Record<string, AgentEvent[][]>;
   /** How often each name is dispatched across the whole transcript. */
   dispatchCounts: Record<string, number>;
+  activeDispatches: ActiveThreadDispatchSnapshot[];
 }
 
 /**
@@ -135,7 +137,26 @@ interface BuildContext {
 function splitEpisodes(events: AgentEvent[]): AgentEvent[][] {
   const episodes: AgentEvent[][] = [];
   events.forEach((event) => {
-    if (event.type === "thread_started" || !episodes.length) episodes.push([]);
+    const eventToolCall =
+      event.type === "thread_started" || event.type === "thread_finished"
+        ? event.tool_call_id
+        : undefined;
+    const currentToolCall = episodes[episodes.length - 1]?.find(
+      (candidate) =>
+        candidate.type === "thread_started" || candidate.type === "thread_finished",
+    );
+    const currentIdentity =
+      currentToolCall?.type === "thread_started" ||
+      currentToolCall?.type === "thread_finished"
+        ? currentToolCall.tool_call_id
+        : undefined;
+    if (
+      event.type === "thread_started" ||
+      !episodes.length ||
+      (eventToolCall != null && currentIdentity != null && eventToolCall !== currentIdentity)
+    ) {
+      episodes.push([]);
+    }
     episodes[episodes.length - 1].push(event);
   });
   return episodes;
@@ -275,6 +296,23 @@ function toolResultsForAssistant(
   return results;
 }
 
+function assistantRunWasCancelled(
+  messages: SessionSnapshotResponse["messages"],
+  assistantIndex: number,
+): boolean {
+  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "user") break;
+    if (
+      message.role === "assistant" &&
+      message.content?.trim() === "[run cancelled by user]"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * @param episode Which dispatch of this name the card stands for, from 0.
  * @param batchNames Thread names in this assistant message (for in-batch deps).
@@ -290,44 +328,65 @@ function describeThread(
   results: Map<string, string>,
   batchNames: Set<string>,
   finishedNames: Set<string>,
+  runCancelled: boolean,
 ): TranscriptThread {
   const name = threadName(call);
   const action = text(parseArguments(call).action);
   const result = results.get(call.id) ?? null;
-  // The stream is keyed by name and only ever describes the dispatch running
-  // now, which is the newest one. Handing it to the earlier cards of that name
-  // would replay this episode's commands on them and mark them failed with it.
-  const live =
-    episode === (ctx.dispatchCounts[name] ?? 1) - 1
-      ? ctx.liveThreads[name]
+  const newest = episode === (ctx.dispatchCounts[name] ?? 1) - 1;
+  const active = ctx.activeDispatches.find(
+    (dispatch) => dispatch.tool_call_id === call.id && dispatch.thread_name === name,
+  );
+  // Exact identity wins. Name-only live records are only a compatibility
+  // fallback for the newest card, never for every historical reuse of a name.
+  const candidate = newest ? ctx.liveThreads[name] : undefined;
+  const live = candidate &&
+    (candidate.toolCallId == null || candidate.toolCallId === call.id)
+      ? candidate
       : undefined;
 
   const waitingOnBatchDep = sourceThreads(call).some(
     (source) => batchNames.has(source) && !finishedNames.has(source),
   );
-
-  const episodeEvents = eventsForEpisode(ctx, name, episode);
-  const finishedPersisted = episodeEvents?.some(
-    (event) => event.type === "thread_finished",
+  const identityEpisode = (ctx.threadEpisodes[name] ?? []).find((events) =>
+    events.some(
+      (event) =>
+        (event.type === "thread_started" || event.type === "thread_finished") &&
+        event.tool_call_id === call.id,
+    ),
   );
-  const finishedLive = live?.status === "finished";
-  const state: ThreadState = live?.isError
-    ? "error"
-    : result != null || finishedLive || finishedPersisted
-      ? "done"
-      : waitingOnBatchDep
-        ? "pending"
-        : "running";
+  const episodeEvents = identityEpisode ?? eventsForEpisode(ctx, name, episode);
+  const exactEvents = episodeEvents?.filter(
+    (event) =>
+      event.type !== "thread_started" && event.type !== "thread_finished" ||
+      event.tool_call_id == null || event.tool_call_id === call.id,
+  );
+  const terminal = exactEvents
+    ?.slice()
+    .reverse()
+    .find((event) => event.type === "thread_finished");
+  const terminalStatus = terminal?.type === "thread_finished" ? terminal.status : undefined;
+  const acceptance = result?.includes("accepted for background execution") ?? false;
+  const rejection = result != null && !acceptance && result.includes("already running");
+  const legacyCompletion = result != null && !acceptance && !rejection;
+
+  let state: ThreadState;
+  const status = live?.status ?? active?.status ?? terminalStatus;
+  if (rejection || status === "failed") state = "error";
+  else if (status === "cancelled" || (acceptance && runCancelled)) state = "cancelled";
+  else if (status === "completed" || legacyCompletion) state = "done";
+  else if (status === "dependency_pending" || waitingOnBatchDep) state = "pending";
+  else state = "running";
 
   return {
-    key: `${name}#${episode}`,
+    key: active?.dispatch_id ?? live?.dispatchId ?? `${name}#${episode}`,
     name,
     action,
-    summary: result || action,
-    // The persisted events are what a reload falls back on, and the stream is
-    // what carries the commands issued since the last snapshot.
+    // The thread tool result is acceptance, not worker completion. Completion
+    // text stays in the canonical thread_wait tool row.
+    summary: rejection ? result ?? action : action,
     log: mergeThreadLog(
-      persistedThreadLog(episodeEvents),
+      persistedThreadLog(exactEvents),
       live?.log ?? [],
     ),
     state,
@@ -445,6 +504,7 @@ export function buildTranscript(
     liveThreads,
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts: countThreadDispatches(messages),
+    activeDispatches: snapshot?.active_thread_dispatches ?? [],
   };
   /** Dispatches of a name walked past, which is what numbers each card's episode. */
   const dispatchesSeen: Record<string, number> = {};
@@ -535,26 +595,28 @@ export function buildTranscript(
 
     if (threadCalls.length) {
       const batchNames = new Set(threadCalls.map(threadName));
-      // Prefer live `thread_finished` over tool results: DAG tool rows are
-      // committed only once every topological wave has returned.
       const finishedNames = new Set<string>();
       for (const call of threadCalls) {
         const name = threadName(call);
-        if (results.has(call.id)) {
-          finishedNames.add(name);
-          continue;
-        }
-        if (ctx.liveThreads[name]?.status === "finished") {
-          finishedNames.add(name);
-          continue;
-        }
-        // Snapshot may already have thread_finished before the tool-result
-        // batch is committed for this DAG.
-        const episodes = ctx.threadEpisodes[name] ?? [];
-        const latest = episodes[episodes.length - 1];
-        if (latest?.some((event) => event.type === "thread_finished")) {
-          finishedNames.add(name);
-        }
+        const result = results.get(call.id);
+        const legacyCompletion =
+          result != null &&
+          !result.includes("accepted for background execution") &&
+          !result.includes("already running");
+        const live = ctx.liveThreads[name];
+        const liveTerminal =
+          (live?.toolCallId == null || live.toolCallId === call.id) &&
+          (live?.status === "completed" ||
+            live?.status === "failed" ||
+            live?.status === "cancelled");
+        const persistedTerminal = (ctx.threadEpisodes[name] ?? []).some((episode) =>
+          episode.some(
+            (event) =>
+              event.type === "thread_finished" &&
+              (event.tool_call_id == null || event.tool_call_id === call.id),
+          ),
+        );
+        if (legacyCompletion || liveTerminal || persistedTerminal) finishedNames.add(name);
       }
       const rows = partitionThreadCalls(threadCalls).map((level) =>
         level.map((call) => {
@@ -568,6 +630,7 @@ export function buildTranscript(
             results,
             batchNames,
             finishedNames,
+            assistantRunWasCancelled(messages, index),
           );
         }),
       );

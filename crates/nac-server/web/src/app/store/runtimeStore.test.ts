@@ -285,3 +285,75 @@ describe("runtime external store", () => {
     });
   });
 });
+
+it("cancels only the exact run before a queued successor reuses the name", () => {
+  resetRuntime("session-1");
+  applyEnvelope(envelope(1, {
+    type: "run_started",
+    prompt_preview: "first",
+    started_at_epoch_ms: 1,
+  }));
+  applyEnvelope(envelope(2, {
+    type: "agent",
+    event: {
+      type: "thread_started",
+      name: "impl",
+      action: "first",
+      source_threads: [],
+      run_id: "run-1",
+      dispatch_id: "dispatch-1",
+      tool_call_id: "call-1",
+      status: "running",
+    },
+  }));
+  applyEnvelope(envelope(3, { type: "run_cancelled" }));
+  expect(getRuntimeState().threads.impl).toMatchObject({
+    status: "cancelled",
+    dispatchId: "dispatch-1",
+  });
+
+  const successor = envelope(4, {
+    type: "agent",
+    event: {
+      type: "thread_started",
+      name: "impl",
+      action: "second",
+      source_threads: [],
+      run_id: "run-2",
+      dispatch_id: "dispatch-2",
+      tool_call_id: "call-2",
+      status: "running",
+    },
+  });
+  successor.run_id = "run-2";
+  applyEnvelope(successor);
+  expect(getRuntimeState().threads.impl).toMatchObject({
+    status: "running",
+    runId: "run-2",
+    dispatchId: "dispatch-2",
+    toolCallId: "call-2",
+  });
+});
+
+it("projects immediate accepted identity before the worker starts", () => {
+  resetRuntime("session-1");
+  applyEnvelope(envelope(1, {
+    type: "agent",
+    event: {
+      type: "tool_call_finished",
+      call_id: "call-1",
+      name: "thread",
+      content_preview: "accepted",
+      is_error: false,
+      dispatch_thread_name: "impl",
+      dispatch_id: "dispatch-1",
+      dispatch_status: "accepted",
+    },
+  }));
+  expect(getRuntimeState().threads.impl).toMatchObject({
+    status: "accepted",
+    runId: "run-1",
+    dispatchId: "dispatch-1",
+    toolCallId: "call-1",
+  });
+});

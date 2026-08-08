@@ -116,3 +116,100 @@ it("offers only server-issued boundaries on the following user turn", () => {
     forkBoundaryToken: "opaque-server-token",
   });
 });
+
+function threadCards(projected: ReturnType<typeof buildTranscript>) {
+  return projected.flatMap((turn) =>
+    turn.kind === "model"
+      ? turn.blocks.flatMap((block) => block.kind === "wave" ? block.rows.flat() : [])
+      : [],
+  );
+}
+
+describe("background dispatch identity", () => {
+  it("treats thread results as acceptance and uses exact snapshot state", () => {
+    const call = threadCall("call-bg", "impl", ["research"]);
+    const projected = snapshot([
+      { role: "user", content: "ship" },
+      { role: "assistant", content: "", tool_calls: [call] },
+      { role: "tool", tool_call_id: call.id, content: "Thread 'impl' accepted for background execution." },
+    ]);
+    projected.active_threads = ["impl"];
+    projected.active_thread_dispatches = [{ run_id: "run-1", thread_name: "impl", dispatch_id: "dispatch-1", tool_call_id: call.id, status: "dependency_pending" }];
+    expect(threadCards(buildTranscript(projected, {}))).toEqual([
+      expect.objectContaining({ key: "dispatch-1", name: "impl", state: "pending" }),
+    ]);
+  });
+
+  it("does not apply a reused name's live dispatch to historical cards", () => {
+    const first = threadCall("call-old", "impl");
+    const second = threadCall("call-new", "impl");
+    const projected = snapshot([
+      { role: "user", content: "first" },
+      { role: "assistant", content: "", tool_calls: [first] },
+      { role: "tool", tool_call_id: first.id, content: "legacy completed output" },
+      { role: "assistant", content: "done" },
+      { role: "user", content: "again" },
+      { role: "assistant", content: "", tool_calls: [second] },
+      { role: "tool", tool_call_id: second.id, content: "Thread 'impl' accepted for background execution." },
+    ]);
+    projected.active_thread_dispatches = [{ run_id: "run-2", thread_name: "impl", dispatch_id: "dispatch-new", tool_call_id: second.id, status: "running" }];
+    const live = { impl: { name: "impl", status: "failed" as const, runId: "run-2", dispatchId: "dispatch-new", toolCallId: second.id, action: "again", exitCode: 1, isError: true, log: [] } };
+    const cards = threadCards(buildTranscript(projected, live));
+    expect(cards.map((card) => card.state)).toEqual(["done", "error"]);
+    expect(cards.map((card) => card.key)).toEqual(["impl#0", "dispatch-new"]);
+  });
+
+  it("projects exact persisted failure and live cancellation across reconnect", () => {
+    const failed = threadCall("call-failed", "research");
+    const cancelled = threadCall("call-cancelled", "impl");
+    const projected = snapshot([
+      { role: "user", content: "work" },
+      { role: "assistant", content: "", tool_calls: [failed, cancelled] },
+      { role: "tool", tool_call_id: failed.id, content: "Thread 'research' accepted for background execution." },
+      { role: "tool", tool_call_id: cancelled.id, content: "Thread 'impl' accepted for background execution." },
+      { role: "assistant", content: "[run cancelled by user]" },
+    ]);
+    projected.thread_events = { research: [{ type: "thread_finished", name: "research", exit_code: 1, timed_out: false, run_id: "run-1", dispatch_id: "dispatch-failed", tool_call_id: failed.id, status: "failed" }] };
+    expect(threadCards(buildTranscript(projected, {})).map((card) => card.state)).toEqual(["error", "cancelled"]);
+  });
+
+  it("keeps thread_wait completion text out of user turns", () => {
+    const wait: ToolCall = { id: "wait-1", type: "function", function: { name: "thread_wait", arguments: "{}" } };
+    const projected = snapshot([
+      { role: "user", content: "work" },
+      { role: "assistant", content: "", tool_calls: [wait] },
+      { role: "tool", tool_call_id: wait.id, content: "impl: completed payload" },
+      { role: "assistant", content: "final" },
+    ]);
+    expect(buildTranscript(projected, {}).filter((turn) => turn.kind === "user")).toHaveLength(1);
+  });
+});
+
+it("reconciles an older exact completion when the newest reused name was cancelled", () => {
+  const first = threadCall("call-first", "impl");
+  const second = threadCall("call-second", "impl");
+  const projected = snapshot([
+    { role: "user", content: "first" },
+    { role: "assistant", content: "", tool_calls: [first] },
+    { role: "tool", tool_call_id: first.id, content: "Thread 'impl' accepted for background execution." },
+    { role: "assistant", content: "first done" },
+    { role: "user", content: "second" },
+    { role: "assistant", content: "", tool_calls: [second] },
+    { role: "tool", tool_call_id: second.id, content: "Thread 'impl' accepted for background execution." },
+    { role: "assistant", content: "[run cancelled by user]" },
+  ]);
+  projected.thread_events = {
+    impl: [{
+      type: "thread_finished",
+      name: "impl",
+      exit_code: 0,
+      timed_out: false,
+      run_id: "run-first",
+      dispatch_id: "dispatch-first",
+      tool_call_id: first.id,
+      status: "completed",
+    }],
+  };
+  expect(threadCards(buildTranscript(projected, {})).map((card) => card.state))
+    .toEqual(["done", "cancelled"]);
+});

@@ -100,6 +100,9 @@ async fn spawn_and_collect_non_thread(
                     name: tool_name.clone(),
                     content_preview: preview_tool_result(&tool_name, &result),
                     is_error: result.is_error,
+                    dispatch_thread_name: None,
+                    dispatch_id: None,
+                    dispatch_status: None,
                 });
                 results.push((index, tool_call_id, tool_name, result));
             }
@@ -205,6 +208,9 @@ async fn execute_with_dag_error(
             name: "thread".to_string(),
             content_preview: preview_tool_result("thread", &result),
             is_error: true,
+            dispatch_thread_name: None,
+            dispatch_id: None,
+            dispatch_status: None,
         });
         all_results.push((
             dispatch.original_index,

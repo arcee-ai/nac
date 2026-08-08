@@ -415,6 +415,7 @@ export function ThreadsView({
   const liveThreads = useLiveThreads();
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
+  const activeDispatches = snapshot?.active_thread_dispatches;
   const sessionId = snapshot?.metadata.session_id ?? "";
   const waveRank = useMemo(
     () => waveRankByName(snapshot?.messages),
@@ -427,24 +428,31 @@ export function ThreadsView({
   const { runningNames, pendingNames } = useMemo(() => {
     const running = new Set<string>();
     const pending = new Set<string>();
+    const projectedNames = new Set<string>();
+    for (const dispatch of activeDispatches ?? []) {
+      projectedNames.add(dispatch.thread_name);
+      if (dispatch.status === "running") running.add(dispatch.thread_name);
+      else pending.add(dispatch.thread_name);
+    }
+    // Compatibility snapshots exposed names only. Never spread this fallback
+    // across historical cards; this view has one newest row per retained name.
     for (const name of activeThreads ?? []) {
-      const live = liveThreads[name];
-      if (live?.status === "running") running.add(name);
-      else if (live?.status === "finished") {
-        // Stay out of both sets until the snapshot drops the name.
-      } else pending.add(name);
+      if (!projectedNames.has(name)) pending.add(name);
     }
     for (const [name, thread] of Object.entries(liveThreads)) {
       if (thread.status === "running") {
         running.add(name);
         pending.delete(name);
-      } else if (thread.status === "finished") {
+      } else if (thread.status === "dependency_pending" || thread.status === "accepted") {
+        pending.add(name);
+        running.delete(name);
+      } else {
         running.delete(name);
         pending.delete(name);
       }
     }
     return { runningNames: running, pendingNames: pending };
-  }, [activeThreads, liveThreads]);
+  }, [activeThreads, activeDispatches, liveThreads]);
 
   const ordered = useMemo(() => {
     const persisted = new Set(threads.map((thread) => thread.name));

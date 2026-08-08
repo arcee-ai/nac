@@ -11,9 +11,10 @@ interface ThreadBoxProps {
 
 const STATE_ORDER: Record<ThreadState, number> = {
   error: 0,
-  running: 1,
-  pending: 2,
-  done: 3,
+  cancelled: 1,
+  running: 2,
+  pending: 3,
+  done: 4,
 };
 
 function StateIcon({ state }: { state: ThreadState }) {
@@ -29,13 +30,17 @@ function StateIcon({ state }: { state: ThreadState }) {
       />
     );
   }
-  if (state === "error") {
+  if (state === "error" || state === "cancelled") {
     return (
       <Icon
         iconName={IconName.Danger}
         size={20}
         // Beat `.btn-ghost .icon path { fill: … }` from atoms.css.
-        className="[&>path]:!fill-error-primary"
+        className={
+          state === "error"
+            ? "[&>path]:!fill-error-primary"
+            : "[&>path]:!fill-basic-muted"
+        }
       />
     );
   }

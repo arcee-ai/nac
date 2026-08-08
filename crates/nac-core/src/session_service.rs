@@ -167,6 +167,15 @@ pub struct SessionServiceInit {
     pub response_timing: ResponseTimingSnapshot,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveThreadDispatchFrontendSnapshot {
+    pub run_id: SessionRunId,
+    pub thread_name: String,
+    pub dispatch_id: String,
+    pub tool_call_id: String,
+    pub status: crate::events::ThreadDispatchStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFrontendSnapshot {
     pub metadata: SessionMetadata,
@@ -190,6 +199,8 @@ pub struct SessionFrontendSnapshot {
     pub sessions: Vec<SessionSummarySnapshot>,
     #[serde(default)]
     pub active_threads: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_thread_dispatches: Vec<ActiveThreadDispatchFrontendSnapshot>,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     #[serde(default)]
@@ -844,6 +855,34 @@ impl SessionService {
         names
     }
 
+    pub fn active_thread_dispatches(&self) -> Vec<ActiveThreadDispatchFrontendSnapshot> {
+        let mut dispatches = self
+            .active_threads
+            .active_dispatches()
+            .into_iter()
+            .map(|dispatch| ActiveThreadDispatchFrontendSnapshot {
+                run_id: dispatch.key.run_id,
+                thread_name: dispatch.key.thread_name,
+                dispatch_id: dispatch.key.dispatch_id,
+                tool_call_id: dispatch.key.tool_call_id,
+                status: match dispatch.state {
+                    crate::tools::ThreadDispatchState::PendingDependency => {
+                        crate::events::ThreadDispatchStatus::DependencyPending
+                    }
+                    crate::tools::ThreadDispatchState::Running => {
+                        crate::events::ThreadDispatchStatus::Running
+                    }
+                },
+            })
+            .collect::<Vec<_>>();
+        dispatches.sort_by(|left, right| {
+            left.thread_name
+                .cmp(&right.thread_name)
+                .then_with(|| left.dispatch_id.cmp(&right.dispatch_id))
+        });
+        dispatches
+    }
+
     pub async fn queue_thread_steering(
         &self,
         thread_name: &str,
@@ -1188,8 +1227,13 @@ impl SessionService {
         let blocking_task = tokio::task::spawn_blocking(move || {
             blocking_service.load_frontend_snapshot_blocking(options)
         });
-        let (active_threads, blocking) = tokio::join!(self.active_thread_names(), blocking_task);
-        let blocking = blocking
+        let active_thread_dispatches = self.active_thread_dispatches();
+        let active_threads = active_thread_dispatches
+            .iter()
+            .map(|dispatch| dispatch.thread_name.clone())
+            .collect::<Vec<_>>();
+        let blocking = blocking_task
+            .await
             .map_err(|error| anyhow::anyhow!("frontend snapshot load task failed: {error}"))??;
 
         // Store-backed transcript reads (step 3): the snapshot blob (legacy
@@ -1242,6 +1286,7 @@ impl SessionService {
             active_compaction: self.active_compaction(),
             sessions: blocking.sessions,
             active_threads,
+            active_thread_dispatches,
             threads: blocking.threads,
             thread_episodes: blocking.thread_episodes,
             thread_events: blocking.thread_events.events,
@@ -4247,6 +4292,10 @@ pub(super) mod tests {
                 name: "impl/ui".to_string(),
                 action: "Build the interface".to_string(),
                 source_threads: Vec::new(),
+                run_id: None,
+                dispatch_id: None,
+                tool_call_id: None,
+                status: None,
             });
         parts
             .service
@@ -4268,7 +4317,18 @@ pub(super) mod tests {
                 name: "read".to_string(),
                 content_preview: "done".to_string(),
                 is_error: false,
+                dispatch_thread_name: None,
+                dispatch_id: None,
+                dispatch_status: None,
             });
+
+        let active_key = crate::tools::ThreadDispatchKey::new(
+            SessionRunId::from_string("run-ui".to_string()),
+            "impl/ui",
+            "dispatch-ui",
+            "thread-call-ui",
+        );
+        assert!(parts.service.active_threads.try_accept(active_key));
 
         let snapshot = parts.service.frontend_snapshot().await.unwrap();
         assert!(snapshot.metadata.extra_headers.is_empty());
@@ -4280,6 +4340,16 @@ pub(super) mod tests {
         assert_eq!(events.len(), 3);
         assert!(matches!(events[0], AgentEvent::ThreadStarted { .. }));
         assert!(matches!(events[2], AgentEvent::ToolCallFinished { .. }));
+        assert_eq!(snapshot.active_threads, vec!["impl/ui"]);
+        assert_eq!(snapshot.active_thread_dispatches.len(), 1);
+        assert_eq!(
+            snapshot.active_thread_dispatches[0].dispatch_id,
+            "dispatch-ui"
+        );
+        assert_eq!(
+            snapshot.active_thread_dispatches[0].status,
+            crate::events::ThreadDispatchStatus::DependencyPending
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

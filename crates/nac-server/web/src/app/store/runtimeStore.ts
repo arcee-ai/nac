@@ -37,7 +37,10 @@ export interface RuntimeGuidance {
 
 export interface RuntimeThread {
   name: string;
-  status: "running" | "finished";
+  status: "accepted" | "dependency_pending" | "running" | "completed" | "failed" | "cancelled";
+  runId: string | null;
+  dispatchId: string | null;
+  toolCallId: string | null;
   action: string;
   exitCode: number | null;
   isError: boolean;
@@ -258,6 +261,9 @@ function pushEvent(
 const emptyThread = (name: string): RuntimeThread => ({
   name,
   status: "running",
+  runId: null,
+  dispatchId: null,
+  toolCallId: null,
   action: "",
   exitCode: null,
   isError: false,
@@ -271,6 +277,23 @@ function updateThread(name: string, patch: Partial<RuntimeThread>) {
       ...state.threads,
       [name]: { ...(state.threads[name] ?? emptyThread(name)), ...patch },
     },
+  }));
+}
+
+function markRunThreadsTerminal(runId: string | undefined, status: "failed" | "cancelled") {
+  if (!runId) return;
+  setState((state) => ({
+    threads: Object.fromEntries(
+      Object.entries(state.threads).map(([name, thread]) => [
+        name,
+        thread.runId === runId &&
+        (thread.status === "accepted" ||
+          thread.status === "dependency_pending" ||
+          thread.status === "running")
+          ? { ...thread, status, isError: status === "failed" }
+          : thread,
+      ]),
+    ),
   }));
 }
 
@@ -357,6 +380,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
       pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
       return true;
     case "run_failed": {
+      markRunThreadsTerminal(envelope.run_id, "failed");
       // The terminal message is a constant; a provider refusal seen earlier in
       // this run explains the same failure and says something useful.
       const message = getState().modelError ?? event.message;
@@ -375,6 +399,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
       return true;
     }
     case "run_cancelled":
+      markRunThreadsTerminal(envelope.run_id, "cancelled");
       // Stopping is what the user asked for: the transcript already carries the
       // cancellation marker, so a red box would only contradict it. A provider
       // refusal seen earlier in this run is moot now for the same reason.
@@ -422,13 +447,13 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
       }));
       return true;
     case "agent":
-      return applyAgent(seq, event.event);
+      return applyAgent(seq, envelope.run_id, event.event);
     default:
       return false;
   }
 }
 
-function applyAgent(seq: number, event: AgentEvent): boolean {
+function applyAgent(seq: number, envelopeRunId: string | undefined, event: AgentEvent): boolean {
   switch (event.type) {
     case "tool_call_started":
       setState({ activity: `Tool: ${event.name}` });
@@ -449,6 +474,15 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
       return false;
     case "tool_call_finished":
       pushThreadLog(event.thread_name, event);
+      if (event.dispatch_thread_name && event.dispatch_status) {
+        updateThread(event.dispatch_thread_name, {
+          status: event.dispatch_status,
+          runId: envelopeRunId ?? null,
+          dispatchId: event.dispatch_id ?? null,
+          toolCallId: event.call_id,
+          isError: event.is_error,
+        });
+      }
       pushEvent({
         seq,
         kind: "tool",
@@ -465,7 +499,10 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         isError: false,
       });
       updateThread(event.name, {
-        status: "running",
+        status: event.status ?? "running",
+        runId: event.run_id ?? envelopeRunId ?? null,
+        dispatchId: event.dispatch_id ?? null,
+        toolCallId: event.tool_call_id ?? null,
         action: event.action,
         exitCode: null,
         isError: false,
@@ -482,7 +519,11 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         isError: Boolean(event.exit_code),
       });
       updateThread(event.name, {
-        status: "finished",
+        status:
+          event.status ?? (event.exit_code ? "failed" : "completed"),
+        runId: event.run_id ?? envelopeRunId ?? null,
+        dispatchId: event.dispatch_id ?? null,
+        toolCallId: event.tool_call_id ?? null,
         exitCode: event.exit_code,
         isError: Boolean(event.exit_code),
       });

@@ -123,6 +123,17 @@ pub enum CompactionFailure {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadDispatchStatus {
+    Accepted,
+    DependencyPending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
@@ -154,11 +165,27 @@ pub enum AgentEvent {
         name: String,
         content_preview: String,
         is_error: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_thread_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_status: Option<ThreadDispatchStatus>,
     },
     ThreadStarted {
         name: String,
         action: String,
         source_threads: Vec<String>,
+        /// Exact background-dispatch identity. Optional so persisted events from
+        /// before background execution remain readable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_id: Option<SessionRunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<ThreadDispatchStatus>,
     },
     ThreadLog {
         name: String,
@@ -217,6 +244,14 @@ pub enum AgentEvent {
         timeout_reason: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<crate::model::TokenUsage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_id: Option<SessionRunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<ThreadDispatchStatus>,
     },
     AssistantMessage {
         thread_name: Option<String>,
@@ -759,12 +794,16 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             name,
             content_preview,
             is_error,
+            ..
         } => AgentEvent::ToolCallFinished {
             thread_name,
             call_id,
             name,
             content_preview,
             is_error,
+            dispatch_thread_name: None,
+            dispatch_id: None,
+            dispatch_status: None,
         },
         AgentEvent::ThreadStarted {
             name,
@@ -774,6 +813,10 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             name,
             action: "thread dispatched".to_string(),
             source_threads,
+            run_id: None,
+            dispatch_id: None,
+            tool_call_id: None,
+            status: None,
         },
         AgentEvent::ThreadSteeringQueued {
             name, steering_id, ..
@@ -826,6 +869,10 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             timed_out,
             timeout_reason: timed_out.then(|| "thread timed out".to_string()),
             usage,
+            run_id: None,
+            dispatch_id: None,
+            tool_call_id: None,
+            status: None,
         },
         AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
             thread_name,
@@ -1252,11 +1299,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_thread_lifecycle_events_decode_without_dispatch_identity() {
+        let started: AgentEvent = serde_json::from_str(
+            r#"{"type":"thread_started","name":"impl","action":"work","source_threads":[]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            started,
+            AgentEvent::ThreadStarted {
+                run_id: None,
+                dispatch_id: None,
+                tool_call_id: None,
+                status: None,
+                ..
+            }
+        ));
+        let finished: AgentEvent = serde_json::from_str(
+            r#"{"type":"thread_finished","name":"impl","exit_code":0,"timed_out":false}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            finished,
+            AgentEvent::ThreadFinished { status: None, .. }
+        ));
+    }
+
+    #[test]
     fn decode_prefixed_event_round_trip() {
         let event = AgentEvent::ThreadStarted {
             name: "impl".to_string(),
             action: "inspect auth".to_string(),
             source_threads: vec!["auth".to_string()],
+            run_id: None,
+            dispatch_id: None,
+            tool_call_id: None,
+            status: None,
         };
         let encoded = format!(
             "{}{}",
@@ -2021,6 +2098,9 @@ mod tests {
             name: "exec_command".to_string(),
             content_preview: "exit 7: test result".to_string(),
             is_error: true,
+            dispatch_thread_name: None,
+            dispatch_id: None,
+            dispatch_status: None,
         });
         bus_sink.emit(AgentEvent::Error {
             thread_name: Some("worker".to_string()),
@@ -2030,6 +2110,10 @@ mod tests {
             name: "worker".to_string(),
             action: "CANARY_ACTION".to_string(),
             source_threads: vec!["source".to_string()],
+            run_id: None,
+            dispatch_id: None,
+            tool_call_id: None,
+            status: None,
         });
         bus_sink.emit(AgentEvent::ThreadFinished {
             name: "worker".to_string(),
@@ -2037,6 +2121,10 @@ mod tests {
             timed_out: true,
             timeout_reason: Some("CANARY_TIMEOUT".to_string()),
             usage: None,
+            run_id: None,
+            dispatch_id: None,
+            tool_call_id: None,
+            status: None,
         });
 
         let channel_event = receiver.try_recv().unwrap();

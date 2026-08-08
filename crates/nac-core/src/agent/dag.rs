@@ -246,6 +246,9 @@ pub(crate) fn collect_parse_errors(
             name: "thread".to_string(),
             content_preview: preview_tool_result("thread", &error_result),
             is_error: error_result.is_error,
+            dispatch_thread_name: None,
+            dispatch_id: None,
+            dispatch_status: None,
         });
         results.push((index, tool_call_id, "thread".to_string(), error_result));
     }
@@ -389,6 +392,10 @@ fn accept_and_launch_background(
             name: "thread".to_string(),
             content_preview: preview_tool_result("thread", &result),
             is_error: result.is_error,
+            dispatch_thread_name: accepted[index].then(|| dispatch.params.thread_name.clone()),
+            dispatch_id: accepted[index].then(|| dispatch.key.dispatch_id.clone()),
+            dispatch_status: accepted[index]
+                .then_some(crate::events::ThreadDispatchStatus::Accepted),
         });
         immediate.push((
             dispatch.original_index,
@@ -482,6 +489,17 @@ async fn run_background_dag(
                     thread_name: Some(dispatch.params.thread_name.clone()),
                     message: result.content.clone(),
                 });
+                ctx.event_sink.emit(AgentEvent::ThreadFinished {
+                    name: dispatch.params.thread_name.clone(),
+                    exit_code: -1,
+                    timed_out: false,
+                    timeout_reason: None,
+                    usage: None,
+                    run_id: Some(dispatch.key.run_id.clone()),
+                    dispatch_id: Some(dispatch.key.dispatch_id.clone()),
+                    tool_call_id: Some(dispatch.key.tool_call_id.clone()),
+                    status: Some(crate::events::ThreadDispatchStatus::Failed),
+                });
                 thread::complete_thread_dispatch(
                     &ctx.runtime,
                     &dispatch.params.session_id,
@@ -499,13 +517,16 @@ async fn run_background_dag(
             let runtime = ctx.runtime.clone();
             let client = ctx.client.clone();
             let params = dispatch.params.clone();
+            let dispatch_key = dispatch.key.clone();
             let task_guard = ctx
                 .runtime
                 .active_threads
                 .register_task(dispatch.key.run_id.clone());
             let abort = workers.spawn(async move {
                 let _task_guard = task_guard;
-                let result = thread::execute_parsed_dispatch(params, &runtime, &client).await;
+                let result =
+                    thread::execute_parsed_dispatch(params, Some(&dispatch_key), &runtime, &client)
+                        .await;
                 (dispatch_idx, result)
             });
             if ctx
@@ -546,6 +567,17 @@ async fn run_background_dag(
                         ctx.event_sink.emit(AgentEvent::Error {
                             thread_name: Some(dispatch.params.thread_name.clone()),
                             message: message.clone(),
+                        });
+                        ctx.event_sink.emit(AgentEvent::ThreadFinished {
+                            name: dispatch.params.thread_name.clone(),
+                            exit_code: -1,
+                            timed_out: false,
+                            timeout_reason: None,
+                            usage: None,
+                            run_id: Some(dispatch.key.run_id.clone()),
+                            dispatch_id: Some(dispatch.key.dispatch_id.clone()),
+                            tool_call_id: Some(dispatch.key.tool_call_id.clone()),
+                            status: Some(crate::events::ThreadDispatchStatus::Failed),
                         });
                         thread::complete_thread_dispatch(
                             &ctx.runtime,
@@ -595,6 +627,9 @@ pub(crate) async fn execute_with_dag(
                     name: tool_name.clone(),
                     content_preview: preview_tool_result(&tool_name, &result),
                     is_error: result.is_error,
+                    dispatch_thread_name: None,
+                    dispatch_id: None,
+                    dispatch_status: None,
                 });
                 all_results.push((index, tool_call_id, tool_name, result));
             }
