@@ -408,9 +408,14 @@ function PaneHeader({
   path: string;
   trailing: React.ReactNode;
 }) {
+  // On a phone the dialog chrome already names the file and carries the badge,
+  // so this bar would only repeat them.
+  const isMobile = useIsMobile();
+  if (isMobile) return null;
+
   return (
     <div
-      className="flex items-center gap-[10px] h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-0-5"
+      className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-0-5"
       title={path}
     >
       <div className="flex flex-1 items-center gap-[6px] min-w-0">

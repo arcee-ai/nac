@@ -67,18 +67,22 @@ const Select: React.FC<SelectProps> = ({
       size="min-w-full"
       className={className}
       panelClassName={panelClassName}
-      content={items.map((item) => (
-        <TabButton
-          key={item.id}
-          size={tabSizeFor[size]}
-          variant={TabButtonVariant.Regular}
-          active={item.id === value}
-          onClick={() => select(item.id)}
-        >
-          {item.icon ? <Icon iconName={item.icon} /> : null}
-          <span className="text-left flex-grow">{item.label}</span>
-        </TabButton>
-      ))}
+      content={
+        <div className="flex flex-col gap-1 px-2 md:px-0">
+          {items.map((item) => (
+            <TabButton
+              key={item.id}
+              size={tabSizeFor[size]}
+              variant={TabButtonVariant.Regular}
+              active={item.id === value}
+              onClick={() => select(item.id)}
+            >
+              {item.icon ? <Icon iconName={item.icon} /> : null}
+              <span className="text-left flex-grow">{item.label}</span>
+            </TabButton>
+          ))}
+        </div>
+      }
     >
       <Button
         variant={variant}

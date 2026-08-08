@@ -233,7 +233,7 @@ export function BranchPicker({
         onClick={() => (open ? close() : setOpen(true))}
       >
         <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate max-w-[64px] md:max-w-[128px]">
+        <span className="label-micro text-btn-secondary truncate max-w-[64px] xl:max-w-[128px]">
           {branch}
         </span>
       </button>

@@ -73,7 +73,7 @@ function FooterChip({
       <span
         className={cn(
           "label-micro text-basic-tertiary truncate",
-          compact ? "max-w-[80px]" : "max-w-[128px]",
+          compact ? "max-w-[64px]" : "max-w-[128px]",
         )}
       >
         {label}

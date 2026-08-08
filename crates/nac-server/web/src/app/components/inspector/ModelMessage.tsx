@@ -132,8 +132,8 @@ export const ModelMessage = memo(function ModelMessage({
         isLast && "min-h-[calc(70vh-316px)]",
       )}
     >
-      <div className="flex flex-col flex-grow gap-1 pt-2 max-w-[calc(100%-36px)] min-w-0">
-        <div className="flex gap-3 items-center mb-1 min-w-0">
+      <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
+        <div className="flex gap-3 items-center mb-4 md:mb-1 min-w-0">
           <ModelPill active={active} />
           <span className="label-small text-basic-primary truncate">
             {model}
@@ -156,7 +156,7 @@ export const ModelMessage = memo(function ModelMessage({
 
         <div
           className={cn(
-            "chat-response chat-response-content paragraph-medium text-basic-secondary relative w-full min-w-0 pl-3",
+            "chat-response chat-response-content paragraph-medium text-basic-secondary relative w-full min-w-0 md:pl-3",
             active && "streaming",
           )}
         >
@@ -236,7 +236,7 @@ export const ModelMessage = memo(function ModelMessage({
         {!active ? (
           <div
             className={cn(
-              "flex items-center justify-start gap-3 pt-4 pl-3",
+              "flex items-center justify-start gap-3 pt-4 md:pl-3",
               "opacity-0 pointer-events-none transition-opacity duration-150",
               "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
               "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",

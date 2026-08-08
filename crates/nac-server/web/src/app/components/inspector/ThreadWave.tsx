@@ -8,8 +8,6 @@ interface ThreadBoxProps {
   thread: TranscriptThread;
   selected: boolean;
   onSelect: (name: string, episodeKey: string) => void;
-  /** Let the card fill its grid column instead of holding the design's width. */
-  compact: boolean;
 }
 
 const STATE_ORDER: Record<ThreadState, number> = {
@@ -60,7 +58,8 @@ function worstState(threads: TranscriptThread[]): ThreadState {
 }
 
 /** One dispatched thread: name, live state and the newest line it produced. */
-function ThreadBox({ thread, selected, onSelect, compact }: ThreadBoxProps) {
+function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
+  const isMobile = useIsMobile();
   const running = thread.state === "running";
   const pending = thread.state === "pending";
   // Before the first command there is nothing to tail, so the card keeps
@@ -85,7 +84,7 @@ function ThreadBox({ thread, selected, onSelect, compact }: ThreadBoxProps) {
     <div
       className={cn(
         "shrink-0 h-[84px] overflow-hidden rounded-[4px]",
-        compact ? "w-full min-w-0" : "w-[220px]",
+        isMobile ? "w-[172px]" : "w-[220px]",
         running || pending ? "bg-elevation-level-2" : "bg-elevation-level-1",
       )}
     >
@@ -146,19 +145,13 @@ interface WaveRowProps {
  */
 function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
   const state = worstState(threads);
-  // Panning a row sideways inside a page that scrolls down fights the gesture,
-  // so a phone wraps the level into a grid instead.
-  const isMobile = useIsMobile();
 
   return (
     <div
       className={cn(
-        "pl-4 py-3 w-full border-l-2 border-solid",
-        !isMobile && [
-          "overflow-x-auto hide-scrollbar",
-          // Fade the row out on the right so a wave reads as scrollable.
-          "[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]",
-        ],
+        "pl-4 py-3 w-full border-l-2 border-solid overflow-x-auto hide-scrollbar",
+        // Fade the row out on the right so a wave reads as scrollable.
+        "[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]",
         state === "error"
           ? "border-error-primary"
           : state === "running"
@@ -166,19 +159,13 @@ function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
             : "border-tertiary",
       )}
     >
-      <div
-        className={cn(
-          "items-start gap-1",
-          isMobile ? "grid grid-cols-2 w-full" : "flex pr-12 w-fit",
-        )}
-      >
+      <div className="flex items-start gap-1 pr-12 w-fit">
         {threads.map((thread) => (
           <ThreadBox
             key={thread.key}
             thread={thread}
             selected={selected === thread.key}
             onSelect={onSelect}
-            compact={isMobile}
           />
         ))}
       </div>

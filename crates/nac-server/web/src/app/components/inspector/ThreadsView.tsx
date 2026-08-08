@@ -190,12 +190,12 @@ function EpisodeTab({
   index: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-
+  const isMobile = useIsMobile();
   return (
     <div className="flex flex-col items-start w-full">
       <button
         type="button"
-        className="group flex items-center gap-2 py-2 pl-3 pr-2 rounded-[4px] w-full btn-ghost"
+        className="group flex items-center gap-2 py-3 pl-1 pr-3 md:py-2 md:pl-3 md:pr-2 rounded-[4px] w-full btn-ghost"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
@@ -204,18 +204,24 @@ function EpisodeTab({
           size={16}
           className="shrink-0 text-basic-muted"
         />
-        <span className="shrink-0 label-micro text-basic-primary">
+        <span
+          className={`shrink-0 ${isMobile ? "label-small" : "label-micro"} text-basic-primary`}
+        >
           {`Episode ${index + 1}`}
         </span>
-        <span className="flex-1 min-w-0 label-micro text-basic-secondary truncate">
+        <span
+          className={`flex-1 min-w-0 ${isMobile ? "label-small" : "label-micro"} text-basic-secondary truncate`}
+        >
           {episode.action}
         </span>
       </button>
       <DropdownContent isOpen={expanded} className="w-full">
-        <div className="flex flex-col gap-4 pl-3 pr-2 py-3">
+        <div className="flex flex-col gap-4 md:pl-3 md:pr-2 py-6">
           <Markdown className="text-basic-secondary">{episode.action}</Markdown>
           <Separator />
-          <Markdown className="text-basic-secondary">{episode.content}</Markdown>
+          <Markdown className="text-basic-secondary">
+            {episode.content}
+          </Markdown>
         </div>
       </DropdownContent>
     </div>
@@ -446,7 +452,10 @@ function Episodes({
       )}
     >
       {episodes.map((episode, index) => (
-        <EpisodeTab key={episode.id} episode={episode} index={index} />
+        <div key={episode.id} className="flex flex-col">
+          {index > 0 ? <Separator /> : null}
+          <EpisodeTab episode={episode} index={index} />
+        </div>
       ))}
     </div>
   );

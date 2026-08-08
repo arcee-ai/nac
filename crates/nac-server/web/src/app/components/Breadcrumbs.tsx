@@ -12,6 +12,8 @@ import {
   PopoverPlacement,
   PopoverSize,
   SessionAvatar,
+  TabButton,
+  TabButtonSize,
   Tooltip,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -84,67 +86,92 @@ export function Breadcrumbs() {
             panelClassName="max-h-[420px] overflow-auto"
             sheetClassName="px-2"
             content={
-              <>
+              <div
+                className={
+                  isMobile ? "flex flex-col h-[calc(70dvh)]" : "flex flex-col"
+                }
+              >
                 {/* The trail is gone on a phone, so the way back to the list
-                    rides along with the switcher. */}
+                    (and the launch affordance) stay pinned above the switcher. */}
                 {isMobile ? (
-                  <button
-                    type="button"
-                    className="flex items-center gap-3 min-w-0 h-12 px-3 rounded-[4px] text-left hover:bg-btn-ghost-hovered"
-                    onClick={() => {
-                      setOpen(false);
-                      navigate(routes.list());
-                    }}
-                  >
-                    <Icon iconName={IconName.Left} />
-                    <span className="text-medium text-basic-primary">
-                      All Sessions
-                    </span>
-                  </button>
-                ) : null}
-                {sessions.length === 0 ? (
-                  <div className="label-small text-basic-muted px-2 py-1">
-                    No sessions
+                  <div className="flex flex-col gap-2 shrink-0 pb-2">
+                    <TabButton
+                      size={TabButtonSize.Large}
+                      onClick={() => {
+                        setOpen(false);
+                        navigate(routes.list());
+                      }}
+                    >
+                      <Icon iconName={IconName.Left} className="shrink-0" />
+                      <span className="flex-1 min-w-0 truncate text-left">
+                        All Sessions
+                      </span>
+                    </TabButton>
+                    <TabButton
+                      size={TabButtonSize.Large}
+                      onClick={() => {
+                        setOpen(false);
+                        actions.launch();
+                      }}
+                    >
+                      <Icon iconName={IconName.Add} className="shrink-0" />
+                      <span className="flex-1 min-w-0 truncate text-left">
+                        New Session
+                      </span>
+                    </TabButton>
                   </div>
-                ) : (
-                  sessions.map(({ summary, active_run }) => {
-                    const running = isActiveRun(active_run);
-                    return (
-                      <button
-                        key={summary.session_id}
-                        type="button"
-                        className={cn(
-                          "flex items-center gap-2 min-w-0 rounded-[4px] text-left hover:bg-btn-ghost-hovered",
-                          isMobile ? "h-12 gap-3 px-3" : "px-2 py-1.5",
-                          summary.session_id === sessionId &&
-                            "bg-btn-ghost-highlighted",
-                        )}
-                        onClick={() => {
-                          setOpen(false);
-                          navigate(routes.session(summary.session_id));
-                        }}
-                      >
-                        <SessionAvatar
-                          id={summary.session_id}
-                          size={isMobile ? 24 : 20}
-                          isRunning={running}
-                        />
-                        <span
+                ) : null}
+                <div
+                  className={cn(
+                    "flex flex-col",
+                    isMobile &&
+                      "flex-1 min-h-0 overflow-auto [&>*]:shrink-0",
+                  )}
+                >
+                  {sessions.length === 0 ? (
+                    <div className="label-small text-basic-muted px-2 py-1">
+                      No sessions
+                    </div>
+                  ) : (
+                    sessions.map(({ summary, active_run }) => {
+                      const running = isActiveRun(active_run);
+                      return (
+                        <button
+                          key={summary.session_id}
+                          type="button"
                           className={cn(
-                            "truncate",
-                            isMobile ? "text-medium" : "label-small",
-                            running
-                              ? "text-shimmer-basic"
-                              : "text-basic-primary",
+                            "flex items-center gap-2 min-w-0 rounded-[4px] text-left hover:bg-btn-ghost-hovered",
+                            isMobile ? "h-12 gap-3 px-3" : "px-2 py-1.5",
+                            summary.session_id === sessionId &&
+                              "bg-btn-ghost-highlighted",
                           )}
+                          onClick={() => {
+                            setOpen(false);
+                            navigate(routes.session(summary.session_id));
+                          }}
                         >
-                          {displaySessionTitle(summary)}
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </>
+                          <SessionAvatar
+                            id={summary.session_id}
+                            size={isMobile ? 24 : 20}
+                            isRunning={running}
+                          />
+                          <span
+                            className={cn(
+                              "truncate",
+                              isMobile ? "text-medium" : "label-small",
+                              running
+                                ? "text-shimmer-basic"
+                                : "text-basic-primary",
+                            )}
+                          >
+                            {displaySessionTitle(summary)}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
             }
           >
             {isMobile ? (

@@ -37,6 +37,7 @@ import {
   useSessionSnapshot,
   useSessionSummary,
   useSshConnect,
+  useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
@@ -47,6 +48,7 @@ import {
   toggleSidePanelExpanded,
   toggleSidePanelList,
   useSelectedFile,
+  useSelectedRevision,
   useSelectedThread,
   useSelectedWorkset,
   useSidePanelCollapsed,
@@ -120,10 +122,17 @@ export default function SessionPage() {
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
+  const selectedRevision = useSelectedRevision();
   const isMobile = useIsMobile();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
+  // The phone dialog header shows the selected file's +/- badge; a revision
+  // reports its own totals rather than the live workspace ones.
+  const revisionChanges = useWorkspaceRevisionChanges(
+    id,
+    isMobile && panel === "files" ? selectedRevision : null,
+  );
 
   useEffect(() => {
     if (id) clearAttention(id);
@@ -158,6 +167,28 @@ export default function SessionPage() {
     revealSidePanel(isMobile);
     goToPanel(next);
   };
+
+  const changedFiles =
+    selectedRevision == null
+      ? (snapshot?.workspace?.changed_files ?? [])
+      : (revisionChanges.data?.changed_files ?? []);
+  // Same default as FilesView: with no selection, land on the first change.
+  const currentFilePath = selectedFile ?? changedFiles[0]?.path ?? null;
+  const currentChangedFile = currentFilePath
+    ? changedFiles.find((file) => file.path === currentFilePath)
+    : undefined;
+  const fileBadge =
+    currentChangedFile &&
+    (currentChangedFile.additions || currentChangedFile.deletions) ? (
+      <div className="flex items-center gap-2 shrink-0 code code-small">
+        <span className="text-success-primary">
+          +{currentChangedFile.additions ?? 0}
+        </span>
+        <span className="text-error-primary">
+          -{currentChangedFile.deletions ?? 0}
+        </span>
+      </div>
+    ) : null;
 
   const sideBox = (
     <SessionSideBox
@@ -215,7 +246,7 @@ export default function SessionPage() {
         className={cn(
           "flex flex-col items-center flex-1 min-w-0 h-full",
           "transition-[padding] duration-150 ease-out",
-          isMobile ? "px-2" : collapsed ? "pl-2 pr-2" : "pl-6 pr-2",
+          isMobile ? "px-4" : collapsed ? "pl-2 pr-2" : "pl-6 pr-2",
         )}
       >
         <div className="flex flex-col flex-1 min-h-0 w-full relative">
@@ -265,23 +296,26 @@ export default function SessionPage() {
           keepOnNavigate
           title={
             <div className="flex items-center gap-2 min-w-0">
-              <span className="header-small truncate flex-1">
-                {panel === "threads"
-                  ? (selectedThread ??
-                    snapshot?.threads?.[0]?.name ??
-                    SESSION_PANEL_LABEL.threads)
-                  : panel === "worksets"
-                    ? (selectedWorkset ??
-                      snapshot?.worksets.items[0]?.id ??
-                      SESSION_PANEL_LABEL.worksets)
-                    : panel === "files"
-                      ? (selectedFile?.split("/").pop() ??
-                        snapshot?.workspace?.changed_files?.[0]?.path
-                          .split("/")
-                          .pop() ??
-                        SESSION_PANEL_LABEL.files)
-                      : SESSION_PANEL_LABEL.history}
-              </span>
+              <div className="flex flex-col flex-1 min-w-0 justify-center">
+                <span className="header-small truncate">
+                  {panel === "threads"
+                    ? (selectedThread ??
+                      snapshot?.threads?.[0]?.name ??
+                      SESSION_PANEL_LABEL.threads)
+                    : panel === "worksets"
+                      ? (selectedWorkset ??
+                        snapshot?.worksets.items[0]?.id ??
+                        SESSION_PANEL_LABEL.worksets)
+                      : panel === "files"
+                        ? (selectedFile?.split("/").pop() ??
+                          snapshot?.workspace?.changed_files?.[0]?.path
+                            .split("/")
+                            .pop() ??
+                          SESSION_PANEL_LABEL.files)
+                        : SESSION_PANEL_LABEL.history}
+                </span>
+                {panel === "files" ? fileBadge : null}
+              </div>
               {snapshot?.workspace?.branch ? (
                 <BranchPicker
                   sessionId={id}
