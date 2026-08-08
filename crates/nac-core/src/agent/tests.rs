@@ -382,3 +382,69 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
+
+#[test]
+fn synthetic_thread_wait_preserves_assistant_content_and_reasoning() {
+    let reasoning = serde_json::json!({"type": "reasoning", "id": "r1"});
+    let mut turn = crate::model::AssistantTurn {
+        content: Some("Progress update".to_string()),
+        reasoning_text: Some("private reasoning".to_string()),
+        reasoning_details: Some(reasoning.clone()),
+        tool_calls: None,
+        reasoning_field: Some("reasoning_content".to_string()),
+    };
+
+    assert!(inject_background_thread_wait(&mut turn, true));
+    assert_eq!(turn.content.as_deref(), Some("Progress update"));
+    assert_eq!(turn.reasoning_text.as_deref(), Some("private reasoning"));
+    assert_eq!(turn.reasoning_details, Some(reasoning));
+    assert_eq!(turn.reasoning_field.as_deref(), Some("reasoning_content"));
+    let calls = turn.tool_calls.unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].function.name, "thread_wait");
+}
+
+#[test]
+fn synthetic_thread_wait_never_overrides_provider_tool_calls() {
+    let mut turn = crate::model::AssistantTurn {
+        content: None,
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: Some(vec![ToolCall {
+            id: "provider-call".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "threads".to_string(),
+                arguments: "{}".to_string(),
+            },
+        }]),
+        reasoning_field: None,
+    };
+
+    assert!(!inject_background_thread_wait(&mut turn, true));
+    assert_eq!(turn.tool_calls.unwrap()[0].id, "provider-call");
+}
+
+#[tokio::test]
+async fn worker_usage_fold_is_exactly_once_and_preserves_orchestrator_context() {
+    let agent = Agent::default(ModelClient::new_for_test());
+    {
+        let mut worker = agent.tool_runtime.worker_usage.lock().await;
+        worker.input_tokens = 11;
+        worker.output_tokens = 7;
+        worker.orchestrator_context_tokens = 999;
+    }
+    let mut accumulated = TokenUsage {
+        input_tokens: 3,
+        orchestrator_context_tokens: 41,
+        ..TokenUsage::default()
+    };
+
+    agent.fold_worker_usage(&mut accumulated).await;
+    assert_eq!(accumulated.input_tokens, 14);
+    assert_eq!(accumulated.output_tokens, 7);
+    assert_eq!(accumulated.orchestrator_context_tokens, 41);
+    agent.fold_worker_usage(&mut accumulated).await;
+    assert_eq!(accumulated.input_tokens, 14);
+    assert_eq!(accumulated.output_tokens, 7);
+}

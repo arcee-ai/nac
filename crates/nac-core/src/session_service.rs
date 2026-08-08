@@ -908,6 +908,9 @@ impl SessionService {
             instruction,
         )?;
         drop(active_operation);
+        // The durable enqueue is complete and the run identity lock is released
+        // before waking a thread_wait parked on this registry.
+        self.active_threads.signal_activity();
         self.event_bus
             .emit_agent(AgentEvent::OrchestratorSteeringQueued {
                 steering_id: record.id,
@@ -2306,6 +2309,25 @@ impl SessionService {
         let Some(mut finishing_run) = self.mark_run_finishing(run_id) else {
             return false;
         };
+        let mut outcome = outcome;
+        if self.active_threads.has_work_for_run(run_id) {
+            let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
+            let cleanup_error = self
+                .active_threads
+                .abort_run(&self.metadata.store_path, session_id, run_id)
+                .err()
+                .map(|error| format!("; cleanup also failed: {error:#}"))
+                .unwrap_or_default();
+            let invariant = format!(
+                "run attempted to finish with background dispatches or completions still owned by it; they were aborted to prevent crossing into a successor run{cleanup_error}"
+            );
+            outcome = match outcome {
+                RunOutcome::Completed(_, usage) => RunOutcome::Failed(invariant, usage),
+                RunOutcome::Failed(message, usage) => {
+                    RunOutcome::Failed(format!("{message}\n{invariant}"), usage)
+                }
+            };
+        }
         self.expire_orchestrator_steering(run_id);
         if matches!(outcome, RunOutcome::Failed(..)) {
             self.normalize_failed_run_transcript().await;
@@ -4312,8 +4334,15 @@ pub(super) mod tests {
         assert!(no_run.to_string().contains("no active run"));
 
         let active = service.try_begin_run(None, "initial direction").unwrap();
+        let activity = service.active_threads.clone();
+        let wake = tokio::spawn(async move { activity.wait_for_activity().await });
+        tokio::task::yield_now().await;
         let queued = service
             .queue_orchestrator_steering("change direction")
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), wake)
+            .await
+            .expect("durable guidance enqueue must wake thread_wait")
             .unwrap();
         assert_eq!(
             queued.thread_name,
@@ -6379,6 +6408,52 @@ pub(super) mod tests {
         assert_eq!(retained.state, crate::store::QueuedRunState::Pending);
         let snapshot = parts.service.frontend_snapshot().await.unwrap();
         assert_eq!(snapshot.queued_message, Some(retained));
+    }
+
+    #[tokio::test]
+    async fn finish_invariant_aborts_background_work_and_blocks_queued_handoff() {
+        let (parts, store_path) =
+            test_active_service("queued_background_invariant", "invariant-session");
+        let active = parts.service.try_begin_run(None, "current").unwrap();
+        let queued = match parts
+            .service
+            .queue_prepared_next_turn(
+                "client-next".to_string(),
+                "next display".to_string(),
+                "next agent".to_string(),
+            )
+            .unwrap()
+        {
+            SessionQueueOutcome::Queued(record) => record,
+            _ => panic!("queue should be created"),
+        };
+        let key = crate::tools::ThreadDispatchKey::new(
+            active.run_id.clone(),
+            "worker",
+            "dispatch-worker",
+            "call-worker",
+        );
+        assert!(parts.service.active_threads.try_accept(key));
+
+        assert!(
+            parts
+                .service
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("must not complete".to_string(), None),
+                )
+                .await
+        );
+        assert!(parts.service.active_run().is_none());
+        assert!(!parts
+            .service
+            .active_threads
+            .has_work_for_run(&active.run_id));
+        let retained = crate::store::load_queued_run(&store_path, "invariant-session")
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.queued_run_id, queued.queued_run_id);
+        assert_eq!(retained.state, crate::store::QueuedRunState::Pending);
     }
 
     #[test]

@@ -14,7 +14,7 @@ use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, To
 use crate::sandbox::{SandboxSession, SshConnection};
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
-use crate::types::{Message, ToolCall, ToolDefinition};
+use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
 
 mod compaction;
 mod dag;
@@ -54,6 +54,42 @@ Reply with your answer as ordinary text, or issue the tool call you meant to mak
 
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn inject_background_thread_wait(
+    assistant: &mut crate::model::AssistantTurn,
+    should_wait: bool,
+) -> bool {
+    if !should_wait
+        || assistant
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| !calls.is_empty())
+    {
+        return false;
+    }
+    assistant
+        .tool_calls
+        .get_or_insert_with(Vec::new)
+        .push(ToolCall {
+            id: format!("nac-thread-wait-{}", Uuid::new_v4()),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "thread_wait".to_string(),
+                arguments: "{}".to_string(),
+            },
+        });
+    if assistant
+        .content
+        .as_deref()
+        .is_none_or(|content| content.trim().is_empty())
+    {
+        assistant.content = Some(
+            "The background threads are still running. I’ll continue when they finish or new guidance arrives."
+                .to_string(),
+        );
+    }
+    true
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -305,9 +341,14 @@ impl Agent {
                      reject them. This enables patterns like best-of-N: dispatch multiple \
                      independent explorations in one response, then a synthesis thread that takes \
                      all of them as source threads and waits for them to finish.\n\n\
+                     Thread dispatch is asynchronous: thread(...) acknowledges immediately while the \
+                     worker continues in the background. Use thread_wait(names?, timeout?) to receive \
+                     completions. It also returns when same-run user guidance arrives. Do not claim the \
+                     task is complete while required background work remains.\n\n\
                      Your tools:\n\
                      - thread(name, action, threads?, skills?, timeout?)\n\
                      - threads()\n\
+                     - thread_wait(names?, timeout?)\n\
                      - thread_read(name)\n\
                      - thread_delete(name)\n\
                      - workset_define(id, goal, status, summary, verification_recipe?, workset_items[])\n\
@@ -547,7 +588,7 @@ impl Agent {
                 .await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();
-            let response = match turn {
+            let mut response = match turn {
                 Ok(response) => response,
                 Err(error) => {
                     // Preserve accumulated usage (including summary and worker
@@ -603,12 +644,24 @@ impl Agent {
                 return Err(error);
             }
 
+            let provider_has_tool_calls = response
+                .assistant
+                .tool_calls
+                .as_ref()
+                .is_some_and(|tool_calls| !tool_calls.is_empty());
+            let run_has_background_work = self
+                .event_sink
+                .run_id()
+                .is_some_and(|run_id| self.tool_runtime.active_threads.has_work_for_run(run_id));
+            inject_background_thread_wait(
+                &mut response.assistant,
+                !provider_has_tool_calls && self.thread_name.is_none() && run_has_background_work,
+            );
             let has_tool_calls = response
                 .assistant
                 .tool_calls
                 .as_ref()
-                .map(|tool_calls| !tool_calls.is_empty())
-                .unwrap_or(false);
+                .is_some_and(|tool_calls| !tool_calls.is_empty());
 
             // Transcript commit point (assistant): durable at push.
             if let Err(error) = self
@@ -709,14 +762,9 @@ impl Agent {
             )
             .await;
 
-            // Fold worker token usage (from thread dispatches) into the
-            // orchestrator's accumulated usage. Only cost fields are summed;
-            // orchestrator context stays ordinary-orchestrator-only.
-            {
-                let mut wu = self.tool_runtime.worker_usage.lock().await;
-                accumulated_usage.add_cost_saturating(&wu);
-                *wu = TokenUsage::default();
-            }
+            // Fold worker token usage (including workers that completed while
+            // thread_wait was parked) before another model call or finish.
+            self.fold_worker_usage(&mut accumulated_usage).await;
 
             self.last_usage = Some(accumulated_usage.clone());
 
@@ -741,6 +789,12 @@ impl Agent {
                 return Err(error);
             }
         }
+    }
+
+    async fn fold_worker_usage(&self, accumulated_usage: &mut TokenUsage) {
+        let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
+        accumulated_usage.add_cost_saturating(&worker_usage);
+        *worker_usage = TokenUsage::default();
     }
 
     #[cfg(test)]

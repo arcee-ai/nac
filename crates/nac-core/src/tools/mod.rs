@@ -10,7 +10,7 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -119,6 +119,7 @@ struct ActiveThreadState {
 pub struct ActiveThreadRegistry {
     state: StdMutex<ActiveThreadState>,
     activity: Notify,
+    activity_epoch: AtomicU64,
     live_thread_updates: AtomicBool,
 }
 
@@ -127,6 +128,7 @@ impl Default for ActiveThreadRegistry {
         Self {
             state: StdMutex::new(ActiveThreadState::default()),
             activity: Notify::new(),
+            activity_epoch: AtomicU64::new(0),
             live_thread_updates: AtomicBool::new(false),
         }
     }
@@ -194,7 +196,7 @@ impl ActiveThreadRegistry {
         }
         drop(state);
         if accepted.iter().any(|accepted| *accepted) {
-            self.activity.notify_waiters();
+            self.notify_activity();
         }
         accepted
     }
@@ -279,7 +281,7 @@ impl ActiveThreadRegistry {
             crate::store::expire_thread_steering(store_path, session_id, &key.dispatch_id)?;
         state.active_by_name.remove(&key.thread_name);
         drop(state);
-        self.activity.notify_waiters();
+        self.notify_activity();
         Ok(expired)
     }
 
@@ -305,7 +307,7 @@ impl ActiveThreadRegistry {
         state.active_by_name.remove(&completion.key.thread_name);
         state.completions.push_back(completion);
         drop(state);
-        self.activity.notify_waiters();
+        self.notify_activity();
         Ok(expired)
     }
 
@@ -356,22 +358,59 @@ impl ActiveThreadRegistry {
             .any(|completion| completion.key.run_id == *run_id)
     }
 
+    /// Atomically observes whether a run still owns active work or buffered
+    /// terminal results. Used by the agent finish guard and service invariant.
+    pub fn has_work_for_run(&self, run_id: &SessionRunId) -> bool {
+        let state = self.lock();
+        state
+            .active_by_name
+            .values()
+            .any(|dispatch| dispatch.key.run_id == *run_id)
+            || state
+                .completions
+                .iter()
+                .any(|completion| completion.key.run_id == *run_id)
+    }
+
     pub fn live_thread_updates(&self) -> bool {
         self.live_thread_updates.load(Ordering::Acquire)
     }
 
     pub fn set_live_thread_updates(&self, enabled: bool) {
         self.live_thread_updates.store(enabled, Ordering::Release);
-        self.activity.notify_waiters();
+        self.notify_activity();
     }
 
     #[allow(dead_code)] // Used by guidance wakeup integration in a later commit.
     pub fn signal_activity(&self) {
-        self.activity.notify_waiters();
+        self.notify_activity();
+    }
+
+    pub fn activity_epoch(&self) -> u64 {
+        self.activity_epoch.load(Ordering::Acquire)
+    }
+
+    pub async fn wait_for_activity_since(&self, observed: u64) {
+        loop {
+            let notified = self.activity.notified();
+            if self.activity_epoch() != observed {
+                return;
+            }
+            notified.await;
+            if self.activity_epoch() != observed {
+                return;
+            }
+        }
     }
 
     pub async fn wait_for_activity(&self) {
-        self.activity.notified().await;
+        let observed = self.activity_epoch();
+        self.wait_for_activity_since(observed).await;
+    }
+
+    fn notify_activity(&self) {
+        self.activity_epoch.fetch_add(1, Ordering::AcqRel);
+        self.activity.notify_waiters();
     }
 
     pub fn abort_run(
@@ -429,7 +468,7 @@ impl ActiveThreadRegistry {
             .completions
             .retain(|completion| run_id.is_some_and(|run_id| completion.key.run_id != *run_id));
         drop(state);
-        self.activity.notify_waiters();
+        self.notify_activity();
         first_error.map_or(Ok(expired), Err)
     }
 
@@ -790,6 +829,7 @@ pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<Tool
     vec![
         thread::dispatch_definition(skills),
         thread::threads_definition(),
+        thread::thread_wait_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
         workset::define_definition(),
@@ -887,6 +927,7 @@ pub async fn execute_tool(
         },
         "thread" => thread::execute_dispatch(args, runtime, client).await,
         "threads" => thread::execute_threads(runtime).await,
+        "thread_wait" => thread::execute_thread_wait(args, runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,
         "thread_delete" => thread::execute_thread_delete(args, runtime).await,
         "workset_define" => workset::execute_define(args, runtime).await,

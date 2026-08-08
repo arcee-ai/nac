@@ -217,6 +217,26 @@ fn expire_thread_steering_once(
         .collect())
 }
 
+pub fn has_queued_thread_steering(
+    path: &Path,
+    session_id: &str,
+    thread_name: &str,
+    dispatch_id: &str,
+) -> Result<bool> {
+    retry_busy(|| {
+        let conn = open_runtime_connection(path)?;
+        Ok(conn.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM thread_steering
+                 WHERE session_id = ?1 AND thread_name = ?2
+                   AND dispatch_id = ?3 AND status = 'queued'
+             )",
+            params![session_id, thread_name, dispatch_id],
+            |row| row.get(0),
+        )?)
+    })
+}
+
 fn retry_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
     const RETRY_DELAYS: [std::time::Duration; 4] = [
         std::time::Duration::from_millis(20),

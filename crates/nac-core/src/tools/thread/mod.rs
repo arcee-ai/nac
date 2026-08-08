@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::time::Duration;
+
 use serde_json::Value;
 
 use crate::events::AgentEvent;
@@ -88,6 +91,30 @@ pub fn thread_read_definition() -> ToolDefinition {
                 "name": { "type": "string", "description": "Thread name." }
             },
             "required": ["name"]
+        }),
+    )
+}
+
+pub fn thread_wait_definition() -> ToolDefinition {
+    use serde_json::json;
+    def(
+        "thread_wait",
+        "Wait for background thread completions or same-run user guidance. By default all run-owned threads finish before completions are returned.",
+        json!({
+            "type": "object",
+            "properties": {
+                "names": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "uniqueItems": true,
+                    "description": "Optional thread names to wait for when live updates are enabled."
+                },
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum wait in seconds. Defaults to the configured thread timeout."
+                }
+            }
         }),
     )
 }
@@ -336,6 +363,169 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
     }
 }
 
+pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResult {
+    let names = match require_string_array(&args, "names") {
+        Ok(names) => names,
+        Err(error) => return error,
+    };
+    if names.iter().any(|name| name.trim().is_empty()) {
+        return ToolResult {
+            content: "Error: 'names' entries must not be empty".to_string(),
+            is_error: true,
+        };
+    }
+    let requested = names.into_iter().collect::<HashSet<_>>();
+    let timeout_secs = match args.get("timeout") {
+        None => runtime.thread_timeout_secs,
+        Some(value) => match value.as_u64().filter(|value| *value > 0) {
+            Some(value) => value,
+            None => {
+                return ToolResult {
+                    content: "Error: 'timeout' must be a positive integer".to_string(),
+                    is_error: true,
+                }
+            }
+        },
+    };
+    let Some(run_id) = runtime.event_sink.run_id().cloned() else {
+        return ToolResult {
+            content: "Error: thread_wait requires an active run identity".to_string(),
+            is_error: true,
+        };
+    };
+    let session_id = match require_session(runtime) {
+        Ok(session_id) => session_id.to_string(),
+        Err(error) => return error,
+    };
+    let Some(deadline) = tokio::time::Instant::now().checked_add(Duration::from_secs(timeout_secs))
+    else {
+        return ToolResult {
+            content: "Error: 'timeout' is too large".to_string(),
+            is_error: true,
+        };
+    };
+
+    loop {
+        // Capture the generation before observing state so a completion or
+        // guidance notify cannot be lost between the checks and parking.
+        let activity_epoch = runtime.active_threads.activity_epoch();
+
+        let live = runtime.active_threads.live_thread_updates();
+        let all = HashSet::new();
+        let eligible = if live { &requested } else { &all };
+        let mut active = runtime
+            .active_threads
+            .active_for_run(&run_id, eligible)
+            .into_iter()
+            .map(|dispatch| dispatch.key.thread_name)
+            .collect::<Vec<_>>();
+        active.sort();
+
+        // Buffered mode drains only after every dispatch owned by this run is
+        // terminal. Live mode may deliver the eligible FIFO prefix early.
+        if live || active.is_empty() {
+            let completions = runtime.active_threads.take_completions(&run_id, eligible);
+            if !completions.is_empty() {
+                let mut output = String::from("Thread updates:");
+                for completion in completions {
+                    output.push_str(&format!(
+                        "\n\n## {} ({})\n{}",
+                        completion.key.thread_name,
+                        if completion.is_error {
+                            "failed"
+                        } else {
+                            "completed"
+                        },
+                        completion.content.trim()
+                    ));
+                }
+                let mut remaining = runtime
+                    .active_threads
+                    .active_for_run(&run_id, eligible)
+                    .into_iter()
+                    .map(|dispatch| dispatch.key.thread_name)
+                    .collect::<Vec<_>>();
+                remaining.sort();
+                if !remaining.is_empty() {
+                    output.push_str(&format!("\n\nStill running: {}", remaining.join(", ")));
+                }
+                return ToolResult {
+                    content: output,
+                    is_error: false,
+                };
+            }
+        }
+
+        let store_path = runtime.store_path.clone();
+        let guidance_session = session_id.clone();
+        let guidance_run = run_id.as_str().to_string();
+        let guidance_pending = tokio::task::spawn_blocking(move || {
+            store::has_queued_thread_steering(
+                &store_path,
+                &guidance_session,
+                store::ORCHESTRATOR_STEERING_TARGET,
+                &guidance_run,
+            )
+        })
+        .await;
+        match guidance_pending {
+            Ok(Ok(true)) => {
+                return ToolResult {
+                    content: "New user guidance is pending for this run. Respond to it now; background threads remain managed by this run.".to_string(),
+                    is_error: false,
+                }
+            }
+            Ok(Ok(false)) => {}
+            Ok(Err(error)) => {
+                return ToolResult {
+                    content: format!("Error checking orchestrator guidance: {error}"),
+                    is_error: true,
+                }
+            }
+            Err(error) => {
+                return ToolResult {
+                    content: format!("Internal error checking orchestrator guidance: {error}"),
+                    is_error: true,
+                }
+            }
+        }
+
+        if active.is_empty() {
+            let content = if live && !requested.is_empty() {
+                let mut names = requested.iter().cloned().collect::<Vec<_>>();
+                names.sort();
+                format!("None of these threads are running: {}", names.join(", "))
+            } else {
+                "No background threads are running.".to_string()
+            };
+            return ToolResult {
+                content,
+                is_error: false,
+            };
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline
+            || tokio::time::timeout(
+                deadline.saturating_duration_since(now),
+                runtime
+                    .active_threads
+                    .wait_for_activity_since(activity_epoch),
+            )
+            .await
+            .is_err()
+        {
+            return ToolResult {
+                content: format!(
+                    "Wait timed out after {timeout_secs}s. Still running: {}",
+                    active.join(", ")
+                ),
+                is_error: false,
+            };
+        }
+    }
+}
+
 pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let thread_name = match require_str(&args, "name") {
         Ok(s) => s,
@@ -551,9 +741,54 @@ fn is_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::{EventSink, SessionEventBus, SessionRunId};
     use crate::tools::test_runtime;
     use serde_json::json;
     use std::sync::Arc;
+
+    fn wait_runtime(label: &str) -> (ToolRuntime, SessionRunId) {
+        let mut runtime = test_runtime();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        runtime.store_path = std::env::temp_dir()
+            .join(format!("nac_thread_wait_{label}_{unique}"))
+            .join("store.db");
+        crate::store::initialize(&runtime.store_path).unwrap();
+        crate::store::insert_test_session(&runtime.store_path, "test-session");
+        let run_id = SessionRunId::new();
+        runtime.event_sink = EventSink::bus_with_context(
+            SessionEventBus::new(Some("test-session".to_string())),
+            Some(run_id.clone()),
+            None,
+        );
+        (runtime, run_id)
+    }
+
+    fn wait_key(run_id: &SessionRunId, name: &str) -> ThreadDispatchKey {
+        ThreadDispatchKey::new(
+            run_id.clone(),
+            name,
+            format!("dispatch-{name}"),
+            format!("call-{name}"),
+        )
+    }
+
+    fn finish_wait_thread(runtime: &ToolRuntime, key: ThreadDispatchKey, content: &str) {
+        runtime
+            .active_threads
+            .complete(
+                &runtime.store_path,
+                "test-session",
+                ThreadCompletion {
+                    key,
+                    content: content.to_string(),
+                    is_error: false,
+                },
+            )
+            .unwrap();
+    }
 
     fn skill_record(
         name: &str,
@@ -763,5 +998,121 @@ mod tests {
             .unwrap()
             .is_none());
         let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn thread_wait_buffered_mode_ignores_subset_and_drains_fifo_once() {
+        let (runtime, run_id) = wait_runtime("buffered");
+        let first = wait_key(&run_id, "first");
+        let second = wait_key(&run_id, "second");
+        assert!(runtime.active_threads.try_accept(first.clone()));
+        assert!(runtime.active_threads.try_accept(second.clone()));
+
+        let waiting = runtime.clone();
+        let wait = tokio::spawn(async move {
+            execute_thread_wait(json!({"names": ["first"], "timeout": 5}), &waiting).await
+        });
+        tokio::task::yield_now().await;
+        finish_wait_thread(&runtime, first, "first result");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!wait.is_finished());
+        finish_wait_thread(&runtime, second, "second result");
+
+        let result = wait.await.unwrap();
+        assert!(result.content.contains("first result"));
+        assert!(result.content.contains("second result"));
+        let again = execute_thread_wait(json!({"timeout": 1}), &runtime).await;
+        assert_eq!(again.content, "No background threads are running.");
+        assert!(!runtime.active_threads.has_work_for_run(&run_id));
+    }
+
+    #[tokio::test]
+    async fn thread_wait_live_mode_selects_without_stealing_unrelated_completion() {
+        let (runtime, run_id) = wait_runtime("live_selection");
+        runtime.active_threads.set_live_thread_updates(true);
+        let selected = wait_key(&run_id, "selected");
+        let other = wait_key(&run_id, "other");
+        assert!(runtime.active_threads.try_accept(selected.clone()));
+        assert!(runtime.active_threads.try_accept(other.clone()));
+        finish_wait_thread(&runtime, other, "other result");
+        finish_wait_thread(&runtime, selected, "selected result");
+
+        let result =
+            execute_thread_wait(json!({"names": ["selected"], "timeout": 1}), &runtime).await;
+        assert!(result.content.contains("selected result"));
+        assert!(!result.content.contains("other result"));
+        let remaining =
+            execute_thread_wait(json!({"names": ["other"], "timeout": 1}), &runtime).await;
+        assert!(remaining.content.contains("other result"));
+    }
+
+    #[tokio::test]
+    async fn thread_wait_wakes_only_for_durable_same_run_guidance_without_consuming_it() {
+        let (runtime, run_id) = wait_runtime("guidance");
+        let worker = wait_key(&run_id, "worker");
+        assert!(runtime.active_threads.try_accept(worker.clone()));
+        crate::store::queue_thread_steering(
+            &runtime.store_path,
+            "test-session",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "foreign-run",
+            "stale",
+        )
+        .unwrap();
+
+        let waiting = runtime.clone();
+        let wait =
+            tokio::spawn(async move { execute_thread_wait(json!({"timeout": 5}), &waiting).await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!wait.is_finished());
+        crate::store::queue_thread_steering(
+            &runtime.store_path,
+            "test-session",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            run_id.as_str(),
+            "new direction",
+        )
+        .unwrap();
+        runtime.active_threads.signal_activity();
+
+        let result = wait.await.unwrap();
+        assert!(result.content.contains("guidance is pending for this run"));
+        assert!(crate::store::has_queued_thread_steering(
+            &runtime.store_path,
+            "test-session",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            run_id.as_str(),
+        )
+        .unwrap());
+        runtime
+            .active_threads
+            .close(&runtime.store_path, "test-session", &worker)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn thread_wait_timeout_reports_running_and_preserves_foreign_completion() {
+        let (runtime, run_id) = wait_runtime("timeout");
+        let running = wait_key(&run_id, "running");
+        let foreign_run = SessionRunId::new();
+        let foreign = wait_key(&foreign_run, "foreign");
+        assert!(runtime.active_threads.try_accept(running.clone()));
+        assert!(runtime.active_threads.try_accept(foreign.clone()));
+        finish_wait_thread(&runtime, foreign.clone(), "foreign result");
+
+        let result = execute_thread_wait(json!({"timeout": 1}), &runtime).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("Still running: running"));
+        assert_eq!(
+            runtime
+                .active_threads
+                .take_completions(&foreign_run, &HashSet::new())[0]
+                .content,
+            "foreign result"
+        );
+        runtime
+            .active_threads
+            .close(&runtime.store_path, "test-session", &running)
+            .unwrap();
     }
 }
