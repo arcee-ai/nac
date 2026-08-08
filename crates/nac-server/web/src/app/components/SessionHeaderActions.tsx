@@ -33,7 +33,7 @@ export function SessionHeaderActions() {
       aria-label="Open panel"
       onClick={toggleSidePanelExpanded}
     >
-      <Icon iconName={IconName.MenuVertical} />
+      <Icon iconName={IconName.OpenMobileModal} />
     </Button>
   );
 }
