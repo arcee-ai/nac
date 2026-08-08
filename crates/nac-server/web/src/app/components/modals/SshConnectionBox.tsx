@@ -14,7 +14,6 @@ import {
   LoaderSize,
   Popover,
   PopoverPlacement,
-  Separator,
   TabButton,
   TabButtonSize,
   TabButtonVariant,
@@ -332,42 +331,64 @@ export function SshConnectionBox({
             open={menuOpen && !fieldsLocked}
             onClose={() => setMenuOpen(false)}
             placement={PopoverPlacement.BottomLeft}
-            size="w-[256px]"
+            size="w-auto"
+            className="shrink-0"
+            panelClassName="max-h-72 overflow-hidden"
+            sheetClassName="overflow-hidden [&>*]:min-h-0 [&>*]:flex-1 [&>*]:flex [&>*]:flex-col"
             content={
-              <>
-                <TabButton
-                  size={TabButtonSize.Medium}
-                  variant={
-                    selectedId === CREATE_NEW
-                      ? TabButtonVariant.Accent
-                      : TabButtonVariant.Regular
-                  }
-                  active={selectedId === CREATE_NEW}
-                  onClick={() => pickConfig(CREATE_NEW)}
-                >
-                  <Icon iconName={IconName.Add} />
-                  <span className="text-left flex-grow">Create New</span>
-                </TabButton>
-                {configurations.length > 0 ? <Separator /> : null}
-                {configurations.map((entry) => (
+              <div
+                className={cn(
+                  "flex flex-col min-h-0",
+                  isMobile ? "w-full flex-1 px-2" : "w-[280px] max-h-72",
+                )}
+              >
+                <div className="flex flex-col shrink-0 [&>*]:shrink-0">
                   <TabButton
-                    key={entry.config_id}
-                    size={TabButtonSize.Medium}
+                    size={
+                      isMobile ? TabButtonSize.Large : TabButtonSize.Medium
+                    }
                     variant={
-                      selectedId === entry.config_id
+                      selectedId === CREATE_NEW
                         ? TabButtonVariant.Accent
                         : TabButtonVariant.Regular
                     }
-                    active={selectedId === entry.config_id}
-                    onClick={() => pickConfig(entry.config_id)}
+                    active={selectedId === CREATE_NEW}
+                    onClick={() => pickConfig(CREATE_NEW)}
                   >
-                    <Icon iconName={IconName.Globe} />
-                    <span className="text-left flex-grow truncate">
-                      {entry.name}
-                    </span>
+                    <Icon iconName={IconName.Add} />
+                    <span className="text-left flex-grow">Create New</span>
                   </TabButton>
-                ))}
-              </>
+                </div>
+                {configurations.length > 0 ? (
+                  <div className="flex flex-col flex-1 min-h-0 min-w-0">
+                    <div className="h-px w-full bg-divider-muted my-1 shrink-0" />
+                    <div className="flex flex-col flex-1 min-h-0 overflow-auto [&>*]:shrink-0">
+                      {configurations.map((entry) => (
+                        <TabButton
+                          key={entry.config_id}
+                          size={
+                            isMobile
+                              ? TabButtonSize.Large
+                              : TabButtonSize.Medium
+                          }
+                          variant={
+                            selectedId === entry.config_id
+                              ? TabButtonVariant.Accent
+                              : TabButtonVariant.Regular
+                          }
+                          active={selectedId === entry.config_id}
+                          onClick={() => pickConfig(entry.config_id)}
+                        >
+                          <Icon iconName={IconName.Globe} />
+                          <span className="text-left flex-grow truncate">
+                            {entry.name}
+                          </span>
+                        </TabButton>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             }
           >
             <Button
