@@ -490,10 +490,12 @@ pub(crate) fn close_thread_dispatch(
     thread_name: &str,
     dispatch_id: &str,
 ) {
-    match runtime
-        .active_threads
-        .close(&runtime.store_path, session_id, thread_name, dispatch_id)
-    {
+    match runtime.active_threads.close_compat(
+        &runtime.store_path,
+        session_id,
+        thread_name,
+        dispatch_id,
+    ) {
         Ok(expired) => {
             for record in expired {
                 runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {

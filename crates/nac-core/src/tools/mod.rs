@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(unix)]
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
@@ -10,14 +10,16 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use fs2::FileExt;
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
+use tokio::task::AbortHandle;
 
-use crate::events::EventSink;
+use crate::events::{EventSink, SessionRunId};
 use crate::mcp::McpRegistry;
 use crate::sandbox::ExecutionBackend;
 use crate::skills::SkillRegistry;
@@ -45,28 +47,175 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
-#[derive(Default)]
-pub struct ActiveThreadRegistry {
-    dispatches: StdMutex<HashMap<String, String>>,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ThreadDispatchKey {
+    pub run_id: SessionRunId,
+    pub thread_name: String,
+    pub dispatch_id: String,
+    pub tool_call_id: String,
 }
 
+impl ThreadDispatchKey {
+    pub fn new(
+        run_id: SessionRunId,
+        thread_name: impl Into<String>,
+        dispatch_id: impl Into<String>,
+        tool_call_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            run_id,
+            thread_name: thread_name.into(),
+            dispatch_id: dispatch_id.into(),
+            tool_call_id: tool_call_id.into(),
+        }
+    }
+
+    // Temporary bridge for the foreground DAG. Background dispatch integration
+    // replaces this with authoritative run and model tool-call identities.
+    fn foreground_compat(thread_name: &str, dispatch_id: &str) -> Self {
+        Self::new(
+            SessionRunId::from_string("foreground-compat".to_string()),
+            thread_name,
+            dispatch_id,
+            dispatch_id,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadDispatchState {
+    PendingDependency,
+    Running,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveThreadDispatchSnapshot {
+    pub key: ThreadDispatchKey,
+    pub state: ThreadDispatchState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadCompletion {
+    pub key: ThreadDispatchKey,
+    pub content: String,
+    pub is_error: bool,
+}
+
+struct ActiveThreadDispatch {
+    key: ThreadDispatchKey,
+    state: ThreadDispatchState,
+    coordinator_abort: Option<AbortHandle>,
+    worker_abort: Option<AbortHandle>,
+}
+
+#[derive(Default)]
+struct ActiveThreadState {
+    active_by_name: HashMap<String, ActiveThreadDispatch>,
+    completions: VecDeque<ThreadCompletion>,
+    shutting_down: bool,
+}
+
+#[allow(dead_code)] // Exact background APIs are wired by subsequent integration commits.
+pub struct ActiveThreadRegistry {
+    state: StdMutex<ActiveThreadState>,
+    activity: Notify,
+    live_thread_updates: AtomicBool,
+}
+
+impl Default for ActiveThreadRegistry {
+    fn default() -> Self {
+        Self {
+            state: StdMutex::new(ActiveThreadState::default()),
+            activity: Notify::new(),
+            live_thread_updates: AtomicBool::new(false),
+        }
+    }
+}
+
+#[allow(dead_code)] // Exact background APIs are wired by subsequent integration commits.
 impl ActiveThreadRegistry {
     pub fn names(&self) -> Vec<String> {
-        self.lock().keys().cloned().collect()
+        self.lock().active_by_name.keys().cloned().collect()
+    }
+
+    pub fn active_dispatches(&self) -> Vec<ActiveThreadDispatchSnapshot> {
+        self.lock()
+            .active_by_name
+            .values()
+            .map(|dispatch| ActiveThreadDispatchSnapshot {
+                key: dispatch.key.clone(),
+                state: dispatch.state,
+            })
+            .collect()
     }
 
     pub fn is_active(&self, thread_name: &str) -> bool {
-        self.lock().contains_key(thread_name)
+        self.lock().active_by_name.contains_key(thread_name)
     }
 
-    pub fn mark(&self, thread_name: &str, dispatch_id: &str) -> bool {
-        let mut dispatches = self.lock();
-        if dispatches.contains_key(thread_name) {
-            false
-        } else {
-            dispatches.insert(thread_name.to_string(), dispatch_id.to_string());
-            true
+    pub fn matches(&self, key: &ThreadDispatchKey) -> bool {
+        self.lock()
+            .active_by_name
+            .get(&key.thread_name)
+            .is_some_and(|dispatch| dispatch.key == *key)
+    }
+
+    pub fn try_accept(&self, key: ThreadDispatchKey) -> bool {
+        let mut state = self.lock();
+        if state.shutting_down || state.active_by_name.contains_key(&key.thread_name) {
+            return false;
         }
+        state.active_by_name.insert(
+            key.thread_name.clone(),
+            ActiveThreadDispatch {
+                key,
+                state: ThreadDispatchState::PendingDependency,
+                coordinator_abort: None,
+                worker_abort: None,
+            },
+        );
+        true
+    }
+
+    pub fn mark_running(&self, key: &ThreadDispatchKey) -> bool {
+        let mut state = self.lock();
+        let Some(dispatch) = state.active_by_name.get_mut(&key.thread_name) else {
+            return false;
+        };
+        if dispatch.key != *key {
+            return false;
+        }
+        dispatch.state = ThreadDispatchState::Running;
+        true
+    }
+
+    pub fn attach_coordinator(&self, key: &ThreadDispatchKey, abort: AbortHandle) -> bool {
+        self.attach_abort(key, abort, false)
+    }
+
+    pub fn attach_worker(&self, key: &ThreadDispatchKey, abort: AbortHandle) -> bool {
+        self.attach_abort(key, abort, true)
+    }
+
+    fn attach_abort(&self, key: &ThreadDispatchKey, abort: AbortHandle, worker: bool) -> bool {
+        let mut state = self.lock();
+        let Some(dispatch) = state.active_by_name.get_mut(&key.thread_name) else {
+            abort.abort();
+            return false;
+        };
+        if dispatch.key != *key {
+            abort.abort();
+            return false;
+        }
+        let slot = if worker {
+            &mut dispatch.worker_abort
+        } else {
+            &mut dispatch.coordinator_abort
+        };
+        if let Some(previous) = slot.replace(abort) {
+            previous.abort();
+        }
+        true
     }
 
     pub fn queue(
@@ -76,15 +225,15 @@ impl ActiveThreadRegistry {
         thread_name: &str,
         instruction: &str,
     ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
-        let dispatches = self.lock();
-        let Some(dispatch_id) = dispatches.get(thread_name) else {
+        let state = self.lock();
+        let Some(dispatch) = state.active_by_name.get(thread_name) else {
             return Ok(None);
         };
         crate::store::queue_thread_steering(
             store_path,
             session_id,
             thread_name,
-            dispatch_id,
+            &dispatch.key.dispatch_id,
             instruction,
         )
         .map(Some)
@@ -94,16 +243,197 @@ impl ActiveThreadRegistry {
         &self,
         store_path: &Path,
         session_id: &str,
+        key: &ThreadDispatchKey,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let mut state = self.lock();
+        if !state
+            .active_by_name
+            .get(&key.thread_name)
+            .is_some_and(|dispatch| dispatch.key == *key)
+        {
+            return Ok(Vec::new());
+        }
+        let expired =
+            crate::store::expire_thread_steering(store_path, session_id, &key.dispatch_id)?;
+        state.active_by_name.remove(&key.thread_name);
+        drop(state);
+        self.activity.notify_waiters();
+        Ok(expired)
+    }
+
+    pub fn complete(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        completion: ThreadCompletion,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let mut state = self.lock();
+        if !state
+            .active_by_name
+            .get(&completion.key.thread_name)
+            .is_some_and(|dispatch| dispatch.key == completion.key)
+        {
+            return Ok(Vec::new());
+        }
+        let expired = crate::store::expire_thread_steering(
+            store_path,
+            session_id,
+            &completion.key.dispatch_id,
+        )?;
+        state.active_by_name.remove(&completion.key.thread_name);
+        state.completions.push_back(completion);
+        drop(state);
+        self.activity.notify_waiters();
+        Ok(expired)
+    }
+
+    pub fn take_completions(
+        &self,
+        run_id: &SessionRunId,
+        thread_names: &HashSet<String>,
+    ) -> Vec<ThreadCompletion> {
+        let mut state = self.lock();
+        let mut matching = Vec::new();
+        let mut retained = VecDeque::new();
+        while let Some(completion) = state.completions.pop_front() {
+            if completion.key.run_id == *run_id
+                && (thread_names.is_empty() || thread_names.contains(&completion.key.thread_name))
+            {
+                matching.push(completion);
+            } else {
+                retained.push_back(completion);
+            }
+        }
+        state.completions = retained;
+        matching
+    }
+
+    pub fn active_for_run(
+        &self,
+        run_id: &SessionRunId,
+        thread_names: &HashSet<String>,
+    ) -> Vec<ActiveThreadDispatchSnapshot> {
+        self.lock()
+            .active_by_name
+            .values()
+            .filter(|dispatch| {
+                dispatch.key.run_id == *run_id
+                    && (thread_names.is_empty() || thread_names.contains(&dispatch.key.thread_name))
+            })
+            .map(|dispatch| ActiveThreadDispatchSnapshot {
+                key: dispatch.key.clone(),
+                state: dispatch.state,
+            })
+            .collect()
+    }
+
+    pub fn has_completions_for_run(&self, run_id: &SessionRunId) -> bool {
+        self.lock()
+            .completions
+            .iter()
+            .any(|completion| completion.key.run_id == *run_id)
+    }
+
+    pub fn live_thread_updates(&self) -> bool {
+        self.live_thread_updates.load(Ordering::Acquire)
+    }
+
+    pub fn set_live_thread_updates(&self, enabled: bool) {
+        self.live_thread_updates.store(enabled, Ordering::Release);
+        self.activity.notify_waiters();
+    }
+
+    #[allow(dead_code)] // Used by guidance wakeup integration in a later commit.
+    pub fn signal_activity(&self) {
+        self.activity.notify_waiters();
+    }
+
+    pub async fn wait_for_activity(&self) {
+        self.activity.notified().await;
+    }
+
+    pub fn abort_run(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        run_id: &SessionRunId,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        self.abort_matching(store_path, session_id, Some(run_id))
+    }
+
+    pub fn shutdown(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        {
+            let mut state = self.lock();
+            state.shutting_down = true;
+        }
+        self.abort_matching(store_path, session_id, None)
+    }
+
+    fn abort_matching(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        run_id: Option<&SessionRunId>,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let mut state = self.lock();
+        let keys = state
+            .active_by_name
+            .values()
+            .filter(|dispatch| run_id.is_none_or(|run_id| dispatch.key.run_id == *run_id))
+            .map(|dispatch| dispatch.key.clone())
+            .collect::<Vec<_>>();
+        let mut expired = Vec::new();
+        let mut first_error = None;
+        for key in keys {
+            if let Some(dispatch) = state.active_by_name.remove(&key.thread_name) {
+                if let Some(abort) = dispatch.worker_abort {
+                    abort.abort();
+                }
+                if let Some(abort) = dispatch.coordinator_abort {
+                    abort.abort();
+                }
+            }
+            match crate::store::expire_thread_steering(store_path, session_id, &key.dispatch_id) {
+                Ok(records) => expired.extend(records),
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+        state
+            .completions
+            .retain(|completion| run_id.is_some_and(|run_id| completion.key.run_id != *run_id));
+        drop(state);
+        self.activity.notify_waiters();
+        first_error.map_or(Ok(expired), Err)
+    }
+
+    // Compatibility for the foreground DAG until background execution supplies
+    // authoritative run and tool-call identities.
+    pub fn mark(&self, thread_name: &str, dispatch_id: &str) -> bool {
+        let key = ThreadDispatchKey::foreground_compat(thread_name, dispatch_id);
+        let accepted = self.try_accept(key.clone());
+        if accepted {
+            self.mark_running(&key);
+        }
+        accepted
+    }
+
+    pub fn close_compat(
+        &self,
+        store_path: &Path,
+        session_id: &str,
         thread_name: &str,
         dispatch_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut dispatches = self.lock();
-        if dispatches.get(thread_name).map(String::as_str) != Some(dispatch_id) {
-            return Ok(Vec::new());
-        }
-        let expired = crate::store::expire_thread_steering(store_path, session_id, dispatch_id)?;
-        dispatches.remove(thread_name);
-        Ok(expired)
+        self.close(
+            store_path,
+            session_id,
+            &ThreadDispatchKey::foreground_compat(thread_name, dispatch_id),
+        )
     }
 
     pub fn close_all(
@@ -111,29 +441,31 @@ impl ActiveThreadRegistry {
         store_path: &Path,
         session_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut dispatches = self.lock();
-        let targets = dispatches
-            .iter()
-            .map(|(name, dispatch_id)| (name.clone(), dispatch_id.clone()))
-            .collect::<Vec<_>>();
-        let mut expired = Vec::new();
-        for (name, dispatch_id) in targets {
-            expired.extend(crate::store::expire_thread_steering(
-                store_path,
-                session_id,
-                &dispatch_id,
-            )?);
-            if dispatches.get(&name) == Some(&dispatch_id) {
-                dispatches.remove(&name);
-            }
-        }
-        Ok(expired)
+        self.abort_matching(store_path, session_id, None)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
-        self.dispatches
+    fn lock(&self) -> std::sync::MutexGuard<'_, ActiveThreadState> {
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+impl Drop for ActiveThreadRegistry {
+    fn drop(&mut self) {
+        let state = self
+            .state
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (_, dispatch) in state.active_by_name.drain() {
+            if let Some(abort) = dispatch.worker_abort {
+                abort.abort();
+            }
+            if let Some(abort) = dispatch.coordinator_abort {
+                abort.abort();
+            }
+        }
+        state.completions.clear();
     }
 }
 
@@ -570,6 +902,261 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
+    }
+}
+
+#[cfg(test)]
+mod active_thread_registry_tests {
+    use super::*;
+    use std::future::pending;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn key(run: &SessionRunId, name: &str, dispatch: &str, call: &str) -> ThreadDispatchKey {
+        ThreadDispatchKey::new(run.clone(), name, dispatch, call)
+    }
+
+    fn test_store() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "nac_active_registry_{}_{}.db",
+            std::process::id(),
+            unique
+        ));
+        crate::store::initialize(&path).unwrap();
+        path
+    }
+
+    fn completion(key: ThreadDispatchKey, content: &str) -> ThreadCompletion {
+        ThreadCompletion {
+            key,
+            content: content.to_string(),
+            is_error: false,
+        }
+    }
+
+    #[test]
+    fn exact_key_and_name_exclusion_preserve_pending_running_state() {
+        let registry = ActiveThreadRegistry::default();
+        let run = SessionRunId::new();
+        let accepted = key(&run, "worker", "dispatch-a", "call-a");
+        let same_name = key(&SessionRunId::new(), "worker", "dispatch-b", "call-b");
+
+        assert!(registry.try_accept(accepted.clone()));
+        assert!(!registry.try_accept(same_name));
+        assert!(registry.matches(&accepted));
+        assert_eq!(
+            registry.active_dispatches(),
+            vec![ActiveThreadDispatchSnapshot {
+                key: accepted.clone(),
+                state: ThreadDispatchState::PendingDependency,
+            }]
+        );
+        assert!(registry.mark_running(&accepted));
+        assert_eq!(
+            registry.active_dispatches()[0].state,
+            ThreadDispatchState::Running
+        );
+
+        for stale in [
+            key(&SessionRunId::new(), "worker", "dispatch-a", "call-a"),
+            key(&run, "worker", "dispatch-other", "call-a"),
+            key(&run, "worker", "dispatch-a", "call-other"),
+        ] {
+            assert!(!registry.matches(&stale));
+            assert!(!registry.mark_running(&stale));
+        }
+    }
+
+    #[test]
+    fn stale_close_and_completion_cannot_remove_or_buffer_for_reused_name() {
+        let registry = ActiveThreadRegistry::default();
+        let run = SessionRunId::new();
+        let current = key(&run, "worker", "dispatch-new", "call-new");
+        let stale = key(&run, "worker", "dispatch-old", "call-old");
+        assert!(registry.try_accept(current.clone()));
+
+        let missing = Path::new("/store/must/not/be/opened");
+        assert!(registry
+            .close(missing, "session", &stale)
+            .unwrap()
+            .is_empty());
+        assert!(registry
+            .complete(missing, "session", completion(stale, "stale"))
+            .unwrap()
+            .is_empty());
+        assert!(registry.matches(&current));
+        assert!(!registry.has_completions_for_run(&run));
+    }
+
+    #[test]
+    fn exact_close_releases_name_for_reuse_without_buffering_completion() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let first = key(&run, "worker", "dispatch-first", "call-first");
+        let second = key(&run, "worker", "dispatch-second", "call-second");
+        assert!(registry.try_accept(first.clone()));
+
+        assert!(registry
+            .close(&store, "session", &first)
+            .unwrap()
+            .is_empty());
+        assert!(!registry.matches(&first));
+        assert!(!registry.has_completions_for_run(&run));
+        assert!(registry.try_accept(second.clone()));
+        assert!(registry.matches(&second));
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn completions_are_fifo_run_scoped_filtered_and_exactly_once() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run_a = SessionRunId::new();
+        let run_b = SessionRunId::new();
+        let a1 = key(&run_a, "a1", "dispatch-a1", "call-a1");
+        let b1 = key(&run_b, "b1", "dispatch-b1", "call-b1");
+        let a2 = key(&run_a, "a2", "dispatch-a2", "call-a2");
+        for key in [&a1, &b1, &a2] {
+            assert!(registry.try_accept(key.clone()));
+        }
+        registry
+            .complete(&store, "session", completion(a1, "first"))
+            .unwrap();
+        registry
+            .complete(&store, "session", completion(b1, "foreign"))
+            .unwrap();
+        registry
+            .complete(&store, "session", completion(a2, "second"))
+            .unwrap();
+
+        let selected = HashSet::from(["a2".to_string()]);
+        let taken = registry.take_completions(&run_a, &selected);
+        assert_eq!(
+            taken
+                .iter()
+                .map(|item| item.content.as_str())
+                .collect::<Vec<_>>(),
+            ["second"]
+        );
+        assert!(registry.take_completions(&run_a, &selected).is_empty());
+        let remaining_a = registry.take_completions(&run_a, &HashSet::new());
+        assert_eq!(remaining_a[0].content, "first");
+        let remaining_b = registry.take_completions(&run_b, &HashSet::new());
+        assert_eq!(remaining_b[0].content, "foreign");
+        assert!(!registry.has_completions_for_run(&run_a));
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[tokio::test]
+    async fn abort_handle_attachment_is_exact_and_replacement_aborts_old_owner() {
+        let registry = ActiveThreadRegistry::default();
+        let run = SessionRunId::new();
+        let current = key(&run, "worker", "dispatch", "call");
+        let stale = key(&run, "worker", "other", "call");
+        assert!(registry.try_accept(current.clone()));
+
+        let stale_task = tokio::spawn(pending::<()>());
+        assert!(!registry.attach_worker(&stale, stale_task.abort_handle()));
+        assert!(stale_task.await.unwrap_err().is_cancelled());
+
+        let first = tokio::spawn(pending::<()>());
+        assert!(registry.attach_worker(&current, first.abort_handle()));
+        let replacement = tokio::spawn(pending::<()>());
+        assert!(registry.attach_worker(&current, replacement.abort_handle()));
+        assert!(first.await.unwrap_err().is_cancelled());
+        replacement.abort();
+    }
+
+    #[tokio::test]
+    async fn abort_run_cleans_only_exact_run_tasks_and_completions() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run_a = SessionRunId::new();
+        let run_b = SessionRunId::new();
+        let active_a = key(&run_a, "active-a", "dispatch-aa", "call-aa");
+        let done_a = key(&run_a, "done-a", "dispatch-da", "call-da");
+        let active_b = key(&run_b, "active-b", "dispatch-ab", "call-ab");
+        let done_b = key(&run_b, "done-b", "dispatch-db", "call-db");
+        for key in [&active_a, &done_a, &active_b, &done_b] {
+            assert!(registry.try_accept(key.clone()));
+        }
+        let coordinator = tokio::spawn(pending::<()>());
+        let worker = tokio::spawn(pending::<()>());
+        assert!(registry.attach_coordinator(&active_a, coordinator.abort_handle()));
+        assert!(registry.attach_worker(&active_a, worker.abort_handle()));
+        registry
+            .complete(&store, "session", completion(done_a, "done-a"))
+            .unwrap();
+        registry
+            .complete(&store, "session", completion(done_b, "done-b"))
+            .unwrap();
+
+        registry.abort_run(&store, "session", &run_a).unwrap();
+        assert!(coordinator.await.unwrap_err().is_cancelled());
+        assert!(worker.await.unwrap_err().is_cancelled());
+        assert!(registry.active_for_run(&run_a, &HashSet::new()).is_empty());
+        assert!(!registry.has_completions_for_run(&run_a));
+        assert!(registry.matches(&active_b));
+        assert_eq!(
+            registry.take_completions(&run_b, &HashSet::new())[0].content,
+            "done-b"
+        );
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[tokio::test]
+    async fn shutdown_aborts_all_owners_clears_buffers_and_rejects_new_dispatches() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let active = key(&run, "active", "dispatch-active", "call-active");
+        let done = key(&run, "done", "dispatch-done", "call-done");
+        assert!(registry.try_accept(active.clone()));
+        assert!(registry.try_accept(done.clone()));
+        let coordinator = tokio::spawn(pending::<()>());
+        assert!(registry.attach_coordinator(&active, coordinator.abort_handle()));
+        registry
+            .complete(&store, "session", completion(done, "done"))
+            .unwrap();
+
+        registry.shutdown(&store, "session").unwrap();
+        assert!(coordinator.await.unwrap_err().is_cancelled());
+        assert!(registry.names().is_empty());
+        assert!(!registry.has_completions_for_run(&run));
+        assert!(!registry.try_accept(key(&run, "later", "dispatch", "call")));
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[tokio::test]
+    async fn notify_and_live_mode_default_are_observable() {
+        let registry = Arc::new(ActiveThreadRegistry::default());
+        assert!(!registry.live_thread_updates());
+        let waiter_registry = registry.clone();
+        let waiter = tokio::spawn(async move { waiter_registry.wait_for_activity().await });
+        tokio::task::yield_now().await;
+        registry.set_live_thread_updates(true);
+        tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(registry.live_thread_updates());
+    }
+
+    #[tokio::test]
+    async fn drop_is_a_synchronous_abort_fallback() {
+        let run = SessionRunId::new();
+        let task = tokio::spawn(pending::<()>());
+        {
+            let registry = ActiveThreadRegistry::default();
+            let key = key(&run, "worker", "dispatch", "call");
+            assert!(registry.try_accept(key.clone()));
+            assert!(registry.attach_worker(&key, task.abort_handle()));
+        }
+        assert!(task.await.unwrap_err().is_cancelled());
     }
 }
 
