@@ -1,9 +1,4 @@
-import React, {
-  useCallback,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { AnchorPlacement, anchorClasses, anchorCoords } from "../../lib/anchor";
@@ -26,6 +21,7 @@ interface TooltipBoxProps {
   style?: React.CSSProperties;
   /** Mobile sheet uses the regular (non-inverse) surface tokens. */
   inverted?: boolean;
+  isMobile?: boolean;
 }
 
 const TooltipBox: React.FC<TooltipBoxProps> = ({
@@ -36,13 +32,15 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
   className,
   style,
   inverted = true,
+  isMobile = false,
 }) => (
   <div ref={boxRef} className={className} style={style}>
     <div className="flex gap-2 items-center">
       <div
         className={cn(
-          "label-micro flex-grow",
-          inverted ? "text-basic-primary-inverse" : "label-medium text-basic-primary",
+          isMobile ? "label-medium" : "label-micro",
+          "flex-grow",
+          inverted ? "text-basic-primary-inverse" : "text-basic-primary",
         )}
       >
         {title}
@@ -185,6 +183,7 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
                 keyboardShortcuts={keyboardShortcuts}
                 inverted={false}
                 className="flex flex-col gap-2"
+                isMobile={isMobile}
               />
             </div>
           </div>
@@ -225,7 +224,10 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
                 coords ? null : "invisible",
                 boxClassName,
               )}
-              style={{ left: `${coords?.left ?? 0}px`, top: `${coords?.top ?? 0}px` }}
+              style={{
+                left: `${coords?.left ?? 0}px`,
+                top: `${coords?.top ?? 0}px`,
+              }}
             />,
             document.body,
           )
@@ -252,7 +254,9 @@ interface TooltipProps {
   children?: React.ReactNode;
 }
 
-const Tooltip: React.FC<TooltipProps> & { Position: typeof AnchorPlacement } = ({
+const Tooltip: React.FC<TooltipProps> & {
+  Position: typeof AnchorPlacement;
+} = ({
   title = "",
   description,
   keyboardShortcuts = [],

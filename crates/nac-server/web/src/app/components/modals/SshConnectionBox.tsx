@@ -32,10 +32,8 @@ import {
   markSshConnected,
   markSshDisconnected,
 } from "@/app/store/sshConnectionStore";
-import type {
-  SshConfigurationRecord,
-  SshTarget,
-} from "@/app/types/api";
+import type { SshConfigurationRecord, SshTarget } from "@/app/types/api";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 const CREATE_NEW = "__new__";
 
@@ -183,12 +181,11 @@ export function SshConnectionBox({
   const [draftPort, setDraftPort] = useState(
     seedTarget?.ssh_port ? String(seedTarget.ssh_port) : "",
   );
-  const [draftKey, setDraftKey] = useState(
-    seedTarget?.ssh_identity_file ?? "",
-  );
+  const [draftKey, setDraftKey] = useState(seedTarget?.ssh_identity_file ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pickingKey, setPickingKey] = useState(false);
 
+  const isMobile = useIsMobile();
   const connected = Boolean(connection);
   const busy = connect.isPending || createConfig.isPending || testing;
   const fieldsLocked = locked || connected || busy;
@@ -196,7 +193,8 @@ export function SshConnectionBox({
   const selectedConfig =
     selectedId === CREATE_NEW
       ? null
-      : (configurations.find((entry) => entry.config_id === selectedId) ?? null);
+      : (configurations.find((entry) => entry.config_id === selectedId) ??
+        null);
 
   const name = isManage ? (controlledName ?? "") : draftName;
   const host = isManage
@@ -314,9 +312,7 @@ export function SshConnectionBox({
     <div
       className={cn(
         "relative flex flex-col rounded-[8px] overflow-hidden shadow-convex",
-        connected
-          ? "bg-info-primary"
-          : "bg-elevation-sublevel-variant-A",
+        connected ? "bg-info-primary" : "bg-elevation-sublevel-variant-A",
         className,
       )}
     >
@@ -326,7 +322,11 @@ export function SshConnectionBox({
             SSH config
           </p>
           {connected ? (
-            <Badge text="Connected" color={BadgeColor.Blue} className="!py-0.5 !px-1" />
+            <Badge
+              text="Connected"
+              color={BadgeColor.Blue}
+              className="!py-0.5 !px-1"
+            />
           ) : null}
           <Popover
             open={menuOpen && !fieldsLocked}
@@ -379,8 +379,11 @@ export function SshConnectionBox({
             >
               <span className="truncate max-w-[140px]">{selectorLabel}</span>
               <Icon
-                iconName={menuOpen ? IconName.Top : IconName.Down}
-                size={20}
+                iconName={IconName.Down}
+                className={cn(
+                  "shrink-0 transition-transform duration-150 ease-out",
+                  menuOpen ? "rotate-180" : "rotate-0",
+                )}
               />
             </Button>
           </Popover>
@@ -392,7 +395,7 @@ export function SshConnectionBox({
           <div className="flex flex-col gap-1 w-full">
             <FieldLabel label="SSH config name" required />
             <Input
-              inputSize={InputSize.Medium}
+              inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               value={name}
               isDisabled={fieldsLocked}
               onChange={(e) => setName(e.target.value)}
@@ -401,28 +404,28 @@ export function SshConnectionBox({
           </div>
         ) : null}
 
-        <div className="flex gap-4 items-start w-full">
-          <div className="flex flex-col gap-1 flex-1 min-w-0">
+        <div className="flex flex-col md:flex-row gap-4 items-start w-full">
+          <div className="flex flex-col gap-1 w-full md:flex-1 min-w-0">
             <FieldLabel
               label="SSH Host"
               required
               hint="user@host, a host alias from ~/.ssh/config, or an IP."
             />
             <Input
-              inputSize={InputSize.Medium}
+              inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               value={host}
               isDisabled={fieldsLocked}
               onChange={(e) => setHost(e.target.value)}
               placeholder="example@192.0.2.10 or build-box"
             />
           </div>
-          <div className="flex flex-col gap-1 w-[98px] shrink-0">
+          <div className="flex flex-col gap-1 w-full md:w-[98px] shrink-0">
             <FieldLabel
               label="Port"
               hint="Blank uses OpenSSH's default (usually 22)."
             />
             <Input
-              inputSize={InputSize.Medium}
+              inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               value={port}
               isDisabled={fieldsLocked}
               onChange={(e) => setPort(e.target.value)}
@@ -450,7 +453,7 @@ export function SshConnectionBox({
               <Icon iconName={IconName.FolderOpen} size={20} />
             </Button>
           </div>
-          <div className="w-[128px] shrink-0 relative">
+          <div className="md:w-[128px] shrink-0 relative">
             {isManage ? (
               <Button
                 size={ButtonSize.Medium}
