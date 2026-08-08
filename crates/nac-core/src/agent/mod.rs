@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
-use crate::events::{AgentEvent, EventSink};
+use crate::events::{AgentEvent, EventSink, FailureKind};
 use crate::mcp::McpRegistry;
 use crate::model::{ModelClient, TokenUsage};
 use crate::sandbox::SandboxSession;
@@ -476,6 +476,7 @@ impl Agent {
             self.emit(AgentEvent::Error {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
+                failure_kind: FailureKind::Unknown,
             });
             self.tool_runtime.terminal_manager.remove_all().await;
             return Err(error);
@@ -485,6 +486,7 @@ impl Agent {
             self.emit(AgentEvent::Error {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
+                failure_kind: FailureKind::Unknown,
             });
             self.tool_runtime.terminal_manager.remove_all().await;
             return Err(error);
@@ -526,6 +528,7 @@ impl Agent {
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
+                        failure_kind: FailureKind::Unknown,
                     });
                     self.tool_runtime.terminal_manager.remove_all().await;
                     return Err(error);
@@ -565,6 +568,7 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
+                    failure_kind: FailureKind::Unknown,
                 });
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Err(error);
@@ -611,6 +615,7 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
+                    failure_kind: FailureKind::Unknown,
                 });
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Err(error);
@@ -702,6 +707,7 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
+                    failure_kind: FailureKind::Unknown,
                 });
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Err(error);
@@ -1057,6 +1063,7 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
+                    failure_kind: FailureKind::Unknown,
                 });
                 self.tool_runtime.terminal_manager.remove_all().await;
                 Err(error)

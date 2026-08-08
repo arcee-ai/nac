@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::events::AgentEvent;
+use crate::events::{AgentEvent, FailureKind};
 use crate::model::ModelClient;
 use crate::skills::SkillRegistry;
 use crate::store;
@@ -17,6 +17,7 @@ use worker::{run_worker, WorkerInvocation};
 
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
+const THREAD_DELETE_CANCELLATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn dispatch_definition(skills: Option<&SkillRegistry>) -> ToolDefinition {
     use serde_json::json;
@@ -121,7 +122,7 @@ pub fn thread_delete_definition() -> ToolDefinition {
     use serde_json::json;
     def(
         "thread_delete",
-        "Delete one thread and all its retained episodes.",
+        "Delete one thread and all its retained episodes. If the thread is running, cancel its managed worker first and wait for shutdown before deleting it.",
         json!({
             "type": "object",
             "properties": {
@@ -184,6 +185,10 @@ pub async fn execute_parsed_dispatch(
         session_id,
         timeout_secs,
     } = params;
+    let cancellation = runtime
+        .active_threads
+        .cancellation(&thread_name, &dispatch_id)
+        .unwrap_or_default();
 
     runtime.event_sink.emit(AgentEvent::ThreadStarted {
         name: thread_name.clone(),
@@ -202,6 +207,7 @@ pub async fn execute_parsed_dispatch(
             source_threads: &source_threads,
             scheduled_skills: &scheduled_skills,
             timeout_secs,
+            cancellation: &cancellation,
         },
     )
     .await;
@@ -220,9 +226,23 @@ pub async fn execute_parsed_dispatch(
             runtime.event_sink.emit(AgentEvent::Error {
                 thread_name: Some(thread_name.clone()),
                 message: format!("Failed to spawn thread '{}': {}", thread_name, e),
+                failure_kind: FailureKind::Unknown,
             });
             ToolResult {
                 content: format!("Failed to spawn thread '{}': {}", thread_name, e),
+                is_error: true,
+            }
+        }
+        Ok(run) if run.cancelled => {
+            runtime.event_sink.emit(AgentEvent::ThreadFinished {
+                name: thread_name.clone(),
+                exit_code: run.exit_code,
+                timed_out: false,
+                timeout_reason: None,
+                usage: run.usage.clone(),
+            });
+            ToolResult {
+                content: format!("Thread '{thread_name}' was cancelled."),
                 is_error: true,
             }
         }
@@ -261,6 +281,9 @@ pub async fn execute_parsed_dispatch(
             } else {
                 "no output".to_string()
             };
+            runtime
+                .event_sink
+                .log_internal_failure(Some(&thread_name), &details);
             ToolResult {
                 content: format!(
                     "Thread '{}' failed (exit {}):\n{}",
@@ -585,14 +608,33 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
         Err(e) => return e,
     };
 
-    if is_thread_active(runtime, &thread_name) {
-        return ToolResult {
-            content: format!(
-                "Thread '{}' is currently running; wait for it to finish before deleting it.",
-                thread_name
-            ),
-            is_error: true,
-        };
+    let was_active = is_thread_active(runtime, &thread_name);
+    if was_active {
+        runtime.active_threads.cancel(&thread_name);
+        let deadline = tokio::time::Instant::now() + THREAD_DELETE_CANCELLATION_TIMEOUT;
+        while is_thread_active(runtime, &thread_name) {
+            let now = tokio::time::Instant::now();
+            if now >= deadline
+                || tokio::time::timeout(
+                    deadline.saturating_duration_since(now),
+                    runtime.active_threads.wait_for_activity(),
+                )
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        if is_thread_active(runtime, &thread_name) {
+            return ToolResult {
+                content: format!(
+                    "Cancellation was requested for thread '{}', but its worker did not shut down within {}s. The thread was not deleted; retry after shutdown completes.",
+                    thread_name,
+                    THREAD_DELETE_CANCELLATION_TIMEOUT.as_secs()
+                ),
+                is_error: true,
+            };
+        }
     }
 
     let store_path = runtime.store_path.clone();
@@ -600,13 +642,23 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
     let tname = thread_name.clone();
     match tokio::task::spawn_blocking(move || store::delete_thread(&store_path, &sid, &tname)).await
     {
-        Ok(Ok(true)) => ToolResult {
-            content: format!(
-                "Deleted thread '{}' and its retained episodes.",
-                thread_name
-            ),
-            is_error: false,
-        },
+        Ok(Ok(true)) => {
+            runtime.active_threads.forget_completion(&thread_name);
+            ToolResult {
+                content: if was_active {
+                    format!(
+                        "Cancelled and deleted thread '{}' and its retained episodes.",
+                        thread_name
+                    )
+                } else {
+                    format!(
+                        "Deleted thread '{}' and its retained episodes.",
+                        thread_name
+                    )
+                },
+                is_error: false,
+            }
+        }
         Ok(Ok(false)) => ToolResult {
             content: format!("Thread '{}' does not exist in this session.", thread_name),
             is_error: true,
@@ -714,6 +766,7 @@ pub(crate) fn close_thread_dispatch(
         Err(error) => runtime.event_sink.emit(AgentEvent::Error {
             thread_name: Some(thread_name.to_string()),
             message: format!("failed to expire undelivered steering: {error}"),
+            failure_kind: FailureKind::Unknown,
         }),
     }
 }
@@ -747,6 +800,7 @@ pub(crate) fn complete_thread_dispatch(
         Err(error) => runtime.event_sink.emit(AgentEvent::Error {
             thread_name: Some(thread_name.to_string()),
             message: format!("failed to expire undelivered steering: {error}"),
+            failure_kind: FailureKind::Unknown,
         }),
     }
 }
@@ -758,8 +812,12 @@ fn is_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::{EventSink, SessionEvent, SessionEventBus};
+    use crate::model::ModelClient;
     use crate::tools::test_runtime;
     use serde_json::json;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::Arc;
 
     fn skill_record(
@@ -1089,6 +1147,86 @@ mod tests {
         assert!(result.content.contains("New user guidance is pending"));
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
         let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn deleting_active_thread_stops_process_tree_emits_terminal_and_clears_status() {
+        let mut runtime = test_runtime_with_store("delete_active");
+        crate::store::append_episode(
+            &runtime.store_path,
+            "test-session",
+            "impl/slow",
+            "previous action",
+            "previous result",
+        )
+        .unwrap();
+
+        let temp_dir = runtime.store_path.parent().unwrap();
+        let child_pid_path = temp_dir.join("child.pid");
+        let worker_path = temp_dir.join("fake-worker.sh");
+        std::fs::write(
+            &worker_path,
+            format!(
+                "#!/bin/sh\nsleep 60 &\nchild=$!\nprintf '%s' \"$child\" > '{}'\nwait \"$child\"\n",
+                child_pid_path.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&worker_path).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&worker_path, permissions).unwrap();
+        runtime.worker_executable = Some(worker_path);
+
+        let bus = SessionEventBus::new(Some("test-session".to_string()));
+        runtime.event_sink = EventSink::bus(bus.clone());
+        let started = execute_dispatch(
+            json!({ "name": "impl/slow", "action": "run until cancelled" }),
+            &runtime,
+            &ModelClient::new_for_test(),
+        )
+        .await;
+        assert!(!started.is_error);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !child_pid_path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fake worker child should start");
+        let child_pid = std::fs::read_to_string(&child_pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+
+        let deleted = execute_thread_delete(json!({ "name": "impl/slow" }), &runtime).await;
+        assert!(!deleted.is_error, "{}", deleted.content);
+        assert!(deleted.content.contains("Cancelled and deleted"));
+        assert!(!runtime.active_threads.is_active("impl/slow"));
+        assert!(!runtime.active_threads.has_completions());
+        assert!(
+            crate::store::list_threads(&runtime.store_path, "test-session")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(bus.recent_events(None, 100).iter().any(|envelope| {
+            matches!(
+                &envelope.event,
+                SessionEvent::Agent {
+                    event: AgentEvent::ThreadFinished { name, .. }
+                } if name == "impl/slow"
+            )
+        }));
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while unsafe { libc::kill(child_pid, 0) } == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("cancellation should terminate the worker process tree");
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[tokio::test]

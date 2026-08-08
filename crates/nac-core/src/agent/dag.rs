@@ -131,6 +131,7 @@ async fn run_background_dag(
                 ctx.event_sink.emit(AgentEvent::Error {
                     thread_name: Some(dispatch.params.thread_name.clone()),
                     message: result.content.clone(),
+                    failure_kind: FailureKind::Unknown,
                 });
                 thread::complete_thread_dispatch(
                     &ctx.runtime,
@@ -191,6 +192,7 @@ async fn run_background_dag(
                         ctx.event_sink.emit(AgentEvent::Error {
                             thread_name: Some(dispatch.params.thread_name.clone()),
                             message: result.content.clone(),
+                            failure_kind: FailureKind::Unknown,
                         });
                         thread::complete_thread_dispatch(
                             &ctx.runtime,

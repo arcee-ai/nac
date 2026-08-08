@@ -116,6 +116,40 @@ pub enum CompactionFailure {
     Cancelled,
 }
 
+/// Stable, externally safe classification for an internal run failure.
+///
+/// The full error remains local to the server log. Events expose only this
+/// category and its fixed user-facing message so provider bodies, paths,
+/// credentials, and transcript content cannot leak through telemetry.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    ContextLimit,
+    Authentication,
+    Ssh,
+    Provider,
+    Persistence,
+    Cancelled,
+    #[default]
+    Unknown,
+}
+
+impl FailureKind {
+    pub fn safe_message(self) -> &'static str {
+        match self {
+            Self::ContextLimit => "Context limit reached. Compact the session and retry.",
+            Self::Authentication => "Authentication failed. Sign in again and retry.",
+            Self::Ssh => "SSH connection failed. Check the remote host and retry.",
+            Self::Provider => "Model provider request failed. Retry or check provider status.",
+            Self::Persistence => {
+                "Session persistence failed. Check the local store and server logs."
+            }
+            Self::Cancelled => "Run cancelled by user.",
+            Self::Unknown => "Operation failed. See server logs for this run ID.",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
@@ -220,6 +254,8 @@ pub enum AgentEvent {
     Error {
         thread_name: Option<String>,
         message: String,
+        #[serde(default)]
+        failure_kind: FailureKind,
     },
     RunFinished {
         thread_name: Option<String>,
@@ -281,6 +317,8 @@ pub enum SessionEvent {
     },
     RunFailed {
         message: String,
+        #[serde(default)]
+        failure_kind: FailureKind,
     },
     SnapshotSaved {
         session_id: String,
@@ -731,10 +769,18 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             timeout_reason: timed_out.then(|| "thread timed out".to_string()),
             usage,
         },
-        AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
+        AgentEvent::Error {
             thread_name,
-            message: "operation failed".to_string(),
-        },
+            message,
+            failure_kind,
+        } => {
+            let failure_kind = resolved_failure_kind(failure_kind, &message);
+            AgentEvent::Error {
+                thread_name,
+                message: failure_kind.safe_message().to_string(),
+                failure_kind,
+            }
+        }
         event @ (AgentEvent::ModelCallStarted { .. }
         | AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::AssistantMessage { .. }
@@ -751,11 +797,123 @@ fn sanitize_external_session_event(event: SessionEvent) -> Option<SessionEvent> 
         SessionEvent::Agent { event } => SessionEvent::Agent {
             event: sanitize_external_agent_event(event)?,
         },
-        SessionEvent::RunFailed { .. } => SessionEvent::RunFailed {
-            message: "run failed".to_string(),
-        },
+        SessionEvent::RunFailed {
+            message,
+            failure_kind,
+        } => {
+            let failure_kind = resolved_failure_kind(failure_kind, &message);
+            SessionEvent::RunFailed {
+                message: failure_kind.safe_message().to_string(),
+                failure_kind,
+            }
+        }
         event => event,
     })
+}
+
+fn resolved_failure_kind(kind: FailureKind, message: &str) -> FailureKind {
+    if kind != FailureKind::Unknown {
+        return kind;
+    }
+    classify_failure(message)
+}
+
+fn classify_failure(message: &str) -> FailureKind {
+    let message = message.to_ascii_lowercase();
+    if contains_any(
+        &message,
+        &[
+            "context_length_exceeded",
+            "context window full",
+            "context window is full",
+            "context limit",
+            "maximum context length",
+            "maximum number of context tokens",
+            "prompt is too long",
+            "input is too long",
+            "too many tokens",
+            "finish_reason=length",
+        ],
+    ) {
+        FailureKind::ContextLimit
+    } else if contains_any(
+        &message,
+        &[
+            "run cancelled by user",
+            "run canceled by user",
+            "operation cancelled by user",
+            "operation canceled by user",
+        ],
+    ) {
+        FailureKind::Cancelled
+    } else if contains_any(
+        &message,
+        &[
+            "unauthorized",
+            "authentication",
+            "auth is not configured",
+            "credential",
+            "access token",
+            "refresh token",
+            "http 401",
+            "http 403",
+        ],
+    ) {
+        FailureKind::Authentication
+    } else if contains_any(
+        &message,
+        &[
+            "ssh connection",
+            "failed to spawn 'ssh'",
+            "openssh",
+            "host key verification failed",
+            "remote cwd",
+        ],
+    ) {
+        FailureKind::Ssh
+    } else if contains_any(
+        &message,
+        &[
+            "persist",
+            "sqlite",
+            "database",
+            "session store",
+            "snapshot",
+            "transcript log",
+            "checkpoint persistence",
+        ],
+    ) {
+        FailureKind::Persistence
+    } else if contains_any(
+        &message,
+        &[
+            "model provider",
+            "model request",
+            "model backend",
+            "http request failed",
+            "failed to read response body",
+            "failed to parse response",
+            "rate limit",
+            "http 400",
+            "http 404",
+            "http 408",
+            "http 409",
+            "http 422",
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+        ],
+    ) {
+        FailureKind::Provider
+    } else {
+        FailureKind::Unknown
+    }
+}
+
+fn contains_any(message: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| message.contains(needle))
 }
 
 fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> String {
@@ -1077,7 +1235,25 @@ impl EventSink {
         }
     }
 
+    pub(crate) fn log_internal_failure(&self, thread_name: Option<&str>, message: &str) {
+        let Some(run_id) = &self.run_id else {
+            return;
+        };
+        eprintln!(
+            "{}",
+            internal_failure_log_line(run_id, thread_name, message)
+        );
+    }
+
     pub fn emit(&self, event: AgentEvent) {
+        if let AgentEvent::Error {
+            thread_name,
+            message,
+            failure_kind: FailureKind::Unknown,
+        } = &event
+        {
+            self.log_internal_failure(thread_name.as_deref(), message);
+        }
         let Some(event) = sanitize_external_agent_event(event) else {
             return;
         };
@@ -1112,6 +1288,19 @@ impl EventSink {
             );
         }
     }
+}
+
+fn internal_failure_log_line(
+    run_id: &SessionRunId,
+    thread_name: Option<&str>,
+    message: &str,
+) -> String {
+    let scope = thread_name
+        .map(|name| format!("thread {name:?}"))
+        .unwrap_or_else(|| "orchestrator".to_string());
+    // Debug formatting escapes embedded newlines so one failure remains one
+    // greppable log record while preserving the complete internal message.
+    format!("nac: run {run_id} failed in {scope}: {message:?}")
 }
 
 pub fn decode_stderr_event(line: &str) -> Option<AgentEvent> {
@@ -1294,6 +1483,108 @@ mod tests {
             )
         );
         assert!(!serialized.contains("CANARY"));
+    }
+
+    #[test]
+    fn failure_sanitization_emits_typed_safe_categories_without_details() {
+        let cases = [
+            (
+                "HTTP 400: context_length_exceeded CANARY_CONTEXT",
+                FailureKind::ContextLimit,
+            ),
+            (
+                "HTTP 401 unauthorized CANARY_AUTH",
+                FailureKind::Authentication,
+            ),
+            ("ssh connection to CANARY_HOST failed", FailureKind::Ssh),
+            ("HTTP 503 from CANARY_PROVIDER", FailureKind::Provider),
+            (
+                "failed to persist session snapshot at CANARY_PATH",
+                FailureKind::Persistence,
+            ),
+            (
+                "run cancelled by user CANARY_CANCEL",
+                FailureKind::Cancelled,
+            ),
+            ("unexpected CANARY_UNKNOWN", FailureKind::Unknown),
+        ];
+
+        for (raw, expected_kind) in cases {
+            let sanitized = sanitize_external_agent_event(AgentEvent::Error {
+                thread_name: None,
+                message: raw.to_string(),
+                failure_kind: FailureKind::Unknown,
+            })
+            .unwrap();
+            let AgentEvent::Error {
+                message,
+                failure_kind,
+                ..
+            } = &sanitized
+            else {
+                panic!("expected sanitized error");
+            };
+            assert_eq!(*failure_kind, expected_kind);
+            assert_eq!(message, expected_kind.safe_message());
+            assert!(!message.contains("CANARY"));
+            assert_eq!(
+                sanitize_external_agent_event(sanitized.clone()),
+                Some(sanitized),
+                "sanitization must be idempotent"
+            );
+
+            let sanitized_run = sanitize_external_session_event(SessionEvent::RunFailed {
+                message: raw.to_string(),
+                failure_kind: FailureKind::Unknown,
+            })
+            .unwrap();
+            assert_eq!(
+                sanitized_run,
+                SessionEvent::RunFailed {
+                    message: expected_kind.safe_message().to_string(),
+                    failure_kind: expected_kind,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_error_without_failure_kind_classifies_on_sanitization() {
+        let decoded = serde_json::from_str::<AgentEvent>(
+            r#"{"type":"error","thread_name":null,"message":"maximum context length exceeded"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            decoded,
+            AgentEvent::Error {
+                failure_kind: FailureKind::Unknown,
+                ..
+            }
+        ));
+        assert!(matches!(
+            sanitize_external_agent_event(decoded),
+            Some(AgentEvent::Error {
+                failure_kind: FailureKind::ContextLimit,
+                ref message,
+                ..
+            }) if message == FailureKind::ContextLimit.safe_message()
+        ));
+    }
+
+    #[test]
+    fn internal_failure_log_keeps_run_id_and_full_cause_on_one_line() {
+        let run_id = SessionRunId("run-123".to_string());
+        let line = internal_failure_log_line(
+            &run_id,
+            Some("impl/auth"),
+            "HTTP 401 CANARY_SECRET\nrefresh failed",
+        );
+
+        assert!(line.contains("run-123"));
+        assert!(line.contains("thread \"impl/auth\""));
+        assert!(line.contains("CANARY_SECRET"));
+        assert!(line.contains("\\nrefresh failed"));
+        assert_eq!(line.lines().count(), 1);
     }
 
     #[tokio::test]
@@ -1496,6 +1787,7 @@ mod tests {
             .unwrap();
         let third = bus.emit(SessionEvent::RunFailed {
             message: "boom".to_string(),
+            failure_kind: FailureKind::Unknown,
         });
 
         assert_eq!(first.sequence_id, 1);
@@ -1710,6 +2002,7 @@ mod tests {
         );
         let third = bus.emit(SessionEvent::RunFailed {
             message: "three".to_string(),
+            failure_kind: FailureKind::Unknown,
         });
 
         assert_eq!(subscription.replay_boundary_sequence_id, second.sequence_id);
@@ -1903,6 +2196,7 @@ mod tests {
         bus_sink.emit(AgentEvent::Error {
             thread_name: Some("worker".to_string()),
             message: "CANARY_ERROR".to_string(),
+            failure_kind: FailureKind::Unknown,
         });
         bus_sink.emit(AgentEvent::ThreadStarted {
             name: "worker".to_string(),
@@ -1953,7 +2247,8 @@ mod tests {
         assert!(!serialized.contains("CANARY"));
         assert!(serialized.contains("/safe/work"));
         assert!(serialized.contains("exit code 7"));
-        assert!(serialized.contains("operation failed"));
+        assert!(serialized.contains("Operation failed"));
+        assert!(serialized.contains(r#""failure_kind":"unknown""#));
         assert!(serialized.contains("thread dispatched"));
         assert!(serialized.contains("thread timed out"));
         let replay = serde_json::to_string(&bus.recent_events(None, 20)).unwrap();

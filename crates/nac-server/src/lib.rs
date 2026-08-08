@@ -2724,6 +2724,7 @@ mod tests {
             run_id: None,
             event: nac_core::events::SessionEvent::RunFailed {
                 message: "boom".to_string(),
+                failure_kind: nac_core::events::FailureKind::Unknown,
             },
         };
 
@@ -6173,6 +6174,7 @@ api_key_env = "OPENAI_API_KEY"
             run_id: None,
             event: nac_core::events::SessionEvent::RunFailed {
                 message: message.to_string(),
+                failure_kind: nac_core::events::FailureKind::Unknown,
             },
         }
     }

@@ -6,18 +6,18 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::time::timeout;
 
 use crate::events::{decode_stderr_event, AgentEvent};
 use crate::model::{ModelClient, TokenUsage};
 use crate::process::{isolate_process_group, terminate_child_tree};
-use crate::tools::ToolRuntime;
+use crate::tools::{ThreadCancellation, ToolRuntime};
 
 pub(super) struct WorkerRun {
     pub(super) stdout: String,
     pub(super) stderr: String,
     pub(super) exit_code: i32,
     pub(super) timed_out: bool,
+    pub(super) cancelled: bool,
     pub(super) timeout_reason: Option<String>,
     pub(super) usage: Option<TokenUsage>,
 }
@@ -155,6 +155,7 @@ pub(super) struct WorkerInvocation<'a> {
     pub(super) source_threads: &'a [String],
     pub(super) scheduled_skills: &'a [String],
     pub(super) timeout_secs: u64,
+    pub(super) cancellation: &'a ThreadCancellation,
 }
 
 fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
@@ -302,9 +303,24 @@ pub(super) async fn run_worker(
         output
     });
 
-    let status = timeout(Duration::from_secs(invocation.timeout_secs), child.wait()).await;
-    let timed_out = status.is_err();
-    if timed_out {
+    let deadline = tokio::time::sleep(Duration::from_secs(invocation.timeout_secs));
+    tokio::pin!(deadline);
+    let cancellation = invocation.cancellation.cancelled();
+    tokio::pin!(cancellation);
+    let mut timed_out = false;
+    let mut cancelled = false;
+    let status = tokio::select! {
+        status = child.wait() => Some(status),
+        _ = &mut deadline => {
+            timed_out = true;
+            None
+        }
+        _ = &mut cancellation => {
+            cancelled = true;
+            None
+        }
+    };
+    if timed_out || cancelled {
         terminate_child_tree(&mut child).await;
     }
 
@@ -316,8 +332,8 @@ pub(super) async fn run_worker(
         None
     };
     let exit_code = match status {
-        Ok(wait_result) => wait_result?.code().unwrap_or(-1),
-        Err(_) => -1,
+        Some(wait_result) => wait_result?.code().unwrap_or(-1),
+        None => -1,
     };
 
     Ok(WorkerRun {
@@ -325,6 +341,7 @@ pub(super) async fn run_worker(
         stderr,
         exit_code,
         timed_out,
+        cancelled,
         timeout_reason,
         usage: worker_usage,
     })

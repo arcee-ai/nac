@@ -339,7 +339,7 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
                 {
                     break;
                 }
-                SessionEvent::RunFailed { message }
+                SessionEvent::RunFailed { message, .. }
                     if envelope.run_id.as_ref() == Some(&run.run_id) =>
                 {
                     panic!("ordinary run failed: {message}");
@@ -465,7 +465,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
                     {
                         break;
                     }
-                    SessionEvent::RunFailed { message }
+                    SessionEvent::RunFailed { message, .. }
                         if envelope.run_id.as_ref() == Some(&run.run_id) =>
                     {
                         panic!("sequential run failed: {message}");
@@ -681,6 +681,138 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
             | SessionEvent::RunFailed { .. }
             | SessionEvent::SnapshotSaved { .. }
     )));
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn context_limit_failure_recovers_after_manual_compaction_and_retry() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "400 Bad Request",
+            serde_json::json!({
+                "error": {
+                    "code": "context_length_exceeded",
+                    "message": "CANARY_PROVIDER_DETAIL"
+                }
+            })
+            .to_string(),
+        ),
+        ScriptedResponse::json("200 OK", compaction_response("durable recovery summary")),
+        ScriptedResponse::json("200 OK", compaction_response("retry succeeded")),
+    ]);
+    let session_id = "context-recovery-session";
+    let (parts, store_path) = test_compaction_service(
+        "context_recovery",
+        session_id,
+        ModelClient::new_for_test_server(server.base_url.clone()),
+    );
+    let mut events = parts.service.subscribe_events();
+
+    let failed_run = parts
+        .service
+        .try_submit_prompt("request beyond the context limit".to_string())
+        .unwrap();
+    let (agent_failure, terminal_failure) =
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            let mut agent_failure = None;
+            loop {
+                let envelope = events.recv().await.unwrap();
+                if envelope.run_id.as_ref() != Some(&failed_run.run_id) {
+                    continue;
+                }
+                match envelope.event {
+                    SessionEvent::Agent {
+                        event:
+                            AgentEvent::Error {
+                                message,
+                                failure_kind,
+                                ..
+                            },
+                    } => agent_failure = Some((message, failure_kind)),
+                    SessionEvent::RunFailed {
+                        message,
+                        failure_kind,
+                    } => break (agent_failure.unwrap(), (message, failure_kind)),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("context-limit run should fail promptly");
+    assert_eq!(
+        agent_failure,
+        (
+            FailureKind::ContextLimit.safe_message().to_string(),
+            FailureKind::ContextLimit,
+        )
+    );
+    assert_eq!(agent_failure, terminal_failure);
+    assert!(
+        !serde_json::to_string(&parts.service.recent_events(None, 100))
+            .unwrap()
+            .contains("CANARY_PROVIDER_DETAIL")
+    );
+
+    while parts.service.has_active_operation() {
+        tokio::task::yield_now().await;
+    }
+    let compacted = parts
+        .service
+        .connect_client()
+        .try_compact()
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    assert!(matches!(
+        compacted,
+        SessionCompactionResult::Compacted { .. }
+    ));
+    assert_eq!(
+        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            &store_path,
+            session_id,
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+
+    let retry = parts
+        .service
+        .try_submit_prompt("retry after compaction".to_string())
+        .unwrap();
+    let response = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let envelope = events.recv().await.unwrap();
+            if envelope.run_id.as_ref() != Some(&retry.run_id) {
+                continue;
+            }
+            match envelope.event {
+                SessionEvent::RunCompleted { response, .. } => break response,
+                SessionEvent::RunFailed { message, .. } => {
+                    panic!("post-compaction retry failed: {message}")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("post-compaction retry should complete promptly");
+    assert_eq!(response, "retry succeeded");
+
+    let requests = server.finish();
+    assert_eq!(requests.len(), 3);
+    let request_bodies = requests
+        .iter()
+        .map(|request| serde_json::from_slice::<serde_json::Value>(&request.body).unwrap())
+        .collect::<Vec<_>>();
+    assert!(request_bodies[0].get("tools").is_some());
+    assert!(request_bodies[1].get("tools").is_none());
+    assert!(request_bodies[2].get("tools").is_some());
+
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 

@@ -64,6 +64,35 @@ struct ActiveThreadState {
 struct ActiveThreadDispatch {
     dispatch_id: String,
     abort_handle: Option<AbortHandle>,
+    cancellation: ThreadCancellation,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ThreadCancellation {
+    cancelled: Arc<AtomicBool>,
+    activity: Arc<Notify>,
+}
+
+impl ThreadCancellation {
+    pub(crate) fn cancel(&self) {
+        if !self.cancelled.swap(true, Ordering::AcqRel) {
+            self.activity.notify_waiters();
+        }
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        loop {
+            let activity = self.activity.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            activity.await;
+        }
+    }
 }
 
 pub struct ActiveThreadRegistry {
@@ -108,9 +137,36 @@ impl ActiveThreadRegistry {
                 ActiveThreadDispatch {
                     dispatch_id: dispatch_id.to_string(),
                     abort_handle: None,
+                    cancellation: ThreadCancellation::default(),
                 },
             );
             true
+        }
+    }
+
+    pub(crate) fn cancellation(
+        &self,
+        thread_name: &str,
+        dispatch_id: &str,
+    ) -> Option<ThreadCancellation> {
+        self.lock()
+            .dispatches
+            .get(thread_name)
+            .filter(|dispatch| dispatch.dispatch_id == dispatch_id)
+            .map(|dispatch| dispatch.cancellation.clone())
+    }
+
+    pub(crate) fn cancel(&self, thread_name: &str) -> bool {
+        let cancellation = self
+            .lock()
+            .dispatches
+            .get(thread_name)
+            .map(|dispatch| dispatch.cancellation.clone());
+        if let Some(cancellation) = cancellation {
+            cancellation.cancel();
+            true
+        } else {
+            false
         }
     }
 
@@ -225,6 +281,12 @@ impl ActiveThreadRegistry {
         !self.lock().completions.is_empty()
     }
 
+    pub(crate) fn forget_completion(&self, thread_name: &str) {
+        self.lock()
+            .completions
+            .retain(|completion| completion.thread_name != thread_name);
+    }
+
     pub fn active_names_matching(&self, thread_names: &HashSet<String>) -> Vec<String> {
         let state = self.lock();
         state
@@ -268,12 +330,14 @@ impl ActiveThreadRegistry {
                     name.clone(),
                     dispatch.dispatch_id.clone(),
                     dispatch.abort_handle.clone(),
+                    dispatch.cancellation.clone(),
                 )
             })
             .collect::<Vec<_>>();
         let mut expired = Vec::new();
         let mut first_error = None;
-        for (name, dispatch_id, abort_handle) in targets {
+        for (name, dispatch_id, abort_handle, cancellation) in targets {
+            cancellation.cancel();
             if let Some(abort_handle) = abort_handle {
                 abort_handle.abort();
             }

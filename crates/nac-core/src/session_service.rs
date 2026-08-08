@@ -14,8 +14,8 @@ use uuid::Uuid;
 use crate::agent::Agent;
 use crate::commands::{self, PreparedPrompt, PreparedUserInput};
 use crate::events::{
-    AgentEvent, CompactionFailure, CompactionReason, EventSink, SessionEvent, SessionEventBoundary,
-    SessionEventBus,
+    AgentEvent, CompactionFailure, CompactionReason, EventSink, FailureKind, SessionEvent,
+    SessionEventBoundary, SessionEventBus,
 };
 pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
@@ -1598,6 +1598,7 @@ impl SessionService {
         self.event_bus.emit_with_context(
             SessionEvent::RunFailed {
                 message: terminal_message,
+                failure_kind: FailureKind::Unknown,
             },
             Some(cancelling_run.snapshot.run_id.clone()),
             cancelling_run.snapshot.client_id.clone(),
@@ -1868,6 +1869,7 @@ impl SessionService {
         let terminal_event = match (outcome, persistence_error) {
             (RunOutcome::Completed(_, _), Some(error)) => SessionEvent::RunFailed {
                 message: format!("run completed, but failed to persist session snapshot: {error}"),
+                failure_kind: FailureKind::Persistence,
             },
             (RunOutcome::Completed(response, _), None) => SessionEvent::RunCompleted {
                 response,
@@ -1877,8 +1879,12 @@ impl SessionService {
                 message: format!(
                     "{message}\nAdditionally, failed to persist session snapshot: {error}"
                 ),
+                failure_kind: FailureKind::Persistence,
             },
-            (RunOutcome::Failed(message, _), None) => SessionEvent::RunFailed { message },
+            (RunOutcome::Failed(message, _), None) => SessionEvent::RunFailed {
+                message,
+                failure_kind: FailureKind::Unknown,
+            },
         };
         self.event_bus
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
@@ -4832,7 +4838,8 @@ pub(super) mod tests {
         assert_eq!(
             terminal.event,
             SessionEvent::RunFailed {
-                message: "run failed".to_string()
+                message: FailureKind::Persistence.safe_message().to_string(),
+                failure_kind: FailureKind::Persistence,
             }
         );
         assert!(matches!(
@@ -5159,7 +5166,8 @@ pub(super) mod tests {
         assert_eq!(
             failed.event,
             SessionEvent::RunFailed {
-                message: "run failed".to_string()
+                message: FailureKind::Unknown.safe_message().to_string(),
+                failure_kind: FailureKind::Unknown,
             }
         );
         assert!(parts.service.active_run().is_none());
@@ -5244,7 +5252,8 @@ pub(super) mod tests {
         assert_eq!(
             failed.event,
             SessionEvent::RunFailed {
-                message: "run failed".to_string()
+                message: FailureKind::Unknown.safe_message().to_string(),
+                failure_kind: FailureKind::Unknown,
             }
         );
 
@@ -5372,7 +5381,8 @@ pub(super) mod tests {
         assert_eq!(
             failed.event,
             SessionEvent::RunFailed {
-                message: "run failed".to_string()
+                message: FailureKind::Cancelled.safe_message().to_string(),
+                failure_kind: FailureKind::Cancelled,
             }
         );
         assert!(parts.service.active_run().is_none());
