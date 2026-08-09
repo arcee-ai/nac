@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use fs2::FileExt;
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 
 use crate::events::{EventSink, SessionRunId};
@@ -113,6 +113,7 @@ struct ActiveThreadState {
     active_by_name: HashMap<String, ActiveThreadDispatch>,
     completions: VecDeque<ThreadCompletion>,
     owned_tasks_by_run: HashMap<SessionRunId, usize>,
+    worker_usage_by_run: HashMap<SessionRunId, crate::model::TokenUsage>,
     shutting_down: bool,
 }
 
@@ -335,17 +336,26 @@ impl ActiveThreadRegistry {
         Ok(expired)
     }
 
+    /// Take eligible buffered completions across the session exactly once.
+    /// Names are compatibility selectors; dispatch ids provide exact selection.
     pub fn take_completions(
         &self,
-        run_id: &SessionRunId,
         thread_names: &HashSet<String>,
+        dispatch_ids: &HashSet<String>,
     ) -> Vec<ThreadCompletion> {
         let mut state = self.lock();
         let mut matching = Vec::new();
         let mut retained = VecDeque::new();
         while let Some(completion) = state.completions.pop_front() {
-            if completion.key.run_id == *run_id
-                && (thread_names.is_empty() || thread_names.contains(&completion.key.thread_name))
+            let selected_by_exact_id = dispatch_ids.contains(&completion.key.dispatch_id);
+            let selected_by_name = thread_names.contains(&completion.key.thread_name)
+                && !state
+                    .active_by_name
+                    .get(&completion.key.thread_name)
+                    .is_some_and(|active| active.key.dispatch_id != completion.key.dispatch_id);
+            if (thread_names.is_empty() && dispatch_ids.is_empty())
+                || selected_by_name
+                || selected_by_exact_id
             {
                 matching.push(completion);
             } else {
@@ -375,6 +385,26 @@ impl ActiveThreadRegistry {
             .collect()
     }
 
+    pub fn active_selected(
+        &self,
+        thread_names: &HashSet<String>,
+        dispatch_ids: &HashSet<String>,
+    ) -> Vec<ActiveThreadDispatchSnapshot> {
+        self.lock()
+            .active_by_name
+            .values()
+            .filter(|dispatch| {
+                (thread_names.is_empty() && dispatch_ids.is_empty())
+                    || thread_names.contains(&dispatch.key.thread_name)
+                    || dispatch_ids.contains(&dispatch.key.dispatch_id)
+            })
+            .map(|dispatch| ActiveThreadDispatchSnapshot {
+                key: dispatch.key.clone(),
+                state: dispatch.state,
+            })
+            .collect()
+    }
+
     pub fn has_completions_for_run(&self, run_id: &SessionRunId) -> bool {
         self.lock()
             .completions
@@ -395,6 +425,33 @@ impl ActiveThreadRegistry {
                 .iter()
                 .any(|completion| completion.key.run_id == *run_id)
             || state.owned_tasks_by_run.contains_key(run_id)
+    }
+
+    pub fn record_worker_usage(&self, run_id: SessionRunId, usage: &crate::model::TokenUsage) {
+        let mut state = self.lock();
+        state
+            .worker_usage_by_run
+            .entry(run_id)
+            .or_default()
+            .add_cost_saturating(usage);
+    }
+
+    pub fn take_worker_usage(&self, run_id: &SessionRunId) -> Option<crate::model::TokenUsage> {
+        self.lock().worker_usage_by_run.remove(run_id)
+    }
+
+    /// Usage not yet folded into its originating run. This remains in the
+    /// session-owned registry across active-run replacement.
+    pub fn pending_worker_usage_total(&self) -> Option<crate::model::TokenUsage> {
+        let state = self.lock();
+        if state.worker_usage_by_run.is_empty() {
+            return None;
+        }
+        let mut total = crate::model::TokenUsage::default();
+        for usage in state.worker_usage_by_run.values() {
+            total.add_cost_saturating(usage);
+        }
+        Some(total)
     }
 
     pub fn live_thread_updates(&self) -> bool {
@@ -602,6 +659,7 @@ impl Drop for ActiveThreadRegistry {
             }
         }
         state.completions.clear();
+        state.worker_usage_by_run.clear();
     }
 }
 
@@ -619,11 +677,6 @@ pub struct ToolRuntime {
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
     pub thread_timeout_secs: u64,
-    /// Accumulated worker token usage from thread dispatches.  The agent
-    /// loop reads and resets this after each tool-execution round so worker
-    /// API costs are included in the session totals.  `orchestrator_context_tokens` is
-    /// intentionally NOT accumulated here — it stays orchestrator-only.
-    pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
 }
 
 pub(crate) fn resolve_workspace_path(runtime: &ToolRuntime, path: impl AsRef<Path>) -> PathBuf {
@@ -1039,7 +1092,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         skills: None,
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
-        worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
     }
 }
 
@@ -1150,7 +1202,7 @@ mod active_thread_registry_tests {
     }
 
     #[test]
-    fn completions_are_fifo_run_scoped_filtered_and_exactly_once() {
+    fn completions_are_session_fifo_filtered_and_exactly_once() {
         let registry = ActiveThreadRegistry::default();
         let store = test_store();
         let run_a = SessionRunId::new();
@@ -1172,7 +1224,7 @@ mod active_thread_registry_tests {
             .unwrap();
 
         let selected = HashSet::from(["a2".to_string()]);
-        let taken = registry.take_completions(&run_a, &selected);
+        let taken = registry.take_completions(&selected, &HashSet::new());
         assert_eq!(
             taken
                 .iter()
@@ -1180,13 +1232,53 @@ mod active_thread_registry_tests {
                 .collect::<Vec<_>>(),
             ["second"]
         );
-        assert!(registry.take_completions(&run_a, &selected).is_empty());
-        let remaining_a = registry.take_completions(&run_a, &HashSet::new());
-        assert_eq!(remaining_a[0].content, "first");
-        let remaining_b = registry.take_completions(&run_b, &HashSet::new());
-        assert_eq!(remaining_b[0].content, "foreign");
+        assert!(registry
+            .take_completions(&selected, &HashSet::new())
+            .is_empty());
+        let remaining = registry.take_completions(&HashSet::new(), &HashSet::new());
+        assert_eq!(
+            remaining
+                .iter()
+                .map(|item| item.content.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "foreign"]
+        );
+        assert!(registry
+            .take_completions(&HashSet::new(), &HashSet::new())
+            .is_empty());
         assert!(!registry.has_completions_for_run(&run_a));
         let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn worker_usage_is_origin_run_keyed_and_pending_total_does_not_double_fold() {
+        let registry = ActiveThreadRegistry::default();
+        let origin = SessionRunId::new();
+        let consuming = SessionRunId::new();
+        registry.record_worker_usage(
+            origin.clone(),
+            &crate::model::TokenUsage {
+                input_tokens: 11,
+                output_tokens: 7,
+                ..Default::default()
+            },
+        );
+        registry.record_worker_usage(
+            consuming.clone(),
+            &crate::model::TokenUsage {
+                input_tokens: 3,
+                ..Default::default()
+            },
+        );
+
+        let consumed = registry.take_worker_usage(&consuming).unwrap();
+        assert_eq!(consumed.input_tokens, 3);
+        assert_eq!(registry.take_worker_usage(&consuming), None);
+        let pending = registry.pending_worker_usage_total().unwrap();
+        assert_eq!(pending.input_tokens, 11);
+        assert_eq!(pending.output_tokens, 7);
+        assert_eq!(registry.take_worker_usage(&origin).unwrap(), pending);
+        assert_eq!(registry.pending_worker_usage_total(), None);
     }
 
     #[tokio::test]
@@ -1240,7 +1332,7 @@ mod active_thread_registry_tests {
         assert!(!registry.has_completions_for_run(&run_a));
         assert!(registry.matches(&active_b));
         assert_eq!(
-            registry.take_completions(&run_b, &HashSet::new())[0].content,
+            registry.take_completions(&HashSet::new(), &HashSet::new())[0].content,
             "done-b"
         );
         let _ = std::fs::remove_file(store);

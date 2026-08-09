@@ -186,7 +186,6 @@ mod tests {
 
     use super::*;
     use crate::events::EventSink;
-    use tokio::sync::Mutex;
 
     fn local_runtime() -> ToolRuntime {
         local_runtime_at(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
@@ -207,7 +206,6 @@ mod tests {
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         }
     }
 
@@ -240,7 +238,6 @@ mod tests {
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         }
     }
 

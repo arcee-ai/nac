@@ -1241,10 +1241,16 @@ impl SessionService {
         // duality and the stale-during-run fallback are gone — mid-run
         // appends are visible as they commit to the log.
         self.update_transcript_scan().await?;
-        let response_timing = {
+        let mut response_timing = {
             let snapshot = self.session_snapshot.lock().await;
             ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref())
         };
+        if let Some(pending) = self.active_threads.pending_worker_usage_total() {
+            response_timing
+                .cumulative_token_usage
+                .get_or_insert_with(crate::model::TokenUsage::default)
+                .add_cost_saturating(&pending);
+        }
         let loaded_messages = match options.messages {
             FrontendSnapshotMessages::All => {
                 let projection = self.store_fork_boundary_projection().await?;
@@ -1962,6 +1968,9 @@ impl SessionService {
         };
         let outcome = crate::store::create_queued_run(&self.metadata.store_path, &request)?;
         drop(guard);
+        // Durable ordinary input must wake an explicit wait. The wait rechecks
+        // the queue before consuming completions, so user input wins races.
+        self.active_threads.signal_activity();
         Ok(match outcome {
             crate::store::CreateQueuedRunOutcome::Created(record) => {
                 self.event_bus.emit(SessionEvent::QueuedRunCreated {

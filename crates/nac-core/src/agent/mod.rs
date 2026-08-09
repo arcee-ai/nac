@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
@@ -378,7 +377,6 @@ impl Agent {
                 skills: config.skills,
                 terminal_manager: crate::terminal::TerminalManager::new(),
                 thread_timeout_secs: config.thread_timeout_secs,
-                worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -686,6 +684,9 @@ impl Agent {
                     self.tool_runtime.terminal_manager.remove_all().await;
                     return Err(error);
                 };
+                // Capture workers that completed after the preceding tool round,
+                // but only from this run's origin-keyed ledger.
+                self.fold_worker_usage(&mut accumulated_usage).await;
                 self.emit(AgentEvent::AssistantMessage {
                     thread_name: self.thread_name.clone(),
                     content: content.clone(),
@@ -743,9 +744,12 @@ impl Agent {
     }
 
     async fn fold_worker_usage(&self, accumulated_usage: &mut TokenUsage) {
-        let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
-        accumulated_usage.add_cost_saturating(&worker_usage);
-        *worker_usage = TokenUsage::default();
+        let run_id = self.event_sink.run_id().cloned().unwrap_or_else(|| {
+            crate::events::SessionRunId::from_string("foreground-compat".to_string())
+        });
+        if let Some(worker_usage) = self.tool_runtime.active_threads.take_worker_usage(&run_id) {
+            accumulated_usage.add_cost_saturating(&worker_usage);
+        }
     }
 
     #[cfg(test)]

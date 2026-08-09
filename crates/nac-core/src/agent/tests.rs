@@ -386,12 +386,15 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
 #[tokio::test]
 async fn worker_usage_fold_is_exactly_once_and_preserves_orchestrator_context() {
     let agent = Agent::default(ModelClient::new_for_test());
-    {
-        let mut worker = agent.tool_runtime.worker_usage.lock().await;
-        worker.input_tokens = 11;
-        worker.output_tokens = 7;
-        worker.orchestrator_context_tokens = 999;
-    }
+    agent.tool_runtime.active_threads.record_worker_usage(
+        crate::events::SessionRunId::from_string("foreground-compat".to_string()),
+        &TokenUsage {
+            input_tokens: 11,
+            output_tokens: 7,
+            orchestrator_context_tokens: 999,
+            ..TokenUsage::default()
+        },
+    );
     let mut accumulated = TokenUsage {
         input_tokens: 3,
         orchestrator_context_tokens: 41,

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::events::AgentEvent;
+use crate::events::{AgentEvent, SessionRunId};
 use crate::model::ModelClient;
 use crate::skills::SkillRegistry;
 use crate::store;
@@ -99,7 +99,7 @@ pub fn thread_wait_definition() -> ToolDefinition {
     use serde_json::json;
     def(
         "thread_wait",
-        "Wait for background thread completions or same-run user guidance. By default all run-owned threads finish before completions are returned.",
+        "Explicitly wait for eligible session background completions or user input. Results retain their originating run and dispatch identity.",
         json!({
             "type": "object",
             "properties": {
@@ -107,7 +107,13 @@ pub fn thread_wait_definition() -> ToolDefinition {
                     "type": "array",
                     "items": { "type": "string" },
                     "uniqueItems": true,
-                    "description": "Optional thread names to wait for when live updates are enabled."
+                    "description": "Optional thread-name compatibility selectors."
+                },
+                "dispatch_ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "uniqueItems": true,
+                    "description": "Optional exact dispatch identities to wait for."
                 },
                 "timeout": {
                     "type": "integer",
@@ -217,8 +223,13 @@ pub async fn execute_parsed_dispatch(
     // orchestrator's agent loop can include it in session totals.
     if let Ok(run) = &result {
         if let Some(usage) = &run.usage {
-            let mut wu = runtime.worker_usage.lock().await;
-            wu.add_cost_saturating(&usage);
+            let origin_run = dispatch_key
+                .map(|key| key.run_id.clone())
+                .or_else(|| runtime.event_sink.run_id().cloned())
+                .unwrap_or_else(|| SessionRunId::from_string("foreground-compat".to_string()));
+            runtime
+                .active_threads
+                .record_worker_usage(origin_run, usage);
         }
     }
 
@@ -396,13 +407,22 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
         Ok(names) => names,
         Err(error) => return error,
     };
-    if names.iter().any(|name| name.trim().is_empty()) {
+    let dispatch_ids = match require_string_array(&args, "dispatch_ids") {
+        Ok(ids) => ids,
+        Err(error) => return error,
+    };
+    if names
+        .iter()
+        .chain(dispatch_ids.iter())
+        .any(|value| value.trim().is_empty())
+    {
         return ToolResult {
-            content: "Error: 'names' entries must not be empty".to_string(),
+            content: "Error: thread_wait selectors must not be empty".to_string(),
             is_error: true,
         };
     }
-    let requested = names.into_iter().collect::<HashSet<_>>();
+    let requested_names = names.into_iter().collect::<HashSet<_>>();
+    let requested_dispatches = dispatch_ids.into_iter().collect::<HashSet<_>>();
     let timeout_secs = match args.get("timeout") {
         None => runtime.thread_timeout_secs,
         Some(value) => match value.as_u64().filter(|value| *value > 0) {
@@ -422,7 +442,7 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
         };
     };
     let session_id = match require_session(runtime) {
-        Ok(session_id) => session_id.to_string(),
+        Ok(value) => value.to_string(),
         Err(error) => return error,
     };
     let Some(deadline) = tokio::time::Instant::now().checked_add(Duration::from_secs(timeout_secs))
@@ -434,54 +454,28 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
     };
 
     loop {
-        // Capture the generation before observing state so a completion or
-        // guidance notify cannot be lost between the checks and parking.
+        // Capture before observing durable/registry state to prevent lost wakeups.
         let activity_epoch = runtime.active_threads.activity_epoch();
 
-        let live = runtime.active_threads.live_thread_updates();
-        let all = HashSet::new();
-        let eligible = if live { &requested } else { &all };
-        let mut active = runtime
-            .active_threads
-            .active_for_run(&run_id, eligible)
-            .into_iter()
-            .map(|dispatch| dispatch.key.thread_name)
-            .collect::<Vec<_>>();
-        active.sort();
-
-        // Buffered mode drains only after every dispatch owned by this run is
-        // terminal. Live mode may deliver the eligible FIFO prefix early.
-        if live || active.is_empty() {
-            let completions = runtime.active_threads.take_completions(&run_id, eligible);
-            if !completions.is_empty() {
-                let mut output = String::from("Thread updates:");
-                for completion in completions {
-                    output.push_str(&format!(
-                        "\n\n## {} ({})\n{}",
-                        completion.key.thread_name,
-                        if completion.is_error {
-                            "failed"
-                        } else {
-                            "completed"
-                        },
-                        completion.content.trim()
-                    ));
-                }
-                let mut remaining = runtime
-                    .active_threads
-                    .active_for_run(&run_id, eligible)
-                    .into_iter()
-                    .map(|dispatch| dispatch.key.thread_name)
-                    .collect::<Vec<_>>();
-                remaining.sort();
-                if !remaining.is_empty() {
-                    output.push_str(&format!("\n\nStill running: {}", remaining.join(", ")));
-                }
-                return ToolResult {
-                    content: output,
-                    is_error: false,
-                };
-            }
+        // Ordinary queued input has priority over completion delivery. Keeping
+        // this check durable also prevents a model from repeatedly waiting and
+        // starving a queued successor after the first wakeup.
+        let store_path = runtime.store_path.clone();
+        let queued_session = session_id.clone();
+        let queued_after = run_id.as_str().to_string();
+        let ordinary_pending = tokio::task::spawn_blocking(move || {
+            store::load_queued_run(&store_path, &queued_session)
+                .map(|queued| queued.is_some_and(|queued| queued.after_run_id == queued_after))
+        })
+        .await;
+        match ordinary_pending {
+            Ok(Ok(true)) => return ToolResult {
+                content: "Yield requested: a new ordinary user message is queued. Finish this turn now so the queued run can start; background threads will continue.".to_string(),
+                is_error: false,
+            },
+            Ok(Ok(false)) => {}
+            Ok(Err(error)) => return ToolResult { content: format!("Error checking queued user input: {error}"), is_error: true },
+            Err(error) => return ToolResult { content: format!("Internal error checking queued user input: {error}"), is_error: true },
         }
 
         let store_path = runtime.store_path.clone();
@@ -497,34 +491,61 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
         })
         .await;
         match guidance_pending {
-            Ok(Ok(true)) => {
-                return ToolResult {
-                    content: "New user guidance is pending for this run. Respond to it now; background threads remain managed by this run.".to_string(),
-                    is_error: false,
-                }
-            }
+            Ok(Ok(true)) => return ToolResult {
+                content: "New user guidance is pending for this run. Respond to it now; background threads continue independently.".to_string(),
+                is_error: false,
+            },
             Ok(Ok(false)) => {}
-            Ok(Err(error)) => {
-                return ToolResult {
-                    content: format!("Error checking orchestrator guidance: {error}"),
-                    is_error: true,
-                }
-            }
-            Err(error) => {
-                return ToolResult {
-                    content: format!("Internal error checking orchestrator guidance: {error}"),
-                    is_error: true,
-                }
-            }
+            Ok(Err(error)) => return ToolResult { content: format!("Error checking orchestrator guidance: {error}"), is_error: true },
+            Err(error) => return ToolResult { content: format!("Internal error checking orchestrator guidance: {error}"), is_error: true },
         }
 
+        let completions = runtime
+            .active_threads
+            .take_completions(&requested_names, &requested_dispatches);
+        if !completions.is_empty() {
+            let mut output = String::from("Thread updates:");
+            for completion in completions {
+                output.push_str(&format!(
+                    "\n\n## {} ({})\norigin_run_id: {}\ndispatch_id: {}\noriginating_tool_call_id: {}\n{}",
+                    completion.key.thread_name,
+                    if completion.is_error { "failed" } else { "completed" },
+                    completion.key.run_id.as_str(), completion.key.dispatch_id,
+                    completion.key.tool_call_id, completion.content.trim()));
+            }
+            let mut remaining = runtime
+                .active_threads
+                .active_selected(&requested_names, &requested_dispatches)
+                .into_iter()
+                .map(|dispatch| {
+                    format!(
+                        "{} [{}]",
+                        dispatch.key.thread_name, dispatch.key.dispatch_id
+                    )
+                })
+                .collect::<Vec<_>>();
+            remaining.sort();
+            if !remaining.is_empty() {
+                output.push_str(&format!("\n\nStill running: {}", remaining.join(", ")));
+            }
+            return ToolResult {
+                content: output,
+                is_error: false,
+            };
+        }
+
+        let mut active = runtime
+            .active_threads
+            .active_selected(&requested_names, &requested_dispatches)
+            .into_iter()
+            .map(|dispatch| dispatch.key.thread_name)
+            .collect::<Vec<_>>();
+        active.sort();
         if active.is_empty() {
-            let content = if live && !requested.is_empty() {
-                let mut names = requested.iter().cloned().collect::<Vec<_>>();
-                names.sort();
-                format!("None of these threads are running: {}", names.join(", "))
+            let content = if requested_names.is_empty() && requested_dispatches.is_empty() {
+                "No eligible buffered completions or active background threads.".to_string()
             } else {
-                "No background threads are running.".to_string()
+                "No eligible buffered completion or active dispatch matches the requested selectors.".to_string()
             };
             return ToolResult {
                 content,
@@ -1029,29 +1050,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn thread_wait_buffered_mode_ignores_subset_and_drains_fifo_once() {
-        let (runtime, run_id) = wait_runtime("buffered");
-        let first = wait_key(&run_id, "first");
-        let second = wait_key(&run_id, "second");
-        assert!(runtime.active_threads.try_accept(first.clone()));
-        assert!(runtime.active_threads.try_accept(second.clone()));
+    async fn thread_wait_later_run_consumes_old_completion_once_with_origin_identity() {
+        let (runtime, consuming_run) = wait_runtime("cross_run");
+        let origin_run = SessionRunId::new();
+        let old = wait_key(&origin_run, "first");
+        let unrelated = wait_key(&consuming_run, "second");
+        assert!(runtime.active_threads.try_accept(old.clone()));
+        assert!(runtime.active_threads.try_accept(unrelated.clone()));
+        finish_wait_thread(&runtime, old.clone(), "old result");
+        finish_wait_thread(&runtime, unrelated, "unrelated result");
 
-        let waiting = runtime.clone();
-        let wait = tokio::spawn(async move {
-            execute_thread_wait(json!({"names": ["first"], "timeout": 5}), &waiting).await
-        });
-        tokio::task::yield_now().await;
-        finish_wait_thread(&runtime, first, "first result");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert!(!wait.is_finished());
-        finish_wait_thread(&runtime, second, "second result");
-
-        let result = wait.await.unwrap();
-        assert!(result.content.contains("first result"));
-        assert!(result.content.contains("second result"));
-        let again = execute_thread_wait(json!({"timeout": 1}), &runtime).await;
-        assert_eq!(again.content, "No background threads are running.");
-        assert!(!runtime.active_threads.has_work_for_run(&run_id));
+        let result = execute_thread_wait(
+            json!({"dispatch_ids": [old.dispatch_id], "timeout": 1}),
+            &runtime,
+        )
+        .await;
+        assert!(result.content.contains("old result"));
+        assert!(result.content.contains(origin_run.as_str()));
+        assert!(result.content.contains(&old.tool_call_id));
+        assert!(!result.content.contains("unrelated result"));
+        let again = execute_thread_wait(
+            json!({"dispatch_ids": [old.dispatch_id], "timeout": 1}),
+            &runtime,
+        )
+        .await;
+        assert!(again.content.contains("No eligible"));
+        let unrelated =
+            execute_thread_wait(json!({"names": ["second"], "timeout": 1}), &runtime).await;
+        assert!(unrelated.content.contains("unrelated result"));
     }
 
     #[tokio::test]
@@ -1119,6 +1145,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn thread_wait_yields_repeatedly_to_queued_ordinary_input_before_completion() {
+        let (runtime, run_id) = wait_runtime("ordinary_yield");
+        let worker = wait_key(&run_id, "worker");
+        assert!(runtime.active_threads.try_accept(worker.clone()));
+
+        let waiting = runtime.clone();
+        let wait = tokio::spawn(async move {
+            execute_thread_wait(json!({"names": ["worker"], "timeout": 5}), &waiting).await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!wait.is_finished());
+
+        crate::store::create_queued_run(
+            &runtime.store_path,
+            &crate::store::CreateQueuedRun {
+                session_id: "test-session".to_string(),
+                queued_run_id: uuid::Uuid::new_v4().to_string(),
+                client_message_id: uuid::Uuid::new_v4().to_string(),
+                display_prompt: "new user message".to_string(),
+                agent_prompt: "new user message".to_string(),
+                after_run_id: run_id.as_str().to_string(),
+            },
+        )
+        .unwrap();
+        // Complete in the same ordering window: ordinary input must win and
+        // leave the completion buffered for a later run.
+        finish_wait_thread(&runtime, worker, "finished concurrently");
+        runtime.active_threads.signal_activity();
+
+        let yielded = wait.await.unwrap();
+        assert!(yielded.content.contains("Yield requested"));
+        let repeated =
+            execute_thread_wait(json!({"names": ["worker"], "timeout": 1}), &runtime).await;
+        assert!(repeated.content.contains("Yield requested"));
+        let buffered = runtime
+            .active_threads
+            .take_completions(&HashSet::from(["worker".to_string()]), &HashSet::new());
+        assert_eq!(buffered.len(), 1);
+        assert_eq!(buffered[0].content, "finished concurrently");
+    }
+
+    #[tokio::test]
     async fn thread_wait_timeout_reports_running_and_preserves_foreign_completion() {
         let (runtime, run_id) = wait_runtime("timeout");
         let running = wait_key(&run_id, "running");
@@ -1128,13 +1196,14 @@ mod tests {
         assert!(runtime.active_threads.try_accept(foreign.clone()));
         finish_wait_thread(&runtime, foreign.clone(), "foreign result");
 
-        let result = execute_thread_wait(json!({"timeout": 1}), &runtime).await;
+        let result =
+            execute_thread_wait(json!({"names": ["running"], "timeout": 1}), &runtime).await;
         assert!(!result.is_error);
         assert!(result.content.contains("Still running: running"));
         assert_eq!(
             runtime
                 .active_threads
-                .take_completions(&foreign_run, &HashSet::new())[0]
+                .take_completions(&HashSet::new(), &HashSet::new())[0]
                 .content,
             "foreign result"
         );

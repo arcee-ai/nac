@@ -1193,7 +1193,7 @@ mod tests {
     #[cfg(unix)]
     async fn wait_for_completions(
         runtime: &ToolRuntime,
-        run_id: &crate::events::SessionRunId,
+        _run_id: &crate::events::SessionRunId,
         count: usize,
     ) -> Vec<crate::tools::ThreadCompletion> {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -1202,7 +1202,7 @@ mod tests {
             completions.extend(
                 runtime
                     .active_threads
-                    .take_completions(run_id, &HashSet::new()),
+                    .take_completions(&HashSet::new(), &HashSet::new()),
             );
             if completions.len() < count {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
