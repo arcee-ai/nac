@@ -39,22 +39,14 @@ export interface MixedTierSettings {
 
 /**
  * Mixed-mode dispatch routing: the orchestrator classifies each dispatch and
- * the classification selects either a worker model or a reasoning effort —
- * never both.
+ * the classification selects a user-configured worker model per tier.
  */
-export type MixedModels =
-  | {
-      kind: "models";
-      easy: MixedTierSettings;
-      medium: MixedTierSettings;
-      hard: MixedTierSettings;
-    }
-  | {
-      kind: "efforts";
-      easy: string;
-      medium: string;
-      hard: string;
-    };
+export interface MixedModels {
+  kind: "models";
+  easy: MixedTierSettings;
+  medium: MixedTierSettings;
+  hard: MixedTierSettings;
+}
 
 export interface StoreInfo {
   root_cwd: string;

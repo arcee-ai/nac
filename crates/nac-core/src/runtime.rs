@@ -744,48 +744,22 @@ fn resolve_mixed_tier_client(tier: &MixedTierSettings, label: &str) -> Result<Mo
         .with_context(|| format!("invalid {label} tier model settings"))
 }
 
-/// Clone the session's worker client at one tier's configured reasoning
-/// effort, failing when the model's catalog metadata does not accept it.
-fn tier_effort_client(base: &ModelClient, raw: &str, label: &str) -> Result<ModelClient> {
-    let effort = raw
-        .parse::<ReasoningEffort>()
-        .map_err(|error| anyhow::anyhow!("invalid {label} tier reasoning effort: {error}"))?;
-    base.with_reasoning_effort_override(effort).ok_or_else(|| {
-        anyhow::anyhow!(
-            "{label} tier reasoning effort '{raw}' is not supported by model '{}'",
-            base.model
-        )
+/// Resolve all three mixed tiers into validated worker clients. Runs at
+/// launch and resume so a misconfigured tier fails loudly up front instead
+/// of at first dispatch.
+pub fn resolve_mixed_dispatch_clients(mixed: &MixedModeConfig) -> Result<MixedDispatchClients> {
+    let MixedModeConfig::Models(tiers) = mixed;
+    Ok(MixedDispatchClients {
+        easy: resolve_mixed_tier_client(&tiers.easy, "easy")?,
+        medium: resolve_mixed_tier_client(&tiers.medium, "medium")?,
+        hard: resolve_mixed_tier_client(&tiers.hard, "hard")?,
     })
 }
 
-/// Resolve all three mixed tiers into validated worker clients. Runs at
-/// launch and resume so a misconfigured tier fails loudly up front instead
-/// of at first dispatch. `base` is the session's single worker client; the
-/// efforts variant reuses it at a different reasoning effort per tier.
-pub fn resolve_mixed_dispatch_clients(
-    mixed: &MixedModeConfig,
-    base: &ModelClient,
-) -> Result<MixedDispatchClients> {
-    match mixed {
-        MixedModeConfig::Models(tiers) => Ok(MixedDispatchClients {
-            easy: resolve_mixed_tier_client(&tiers.easy, "easy")?,
-            medium: resolve_mixed_tier_client(&tiers.medium, "medium")?,
-            hard: resolve_mixed_tier_client(&tiers.hard, "hard")?,
-        }),
-        MixedModeConfig::Efforts { easy, medium, hard } => Ok(MixedDispatchClients {
-            easy: tier_effort_client(base, easy, "easy")?,
-            medium: tier_effort_client(base, medium, "medium")?,
-            hard: tier_effort_client(base, hard, "hard")?,
-        }),
-    }
-}
-
-/// Validate a mixed configuration against the session model it would run
-/// with, without launching anything: resolves every tier exactly as
-/// launch/resume would and discards the clients.
-pub fn validate_mixed_models(mixed: &MixedModeConfig, base: &EffectiveModelSettings) -> Result<()> {
-    let client = ModelClient::from_effective_settings(base.clone())?;
-    resolve_mixed_dispatch_clients(mixed, &client).map(|_| ())
+/// Validate a mixed configuration without launching anything: resolves
+/// every tier exactly as launch/resume would and discards the clients.
+pub fn validate_mixed_models(mixed: &MixedModeConfig) -> Result<()> {
+    resolve_mixed_dispatch_clients(mixed).map(|_| ())
 }
 
 /// Resolve and normalize the persisted orchestrator compaction threshold for a
@@ -878,7 +852,7 @@ pub async fn build_run_config(
     let mixed_models = options.model.mixed.clone();
     let mixed_clients = mixed_models
         .as_ref()
-        .map(|mixed| resolve_mixed_dispatch_clients(mixed, &client))
+        .map(resolve_mixed_dispatch_clients)
         .transpose()?
         .map(std::sync::Arc::new);
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
@@ -1280,7 +1254,7 @@ async fn build_resume_config_from_snapshot(
     let mixed_clients = snapshot
         .mixed_models
         .as_ref()
-        .map(|mixed| resolve_mixed_dispatch_clients(mixed, &client))
+        .map(resolve_mixed_dispatch_clients)
         .transpose()
         .map_err(|error| {
             anyhow::anyhow!(
@@ -1843,64 +1817,6 @@ mod tests {
         restore_env("OPENAI_API_KEY", original_openai_key);
     }
 
-    /// A worker client for a catalog model whose thinking-level map accepts
-    /// only `none` (claude-fable-5), for exercising effort validation.
-    fn fable_client() -> ModelClient {
-        let settings = EffectiveModelSettings::from_optional(
-            Some(BackendKind::AnthropicMessages),
-            Some("claude-fable-5".to_string()),
-            None,
-            None,
-            None,
-            BTreeMap::new(),
-        )
-        .unwrap();
-        ModelClient::from_effective_settings(settings).unwrap()
-    }
-
-    fn efforts_config(easy: &str, medium: &str, hard: &str) -> MixedModeConfig {
-        MixedModeConfig::Efforts {
-            easy: easy.to_string(),
-            medium: medium.to_string(),
-            hard: hard.to_string(),
-        }
-    }
-
-    #[test]
-    fn mixed_efforts_variant_applies_and_validates_tier_levels() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let original_key = std::env::var_os("ANTHROPIC_API_KEY");
-        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "test-key") };
-
-        let base = fable_client();
-
-        // Supported levels clone the base client at each tier's effort.
-        let clients =
-            resolve_mixed_dispatch_clients(&efforts_config("none", "none", "none"), &base).unwrap();
-        for (_, client) in clients.tiers() {
-            assert_eq!(client.model, base.model);
-            assert_eq!(client.reasoning_effort(), Some(ReasoningEffort::None));
-        }
-
-        // A level outside the model's thinking-level map names the tier.
-        let unsupported =
-            resolve_mixed_dispatch_clients(&efforts_config("none", "high", "none"), &base)
-                .map(|_| ())
-                .unwrap_err()
-                .to_string();
-        assert!(unsupported.contains("medium tier reasoning effort 'high' is not supported"));
-
-        // A level that is not an effort at all fails at parse.
-        let invalid =
-            resolve_mixed_dispatch_clients(&efforts_config("extreme", "none", "none"), &base)
-                .map(|_| ())
-                .unwrap_err()
-                .to_string();
-        assert!(invalid.contains("invalid easy tier reasoning effort"));
-
-        restore_env("ANTHROPIC_API_KEY", original_key);
-    }
-
     #[test]
     fn mixed_models_variant_resolves_tiers_and_rejects_unsupported_tier_effort() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -1918,14 +1834,12 @@ mod tests {
             api_key_env: None,
             reasoning_effort: effort.map(str::to_string),
         };
-        let base = fable_client();
-
         let mixed = MixedModeConfig::Models(Box::new(sessions::MixedTierModels {
             easy: tier("gpt-5-mini", Some("low")),
             medium: tier("gpt-5", None),
             hard: tier("claude-fable-5", None),
         }));
-        let clients = resolve_mixed_dispatch_clients(&mixed, &base).unwrap();
+        let clients = resolve_mixed_dispatch_clients(&mixed).unwrap();
         assert_eq!(clients.easy.model, "gpt-5-mini");
         assert_eq!(clients.easy.reasoning_effort(), Some(ReasoningEffort::Low));
         assert_eq!(clients.medium.model, "gpt-5");
@@ -1938,7 +1852,7 @@ mod tests {
             medium: tier("gpt-5", None),
             hard: tier("claude-fable-5", Some("high")),
         }));
-        let error = resolve_mixed_dispatch_clients(&mixed, &base)
+        let error = resolve_mixed_dispatch_clients(&mixed)
             .map(|_| ())
             .unwrap_err()
             .to_string();
@@ -1946,30 +1860,6 @@ mod tests {
 
         restore_env("OPENAI_API_KEY", original_openai);
         restore_env("ANTHROPIC_API_KEY", original_anthropic);
-    }
-
-    #[test]
-    fn validate_mixed_models_checks_efforts_against_the_session_model() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let original_key = std::env::var_os("ANTHROPIC_API_KEY");
-        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "test-key") };
-
-        let settings = EffectiveModelSettings::from_optional(
-            Some(BackendKind::AnthropicMessages),
-            Some("claude-fable-5".to_string()),
-            None,
-            None,
-            None,
-            BTreeMap::new(),
-        )
-        .unwrap();
-
-        assert!(validate_mixed_models(&efforts_config("none", "none", "none"), &settings).is_ok());
-        assert!(
-            validate_mixed_models(&efforts_config("none", "none", "xhigh"), &settings).is_err()
-        );
-
-        restore_env("ANTHROPIC_API_KEY", original_key);
     }
 
     #[test]

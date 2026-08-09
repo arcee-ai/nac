@@ -58,22 +58,14 @@ pub struct MixedTierModels {
 }
 
 /// Mixed-mode dispatch routing: the orchestrator classifies every thread
-/// dispatch as easy, medium, or hard, and the classification selects either
-/// a worker model or a reasoning effort — never both. `Some` on a session
-/// means mixed mode is on; `None` keeps single-model behavior.
+/// dispatch as easy, medium, or hard, and the classification selects a
+/// user-configured worker model per tier. `Some` on a session means mixed
+/// mode is on; `None` keeps single-model behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum MixedModeConfig {
     /// A user-configured worker model per difficulty tier.
     Models(Box<MixedTierModels>),
-    /// The session's single worker model, at a user-configured reasoning
-    /// effort per difficulty tier. Persisted verbatim; parsed and validated
-    /// against the model's catalog metadata at launch/resume.
-    Efforts {
-        easy: String,
-        medium: String,
-        hard: String,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -424,20 +416,8 @@ mod tests {
         let loaded = load_session(&store_path, "mixed-session").unwrap();
         assert_eq!(loaded.mixed_models, Some(mixed));
 
-        // The efforts variant persists through the same column.
-        let efforts = MixedModeConfig::Efforts {
-            easy: "low".to_string(),
-            medium: "medium".to_string(),
-            hard: "high".to_string(),
-        };
-        let mut updated = loaded;
-        updated.mixed_models = Some(efforts.clone());
-        update_session_config(&store_path, &updated).unwrap();
-        let reloaded = load_session(&store_path, "mixed-session").unwrap();
-        assert_eq!(reloaded.mixed_models, Some(efforts));
-
         // Clearing the configuration returns the session to single-model mode.
-        let mut cleared = reloaded;
+        let mut cleared = loaded;
         cleared.mixed_models = None;
         update_session_config(&store_path, &cleared).unwrap();
         let reloaded = load_session(&store_path, "mixed-session").unwrap();

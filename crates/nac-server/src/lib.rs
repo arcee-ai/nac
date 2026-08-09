@@ -347,8 +347,8 @@ pub struct MixedTierRequest {
     pub reasoning_effort: Option<String>,
 }
 
-/// Mixed-mode dispatch routing: the classification selects either a worker
-/// model or a reasoning effort per tier — never both.
+/// Mixed-mode dispatch routing: the classification selects a user-configured
+/// worker model per tier.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum MixedModelsRequest {
@@ -356,11 +356,6 @@ pub enum MixedModelsRequest {
         easy: MixedTierRequest,
         medium: MixedTierRequest,
         hard: MixedTierRequest,
-    },
-    Efforts {
-        easy: String,
-        medium: String,
-        hard: String,
     },
 }
 
@@ -1880,7 +1875,7 @@ impl SessionManager {
             )?;
         }
 
-        let settings = EffectiveModelSettings::new(
+        EffectiveModelSettings::new(
             backend,
             prospective.model.clone(),
             prospective.base_url.clone(),
@@ -1889,9 +1884,8 @@ impl SessionManager {
             extra_headers.clone(),
         )?;
         // Fail a broken mixed tier here, not at the session's next launch.
-        // The efforts variant validates against the prospective session model.
         if let Some(mixed) = prospective.mixed_models.as_ref() {
-            runtime::validate_mixed_models(mixed, &settings)
+            runtime::validate_mixed_models(mixed)
                 .map_err(|error| request_configuration_error(format!("{error:#}")))?;
         }
         validate_model_configuration(
@@ -3359,35 +3353,18 @@ fn mixed_tier_settings(
     })
 }
 
-/// Validate one efforts-variant tier: nonblank and a recognized level. Model
-/// support is checked at launch/resume against the session model's catalog
-/// metadata.
-fn mixed_tier_effort(value: String, label: &str) -> Result<String> {
-    let value = nonblank_request_string(value, &format!("mixed_models.{label}"))?;
-    parse_request_enum::<ReasoningEffort>(&value, &format!("mixed_models.{label}"))
-        .map(|_: ReasoningEffort| value)
-}
-
 fn mixed_models_config(
     request: MixedModelsRequest,
     policy: &CredentialDestinationPolicy,
 ) -> Result<sessions::MixedModeConfig> {
-    match request {
-        MixedModelsRequest::Models { easy, medium, hard } => Ok(sessions::MixedModeConfig::Models(
-            Box::new(sessions::MixedTierModels {
-                easy: mixed_tier_settings(easy, "easy", policy)?,
-                medium: mixed_tier_settings(medium, "medium", policy)?,
-                hard: mixed_tier_settings(hard, "hard", policy)?,
-            }),
-        )),
-        MixedModelsRequest::Efforts { easy, medium, hard } => {
-            Ok(sessions::MixedModeConfig::Efforts {
-                easy: mixed_tier_effort(easy, "easy")?,
-                medium: mixed_tier_effort(medium, "medium")?,
-                hard: mixed_tier_effort(hard, "hard")?,
-            })
-        }
-    }
+    let MixedModelsRequest::Models { easy, medium, hard } = request;
+    Ok(sessions::MixedModeConfig::Models(Box::new(
+        sessions::MixedTierModels {
+            easy: mixed_tier_settings(easy, "easy", policy)?,
+            medium: mixed_tier_settings(medium, "medium", policy)?,
+            hard: mixed_tier_settings(hard, "hard", policy)?,
+        },
+    )))
 }
 
 fn model_options(
@@ -5215,89 +5192,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn model_patch_revalidates_stored_mixed_efforts_against_the_new_model() {
+    async fn model_patch_validates_and_clears_mixed_tier_models() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-        let root = temp_root("mixed_efforts_model_patch");
+        let root = temp_root("mixed_models_model_patch");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
         unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
         seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
         let manager = test_manager(&root);
 
-        let efforts_patch =
-            |model: RequestField<String>,
-             backend: RequestField<String>,
-             base_url: RequestField<String>,
-             mixed_models: RequestField<MixedModelsRequest>| {
-                UpdateConfigRequest {
-                    model,
-                    base_url,
-                    backend,
-                    reasoning_effort: RequestField::Omitted,
-                    api_key_env: RequestField::Omitted,
-                    extra_headers: RequestField::Omitted,
-                    orchestrator_compaction_threshold: RequestField::Omitted,
-                    mixed_models,
-                }
-            };
+        let tier = |model: &str, effort: Option<&str>| MixedTierRequest {
+            model: model.to_string(),
+            backend: None,
+            base_url: None,
+            api_key_env: None,
+            reasoning_effort: effort.map(str::to_string),
+        };
+        let mixed_patch = |mixed_models: RequestField<MixedModelsRequest>| UpdateConfigRequest {
+            model: RequestField::Omitted,
+            base_url: RequestField::Omitted,
+            backend: RequestField::Omitted,
+            reasoning_effort: RequestField::Omitted,
+            api_key_env: RequestField::Omitted,
+            extra_headers: RequestField::Omitted,
+            orchestrator_compaction_threshold: RequestField::Omitted,
+            mixed_models,
+        };
 
         manager
             .update_session_config(
                 "session",
-                efforts_patch(
-                    RequestField::Value("gpt-5.2".to_string()),
-                    RequestField::Omitted,
-                    RequestField::Omitted,
-                    RequestField::Value(MixedModelsRequest::Efforts {
-                        easy: "low".to_string(),
-                        medium: "medium".to_string(),
-                        hard: "high".to_string(),
-                    }),
-                ),
+                mixed_patch(RequestField::Value(MixedModelsRequest::Models {
+                    easy: tier("gpt-5-mini", Some("low")),
+                    medium: tier("gpt-5", None),
+                    hard: tier("claude-fable-5", None),
+                })),
             )
             .await
-            .expect("efforts the session model supports should persist");
+            .expect("valid tier models should persist");
+        let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
+        assert!(stored.mixed_models.is_some());
 
-        // Moving the session to a model whose thinking-level map rejects the
-        // stored tiers must fail the PATCH and leave the config untouched,
-        // even though the request itself never names the mixed config.
+        // A tier effort its model's catalog metadata rejects fails the PATCH
+        // and leaves the stored config untouched.
         let error = manager
             .update_session_config(
                 "session",
-                efforts_patch(
-                    RequestField::Value("claude-fable-5".to_string()),
-                    RequestField::Value("anthropic-messages".to_string()),
-                    RequestField::Value("https://api.anthropic.com".to_string()),
-                    RequestField::Omitted,
-                ),
+                mixed_patch(RequestField::Value(MixedModelsRequest::Models {
+                    easy: tier("gpt-5-mini", None),
+                    medium: tier("gpt-5", None),
+                    hard: tier("claude-fable-5", Some("high")),
+                })),
             )
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("not supported by model 'claude-fable-5'"),
+            error.to_string().contains("invalid hard tier model settings"),
             "{error:#}"
         );
         let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
-        assert_eq!(stored.model, "gpt-5.2");
-        assert!(stored.mixed_models.is_some());
+        let Some(sessions::MixedModeConfig::Models(tiers)) = stored.mixed_models else {
+            panic!("stored mixed config should survive the failed patch");
+        };
+        assert_eq!(tiers.hard.reasoning_effort, None);
 
-        // Clearing the mixed config in the same PATCH makes the move legal.
+        // Null returns the session to single-model mode.
         manager
-            .update_session_config(
-                "session",
-                efforts_patch(
-                    RequestField::Value("claude-fable-5".to_string()),
-                    RequestField::Value("anthropic-messages".to_string()),
-                    RequestField::Value("https://api.anthropic.com".to_string()),
-                    RequestField::Null,
-                ),
-            )
+            .update_session_config("session", mixed_patch(RequestField::Null))
             .await
-            .expect("clearing the efforts should unblock the model change");
+            .expect("clearing the mixed config should succeed");
         let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
-        assert_eq!(stored.model, "claude-fable-5");
         assert!(stored.mixed_models.is_none());
 
         let _ = std::fs::remove_dir_all(&root);

@@ -138,21 +138,11 @@ export function sameMixedModels(
 ): boolean {
   if (left === right) return true;
   if (!left || !right) return false;
-  if (left.kind === "efforts" && right.kind === "efforts") {
-    return (
-      left.easy === right.easy &&
-      left.medium === right.medium &&
-      left.hard === right.hard
-    );
-  }
-  if (left.kind === "models" && right.kind === "models") {
-    return (
-      sameTier(left.easy, right.easy) &&
-      sameTier(left.medium, right.medium) &&
-      sameTier(left.hard, right.hard)
-    );
-  }
-  return false;
+  return (
+    sameTier(left.easy, right.easy) &&
+    sameTier(left.medium, right.medium) &&
+    sameTier(left.hard, right.hard)
+  );
 }
 
 export interface LaunchLocation {

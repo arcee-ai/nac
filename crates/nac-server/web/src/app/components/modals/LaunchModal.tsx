@@ -530,7 +530,6 @@ function LaunchForm({
               <MixedModelsSection
                 key={savedMixedKey}
                 initial={savedMixed}
-                primary={chosen}
                 onChange={onMixed}
               />
               <Separator />

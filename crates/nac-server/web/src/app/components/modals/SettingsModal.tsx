@@ -615,7 +615,6 @@ function SettingsForm({
 
         <MixedModelsSection
           initial={initialMixed}
-          primary={{ backend, model }}
           onChange={setMixed}
         />
 

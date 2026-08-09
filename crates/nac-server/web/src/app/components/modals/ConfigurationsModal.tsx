@@ -616,7 +616,6 @@ function ConfigurationForm({
           <Separator />
           <MixedModelsSection
             initial={record?.mixed_models ?? null}
-            primary={{ backend, model: chosenModel }}
             onChange={setMixed}
           />
           <Separator />
