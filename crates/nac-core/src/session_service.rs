@@ -2297,22 +2297,13 @@ impl SessionService {
 
         if enforce_coordination {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
-                let mut expired =
+                let expired =
                     crate::store::expire_session_steering(&self.metadata.store_path, session_id)
                         .map_err(|error| SessionSubmitError::Coordination {
                             message: SessionCoordinationError::store(format!(
                                 "failed to recover stale steering: {error:#}"
                             )),
                         })?;
-                expired.extend(
-                    self.active_threads
-                        .close_all(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to clear stale worker targets: {error:#}"
-                            )),
-                        })?,
-                );
                 self.emit_steering_expired(expired);
             }
         }
@@ -2367,24 +2358,21 @@ impl SessionService {
             return false;
         };
         let mut outcome = outcome;
-        if self.active_threads.has_work_for_run(run_id) {
+        if matches!(outcome, RunOutcome::Failed(..)) {
             let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
-            let cleanup_error = self
+            if let Err(error) = self
                 .active_threads
                 .abort_run_and_drain(&self.metadata.store_path, session_id, run_id)
                 .await
-                .err()
-                .map(|error| format!("; cleanup also failed: {error:#}"))
-                .unwrap_or_default();
-            let invariant = format!(
-                "run attempted to finish with background dispatches or completions still owned by it; they were aborted to prevent crossing into a successor run{cleanup_error}"
-            );
-            outcome = match outcome {
-                RunOutcome::Completed(_, usage) => RunOutcome::Failed(invariant, usage),
-                RunOutcome::Failed(message, usage) => {
-                    RunOutcome::Failed(format!("{message}\n{invariant}"), usage)
-                }
-            };
+            {
+                let cleanup_error = format!("failed to clean up background work: {error:#}");
+                outcome = match outcome {
+                    RunOutcome::Completed(..) => unreachable!(),
+                    RunOutcome::Failed(message, usage) => {
+                        RunOutcome::Failed(format!("{message}\n{cleanup_error}"), usage)
+                    }
+                };
+            }
         }
         self.expire_orchestrator_steering(run_id);
         if matches!(outcome, RunOutcome::Failed(..)) {
@@ -6508,10 +6496,68 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn finish_invariant_aborts_background_work_and_blocks_queued_handoff() {
-        let (parts, store_path) =
-            test_active_service("queued_background_invariant", "invariant-session");
+    async fn successful_finish_preserves_origin_background_work() {
+        let (parts, _store_path) =
+            test_active_service("finish_preserves_background", "finish-session");
         let active = parts.service.try_begin_run(None, "current").unwrap();
+        let key = crate::tools::ThreadDispatchKey::new(
+            active.run_id.clone(),
+            "worker",
+            "dispatch-worker",
+            "call-worker",
+        );
+        assert!(parts.service.active_threads.try_accept(key.clone()));
+
+        assert!(
+            parts
+                .service
+                .finish_run_once(
+                    &active.run_id,
+                    RunOutcome::Completed("progress response".to_string(), None),
+                )
+                .await
+        );
+        assert!(parts.service.active_run().is_none());
+        assert!(parts.service.active_threads.matches(&key));
+        assert!(parts
+            .service
+            .active_threads
+            .has_work_for_run(&active.run_id));
+    }
+
+    #[tokio::test]
+    async fn cancelling_origin_run_preserves_other_run_background_work() {
+        let (parts, _store_path) =
+            test_active_service("cancel_origin_isolation", "cancel-isolation-session");
+        let active = parts.service.try_begin_run(None, "current").unwrap();
+        let other_run = SessionRunId::new();
+        let origin_key = crate::tools::ThreadDispatchKey::new(
+            active.run_id.clone(),
+            "origin-worker",
+            "dispatch-origin",
+            "call-origin",
+        );
+        let other_key = crate::tools::ThreadDispatchKey::new(
+            other_run.clone(),
+            "other-worker",
+            "dispatch-other",
+            "call-other",
+        );
+        assert!(parts.service.active_threads.try_accept(origin_key.clone()));
+        assert!(parts.service.active_threads.try_accept(other_key.clone()));
+
+        parts.service.request_cancel(&active.run_id).await.unwrap();
+
+        assert!(!parts.service.active_threads.matches(&origin_key));
+        assert!(parts.service.active_threads.matches(&other_key));
+        assert!(parts.service.active_threads.has_work_for_run(&other_run));
+    }
+
+    #[test]
+    fn queued_handoff_preserves_predecessor_background_work() {
+        let (parts, _store_path) =
+            test_active_service("queued_background_handoff", "handoff-background-session");
+        let old = parts.service.try_begin_run(None, "current").unwrap();
         let queued = match parts
             .service
             .queue_prepared_next_turn(
@@ -6525,32 +6571,22 @@ pub(super) mod tests {
             _ => panic!("queue should be created"),
         };
         let key = crate::tools::ThreadDispatchKey::new(
-            active.run_id.clone(),
+            old.run_id.clone(),
             "worker",
             "dispatch-worker",
             "call-worker",
         );
-        assert!(parts.service.active_threads.try_accept(key));
+        assert!(parts.service.active_threads.try_accept(key.clone()));
 
-        assert!(
-            parts
-                .service
-                .finish_run_once(
-                    &active.run_id,
-                    RunOutcome::Completed("must not complete".to_string(), None),
-                )
-                .await
-        );
-        assert!(parts.service.active_run().is_none());
-        assert!(!parts
+        let mut finishing = parts.service.mark_run_finishing(&old.run_id).unwrap();
+        let (admitted, successor) = parts
             .service
-            .active_threads
-            .has_work_for_run(&active.run_id));
-        let retained = crate::store::load_queued_run(&store_path, "invariant-session")
-            .unwrap()
-            .unwrap();
-        assert_eq!(retained.queued_run_id, queued.queued_run_id);
-        assert_eq!(retained.state, crate::store::QueuedRunState::Pending);
+            .try_handoff_queued_run(&mut finishing)
+            .expect("queued successor should start");
+        assert_eq!(admitted.queued_run_id, queued.queued_run_id);
+        assert_ne!(successor.run_id, old.run_id);
+        assert_eq!(parts.service.active_run().unwrap().run_id, successor.run_id);
+        assert!(parts.service.active_threads.matches(&key));
     }
 
     #[test]

@@ -14,7 +14,7 @@ use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, To
 use crate::sandbox::{SandboxSession, SshConnection};
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
-use crate::types::{FunctionCall, Message, ToolCall, ToolDefinition};
+use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
 mod dag;
@@ -54,42 +54,6 @@ Reply with your answer as ordinary text, or issue the tool call you meant to mak
 
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-}
-
-fn inject_background_thread_wait(
-    assistant: &mut crate::model::AssistantTurn,
-    should_wait: bool,
-) -> bool {
-    if !should_wait
-        || assistant
-            .tool_calls
-            .as_ref()
-            .is_some_and(|calls| !calls.is_empty())
-    {
-        return false;
-    }
-    assistant
-        .tool_calls
-        .get_or_insert_with(Vec::new)
-        .push(ToolCall {
-            id: format!("nac-thread-wait-{}", Uuid::new_v4()),
-            call_type: "function".to_string(),
-            function: FunctionCall {
-                name: "thread_wait".to_string(),
-                arguments: "{}".to_string(),
-            },
-        });
-    if assistant
-        .content
-        .as_deref()
-        .is_none_or(|content| content.trim().is_empty())
-    {
-        assistant.content = Some(
-            "The background threads are still running. I’ll continue when they finish or new guidance arrives."
-                .to_string(),
-        );
-    }
-    true
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -588,7 +552,7 @@ impl Agent {
                 .await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();
-            let mut response = match turn {
+            let response = match turn {
                 Ok(response) => response,
                 Err(error) => {
                     // Preserve accumulated usage (including summary and worker
@@ -644,19 +608,6 @@ impl Agent {
                 return Err(error);
             }
 
-            let provider_has_tool_calls = response
-                .assistant
-                .tool_calls
-                .as_ref()
-                .is_some_and(|tool_calls| !tool_calls.is_empty());
-            let run_has_background_work = self
-                .event_sink
-                .run_id()
-                .is_some_and(|run_id| self.tool_runtime.active_threads.has_work_for_run(run_id));
-            inject_background_thread_wait(
-                &mut response.assistant,
-                !provider_has_tool_calls && self.thread_name.is_none() && run_has_background_work,
-            );
             let has_tool_calls = response
                 .assistant
                 .tool_calls
