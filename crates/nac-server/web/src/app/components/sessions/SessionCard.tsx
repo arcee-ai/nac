@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   Icon,
@@ -91,6 +91,71 @@ function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
   );
 }
 
+export interface SessionReorderStart {
+  sessionId: string;
+  pinned: boolean;
+  clientX: number;
+  clientY: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+}
+
+/** Two vertical bars — Figma Handler on desktop Default-sort cards. */
+function DragHandle({
+  getCardElement,
+  onReorderStart,
+}: {
+  getCardElement: () => HTMLElement | null;
+  onReorderStart: (start: SessionReorderStart) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="Drag to reorder"
+      className={cn(
+        "absolute right-1.5 top-1/2 z-1 -translate-y-1/2",
+        "flex h-6 items-center gap-[3px]",
+        "cursor-grab active:cursor-grabbing touch-none",
+        "rounded-sm border-0 bg-transparent p-0",
+      )}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const card = getCardElement();
+        if (!card) return;
+        const rect = card.getBoundingClientRect();
+        // Capture on the handle so moves keep flowing after the card floats.
+        e.currentTarget.setPointerCapture(e.pointerId);
+        onReorderStart({
+          sessionId: card.dataset.sessionId ?? "",
+          pinned: card.dataset.sessionPinned === "true",
+          clientX: e.clientX,
+          clientY: e.clientY,
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top,
+          width: rect.width,
+          height: rect.height,
+        });
+      }}
+    >
+      <span className="h-full w-px rounded-[2px] bg-divider-primary" />
+      <span className="h-full w-px rounded-[2px] bg-divider-primary" />
+    </button>
+  );
+}
+
+export interface SessionCardReorder {
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onReorderStart: (start: SessionReorderStart) => void;
+}
+
 interface SessionCardProps {
   entry: ManagedSessionSummary;
   selected: boolean;
@@ -100,6 +165,10 @@ interface SessionCardProps {
   onRename: (entry: ManagedSessionSummary) => void;
   onDelete: (entry: ManagedSessionSummary) => void;
   onStop: (entry: ManagedSessionSummary) => void;
+  /** When set (Default sort), shows desktop handle / mobile arrows. */
+  reorder?: SessionCardReorder;
+  /** Card is the active drag ghost (follows the pointer). */
+  dragging?: boolean;
 }
 
 export function SessionCard({
@@ -111,6 +180,8 @@ export function SessionCard({
   onRename,
   onDelete,
   onStop,
+  reorder,
+  dragging = false,
 }: SessionCardProps) {
   const summary = entry.summary;
   const id = summary.session_id;
@@ -131,22 +202,38 @@ export function SessionCard({
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pressed, setPressed] = useState(false);
+  const suppressClick = useRef(false);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // The bottom row swaps provenance for actions as soon as the card is the
   // user's focus, which is also how the design shows the Focused state. A touch
   // screen never reaches that state, so the actions stay out and the
   // provenance moves up under the title instead.
   const showActions = !isDesktop || hover || focused || selected;
+  const showDesktopHandle = Boolean(reorder) && isDesktop;
+  const showMobileReorder = Boolean(reorder) && !isDesktop;
+  // Touch / narrow layouts stick "hover" after a tap; only desktop gets hover bg.
+  const surfaceHover = isDesktop && hover;
 
-  const activate = () => onOpen(id);
+  const activate = () => {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      return;
+    }
+    onOpen(id);
+  };
 
   return (
     <div
+      ref={cardRef}
+      data-session-id={id}
+      data-session-pinned={summary.pinned ? "true" : "false"}
       className={cn(
         "group fade relative flex flex-col rounded-[8px] overflow-hidden cursor-default",
         isMobile ? "gap-4 px-4 pt-4 pb-2" : "gap-4 px-6 pt-5 pb-3",
         "shadow-convex",
         running ? "bg-elevation-level-3" : "bg-elevation-level-1",
+        dragging && "shadow-lg",
       )}
       role="button"
       tabIndex={0}
@@ -159,7 +246,9 @@ export function SessionCard({
           activate();
         }
       }}
-      onMouseEnter={() => setHover(true)}
+      onMouseEnter={() => {
+        if (isDesktop) setHover(true);
+      }}
       onMouseLeave={() => {
         setHover(false);
         setPressed(false);
@@ -181,10 +270,10 @@ export function SessionCard({
       <div
         className="absolute inset-0 rounded-[8px] pointer-events-none ease-out"
         style={{
-          backgroundColor: `var(${surfaceToken({ selected, hover, pressed })})`,
+          backgroundColor: `var(${surfaceToken({ selected, hover: surfaceHover, pressed })})`,
         }}
       />
-      {selected || focused ? (
+      {selected || focused || dragging ? (
         <div
           className="absolute inset-0 rounded-[8px] pointer-events-none border-2"
           style={{ borderColor: "var(--blue-500)" }}
@@ -199,6 +288,19 @@ export function SessionCard({
         >
           <span className="block size-2 rounded-full bg-accent-primary" />
         </Tooltip>
+      ) : null}
+
+      {showDesktopHandle && reorder ? (
+        <DragHandle
+          getCardElement={() => cardRef.current}
+          onReorderStart={(start) => {
+            suppressClick.current = true;
+            reorder.onReorderStart(start);
+            window.setTimeout(() => {
+              suppressClick.current = false;
+            }, 100);
+          }}
+        />
       ) : null}
 
       <div className="relative flex items-center gap-4 w-full">
@@ -257,6 +359,16 @@ export function SessionCard({
             onRename={() => onRename(entry)}
             onDelete={() => onDelete(entry)}
             onStop={() => onStop(entry)}
+            reorder={
+              showMobileReorder && reorder
+                ? {
+                    canMoveUp: reorder.canMoveUp,
+                    canMoveDown: reorder.canMoveDown,
+                    onMoveUp: reorder.onMoveUp,
+                    onMoveDown: reorder.onMoveDown,
+                  }
+                : undefined
+            }
           />
         ) : (
           <Provenance summary={summary} />
