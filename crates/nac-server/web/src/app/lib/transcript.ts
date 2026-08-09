@@ -35,7 +35,13 @@ const SILENT_TOOLS = new Set([
   "workset_list",
 ]);
 
-export type ThreadState = "running" | "pending" | "done" | "error" | "cancelled";
+export type ThreadState =
+  | "running"
+  | "pending"
+  | "cancelling"
+  | "done"
+  | "error"
+  | "cancelled";
 
 export interface TranscriptThread {
   /**
@@ -374,6 +380,7 @@ function describeThread(
   const status = live?.status ?? active?.status ?? terminalStatus;
   if (rejection || status === "failed") state = "error";
   else if (status === "cancelled" || (acceptance && runCancelled)) state = "cancelled";
+  else if (status === "cancelling") state = "cancelling";
   else if (status === "completed" || legacyCompletion) state = "done";
   else if (status === "dependency_pending" || waitingOnBatchDep) state = "pending";
   else state = "running";

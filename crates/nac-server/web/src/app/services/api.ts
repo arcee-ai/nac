@@ -50,6 +50,9 @@ import type {
   SubmitPromptResponse,
   SwitchBranchRequest,
   ThreadEventPage,
+  ThreadCancelRequest,
+  ThreadCancelResponse,
+  ExactThreadSteeringRequest,
   ThreadSteeringResponse,
   UpdateConfigRequest,
   UpdateModelConfigurationRequest,
@@ -512,6 +515,28 @@ export const api = {
       "POST",
       `${sessionPath(id)}/threads/${encodeURIComponent(threadName)}/steering`,
       { body: { instruction } },
+    ),
+
+  steerThreadDispatch: (
+    id: string,
+    dispatchId: string,
+    body: ExactThreadSteeringRequest,
+  ) =>
+    request<ThreadSteeringResponse>(
+      "POST",
+      `${sessionPath(id)}/thread-dispatches/${encodeURIComponent(dispatchId)}/steering`,
+      { body },
+    ),
+
+  cancelThreadDispatch: (
+    id: string,
+    dispatchId: string,
+    body: ThreadCancelRequest,
+  ) =>
+    request<ThreadCancelResponse>(
+      "POST",
+      `${sessionPath(id)}/thread-dispatches/${encodeURIComponent(dispatchId)}/cancel`,
+      { body },
     ),
 
   getRecentEvents: (

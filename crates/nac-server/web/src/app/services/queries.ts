@@ -13,6 +13,7 @@ import { ApiError, api } from "@/app/services/api";
 import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
 import type {
   BackendKind,
+  ActiveThreadDispatchSnapshot,
   BranchList,
   BrowseListing,
   CommitWorkspaceRequest,
@@ -858,6 +859,73 @@ export function useDeleteQueuedRun() {
     },
     onError: (error, { id }) => {
       if (error instanceof ApiError && error.status === 409) void invalidate.session(id);
+    },
+  });
+}
+
+export interface ExactDispatchMutation {
+  id: string;
+  dispatch: ActiveThreadDispatchSnapshot;
+}
+
+export function useCancelThreadDispatch() {
+  const invalidate = useInvalidators();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dispatch }: ExactDispatchMutation) =>
+      api.cancelThreadDispatch(id, dispatch.dispatch_id, {
+        origin_run_id: dispatch.run_id,
+        thread_name: dispatch.thread_name,
+        originating_tool_call_id: dispatch.tool_call_id,
+        wait_ms: 250,
+      }),
+    onSuccess: (response, { id, dispatch }) => {
+      client.setQueryData<SessionSnapshotResponse>(queryKeys.session(id), (snapshot) => {
+        if (!snapshot?.active_thread_dispatches) return snapshot;
+        return {
+          ...snapshot,
+          active_thread_dispatches: snapshot.active_thread_dispatches.map((item) =>
+            item.dispatch_id === dispatch.dispatch_id &&
+            item.run_id === dispatch.run_id &&
+            item.thread_name === dispatch.thread_name &&
+            item.tool_call_id === dispatch.tool_call_id
+              ? {
+                  ...item,
+                  status:
+                    response.terminal && response.terminal_status
+                      ? response.terminal_status
+                      : "cancelling",
+                }
+              : item,
+          ),
+        };
+      });
+      void invalidate.session(id);
+    },
+    onError: (error, { id }) => {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        void invalidate.session(id);
+      }
+    },
+  });
+}
+
+export function useSteerThreadDispatch() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({
+      id,
+      dispatch,
+      instruction,
+    }: ExactDispatchMutation & { instruction: string }) =>
+      api.steerThreadDispatch(id, dispatch.dispatch_id, {
+        origin_run_id: dispatch.run_id,
+        thread_name: dispatch.thread_name,
+        originating_tool_call_id: dispatch.tool_call_id,
+        instruction,
+      }),
+    onSettled: (_data, _error, { id }) => {
+      void invalidate.session(id);
     },
   });
 }

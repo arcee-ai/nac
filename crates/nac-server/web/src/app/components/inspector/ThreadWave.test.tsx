@@ -23,12 +23,17 @@ describe("ThreadWave", () => {
   it("renders dependency pending and cancellation as distinct terminal state", () => {
     render(
       <ThreadWave
-        rows={[[thread("pending-dispatch", "pending")], [thread("cancelled-dispatch", "cancelled")]]}
+        rows={[
+          [thread("pending-dispatch", "pending")],
+          [thread("cancelling-dispatch", "cancelling")],
+          [thread("cancelled-dispatch", "cancelled")],
+        ]}
         selected={null}
         onSelect={() => undefined}
       />,
     );
     expect(screen.getByText("Pending...")).toBeVisible();
+    expect(screen.getByText("Cancelling…")).toBeVisible();
     expect(screen.getByText("summary cancelled-dispatch")).toBeVisible();
   });
 

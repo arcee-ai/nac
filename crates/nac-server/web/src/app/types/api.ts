@@ -641,7 +641,8 @@ export interface ActiveThreadDispatchSnapshot {
   thread_name: string;
   dispatch_id: string;
   tool_call_id: string;
-  status: ThreadDispatchStatus;
+  /** `cancelling` is a client-only optimistic state until SSE/snapshot terminalizes it. */
+  status: ThreadDispatchStatus | "cancelling";
 }
 
 export interface RespondLivePreference {
@@ -1131,10 +1132,39 @@ export interface OrchestratorSteeringResponse {
   instruction_preview: string;
 }
 
+export interface ExactThreadDispatchRequest {
+  origin_run_id: string;
+  thread_name: string;
+  originating_tool_call_id: string;
+}
+
+export interface ExactThreadSteeringRequest extends ExactThreadDispatchRequest {
+  instruction: string;
+}
+
+export interface ThreadCancelRequest extends ExactThreadDispatchRequest {
+  wait_ms: number;
+}
+
+export type ThreadCancelOutcome =
+  | "requested"
+  | "already_cancelling"
+  | "already_terminal";
+
+export interface ThreadCancelResponse extends ExactThreadDispatchRequest {
+  outcome: ThreadCancelOutcome;
+  dispatch_id: string;
+  terminal: boolean;
+  terminal_status: ThreadDispatchStatus | null;
+}
+
 export interface ThreadSteeringResponse {
   steering_id: number;
+  origin_run_id: string;
   thread_name: string;
-  status: string;
+  dispatch_id: string;
+  originating_tool_call_id: string;
+  status: SteeringStatus;
   instruction_preview: string;
 }
 

@@ -26,6 +26,7 @@ import {
   toggleSidePanelExpanded,
   useSelectedRevision,
   useSelectedThread,
+  useSelectedThreadEpisode,
   useSelectedWorkset,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
@@ -124,6 +125,7 @@ export function SessionSideBox({
 }: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
+  const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
 
@@ -198,6 +200,7 @@ export function SessionSideBox({
           <ThreadsView
             snapshot={snapshot}
             selected={selectedThread}
+            selectedEpisode={selectedThreadEpisode}
             onSelect={selectThread}
           />
         ) : null}

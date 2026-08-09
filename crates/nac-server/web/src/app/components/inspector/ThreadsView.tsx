@@ -32,7 +32,11 @@ import {
 } from "@/app/hooks/useThreadLogHeight";
 import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useUpdateRespondLive } from "@/app/services/queries";
+import {
+  useCancelThreadDispatch,
+  useSteerThreadDispatch,
+  useUpdateRespondLive,
+} from "@/app/services/queries";
 import { Markdown } from "@/app/lib/markdown";
 import {
   STICK_TOLERANCE_PX,
@@ -50,6 +54,7 @@ import {
 import { dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
 import { useLiveThreads } from "@/app/store/runtimeStore";
 import type {
+  ActiveThreadDispatchSnapshot,
   AgentEvent,
   EpisodeSnapshot,
   SessionSnapshotResponse,
@@ -350,6 +355,9 @@ function Detail({
   events,
   liveLog,
   running,
+  sessionId,
+  dispatch,
+  steeringStatus,
 }: {
   thread: ThreadSnapshot;
   episodes: EpisodeSnapshot[];
@@ -358,29 +366,150 @@ function Detail({
   /** The same commands as the stream reported them, plus whatever came after. */
   liveLog: ThreadLogLine[];
   running: boolean;
+  sessionId: string;
+  /** Exact snapshot identity selected from a card/list row. */
+  dispatch: ActiveThreadDispatchSnapshot | null;
+  steeringStatus: "queued" | "delivered" | "expired" | null;
 }) {
   const paneRef = useRef<HTMLDivElement>(null);
+  const [instruction, setInstruction] = useState("");
+  const [localSteeringStatus, setLocalSteeringStatus] = useState<
+    "queued" | "delivered" | "expired" | "error" | null
+  >(null);
+  const cancelDispatch = useCancelThreadDispatch();
+  const steerDispatch = useSteerThreadDispatch();
+  const toast = useToast();
   const log = useMemo(
     () => mergeThreadLog(persistedThreadLog(events), liveLog),
     [events, liveLog],
   );
+  const dispatchStatus = dispatch?.status ?? null;
+  const terminal =
+    dispatchStatus === "completed" ||
+    dispatchStatus === "failed" ||
+    dispatchStatus === "cancelled" ||
+    (cancelDispatch.isSuccess && cancelDispatch.data.terminal);
+  const acceptedCancellation =
+    cancelDispatch.isSuccess &&
+    !cancelDispatch.data.terminal &&
+    cancelDispatch.variables.dispatch.dispatch_id === dispatch?.dispatch_id &&
+    cancelDispatch.variables.dispatch.run_id === dispatch?.run_id;
+  const cancelling =
+    dispatchStatus === "cancelling" || cancelDispatch.isPending || acceptedCancellation;
+  const actionable = dispatch != null && !terminal;
+  const shownSteeringStatus = steeringStatus ?? localSteeringStatus;
 
   return (
     <div ref={paneRef} className="flex flex-col flex-1 min-h-0 min-w-0">
-      <div className="flex items-center gap-[10px] h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
-        <span className="label-micro text-btn-secondary truncate">
-          {thread.name}
-        </span>
-        {running ? (
-          <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
-        ) : null}
+      <div className="flex flex-wrap items-center gap-[10px] min-h-10 px-4 py-2 shrink-0 border-b border-muted bg-elevation-level-1">
+        <span className="label-micro text-btn-secondary truncate">{thread.name}</span>
+        {running ? <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} /> : null}
         <span className="flex-1 min-w-0 code code-small text-basic-muted truncate">
           {thread.updated_at}
         </span>
+        {dispatchStatus ? (
+          <span role="status" className="shrink-0 label-micro text-basic-muted">
+            {cancelling
+              ? "Cancelling"
+              : cancelDispatch.isSuccess && cancelDispatch.data.terminal_status === "cancelled"
+                ? "Cancelled"
+                : dispatchStatus === "cancelled"
+                  ? "Cancelled"
+                  : dispatchStatus.replace("_", " ")}
+          </span>
+        ) : null}
         <span className="shrink-0 code code-small text-basic-muted">
           {thread.episode_count} ep
         </span>
       </div>
+
+      {dispatch ? (
+        <div className="flex flex-col gap-2 p-3 border-b border-muted bg-elevation-level-0-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="btn-secondary px-3 py-1.5 label-small"
+              disabled={!actionable || cancelling}
+              aria-label={`Cancel dispatch ${thread.name}`}
+              onClick={() => {
+                void cancelDispatch
+                  .mutateAsync({ id: sessionId, dispatch })
+                  .catch((error) => {
+                    toast.error(
+                      `Dispatch was not cancelled; refreshed exact state: ${errorMessage(error)}`,
+                    );
+                  });
+              }}
+            >
+              {cancelling
+                ? "Cancelling…"
+                : dispatchStatus === "cancelled" ||
+                    cancelDispatch.data?.terminal_status === "cancelled"
+                  ? "Cancelled"
+                  : "Cancel dispatch"}
+            </button>
+            <span className="code code-micro text-basic-muted break-all">
+              {`Run ${dispatch.run_id} · dispatch ${dispatch.dispatch_id}`}
+            </span>
+          </div>
+          <form
+            className="flex flex-col sm:flex-row gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const value = instruction.trim();
+              if (!value || !actionable || cancelling) return;
+              setLocalSteeringStatus(null);
+              void steerDispatch
+                .mutateAsync({ id: sessionId, dispatch, instruction: value })
+                .then(() => {
+                  setInstruction("");
+                  setLocalSteeringStatus("queued");
+                })
+                .catch((error) => {
+                  setLocalSteeringStatus("error");
+                  toast.error(`Steering was not queued: ${errorMessage(error)}`);
+                });
+            }}
+          >
+            <label className="sr-only" htmlFor={`steer-${dispatch.dispatch_id}`}>
+              Steer selected dispatch
+            </label>
+            <input
+              id={`steer-${dispatch.dispatch_id}`}
+              className="min-w-0 flex-1 rounded-[4px] border border-muted bg-elevation-level-1 px-3 py-2 text-small"
+              value={instruction}
+              disabled={!actionable || cancelling || steerDispatch.isPending}
+              placeholder="Steer this exact thread dispatch"
+              onChange={(event) => setInstruction(event.target.value)}
+            />
+            <button
+              type="submit"
+              className="btn-secondary px-3 py-2 label-small"
+              disabled={
+                !actionable ||
+                cancelling ||
+                steerDispatch.isPending ||
+                !instruction.trim()
+              }
+            >
+              {steerDispatch.isPending ? "Sending…" : "Send steering"}
+            </button>
+          </form>
+          {shownSteeringStatus ? (
+            <span role="status" className={cn(
+              "label-micro",
+              shownSteeringStatus === "error" || shownSteeringStatus === "expired"
+                ? "text-error-primary"
+                : "text-basic-muted",
+            )}>
+              {`Steering ${shownSteeringStatus}`}
+            </span>
+          ) : null}
+          <span className="label-micro text-basic-muted">
+            Delete thread history is a separate action and is unavailable while this dispatch is active or cancelling.
+          </span>
+        </div>
+      ) : null}
 
       {episodes.length ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-auto p-4 border-t border-muted [&>*]:shrink-0">
@@ -391,11 +520,7 @@ function Detail({
       ) : (
         <div className="flex-1 min-h-0" />
       )}
-      <LogTail
-        lines={log}
-        running={running}
-        paneRef={paneRef}
-      />
+      <LogTail lines={log} running={running} paneRef={paneRef} />
     </div>
   );
 }
@@ -408,12 +533,15 @@ function Detail({
 export function ThreadsView({
   snapshot,
   selected,
+  selectedEpisode = null,
   onSelect,
 }: {
   snapshot: SessionSnapshotResponse | null;
   /** Thread the chat pointed at, if any. */
   selected: string | null;
-  onSelect: (name: string) => void;
+  /** Exact dispatch key selected by a transcript card, if available. */
+  selectedEpisode?: string | null;
+  onSelect: (name: string, episodeKey?: string | null) => void;
 }) {
   const liveThreads = useLiveThreads();
   const updateRespondLive = useUpdateRespondLive();
@@ -437,7 +565,13 @@ export function ThreadsView({
     for (const dispatch of activeDispatches ?? []) {
       projectedNames.add(dispatch.thread_name);
       if (dispatch.status === "running") running.add(dispatch.thread_name);
-      else pending.add(dispatch.thread_name);
+      else if (
+        dispatch.status === "accepted" ||
+        dispatch.status === "dependency_pending" ||
+        dispatch.status === "cancelling"
+      ) {
+        pending.add(dispatch.thread_name);
+      }
     }
     // Compatibility snapshots exposed names only. Never spread this fallback
     // across historical cards; this view has one newest row per retained name.
@@ -487,12 +621,46 @@ export function ThreadsView({
 
   if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
 
-  const selectable = ordered.filter((thread) => !pendingNames.has(thread.name));
+  const exactActiveNames = new Set((activeDispatches ?? []).map((item) => item.thread_name));
+  const selectable = ordered.filter(
+    (thread) => !pendingNames.has(thread.name) || exactActiveNames.has(thread.name),
+  );
   const current =
     selectable.find((thread) => thread.name === selected) ??
     selectable[0] ??
     null;
-  const live = current ? liveThreads[current.name] : undefined;
+  // Actions are intentionally unavailable without an exact selected dispatch
+  // identity. In particular, a reused name never targets whichever run happens
+  // to be current.
+  const selectedDispatch =
+    activeDispatches?.find(
+      (dispatch) =>
+        dispatch.dispatch_id === selectedEpisode &&
+        dispatch.thread_name === current?.name,
+    ) ?? null;
+  const liveCandidate = current ? liveThreads[current.name] : undefined;
+  // A historical selection must not inherit the replacement's name-level log.
+  // Compatibility name-only live state remains available only without an exact
+  // card selection (the newest list row).
+  const live = selectedDispatch
+    ? liveCandidate?.runId === selectedDispatch.run_id &&
+      liveCandidate.dispatchId === selectedDispatch.dispatch_id &&
+      liveCandidate.toolCallId === selectedDispatch.tool_call_id
+      ? liveCandidate
+      : undefined
+    : selectedEpisode == null
+      ? liveCandidate
+      : undefined;
+  const selectedSteering = selectedDispatch
+    ? (snapshot.thread_steering ?? [])
+        .filter((record) => record.dispatch_id === selectedDispatch.dispatch_id)
+        .at(-1)
+    : undefined;
+  const selectedSteeringStatus = selectedSteering
+    ? selectedSteering.status === "claimed"
+      ? "queued"
+      : selectedSteering.status
+    : null;
 
   return (
     <PanelSplit
@@ -533,13 +701,17 @@ export function ThreadsView({
             const pending = pendingNames.has(thread.name);
             const running = runningNames.has(thread.name);
             const errored = liveThreads[thread.name]?.isError;
+            const exact = activeDispatches?.find(
+              (dispatch) => dispatch.thread_name === thread.name,
+            );
+            const disabled = pending && !exact;
             return (
               <PanelRow
                 key={thread.name}
                 label={thread.name}
                 active={thread.name === current?.name}
-                disabled={pending}
-                title={pending ? "Waiting on source threads" : undefined}
+                disabled={disabled}
+                title={disabled ? "Waiting on source threads" : undefined}
                 icon={
                   pending ? (
                     <Icon
@@ -570,7 +742,7 @@ export function ThreadsView({
                     {thread.episode_count}
                   </span>
                 }
-                onClick={() => onSelect(thread.name)}
+                onClick={() => onSelect(thread.name, exact?.dispatch_id ?? null)}
               />
             );
           })
@@ -580,11 +752,19 @@ export function ThreadsView({
     >
       {current ? (
         <Detail
+          key={selectedEpisode ?? current.name}
           thread={current}
           episodes={snapshot.thread_episodes?.[current.name] ?? []}
           events={snapshot.thread_events?.[current.name]}
           liveLog={live?.log ?? []}
-          running={runningNames.has(current.name)}
+          running={
+            selectedDispatch
+              ? selectedDispatch.status === "running"
+              : selectedEpisode == null && runningNames.has(current.name)
+          }
+          sessionId={sessionId}
+          dispatch={selectedDispatch}
+          steeringStatus={selectedSteeringStatus}
         />
       ) : (
         <PanelEmpty>No threads yet for this session.</PanelEmpty>

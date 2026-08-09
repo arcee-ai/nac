@@ -12,13 +12,14 @@ interface ThreadBoxProps {
 const STATE_ORDER: Record<ThreadState, number> = {
   error: 0,
   cancelled: 1,
-  running: 2,
-  pending: 3,
-  done: 4,
+  cancelling: 2,
+  running: 3,
+  pending: 4,
+  done: 5,
 };
 
 function StateIcon({ state }: { state: ThreadState }) {
-  if (state === "running") {
+  if (state === "running" || state === "cancelling") {
     return <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />;
   }
   if (state === "pending") {
@@ -64,6 +65,7 @@ function worstState(threads: TranscriptThread[]): ThreadState {
 /** One dispatched thread: name, live state and the newest line it produced. */
 function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
   const running = thread.state === "running";
+  const cancelling = thread.state === "cancelling";
   const pending = thread.state === "pending";
   // Before the first command there is nothing to tail, so the card keeps
   // showing what the thread was asked to do.
@@ -87,7 +89,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
     <div
       className={cn(
         "shrink-0 w-[220px] h-[84px] overflow-hidden rounded-[4px]",
-        running || pending ? "bg-elevation-level-2" : "bg-elevation-level-1",
+        running || pending || cancelling ? "bg-elevation-level-2" : "bg-elevation-level-1",
       )}
     >
       <button
@@ -126,7 +128,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           // needs a plain wrapper to stay clamped.
           <div className="w-full px-2 pt-2">
             <span className="line-clamp-2 text-micro text-basic-muted !my-0 !text-[11px]">
-              {pending ? "Pending..." : thread.summary}
+              {pending ? "Pending..." : cancelling ? "Cancelling…" : thread.summary}
             </span>
           </div>
         )}
@@ -157,7 +159,7 @@ function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
         "[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]",
         state === "error"
           ? "border-error-primary"
-          : state === "running"
+          : state === "running" || state === "cancelling"
             ? "border-primary"
             : "border-tertiary",
       )}
