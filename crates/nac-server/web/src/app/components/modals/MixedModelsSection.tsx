@@ -21,12 +21,13 @@ import {
 } from "@/app/components/modals/options";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useModelCatalog } from "@/app/services/queries";
+import { MIXED_TIERS } from "@/app/types/api";
 import type {
-  BackendKind,
   MixedModels,
   MixedTierSettings,
   ModelCatalog,
   ReasoningEffort,
+  ThreadComplexity,
 } from "@/app/types/api";
 
 export type MixedMode = "single" | "mixed";
@@ -40,8 +41,7 @@ export interface MixedSelection {
   mixed: MixedModels | null;
 }
 
-const TIERS = ["easy", "medium", "hard"] as const;
-type Tier = (typeof TIERS)[number];
+type Tier = ThreadComplexity;
 
 const TIER_LABELS: Record<Tier, string> = {
   easy: "Easy",
@@ -82,19 +82,13 @@ function tierStateFrom(settings: MixedTierSettings | undefined): TierState {
   };
 }
 
-function tierSettings(
-  state: TierState,
-  primaryBackend: BackendKind | null,
-  primaryApiKeyEnv: string | null,
-): MixedTierSettings | null {
+function tierSettings(state: TierState): MixedTierSettings | null {
   if (!state.pick || !state.pick.baseUrl) return null;
   return {
     model: state.pick.model,
     backend: state.pick.backend,
     base_url: state.pick.baseUrl,
-    api_key_env:
-      state.apiKeyEnv ??
-      (state.pick.backend === primaryBackend ? primaryApiKeyEnv : null),
+    api_key_env: state.apiKeyEnv,
     reasoning_effort: state.effort || null,
   };
 }
@@ -186,15 +180,10 @@ function initialTiers(
  */
 export function MixedModelsSection({
   initial,
-  primaryBackend = null,
-  primaryApiKeyEnv = null,
   onChange,
 }: {
   /** Seeds the form; a value opens the section in mixed mode. */
   initial?: MixedModels | null;
-  /** The primary setup credential is reused by tiers on the same backend. */
-  primaryBackend?: BackendKind | null;
-  primaryApiKeyEnv?: string | null;
   onChange: (selection: MixedSelection) => void;
 }) {
   const catalog = useModelCatalog();
@@ -205,14 +194,14 @@ export function MixedModelsSection({
 
   const selection = useMemo<MixedSelection>(() => {
     if (mode === "single") return { mode, mixed: null };
-    const easy = tierSettings(tiers.easy, primaryBackend, primaryApiKeyEnv);
-    const medium = tierSettings(tiers.medium, primaryBackend, primaryApiKeyEnv);
-    const hard = tierSettings(tiers.hard, primaryBackend, primaryApiKeyEnv);
+    const easy = tierSettings(tiers.easy);
+    const medium = tierSettings(tiers.medium);
+    const hard = tierSettings(tiers.hard);
     return {
       mode,
       mixed: easy && medium && hard ? { easy, medium, hard } : null,
     };
-  }, [mode, tiers, primaryBackend, primaryApiKeyEnv]);
+  }, [mode, tiers]);
 
   useEffect(() => {
     onChange(selection);
@@ -245,7 +234,7 @@ export function MixedModelsSection({
 
       {mode === "mixed" ? (
         <div className="flex flex-col gap-2 rounded-[8px] border border-muted bg-elevation-level-2 p-3">
-          {TIERS.map((tier, index) => (
+          {MIXED_TIERS.map((tier, index) => (
             <div key={tier} className="flex flex-col gap-2">
               {index > 0 ? <Separator /> : null}
               <TierModelRow

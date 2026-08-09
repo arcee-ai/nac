@@ -106,30 +106,6 @@ impl ReasoningEffort {
     }
 }
 
-impl std::fmt::Display for ReasoningEffort {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for ReasoningEffort {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "none" => Ok(Self::None),
-            "minimal" => Ok(Self::Minimal),
-            "low" => Ok(Self::Low),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            "xhigh" => Ok(Self::Xhigh),
-            other => Err(format!(
-                "unsupported reasoning effort '{other}'; select one of: none, minimal, low, medium, high, xhigh"
-            )),
-        }
-    }
-}
-
 /// Difficulty tier the orchestrator assigns to a thread dispatch in mixed
 /// mode. Each tier routes to its own user-configured worker model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -147,12 +123,6 @@ impl ThreadComplexity {
             Self::Medium => "medium",
             Self::Hard => "hard",
         }
-    }
-}
-
-impl std::fmt::Display for ThreadComplexity {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
     }
 }
 

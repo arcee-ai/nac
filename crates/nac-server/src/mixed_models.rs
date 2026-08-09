@@ -1,35 +1,11 @@
 use anyhow::Result;
 use nac_core::{
     mixed_mode::{MixedModeConfig, MixedTierSettings},
-    model::{provider_for_model, BackendKind, ReasoningEffort},
+    model::{provider_for_model, BackendKind},
     runtime::CredentialDestinationPolicy,
 };
-use serde::Deserialize;
 
 use crate::{enforce_trusted_base_url, nonblank_request_string};
-
-/// One mixed tier's model identity as a request names it. The credential is
-/// an environment/stored-credential name, never a key value.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct MixedTierRequest {
-    pub model: String,
-    #[serde(default)]
-    pub backend: Option<BackendKind>,
-    #[serde(default)]
-    pub base_url: Option<String>,
-    #[serde(default)]
-    pub api_key_env: Option<String>,
-    #[serde(default)]
-    pub reasoning_effort: Option<ReasoningEffort>,
-}
-
-/// Request representation of easy, medium, and hard dispatch models.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct MixedModelsRequest {
-    pub easy: MixedTierRequest,
-    pub medium: MixedTierRequest,
-    pub hard: MixedTierRequest,
-}
 
 /// A top-level generated credential which matching tiers may inherit. During
 /// rotation, `previous` identifies references that should follow the new key.
@@ -41,7 +17,7 @@ pub(crate) struct InheritedCredential<'a> {
 }
 
 fn normalize_tier(
-    tier: MixedTierRequest,
+    tier: MixedTierSettings,
     label: &str,
     policy: &CredentialDestinationPolicy,
     inherited: Option<InheritedCredential<'_>>,
@@ -73,7 +49,7 @@ fn normalize_tier(
 
 /// Normalize and destination-check all tiers before persistence or launch.
 pub(crate) fn normalize(
-    request: MixedModelsRequest,
+    request: MixedModeConfig,
     policy: &CredentialDestinationPolicy,
     inherited: Option<InheritedCredential<'_>>,
 ) -> Result<MixedModeConfig> {

@@ -25,6 +25,10 @@ export type ReasoningEffort =
   | "high"
   | "xhigh";
 
+/** Mixed-mode dispatch difficulty, serialized lowercase. */
+export const MIXED_TIERS = ["easy", "medium", "hard"] as const;
+export type ThreadComplexity = (typeof MIXED_TIERS)[number];
+
 /**
  * One mixed tier's worker model. Same shape on records and requests: the
  * credential is always a selector name, never a key value.
@@ -41,11 +45,7 @@ export interface MixedTierSettings {
  * Mixed-mode dispatch routing: the orchestrator classifies each dispatch and
  * the classification selects a user-configured worker model per tier.
  */
-export interface MixedModels {
-  easy: MixedTierSettings;
-  medium: MixedTierSettings;
-  hard: MixedTierSettings;
-}
+export type MixedModels = Record<ThreadComplexity, MixedTierSettings>;
 
 export interface StoreInfo {
   root_cwd: string;

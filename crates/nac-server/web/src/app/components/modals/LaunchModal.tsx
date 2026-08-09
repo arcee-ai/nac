@@ -541,10 +541,6 @@ function LaunchForm({
               <MixedModelsSection
                 key={savedMixedKey}
                 initial={savedMixed}
-                primaryBackend={chosen?.backend ?? null}
-                primaryApiKeyEnv={
-                  selection?.kind === "resolved" ? selection.api_key_env : null
-                }
                 onChange={onMixed}
               />
               <Separator />

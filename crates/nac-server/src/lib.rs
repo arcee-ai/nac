@@ -10,7 +10,6 @@ pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,
 };
-pub use mixed_models::{MixedModelsRequest, MixedTierRequest};
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
     RevertSessionResponse,
@@ -39,11 +38,14 @@ use axum::{
     Json, Router,
 };
 use include_dir::{include_dir, Dir};
+#[cfg(test)]
+use nac_core::mixed_mode::MixedTierSettings;
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
+    mixed_mode::MixedModeConfig,
     model::{
         list_managed_provider_models, list_provider_models, list_stored_api_keys,
         managed_backend_base_url, provider_default_base_url, provider_for_model,
@@ -354,7 +356,7 @@ pub struct CreateSessionRequest {
     pub orchestrator_compaction_threshold: RequestField<u64>,
     /// Mixed-mode tier models; omitted or null launches single-model.
     #[serde(default)]
-    pub mixed_models: RequestField<MixedModelsRequest>,
+    pub mixed_models: RequestField<MixedModeConfig>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -424,7 +426,7 @@ pub struct CreateModelConfigurationRequest {
     pub initial_prompt: Option<String>,
     /// Mixed-mode tier models saved with this setup.
     #[serde(default)]
-    pub mixed_models: Option<MixedModelsRequest>,
+    pub mixed_models: Option<MixedModeConfig>,
 }
 
 /// Edits a saved setup in place. Every field is tri-state: omit it to keep what
@@ -454,7 +456,7 @@ pub struct UpdateModelConfigurationRequest {
     #[serde(default)]
     pub initial_prompt: RequestField<String>,
     #[serde(default)]
-    pub mixed_models: RequestField<MixedModelsRequest>,
+    pub mixed_models: RequestField<MixedModeConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -559,7 +561,7 @@ pub struct UpdateConfigRequest {
     pub orchestrator_compaction_threshold: RequestField<u64>,
     /// Omitted preserves; null returns the session to single-model mode.
     #[serde(default)]
-    pub mixed_models: RequestField<MixedModelsRequest>,
+    pub mixed_models: RequestField<MixedModeConfig>,
 }
 
 impl UpdateConfigRequest {
@@ -5154,14 +5156,14 @@ mod tests {
         seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
         let manager = test_manager(&root);
 
-        let tier = |model: &str, effort: Option<&str>| MixedTierRequest {
+        let tier = |model: &str, reasoning_effort| MixedTierSettings {
             model: model.to_string(),
             backend: None,
             base_url: None,
             api_key_env: None,
-            reasoning_effort: effort.map(|value| value.parse().unwrap()),
+            reasoning_effort,
         };
-        let mixed_patch = |mixed_models: RequestField<MixedModelsRequest>| UpdateConfigRequest {
+        let mixed_patch = |mixed_models: RequestField<MixedModeConfig>| UpdateConfigRequest {
             model: RequestField::Omitted,
             base_url: RequestField::Omitted,
             backend: RequestField::Omitted,
@@ -5175,8 +5177,8 @@ mod tests {
         manager
             .update_session_config(
                 "session",
-                mixed_patch(RequestField::Value(MixedModelsRequest {
-                    easy: tier("gpt-5-mini", Some("low")),
+                mixed_patch(RequestField::Value(MixedModeConfig {
+                    easy: tier("gpt-5-mini", Some(ReasoningEffort::Low)),
                     medium: tier("gpt-5", None),
                     hard: tier("claude-fable-5", None),
                 })),
@@ -5191,10 +5193,10 @@ mod tests {
         let error = manager
             .update_session_config(
                 "session",
-                mixed_patch(RequestField::Value(MixedModelsRequest {
+                mixed_patch(RequestField::Value(MixedModeConfig {
                     easy: tier("gpt-5-mini", None),
                     medium: tier("gpt-5", None),
-                    hard: tier("claude-fable-5", Some("high")),
+                    hard: tier("claude-fable-5", Some(ReasoningEffort::High)),
                 })),
             )
             .await
@@ -5252,7 +5254,7 @@ mod tests {
             raw.diagnostics
         );
 
-        let tier = |model: &str, effort| MixedTierRequest {
+        let tier = |model: &str, effort| MixedTierSettings {
             model: model.to_string(),
             backend: None,
             base_url: None,
@@ -5263,7 +5265,7 @@ mod tests {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
-                    mixed_models: RequestField::Value(MixedModelsRequest {
+                    mixed_models: RequestField::Value(MixedModeConfig {
                         easy: tier("gpt-5-mini", Some(ReasoningEffort::Low)),
                         medium: tier("gpt-5", None),
                         hard: tier("gpt-5", None),

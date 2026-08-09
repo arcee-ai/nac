@@ -31,20 +31,16 @@ impl MixedDispatchClients {
         }
     }
 
-    pub fn tiers(&self) -> [(ThreadComplexity, &ModelClient); 3] {
-        [
+    pub fn describe_tiers(&self) -> String {
+        let mut description = String::new();
+        for (complexity, client) in [
             (ThreadComplexity::Easy, &self.easy),
             (ThreadComplexity::Medium, &self.medium),
             (ThreadComplexity::Hard, &self.hard),
-        ]
-    }
-
-    pub fn describe_tiers(&self) -> String {
-        let mut description = String::new();
-        for (complexity, client) in self.tiers() {
+        ] {
             let mut traits = Vec::new();
             if let Some(effort) = client.reasoning_effort() {
-                traits.push(format!("effort: {effort}"));
+                traits.push(format!("effort: {}", effort.as_str()));
             }
             let cost = client.cost_rates();
             if cost.input > 0.0 || cost.output > 0.0 {
@@ -201,7 +197,18 @@ pub fn parse_dispatch_args(
     let scheduled_skills = resolve_scheduled_skills(args, runtime.skills.as_deref())?;
     let session_id = require_session(runtime)?.to_string();
     let timeout_secs = resolve_thread_timeout_secs(args, runtime.thread_timeout_secs);
-    let complexity = parse_mixed_complexity(args, runtime)?;
+    let complexity = if runtime.mixed_clients.is_some() {
+        Some(
+            require_str(args, "complexity")?
+                .parse::<ThreadComplexity>()
+                .map_err(|error| ToolResult {
+                    content: format!("Error: {error}"),
+                    is_error: true,
+                })?,
+        )
+    } else {
+        None
+    };
 
     Ok(ParsedDispatchParams {
         thread_name,
@@ -215,46 +222,21 @@ pub fn parse_dispatch_args(
     })
 }
 
-/// Parse the mixed-only `complexity` argument. Outside mixed mode it is
-/// ignored and stays `None`, preserving single-model behavior. In mixed
-/// mode it is required.
-fn parse_mixed_complexity(
-    args: &Value,
-    runtime: &ToolRuntime,
-) -> Result<Option<ThreadComplexity>, ToolResult> {
-    if runtime.mixed_clients.is_none() {
-        return Ok(None);
-    }
-    require_str(args, "complexity")
-        .and_then(|raw| {
-            raw.parse::<ThreadComplexity>().map_err(|error| ToolResult {
-                content: format!("Error: {}", error),
-                is_error: true,
-            })
-        })
-        .map(Some)
-}
-
-/// Select the model client a dispatch runs with. Outside mixed mode this is
-/// the orchestrator client, unchanged. In mixed mode the parsed complexity
-/// picks the pre-resolved tier client. A crossed routing state is an invariant
-/// error, never permission to run on the wrong model.
+/// Select the model client a dispatch runs with. A complexity is only parsed
+/// when mixed mode is enabled, so its presence selects the matching tier.
 pub(crate) fn select_dispatch_client(
     params: &ParsedDispatchParams,
     runtime: &ToolRuntime,
     orchestrator_client: &ModelClient,
-) -> Result<ModelClient, ToolResult> {
-    match (runtime.mixed_clients.as_deref(), params.complexity) {
-        (None, None) => Ok(orchestrator_client.clone()),
-        (Some(mixed), Some(complexity)) => Ok(mixed.for_tier(complexity).clone()),
-        (Some(_), None) => Err(ToolResult {
-            content: "Error: mixed-mode dispatch is missing its required complexity".to_string(),
-            is_error: true,
-        }),
-        (None, Some(_)) => Err(ToolResult {
-            content: "Error: single-model dispatch unexpectedly has a complexity".to_string(),
-            is_error: true,
-        }),
+) -> ModelClient {
+    match params.complexity {
+        Some(complexity) => runtime
+            .mixed_clients
+            .as_deref()
+            .expect("a parsed complexity requires mixed-mode clients")
+            .for_tier(complexity)
+            .clone(),
+        None => orchestrator_client.clone(),
     }
 }
 
@@ -389,10 +371,7 @@ pub async fn execute_dispatch(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let client = match select_dispatch_client(&params, runtime, client) {
-        Ok(client) => client,
-        Err(error) => return error,
-    };
+    let client = select_dispatch_client(&params, runtime, client);
     let thread_name = params.thread_name.clone();
     let dispatch_id = params.dispatch_id.clone();
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
@@ -920,7 +899,7 @@ mod tests {
         let runtime = test_runtime();
         let params =
             parse_dispatch_args(&json!({ "name": "t1", "action": "w" }), &runtime).unwrap();
-        let client = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
+        let client = select_dispatch_client(&params, &runtime, &orchestrator);
         assert_eq!(client.model, "orchestrator-model");
         assert_eq!(client.backend(), BackendKind::OpenAiResponses);
         assert_eq!(client.reasoning_effort(), Some(ReasoningEffort::Xhigh));
@@ -952,7 +931,7 @@ mod tests {
                 &runtime,
             )
             .unwrap();
-            let client = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
+            let client = select_dispatch_client(&params, &runtime, &orchestrator);
             assert_eq!(client.model, model);
             assert_eq!(client.backend(), backend);
             assert_eq!(client.reasoning_effort(), Some(effort));
@@ -974,7 +953,7 @@ mod tests {
             &runtime,
         )
         .unwrap();
-        let selected = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
+        let selected = select_dispatch_client(&params, &runtime, &orchestrator);
 
         assert_eq!(
             super::worker::worker_model_arguments_for_test(&selected),
@@ -991,27 +970,6 @@ mod tests {
                 "{}",
             ]
         );
-    }
-
-    #[test]
-    fn select_dispatch_client_rejects_crossed_routing_state() {
-        let orchestrator = ModelClient::new_for_test();
-
-        let mixed = mixed_runtime();
-        let params =
-            parse_dispatch_args(&json!({ "name": "t1", "action": "w" }), &test_runtime()).unwrap();
-        let error = select_dispatch_client(&params, &mixed, &orchestrator).unwrap_err();
-        assert!(error.is_error);
-        assert!(error.content.contains("missing its required complexity"));
-
-        let params = parse_dispatch_args(
-            &json!({ "name": "t1", "action": "w", "complexity": "easy" }),
-            &mixed,
-        )
-        .unwrap();
-        let error = select_dispatch_client(&params, &test_runtime(), &orchestrator).unwrap_err();
-        assert!(error.is_error);
-        assert!(error.content.contains("unexpectedly has a complexity"));
     }
 
     #[test]

@@ -60,12 +60,11 @@ pub(super) fn serialize_mixed_models(mixed: Option<&MixedModeConfig>) -> Result<
 }
 
 pub(super) fn deserialize_mixed_models(raw: Option<&str>) -> Result<Option<MixedModeConfig>> {
-    raw.filter(|json| !json.is_empty())
-        .map(|json| {
-            serde_json::from_str::<MixedModeConfig>(json)
-                .context("failed to parse stored session mixed models")
-        })
-        .transpose()
+    raw.map(|json| {
+        serde_json::from_str::<MixedModeConfig>(json)
+            .context("failed to parse stored session mixed models")
+    })
+    .transpose()
 }
 
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {

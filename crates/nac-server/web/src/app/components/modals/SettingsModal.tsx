@@ -620,12 +620,7 @@ function SettingsForm({
 
         <Separator />
 
-        <MixedModelsSection
-          initial={initialMixed}
-          primaryBackend={kind}
-          primaryApiKeyEnv={editingKey ? null : initial.api_key_env}
-          onChange={setMixed}
-        />
+        <MixedModelsSection initial={initialMixed} onChange={setMixed} />
 
         <Separator />
 

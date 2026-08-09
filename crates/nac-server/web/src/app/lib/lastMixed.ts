@@ -2,6 +2,7 @@
 // with, so turning mixed mode on again does not mean re-picking three
 // models. Presentation state only — the server never sees this key.
 
+import { MIXED_TIERS } from "@/app/types/api";
 import type { MixedModels, MixedTierSettings } from "@/app/types/api";
 
 const STORAGE_KEY = "nac.last-mixed-models";
@@ -20,9 +21,7 @@ export function loadLastMixed(): MixedModels | null {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return null;
     const mixed = parsed as Record<string, unknown>;
-    if (!isTier(mixed.easy) || !isTier(mixed.medium) || !isTier(mixed.hard)) {
-      return null;
-    }
+    if (!MIXED_TIERS.every((tier) => isTier(mixed[tier]))) return null;
     return parsed as MixedModels;
   } catch {
     return null;

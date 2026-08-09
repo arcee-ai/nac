@@ -2,6 +2,7 @@
 // backends with a fixed base URL, credential modes, mixed-tier credential
 // inheritance, reasoning-effort clearing and extra-header validation.
 
+import { MIXED_TIERS } from "@/app/types/api";
 import type {
   BackendKind,
   MixedModels,
@@ -160,10 +161,8 @@ export function sameMixedModels(
 ): boolean {
   if (left === right) return true;
   if (!left || !right) return false;
-  return (
-    sameTier(left.easy, right.easy) &&
-    sameTier(left.medium, right.medium) &&
-    sameTier(left.hard, right.hard)
+  return MIXED_TIERS.every((tier) =>
+    sameTier(left[tier], right[tier]),
   );
 }
 

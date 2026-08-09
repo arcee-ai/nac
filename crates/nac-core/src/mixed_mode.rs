@@ -15,13 +15,13 @@ use crate::tools::thread::MixedDispatchClients;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MixedTierSettings {
     pub model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<BackendKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
 }
 
@@ -43,7 +43,7 @@ fn resolve_tier_client(tier: &MixedTierSettings, label: &str) -> Result<ModelCli
         .and_then(managed_backend_base_url)
         .map(str::to_string);
     let base_url = tier.base_url.clone().or(selected_managed_base_url);
-    let settings = EffectiveModelSettings::from_optional(
+    EffectiveModelSettings::from_optional(
         backend,
         Some(tier.model.clone()),
         base_url,
@@ -51,9 +51,8 @@ fn resolve_tier_client(tier: &MixedTierSettings, label: &str) -> Result<ModelCli
         tier.api_key_env.clone(),
         BTreeMap::new(),
     )
-    .with_context(|| format!("invalid {label} tier model settings"))?;
-    ModelClient::from_effective_settings(settings)
-        .with_context(|| format!("invalid {label} tier model settings"))
+    .and_then(ModelClient::from_effective_settings)
+    .with_context(|| format!("invalid {label} tier model settings"))
 }
 
 /// Resolve all mixed tiers at launch or resume, so invalid settings fail
@@ -98,15 +97,15 @@ mod tests {
             std::env::set_var("ANTHROPIC_API_KEY", "test-key");
         }
 
-        let tier = |model: &str, effort: Option<&str>| MixedTierSettings {
+        let tier = |model: &str, reasoning_effort| MixedTierSettings {
             model: model.to_string(),
             backend: None,
             base_url: None,
             api_key_env: None,
-            reasoning_effort: effort.map(|value| value.parse().unwrap()),
+            reasoning_effort,
         };
         let mixed = MixedModeConfig {
-            easy: tier("gpt-5-mini", Some("low")),
+            easy: tier("gpt-5-mini", Some(ReasoningEffort::Low)),
             medium: tier("gpt-5", None),
             hard: tier("claude-fable-5", None),
         };
@@ -120,7 +119,7 @@ mod tests {
         let mixed = MixedModeConfig {
             easy: tier("gpt-5-mini", None),
             medium: tier("gpt-5", None),
-            hard: tier("claude-fable-5", Some("high")),
+            hard: tier("claude-fable-5", Some(ReasoningEffort::High)),
         };
         let error = resolve_dispatch_clients(&mixed)
             .map(|_| ())
