@@ -31,6 +31,30 @@ export function inheritPrimaryCredential(
   };
 }
 
+/**
+ * Drop tier credentials that came from inheriting the launch's primary key.
+ * Those selectors are launch-specific (a typed key is stored under a
+ * generated name), so remembering them would replay a name that may no
+ * longer exist; a null credential re-inherits the next launch's primary.
+ */
+export function withoutInheritedCredential(
+  mixed: MixedModels,
+  primaryApiKeyEnv: string | null,
+): MixedModels {
+  const tier = (settings: MixedTierSettings): MixedTierSettings => ({
+    ...settings,
+    api_key_env:
+      primaryApiKeyEnv !== null && settings.api_key_env === primaryApiKeyEnv
+        ? null
+        : settings.api_key_env,
+  });
+  return {
+    easy: tier(mixed.easy),
+    medium: tier(mixed.medium),
+    hard: tier(mixed.hard),
+  };
+}
+
 export const MANAGED_LAUNCH_BASE_URLS: Record<string, string> = {
   "arcee-auth": "https://api.arcee.ai/api/v1",
   "chatgpt-codex-responses": "https://chatgpt.com/backend-api",

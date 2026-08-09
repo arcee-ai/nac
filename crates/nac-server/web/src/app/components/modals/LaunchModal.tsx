@@ -42,6 +42,7 @@ import { cn } from "@/app/lib/cn";
 import { loadLastMixed, storeLastMixed } from "@/app/lib/lastMixed";
 import {
   inheritPrimaryCredential,
+  withoutInheritedCredential,
   CLEAR_EFFORT,
   csv,
   launchLocationFromValues,
@@ -355,7 +356,9 @@ function LaunchForm({
     try {
       const snapshot = await createSession.mutateAsync(body);
       const newId = snapshot.metadata.session_id;
-      storeLastMixed(launchMixed);
+      storeLastMixed(
+        launchMixed && withoutInheritedCredential(launchMixed, apiKeyEnv),
+      );
       toast.success("Session created");
 
       // A title is presentation state, so it is applied after creation.
