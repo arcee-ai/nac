@@ -25,6 +25,8 @@ mod compaction_integration_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]
+mod respond_live_tests;
+#[cfg(test)]
 mod transcript_log_tests;
 
 #[cfg(test)]
@@ -550,7 +552,7 @@ impl Agent {
                 .await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();
-            let response = match turn {
+            let mut response = match turn {
                 Ok(response) => response,
                 Err(error) => {
                     // Preserve accumulated usage (including summary and worker
@@ -604,6 +606,45 @@ impl Agent {
                 });
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Err(error);
+            }
+
+            let mut automatic_wait = None;
+            if response
+                .assistant
+                .tool_calls
+                .as_ref()
+                .is_none_or(Vec::is_empty)
+                && response
+                    .assistant
+                    .content
+                    .as_deref()
+                    .is_some_and(|content| !content.trim().is_empty())
+            {
+                let dispatch_ids = self.respond_live_dispatch_ids().await?;
+                if !dispatch_ids.is_empty() {
+                    let run_id = self
+                        .event_sink
+                        .run_id()
+                        .expect("automatic wait eligibility requires a run id")
+                        .as_str()
+                        .to_string();
+                    let tool_call_id = format!("respond-live-{}", Uuid::new_v4());
+                    let arguments = serde_json::json!({
+                        "dispatch_ids": dispatch_ids,
+                        "_respond_live_run_id": run_id,
+                    });
+                    let retained_content = response.assistant.content.take().unwrap_or_default();
+                    response.assistant.tool_calls = Some(vec![ToolCall {
+                        id: tool_call_id.clone(),
+                        call_type: "function".to_string(),
+                        function: crate::types::FunctionCall {
+                            name: "thread_wait".to_string(),
+                            arguments: serde_json::to_string(&arguments)
+                                .expect("automatic wait arguments serialize"),
+                        },
+                    }]);
+                    automatic_wait = Some((tool_call_id, retained_content));
+                }
             }
 
             let has_tool_calls = response
@@ -720,6 +761,17 @@ impl Agent {
 
             self.last_usage = Some(accumulated_usage.clone());
 
+            let automatic_yield = automatic_wait.as_ref().and_then(|(call_id, content)| {
+                results.iter().find_map(|(result_call_id, _, result)| {
+                    (result_call_id == call_id
+                        && matches!(
+                            result.content.as_str(),
+                            tools::thread::RESPOND_LIVE_YIELD_QUEUED
+                                | tools::thread::RESPOND_LIVE_YIELD_DISABLED
+                        ))
+                    .then(|| content.clone())
+                })
+            });
             let tool_messages = results
                 .into_iter()
                 .map(|(tool_call_id, _tool_name, result)| Message::Tool {
@@ -740,7 +792,82 @@ impl Agent {
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Err(error);
             }
+            if let Some(content) = automatic_yield {
+                // This is a control outcome, not advice to the model. Commit a
+                // terminal assistant after the synthetic assistant/tool pair
+                // and finish directly so the model cannot issue another wait
+                // and starve the queued successor.
+                self.push_and_log(Message::Assistant {
+                    content: Some(content.clone()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                    duration_ms: None,
+                    model_origin: Some(self.client.model_origin()),
+                    reasoning_field: None,
+                })
+                .await?;
+                self.fold_worker_usage(&mut accumulated_usage).await;
+                self.emit(AgentEvent::AssistantMessage {
+                    thread_name: self.thread_name.clone(),
+                    content: content.clone(),
+                    usage: Some(accumulated_usage.clone()),
+                });
+                self.last_usage = Some(accumulated_usage);
+                self.emit(AgentEvent::RunFinished {
+                    thread_name: self.thread_name.clone(),
+                });
+                self.tool_runtime.terminal_manager.remove_all().await;
+                return Ok(content);
+            }
         }
+    }
+
+    async fn respond_live_dispatch_ids(&self) -> Result<Vec<String>> {
+        if self.thread_name.is_some() {
+            return Ok(Vec::new());
+        }
+        let (Some(run_id), Some(session_id)) = (
+            self.event_sink.run_id().cloned(),
+            self.tool_runtime.session_id.clone(),
+        ) else {
+            return Ok(Vec::new());
+        };
+
+        // Durable ordinary input wins before Respond-live is considered. This
+        // check happens after the model call, so toggles and messages arriving
+        // while the provider was running are observed at the terminal edge.
+        let store_path = self.tool_runtime.store_path.clone();
+        let queued_session = session_id.clone();
+        let queued_after = run_id.as_str().to_string();
+        let ordinary_pending = tokio::task::spawn_blocking(move || {
+            crate::store::load_queued_run(&store_path, &queued_session)
+                .map(|queued| queued.is_some_and(|queued| queued.after_run_id == queued_after))
+        })
+        .await
+        .map_err(|error| anyhow!("queued input check task failed: {error}"))??;
+        if ordinary_pending {
+            return Ok(Vec::new());
+        }
+
+        let store_path = self.tool_runtime.store_path.clone();
+        let preference = tokio::task::spawn_blocking(move || {
+            crate::store::load_respond_live_preference(&store_path, &session_id)
+        })
+        .await
+        .map_err(|error| anyhow!("Respond-live preference task failed: {error}"))??;
+        // Reconcile a remote-process update into this process before an
+        // automatic wait starts; subsequent local toggles notify the wait.
+        self.tool_runtime
+            .active_threads
+            .set_live_thread_updates(preference.enabled);
+        if !preference.enabled {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .tool_runtime
+            .active_threads
+            .dispatch_ids_for_run(&run_id))
     }
 
     async fn fold_worker_usage(&self, accumulated_usage: &mut TokenUsage) {

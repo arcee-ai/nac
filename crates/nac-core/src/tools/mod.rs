@@ -366,6 +366,18 @@ impl ActiveThreadRegistry {
         matching
     }
 
+    pub(crate) fn restore_completions(&self, completions: Vec<ThreadCompletion>) {
+        if completions.is_empty() {
+            return;
+        }
+        let mut state = self.lock();
+        for completion in completions.into_iter().rev() {
+            state.completions.push_front(completion);
+        }
+        drop(state);
+        self.notify_activity();
+    }
+
     pub fn active_for_run(
         &self,
         run_id: &SessionRunId,
@@ -403,6 +415,29 @@ impl ActiveThreadRegistry {
                 state: dispatch.state,
             })
             .collect()
+    }
+
+    /// Snapshot exact dispatch identities that are active or buffered for one
+    /// originating run. Automatic delivery must use this instead of names so
+    /// a later same-name dispatch or an unrelated completion cannot be stolen.
+    pub fn dispatch_ids_for_run(&self, run_id: &SessionRunId) -> Vec<String> {
+        let state = self.lock();
+        let mut dispatch_ids = state
+            .active_by_name
+            .values()
+            .filter(|dispatch| dispatch.key.run_id == *run_id)
+            .map(|dispatch| dispatch.key.dispatch_id.clone())
+            .chain(
+                state
+                    .completions
+                    .iter()
+                    .filter(|completion| completion.key.run_id == *run_id)
+                    .map(|completion| completion.key.dispatch_id.clone()),
+            )
+            .collect::<Vec<_>>();
+        dispatch_ids.sort();
+        dispatch_ids.dedup();
+        dispatch_ids
     }
 
     pub fn has_completions_for_run(&self, run_id: &SessionRunId) -> bool {

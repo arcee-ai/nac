@@ -402,6 +402,11 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
     }
 }
 
+pub(crate) const RESPOND_LIVE_MARKER: &str = "_respond_live_run_id";
+pub(crate) const RESPOND_LIVE_YIELD_QUEUED: &str = "respond_live_yield:new_user_pending";
+pub(crate) const RESPOND_LIVE_YIELD_DISABLED: &str = "respond_live_yield:disabled";
+const RESPOND_LIVE_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
 pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let names = match require_string_array(&args, "names") {
         Ok(names) => names,
@@ -441,6 +446,16 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: true,
         };
     };
+    let automatic = match args.get(RESPOND_LIVE_MARKER) {
+        None => false,
+        Some(Value::String(marked_run_id)) if marked_run_id == run_id.as_str() => true,
+        Some(_) => {
+            return ToolResult {
+                content: "Error: invalid automatic thread_wait run identity".to_string(),
+                is_error: true,
+            }
+        }
+    };
     let session_id = match require_session(runtime) {
         Ok(value) => value.to_string(),
         Err(error) => return error,
@@ -469,6 +484,10 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
         })
         .await;
         match ordinary_pending {
+            Ok(Ok(true)) if automatic => return ToolResult {
+                content: RESPOND_LIVE_YIELD_QUEUED.to_string(),
+                is_error: false,
+            },
             Ok(Ok(true)) => return ToolResult {
                 content: "Yield requested: a new ordinary user message is queued. Finish this turn now so the queued run can start; background threads will continue.".to_string(),
                 is_error: false,
@@ -476,6 +495,44 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
             Ok(Ok(false)) => {}
             Ok(Err(error)) => return ToolResult { content: format!("Error checking queued user input: {error}"), is_error: true },
             Err(error) => return ToolResult { content: format!("Internal error checking queued user input: {error}"), is_error: true },
+        }
+
+        // Automatic waits, unlike explicit model requests, are controlled by
+        // the persisted preference. The registry check gives local toggles an
+        // immediate wake; the durable read plus bounded polling observes a
+        // toggle handled by another server process.
+        if automatic {
+            let locally_enabled = runtime.active_threads.live_thread_updates();
+            let store_path = runtime.store_path.clone();
+            let preference_session = session_id.clone();
+            let persisted_enabled = tokio::task::spawn_blocking(move || {
+                store::load_respond_live_preference(&store_path, &preference_session)
+                    .map(|preference| preference.enabled)
+            })
+            .await;
+            match persisted_enabled {
+                Ok(Ok(true)) if locally_enabled => {}
+                Ok(Ok(_)) => {
+                    return ToolResult {
+                        content: RESPOND_LIVE_YIELD_DISABLED.to_string(),
+                        is_error: false,
+                    }
+                }
+                Ok(Err(error)) => {
+                    return ToolResult {
+                        content: format!("Error checking Respond-live preference: {error}"),
+                        is_error: true,
+                    }
+                }
+                Err(error) => {
+                    return ToolResult {
+                        content: format!(
+                            "Internal error checking Respond-live preference: {error}"
+                        ),
+                        is_error: true,
+                    }
+                }
+            }
         }
 
         let store_path = runtime.store_path.clone();
@@ -504,6 +561,46 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
             .active_threads
             .take_completions(&requested_names, &requested_dispatches);
         if !completions.is_empty() {
+            if automatic {
+                // Recheck after the destructive registry operation. This
+                // makes a queue commit racing completion delivery win without
+                // losing the exactly-once completion.
+                let store_path = runtime.store_path.clone();
+                let queued_session = session_id.clone();
+                let queued_after = run_id.as_str().to_string();
+                let ordinary_pending = tokio::task::spawn_blocking(move || {
+                    store::load_queued_run(&store_path, &queued_session).map(|queued| {
+                        queued.is_some_and(|queued| queued.after_run_id == queued_after)
+                    })
+                })
+                .await;
+                match ordinary_pending {
+                    Ok(Ok(true)) => {
+                        runtime.active_threads.restore_completions(completions);
+                        return ToolResult {
+                            content: RESPOND_LIVE_YIELD_QUEUED.to_string(),
+                            is_error: false,
+                        };
+                    }
+                    Ok(Ok(false)) => {}
+                    Ok(Err(error)) => {
+                        runtime.active_threads.restore_completions(completions);
+                        return ToolResult {
+                            content: format!("Error rechecking queued user input: {error}"),
+                            is_error: true,
+                        };
+                    }
+                    Err(error) => {
+                        runtime.active_threads.restore_completions(completions);
+                        return ToolResult {
+                            content: format!(
+                                "Internal error rechecking queued user input: {error}"
+                            ),
+                            is_error: true,
+                        };
+                    }
+                }
+            }
             let mut output = String::from("Thread updates:");
             for completion in completions {
                 output.push_str(&format!(
@@ -554,15 +651,30 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
         }
 
         let now = tokio::time::Instant::now();
-        if now >= deadline
-            || tokio::time::timeout(
-                deadline.saturating_duration_since(now),
-                runtime
-                    .active_threads
-                    .wait_for_activity_since(activity_epoch),
-            )
-            .await
-            .is_err()
+        if now >= deadline {
+            return ToolResult {
+                content: format!(
+                    "Wait timed out after {timeout_secs}s. Still running: {}",
+                    active.join(", ")
+                ),
+                is_error: false,
+            };
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let wake_after = if automatic {
+            remaining.min(RESPOND_LIVE_POLL_INTERVAL)
+        } else {
+            remaining
+        };
+        if tokio::time::timeout(
+            wake_after,
+            runtime
+                .active_threads
+                .wait_for_activity_since(activity_epoch),
+        )
+        .await
+        .is_err()
+            && !automatic
         {
             return ToolResult {
                 content: format!(
@@ -839,6 +951,12 @@ mod tests {
             .unwrap();
     }
 
+    fn enable_respond_live(runtime: &ToolRuntime) {
+        crate::store::update_respond_live_preference(&runtime.store_path, "test-session", true, 0)
+            .unwrap();
+        runtime.active_threads.set_live_thread_updates(true);
+    }
+
     fn skill_record(
         name: &str,
         description: &str,
@@ -1078,6 +1196,136 @@ mod tests {
         let unrelated =
             execute_thread_wait(json!({"names": ["second"], "timeout": 1}), &runtime).await;
         assert!(unrelated.content.contains("unrelated result"));
+    }
+
+    #[tokio::test]
+    async fn automatic_wait_delivers_only_exact_origin_run_dispatches() {
+        for _ in 0..3 {
+            let (runtime, run_id) = wait_runtime("automatic_exact");
+            enable_respond_live(&runtime);
+            let selected = wait_key(&run_id, "selected");
+            let foreign_run = SessionRunId::new();
+            let foreign = wait_key(&foreign_run, "foreign");
+            assert!(runtime.active_threads.try_accept(selected.clone()));
+            assert!(runtime.active_threads.try_accept(foreign.clone()));
+            finish_wait_thread(&runtime, foreign.clone(), "foreign result");
+            finish_wait_thread(&runtime, selected.clone(), "selected result");
+
+            let result = execute_thread_wait(
+                json!({
+                    "dispatch_ids": runtime.active_threads.dispatch_ids_for_run(&run_id),
+                    RESPOND_LIVE_MARKER: run_id.as_str(),
+                    "timeout": 1
+                }),
+                &runtime,
+            )
+            .await;
+            assert!(result.content.contains("selected result"));
+            assert!(!result.content.contains("foreign result"));
+            let retained = runtime
+                .active_threads
+                .take_completions(&HashSet::new(), &HashSet::from([foreign.dispatch_id]));
+            assert_eq!(retained.len(), 1);
+            assert_eq!(retained[0].content, "foreign result");
+        }
+    }
+
+    #[tokio::test]
+    async fn automatic_wait_queue_wins_and_preserves_completion() {
+        for _ in 0..3 {
+            let (runtime, run_id) = wait_runtime("automatic_queue");
+            enable_respond_live(&runtime);
+            let selected = wait_key(&run_id, "worker");
+            assert!(runtime.active_threads.try_accept(selected.clone()));
+            finish_wait_thread(&runtime, selected.clone(), "must remain buffered");
+            crate::store::create_queued_run(
+                &runtime.store_path,
+                &crate::store::CreateQueuedRun {
+                    session_id: "test-session".to_string(),
+                    client_message_id: uuid::Uuid::new_v4().to_string(),
+                    queued_run_id: uuid::Uuid::new_v4().to_string(),
+                    display_prompt: "next".to_string(),
+                    agent_prompt: "next".to_string(),
+                    after_run_id: run_id.as_str().to_string(),
+                },
+            )
+            .unwrap();
+
+            let result = execute_thread_wait(
+                json!({
+                    "dispatch_ids": [selected.dispatch_id.clone()],
+                    RESPOND_LIVE_MARKER: run_id.as_str(),
+                    "timeout": 1
+                }),
+                &runtime,
+            )
+            .await;
+            assert_eq!(result.content, RESPOND_LIVE_YIELD_QUEUED);
+            let retained = runtime
+                .active_threads
+                .take_completions(&HashSet::new(), &HashSet::from([selected.dispatch_id]));
+            assert_eq!(retained.len(), 1);
+            assert_eq!(retained[0].content, "must remain buffered");
+        }
+    }
+
+    #[tokio::test]
+    async fn automatic_wait_wakes_on_local_or_remote_mode_off() {
+        for remote in [false, true] {
+            let (runtime, run_id) = wait_runtime(if remote {
+                "automatic_remote_off"
+            } else {
+                "automatic_local_off"
+            });
+            enable_respond_live(&runtime);
+            let selected = wait_key(&run_id, "worker");
+            assert!(runtime.active_threads.try_accept(selected.clone()));
+            let waiting = runtime.clone();
+            let marker = run_id.as_str().to_string();
+            let dispatch_id = selected.dispatch_id.clone();
+            let wait = tokio::spawn(async move {
+                execute_thread_wait(
+                    json!({
+                        "dispatch_ids": [dispatch_id],
+                        RESPOND_LIVE_MARKER: marker,
+                        "timeout": 3
+                    }),
+                    &waiting,
+                )
+                .await
+            });
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            crate::store::update_respond_live_preference(
+                &runtime.store_path,
+                "test-session",
+                false,
+                1,
+            )
+            .unwrap();
+            if !remote {
+                runtime.active_threads.set_live_thread_updates(false);
+            }
+            let result = tokio::time::timeout(Duration::from_secs(2), wait)
+                .await
+                .expect("automatic wait did not poll mode-off")
+                .unwrap();
+            assert_eq!(result.content, RESPOND_LIVE_YIELD_DISABLED);
+            assert!(runtime.active_threads.matches(&selected));
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_wait_ignores_mode_off_and_delivers_completion() {
+        let (runtime, run_id) = wait_runtime("explicit_mode_off");
+        let selected = wait_key(&run_id, "worker");
+        assert!(runtime.active_threads.try_accept(selected.clone()));
+        finish_wait_thread(&runtime, selected.clone(), "explicit result");
+        let result = execute_thread_wait(
+            json!({"dispatch_ids": [selected.dispatch_id], "timeout": 1}),
+            &runtime,
+        )
+        .await;
+        assert!(result.content.contains("explicit result"));
     }
 
     #[tokio::test]
