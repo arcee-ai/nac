@@ -19,6 +19,7 @@ mod threads;
 mod time;
 mod transcript;
 mod worksets;
+mod worker_usage;
 mod workspace_revisions;
 
 pub use backup::pinned_backup_paths;
@@ -34,6 +35,7 @@ pub use thread_events::*;
 pub use threads::*;
 pub use transcript::*;
 pub use worksets::*;
+pub use worker_usage::*;
 pub use workspace_revisions::*;
 
 pub(crate) use schema::{open_connection, open_runtime_connection};

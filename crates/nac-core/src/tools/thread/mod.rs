@@ -8,14 +8,14 @@ use crate::model::ModelClient;
 use crate::skills::SkillRegistry;
 use crate::store;
 use crate::tools::{
-    ThreadCompletion, ThreadDispatchKey, ToolResult, ToolRuntime, require_str, require_string_array,
+    require_str, require_string_array, ThreadCompletion, ThreadDispatchKey, ToolResult, ToolRuntime,
 };
 use crate::types::ToolDefinition;
 
 mod worker;
 #[cfg(test)]
 pub(crate) use worker::worker_model_arguments_for_test;
-use worker::{WorkerInvocation, run_worker};
+use worker::{run_worker, WorkerInvocation};
 
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
@@ -226,10 +226,6 @@ pub async fn execute_parsed_dispatch(
     let cancellation = dispatch_key
         .and_then(|key| runtime.active_threads.cancellation(key))
         .unwrap_or_default();
-    let origin_run_id = dispatch_key
-        .map(|key| key.run_id.clone())
-        .or_else(|| runtime.event_sink.run_id().cloned())
-        .unwrap_or_else(|| SessionRunId::from_string("foreground-compat".to_string()));
     let result = run_worker(
         runtime,
         client,
@@ -242,7 +238,6 @@ pub async fn execute_parsed_dispatch(
             scheduled_skills: &scheduled_skills,
             timeout_secs,
             cancellation: &cancellation,
-            origin_run_id: Some(&origin_run_id),
             dispatch_key,
         },
     )
@@ -266,6 +261,28 @@ pub async fn execute_parsed_dispatch(
                     None,
                     crate::events::ThreadDispatchStatus::Failed,
                     None,
+                )
+            }
+            Ok(run) if run.usage_persistence_error.is_some() => {
+                let error = run.usage_persistence_error.as_deref().unwrap();
+                runtime.event_sink.emit(AgentEvent::Error {
+                    thread_name: Some(thread_name.clone()),
+                    message: format!("failed to persist worker usage: {error}"),
+                });
+                (
+                    ToolResult {
+                        content: format!(
+                            "Thread '{}' usage persistence failed: {error}",
+                            thread_name
+                        ),
+                        is_error: true,
+                    },
+                    run.exit_code,
+                    run.timed_out,
+                    run.timeout_reason,
+                    run.usage,
+                    crate::events::ThreadDispatchStatus::Failed,
+                    Some((run.child, run.process_group)),
                 )
             }
             Ok(run) if run.cancelled => (
@@ -978,6 +995,7 @@ pub(crate) fn finalize_thread_dispatch(
             is_error: result.is_error,
         },
         status,
+        usage.as_ref(),
         true,
     ) {
         Ok(Some(outcome)) => {
@@ -1178,11 +1196,9 @@ mod tests {
 
     #[test]
     fn dispatch_definition_skills_schema_depends_on_registry() {
-        assert!(
-            dispatch_definition(None).function.parameters["properties"]
-                .get("skills")
-                .is_none()
-        );
+        assert!(dispatch_definition(None).function.parameters["properties"]
+            .get("skills")
+            .is_none());
 
         let registry = test_registry();
         let definition = dispatch_definition(Some(&registry));
@@ -1198,11 +1214,9 @@ mod tests {
     #[test]
     fn scheduled_skills_validation_dedupes_and_rejects_invalid_requests() {
         let registry = test_registry();
-        assert!(
-            resolve_scheduled_skills(&json!({}), None)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(resolve_scheduled_skills(&json!({}), None)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             resolve_scheduled_skills(
                 &json!({ "skills": ["review", "lint", "review"] }),
@@ -1354,13 +1368,11 @@ mod tests {
         assert_eq!(reused.dispatch_id, "dispatch-b");
 
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-b");
-        assert!(
-            runtime
-                .active_threads
-                .queue(&runtime.store_path, "test-session", "worker", "too late",)
-                .unwrap()
-                .is_none()
-        );
+        assert!(runtime
+            .active_threads
+            .queue(&runtime.store_path, "test-session", "worker", "too late",)
+            .unwrap()
+            .is_none());
         let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
     }
 
@@ -1576,15 +1588,13 @@ mod tests {
 
         let result = wait.await.unwrap();
         assert!(result.content.contains("guidance is pending for this run"));
-        assert!(
-            crate::store::has_queued_thread_steering(
-                &runtime.store_path,
-                "test-session",
-                crate::store::ORCHESTRATOR_STEERING_TARGET,
-                run_id.as_str(),
-            )
-            .unwrap()
-        );
+        assert!(crate::store::has_queued_thread_steering(
+            &runtime.store_path,
+            "test-session",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            run_id.as_str(),
+        )
+        .unwrap());
         runtime
             .active_threads
             .close(&runtime.store_path, "test-session", &worker)
@@ -1703,23 +1713,21 @@ mod tests {
         barrier.wait();
         let cancel_outcome = cancel.join().unwrap();
         assert!(finalize.join().unwrap().is_some());
-        assert!(
-            finalize_thread_dispatch(
-                &runtime,
-                "test-session",
-                key.clone(),
-                &ToolResult {
-                    content: "duplicate".to_string(),
-                    is_error: true,
-                },
-                crate::events::ThreadDispatchStatus::Failed,
-                -1,
-                false,
-                None,
-                None,
-            )
-            .is_none()
-        );
+        assert!(finalize_thread_dispatch(
+            &runtime,
+            "test-session",
+            key.clone(),
+            &ToolResult {
+                content: "duplicate".to_string(),
+                is_error: true,
+            },
+            crate::events::ThreadDispatchStatus::Failed,
+            -1,
+            false,
+            None,
+            None,
+        )
+        .is_none());
 
         let completions = runtime
             .active_threads

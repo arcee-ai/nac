@@ -7,9 +7,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use crate::events::{AgentEvent, decode_stderr_event};
+use crate::events::{decode_stderr_event, AgentEvent};
 use crate::model::{ModelClient, TokenUsage};
-use crate::process::{ProcessGroupGuard, isolate_process_group};
+use crate::process::{isolate_process_group, ProcessGroupGuard};
 use crate::tools::{ThreadCancellation, ToolRuntime};
 
 pub(super) struct WorkerRun {
@@ -20,6 +20,7 @@ pub(super) struct WorkerRun {
     pub(super) cancelled: bool,
     pub(super) timeout_reason: Option<String>,
     pub(super) usage: Option<TokenUsage>,
+    pub(super) usage_persistence_error: Option<String>,
     // Retained until the registry terminal transition resolves. A cancellation
     // that wins after natural child exit can still sweep pipe-holding descendants.
     pub(super) child: tokio::process::Child,
@@ -161,7 +162,6 @@ pub(super) struct WorkerInvocation<'a> {
     pub(super) scheduled_skills: &'a [String],
     pub(super) timeout_secs: u64,
     pub(super) cancellation: &'a ThreadCancellation,
-    pub(super) origin_run_id: Option<&'a crate::events::SessionRunId>,
     pub(super) dispatch_key: Option<&'a crate::tools::ThreadDispatchKey>,
 }
 
@@ -257,7 +257,16 @@ pub(super) async fn run_worker(
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child.stderr.take().unwrap();
     let event_sink = runtime.event_sink.clone();
-    let usage_registry = runtime.active_threads.clone();
+    let usage_identity = invocation
+        .dispatch_key
+        .map(|key| crate::store::WorkerUsageIdentity {
+            session_id: invocation.session_id.to_string(),
+            origin_run_id: key.run_id.to_string(),
+            dispatch_id: key.dispatch_id.clone(),
+            thread_name: key.thread_name.clone(),
+            originating_tool_call_id: key.tool_call_id.clone(),
+        });
+    let usage_store_path = runtime.store_path.clone();
     // Reader guards participate in exact dispatch draining. Dropping the outer
     // process-owner aborts the JoinSet, but drain does not complete until both
     // cancelled reader tasks have actually dropped these guards.
@@ -267,11 +276,10 @@ pub(super) async fn run_worker(
     let stdout_task_guard = invocation
         .dispatch_key
         .map(|key| runtime.active_threads.register_dispatch_task(key.clone()));
-    let origin_run_id = invocation.origin_run_id.cloned();
     let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
     enum ReaderOutput {
-        Stderr(String, Option<TokenUsage>),
+        Stderr(String, Option<TokenUsage>, Option<String>),
         Stdout(String),
     }
     // JoinSet owns the pipe readers. If this process-owner future is force
@@ -283,6 +291,7 @@ pub(super) async fn run_worker(
         let mut lines = reader.lines();
         let mut output = String::new();
         let mut worker_usage = TokenUsage::default();
+        let mut persistence_error = None;
         while let Ok(Some(line)) = lines.next_line().await {
             if let Some(event) = decode_stderr_event(&line) {
                 timeout_trace_for_logs.lock().await.observe(&event);
@@ -291,11 +300,20 @@ pub(super) async fn run_worker(
                 } = &event
                 {
                     worker_usage += usage.clone();
-                    // Account usage as it becomes durable in the event stream.
-                    // A later forced abort can therefore not discard usage
-                    // already reported by the worker.
-                    if let Some(run_id) = &origin_run_id {
-                        usage_registry.record_worker_usage(run_id.clone(), usage);
+                    // Persist the dispatch cumulative total before relaying the
+                    // usage-bearing event. A crash after this point cannot lose
+                    // already reported worker usage.
+                    if persistence_error.is_none() {
+                        if let Some(identity) = &usage_identity {
+                            if let Err(error) = crate::store::upsert_worker_dispatch_usage_total(
+                                &usage_store_path,
+                                identity,
+                                &worker_usage,
+                                None,
+                            ) {
+                                persistence_error = Some(format!("{error:#}"));
+                            }
+                        }
                     }
                 }
                 event_sink.emit(event);
@@ -319,7 +337,7 @@ pub(super) async fn run_worker(
         } else {
             Some(worker_usage)
         };
-        ReaderOutput::Stderr(output, usage)
+        ReaderOutput::Stderr(output, usage, persistence_error)
     });
 
     let stdout = child.stdout.take().unwrap();
@@ -367,6 +385,7 @@ pub(super) async fn run_worker(
     let mut stderr = String::new();
     let mut stdout = String::new();
     let mut worker_usage = None;
+    let mut usage_persistence_error = None;
     while !readers.is_empty() {
         tokio::select! {
             biased;
@@ -382,9 +401,10 @@ pub(super) async fn run_worker(
             reader = readers.join_next() => {
                 let Some(reader) = reader else { break; };
                 match reader {
-                    Ok(ReaderOutput::Stderr(output, usage)) => {
+                    Ok(ReaderOutput::Stderr(output, usage, persistence_error)) => {
                         stderr = output;
                         worker_usage = usage;
+                        usage_persistence_error = persistence_error;
                     }
                     Ok(ReaderOutput::Stdout(output)) => stdout = output,
                     Err(_) => {}
@@ -410,6 +430,7 @@ pub(super) async fn run_worker(
         cancelled,
         timeout_reason,
         usage: worker_usage,
+        usage_persistence_error,
         child,
         process_group,
     })
@@ -418,8 +439,8 @@ pub(super) async fn run_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TEST_ENV_LOCK;
     use crate::model::{BackendKind, EffectiveModelSettings};
+    use crate::TEST_ENV_LOCK;
 
     #[test]
     fn worker_model_transport_is_complete_with_absent_effort_and_empty_headers() {
@@ -474,7 +495,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn cancelling_worker_drains_readers_kills_tree_and_preserves_partial_usage() {
-        use crate::events::{STDERR_EVENT_PREFIX, SessionRunId};
+        use crate::events::{SessionRunId, STDERR_EVENT_PREFIX};
         use crate::tools::test_runtime;
         use std::os::unix::fs::PermissionsExt;
 
@@ -512,6 +533,9 @@ mod tests {
             runtime.worker_executable = Some(executable);
             runtime.workspace_cwd = root.clone();
             runtime.config_cwd = root.clone();
+            runtime.store_path = root.join("store.db");
+            crate::store::initialize(&runtime.store_path).unwrap();
+            crate::store::insert_test_session(&runtime.store_path, "test-session");
             let cancellation = ThreadCancellation::default();
             let canceller = cancellation.clone();
             let ready = root.join("ready");
@@ -522,6 +546,12 @@ mod tests {
                 canceller.cancel();
             });
             let run_id = SessionRunId::new();
+            let dispatch_key = crate::tools::ThreadDispatchKey::new(
+                run_id.clone(),
+                "A",
+                "dispatch",
+                "tool-call",
+            );
             let result = run_worker(
                 &runtime,
                 &ModelClient::new_for_test(),
@@ -534,15 +564,19 @@ mod tests {
                     scheduled_skills: &[],
                     timeout_secs: 30,
                     cancellation: &cancellation,
-                    origin_run_id: Some(&run_id),
-                    dispatch_key: None,
+                    dispatch_key: Some(&dispatch_key),
                 },
             )
             .await
             .unwrap();
             assert!(result.cancelled);
             assert_eq!(result.usage, Some(usage.clone()));
-            assert_eq!(runtime.active_threads.take_worker_usage(&run_id), Some(usage));
+            let rows = crate::store::load_session_worker_usage(&runtime.store_path, "test-session")
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].identity.origin_run_id, run_id.to_string());
+            assert_eq!(rows[0].usage, usage);
+            assert_eq!(rows[0].terminal_status, None);
             let grandchild = std::fs::read_to_string(root.join("grandchild.pid"))
                 .unwrap()
                 .trim()
@@ -562,6 +596,141 @@ mod tests {
         })
         .await
         .expect("worker cancellation test timed out");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timed_out_and_failed_workers_persist_and_finalize_partial_usage_once() {
+        use crate::events::{SessionRunId, STDERR_EVENT_PREFIX};
+        use crate::tools::test_runtime;
+        use std::os::unix::fs::PermissionsExt;
+
+        tokio::time::timeout(Duration::from_secs(8), async {
+            let root = std::env::temp_dir().join(format!(
+                "nac_worker_partial_terminal_{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let usage = TokenUsage {
+                input_tokens: 13,
+                output_tokens: 4,
+                ..TokenUsage::default()
+            };
+            let event = serde_json::to_string(&AgentEvent::AssistantMessage {
+                thread_name: Some("worker".to_string()),
+                content: "partial".to_string(),
+                usage: Some(usage.clone()),
+            })
+            .unwrap();
+            let mut runtime = test_runtime();
+            runtime.workspace_cwd = root.clone();
+            runtime.config_cwd = root.clone();
+            runtime.store_path = root.join("store.db");
+            crate::store::initialize(&runtime.store_path).unwrap();
+            crate::store::insert_test_session(&runtime.store_path, "test-session");
+
+            for (name, dispatch_id, tail, expect_timeout) in [
+                ("timed-out", "timeout-dispatch", "sleep 5", true),
+                ("failed", "failure-dispatch", "exit 7", false),
+            ] {
+                let executable = root.join(format!("{name}.sh"));
+                std::fs::write(
+                    &executable,
+                    format!("#!/bin/sh\necho '{STDERR_EVENT_PREFIX}{event}' >&2\n{tail}\n"),
+                )
+                .unwrap();
+                let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+                permissions.set_mode(0o755);
+                std::fs::set_permissions(&executable, permissions).unwrap();
+                runtime.worker_executable = Some(executable);
+                let key = crate::tools::ThreadDispatchKey::new(
+                    SessionRunId::new(),
+                    name,
+                    dispatch_id,
+                    "tool-call",
+                );
+                assert!(runtime.active_threads.try_accept(key.clone()));
+                let cancellation = ThreadCancellation::default();
+                let result = run_worker(
+                    &runtime,
+                    &ModelClient::new_for_test(),
+                    WorkerInvocation {
+                        session_id: "test-session",
+                        thread_name: name,
+                        dispatch_id,
+                        action: "work",
+                        source_threads: &[],
+                        scheduled_skills: &[],
+                        timeout_secs: 1,
+                        cancellation: &cancellation,
+                        dispatch_key: Some(&key),
+                    },
+                )
+                .await
+                .unwrap();
+                assert_eq!(result.timed_out, expect_timeout);
+                assert_eq!(result.usage, Some(usage.clone()));
+                assert!(runtime
+                    .active_threads
+                    .finalize_once(
+                        &runtime.store_path,
+                        "test-session",
+                        crate::tools::ThreadCompletion {
+                            key: key.clone(),
+                            content: "terminal".into(),
+                            is_error: true,
+                        },
+                        crate::events::ThreadDispatchStatus::Failed,
+                        result.usage.as_ref(),
+                        true,
+                    )
+                    .unwrap()
+                    .is_some());
+                assert!(runtime
+                    .active_threads
+                    .finalize_once(
+                        &runtime.store_path,
+                        "test-session",
+                        crate::tools::ThreadCompletion {
+                            key,
+                            content: "duplicate".into(),
+                            is_error: true,
+                        },
+                        crate::events::ThreadDispatchStatus::Failed,
+                        result.usage.as_ref(),
+                        true,
+                    )
+                    .unwrap()
+                    .is_none());
+            }
+
+            let rows = crate::store::load_session_worker_usage(&runtime.store_path, "test-session")
+                .unwrap();
+            assert_eq!(rows.len(), 2);
+            assert!(rows.iter().all(|row| row.usage == usage));
+            assert!(rows.iter().all(|row| {
+                row.terminal_status == Some(crate::events::ThreadDispatchStatus::Failed)
+            }));
+            let total =
+                crate::store::aggregate_session_worker_usage(&runtime.store_path, "test-session")
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(total.input_tokens, 26);
+            assert_eq!(total.output_tokens, 8);
+            assert_eq!(
+                runtime
+                    .active_threads
+                    .take_completions(
+                        &std::collections::HashSet::new(),
+                        &std::collections::HashSet::new(),
+                    )
+                    .len(),
+                2
+            );
+            let _ = std::fs::remove_dir_all(root);
+        })
+        .await
+        .expect("worker partial terminal test timed out");
     }
 
     #[cfg(unix)]
@@ -613,7 +782,6 @@ mod tests {
                     scheduled_skills: &[],
                     timeout_secs: 30,
                     cancellation: &cancellation,
-                    origin_run_id: None,
                     dispatch_key: None,
                 },
             )

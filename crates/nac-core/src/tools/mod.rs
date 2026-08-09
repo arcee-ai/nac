@@ -170,7 +170,6 @@ struct ActiveThreadState {
     terminals: VecDeque<ThreadTerminalTombstone>,
     owned_tasks_by_run: HashMap<SessionRunId, usize>,
     owned_tasks_by_dispatch: HashMap<ThreadDispatchKey, usize>,
-    worker_usage_by_run: HashMap<SessionRunId, crate::model::TokenUsage>,
     shutting_down: bool,
 }
 
@@ -494,6 +493,7 @@ impl ActiveThreadRegistry {
                 is_error: false,
             },
             crate::events::ThreadDispatchStatus::Completed,
+            None,
             false,
         )
         .and_then(|outcome| match outcome {
@@ -513,6 +513,7 @@ impl ActiveThreadRegistry {
         session_id: &str,
         completion: ThreadCompletion,
         status: crate::events::ThreadDispatchStatus,
+        usage: Option<&crate::model::TokenUsage>,
         queue_completion: bool,
     ) -> anyhow::Result<Option<ThreadFinalization>> {
         // The registry transition is authoritative and linearizes before I/O.
@@ -540,6 +541,20 @@ impl ActiveThreadRegistry {
                     completion.key.tool_call_id,
                 );
                 completion.is_error = true;
+            }
+            if completion.key.run_id.as_str() != "foreground-compat" {
+                crate::store::finalize_worker_dispatch_usage(
+                    store_path,
+                    &crate::store::WorkerUsageIdentity {
+                        session_id: session_id.to_string(),
+                        origin_run_id: completion.key.run_id.to_string(),
+                        dispatch_id: completion.key.dispatch_id.clone(),
+                        thread_name: completion.key.thread_name.clone(),
+                        originating_tool_call_id: completion.key.tool_call_id.clone(),
+                    },
+                    usage,
+                    status,
+                )?;
             }
             state.active_by_name.remove(&completion.key.thread_name);
             state.terminals.push_back(ThreadTerminalTombstone {
@@ -595,7 +610,7 @@ impl ActiveThreadRegistry {
                     crate::events::ThreadDispatchStatus::Completed
                 }
             });
-        self.finalize_once(store_path, session_id, completion, status, true)
+        self.finalize_once(store_path, session_id, completion, status, None, true)
             .and_then(|outcome| match outcome {
                 Some(outcome) => match outcome.steering_error {
                     Some(error) => Err(error),
@@ -729,33 +744,6 @@ impl ActiveThreadRegistry {
                 .iter()
                 .any(|completion| completion.key.run_id == *run_id)
             || state.owned_tasks_by_run.contains_key(run_id)
-    }
-
-    pub fn record_worker_usage(&self, run_id: SessionRunId, usage: &crate::model::TokenUsage) {
-        let mut state = self.lock();
-        state
-            .worker_usage_by_run
-            .entry(run_id)
-            .or_default()
-            .add_cost_saturating(usage);
-    }
-
-    pub fn take_worker_usage(&self, run_id: &SessionRunId) -> Option<crate::model::TokenUsage> {
-        self.lock().worker_usage_by_run.remove(run_id)
-    }
-
-    /// Usage not yet folded into its originating run. This remains in the
-    /// session-owned registry across active-run replacement.
-    pub fn pending_worker_usage_total(&self) -> Option<crate::model::TokenUsage> {
-        let state = self.lock();
-        if state.worker_usage_by_run.is_empty() {
-            return None;
-        }
-        let mut total = crate::model::TokenUsage::default();
-        for usage in state.worker_usage_by_run.values() {
-            total.add_cost_saturating(usage);
-        }
-        Some(total)
     }
 
     pub fn live_thread_updates(&self) -> bool {
@@ -1102,6 +1090,7 @@ impl ActiveThreadRegistry {
                 session_id,
                 completion,
                 crate::events::ThreadDispatchStatus::Cancelled,
+                None,
                 true,
             ) {
                 Ok(Some(outcome)) => finalizations.push(outcome),
@@ -1171,7 +1160,6 @@ impl Drop for ActiveThreadRegistry {
             }
         }
         state.completions.clear();
-        state.worker_usage_by_run.clear();
     }
 }
 
@@ -1630,6 +1618,7 @@ mod active_thread_registry_tests {
             unique
         ));
         crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
         path
     }
 
@@ -1762,37 +1751,6 @@ mod active_thread_registry_tests {
             .is_empty());
         assert!(!registry.has_completions_for_run(&run_a));
         let _ = std::fs::remove_file(store);
-    }
-
-    #[test]
-    fn worker_usage_is_origin_run_keyed_and_pending_total_does_not_double_fold() {
-        let registry = ActiveThreadRegistry::default();
-        let origin = SessionRunId::new();
-        let consuming = SessionRunId::new();
-        registry.record_worker_usage(
-            origin.clone(),
-            &crate::model::TokenUsage {
-                input_tokens: 11,
-                output_tokens: 7,
-                ..Default::default()
-            },
-        );
-        registry.record_worker_usage(
-            consuming.clone(),
-            &crate::model::TokenUsage {
-                input_tokens: 3,
-                ..Default::default()
-            },
-        );
-
-        let consumed = registry.take_worker_usage(&consuming).unwrap();
-        assert_eq!(consumed.input_tokens, 3);
-        assert_eq!(registry.take_worker_usage(&consuming), None);
-        let pending = registry.pending_worker_usage_total().unwrap();
-        assert_eq!(pending.input_tokens, 11);
-        assert_eq!(pending.output_tokens, 7);
-        assert_eq!(registry.take_worker_usage(&origin).unwrap(), pending);
-        assert_eq!(registry.pending_worker_usage_total(), None);
     }
 
     #[tokio::test]
@@ -1958,6 +1916,7 @@ mod active_thread_registry_tests {
                     is_error: true,
                 },
                 crate::events::ThreadDispatchStatus::Cancelled,
+                None,
                 true,
             )
             .unwrap()
@@ -1989,6 +1948,7 @@ mod active_thread_registry_tests {
                 "session",
                 completion(old.clone(), "done"),
                 crate::events::ThreadDispatchStatus::Completed,
+                None,
                 true,
             )
             .unwrap()
@@ -2004,6 +1964,7 @@ mod active_thread_registry_tests {
                 "session",
                 completion(old, "late"),
                 crate::events::ThreadDispatchStatus::Failed,
+                None,
                 true,
             )
             .unwrap()
@@ -2096,6 +2057,7 @@ mod active_thread_registry_tests {
                 "session",
                 completion(dispatch.clone(), "natural result"),
                 crate::events::ThreadDispatchStatus::Completed,
+                None,
                 true,
             )
             .unwrap()
@@ -2147,6 +2109,7 @@ mod active_thread_registry_tests {
                     "session",
                     completion(finalize_key, "natural result"),
                     crate::events::ThreadDispatchStatus::Completed,
+                    None,
                     true,
                 )
                 .unwrap()
@@ -2181,7 +2144,7 @@ mod active_thread_registry_tests {
     #[test]
     fn steering_store_failure_does_not_strand_terminal_dispatch() {
         let registry = ActiveThreadRegistry::default();
-        let run = SessionRunId::new();
+        let run = SessionRunId::from_string("foreground-compat".to_string());
         let dispatch = key(&run, "worker", "dispatch", "call");
         assert!(registry.try_accept(dispatch.clone()));
         let invalid_store = std::env::temp_dir();
@@ -2191,6 +2154,7 @@ mod active_thread_registry_tests {
                 "session",
                 completion(dispatch.clone(), "done"),
                 crate::events::ThreadDispatchStatus::Completed,
+                None,
                 true,
             )
             .unwrap()
@@ -2210,6 +2174,106 @@ mod active_thread_registry_tests {
     }
 
     #[test]
+    fn cancel_timeout_and_failure_partial_usage_is_finalized_exactly_once() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let usage = crate::model::TokenUsage {
+            input_tokens: 5,
+            output_tokens: 2,
+            ..Default::default()
+        };
+        let cases = [
+            ("cancelled-worker", "cancel-dispatch", true),
+            ("timed-out-worker", "timeout-dispatch", false),
+            ("failed-worker", "failure-dispatch", false),
+        ];
+        for (name, dispatch_id, cancel_first) in cases {
+            let dispatch = key(&SessionRunId::new(), name, dispatch_id, "call");
+            assert!(registry.try_accept(dispatch.clone()));
+            if cancel_first {
+                assert_eq!(
+                    registry.request_cancel(&dispatch).unwrap(),
+                    ThreadCancelOutcome::CancelRequested
+                );
+            }
+            let requested_status = if cancel_first {
+                crate::events::ThreadDispatchStatus::Completed
+            } else {
+                crate::events::ThreadDispatchStatus::Failed
+            };
+            assert!(registry
+                .finalize_once(
+                    &store,
+                    "session",
+                    completion(dispatch.clone(), "partial result"),
+                    requested_status,
+                    Some(&usage),
+                    true,
+                )
+                .unwrap()
+                .is_some());
+            assert!(registry
+                .finalize_once(
+                    &store,
+                    "session",
+                    completion(dispatch, "duplicate"),
+                    requested_status,
+                    Some(&usage),
+                    true,
+                )
+                .unwrap()
+                .is_none());
+        }
+
+        let rows = crate::store::load_session_worker_usage(&store, "session").unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.terminal_status == Some(crate::events::ThreadDispatchStatus::Cancelled))
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.terminal_status == Some(crate::events::ThreadDispatchStatus::Failed))
+                .count(),
+            2
+        );
+        let total = crate::store::aggregate_session_worker_usage(&store, "session")
+            .unwrap()
+            .unwrap();
+        assert_eq!(total.input_tokens, 15);
+        assert_eq!(total.output_tokens, 6);
+        assert_eq!(
+            registry
+                .take_completions(&HashSet::new(), &HashSet::new())
+                .len(),
+            3
+        );
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn worker_usage_store_failure_prevents_terminal_publication() {
+        let registry = ActiveThreadRegistry::default();
+        let dispatch = key(&SessionRunId::new(), "worker", "dispatch", "call");
+        assert!(registry.try_accept(dispatch.clone()));
+        let result = registry.finalize_once(
+            &std::env::temp_dir(),
+            "session",
+            completion(dispatch.clone(), "done"),
+            crate::events::ThreadDispatchStatus::Completed,
+            None,
+            true,
+        );
+        assert!(result.is_err());
+        assert!(registry.matches(&dispatch));
+        assert!(registry
+            .take_completions(&HashSet::new(), &HashSet::new())
+            .is_empty());
+    }
+
+    #[test]
     fn natural_completion_wins_cancel_race_exactly_once() {
         let registry = ActiveThreadRegistry::default();
         let store = test_store();
@@ -2222,6 +2286,7 @@ mod active_thread_registry_tests {
                 "session",
                 completion(dispatch.clone(), "done"),
                 crate::events::ThreadDispatchStatus::Completed,
+                None,
                 true,
             )
             .unwrap()
@@ -2236,6 +2301,7 @@ mod active_thread_registry_tests {
                 "session",
                 completion(dispatch, "duplicate"),
                 crate::events::ThreadDispatchStatus::Cancelled,
+                None,
                 true,
             )
             .unwrap()

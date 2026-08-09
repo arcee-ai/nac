@@ -274,6 +274,23 @@ mod tests {
             .clone()
             .unwrap();
 
+        crate::store::upsert_worker_dispatch_usage_total(
+            &path,
+            &crate::store::WorkerUsageIdentity {
+                session_id: "source".into(),
+                origin_run_id: "origin-run".into(),
+                dispatch_id: "dispatch".into(),
+                thread_name: "worker".into(),
+                originating_tool_call_id: "call".into(),
+            },
+            &crate::model::TokenUsage {
+                input_tokens: 11,
+                ..Default::default()
+            },
+            Some(crate::events::ThreadDispatchStatus::Completed),
+        )
+        .unwrap();
+
         let lineage = create_session_fork(&path, "source", "child", &token, true).unwrap();
         assert_eq!(lineage.source_config_version, 7);
         let child = crate::sessions::load_session(&path, "child").unwrap();
@@ -281,6 +298,15 @@ mod tests {
         assert_eq!(child.config_version, 0);
         assert_eq!(child.orchestrator_compaction_threshold, Some(1234));
         assert!(child.token_usages.is_empty());
+        assert_eq!(
+            crate::store::load_session_worker_usage(&path, "source")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(crate::store::load_session_worker_usage(&path, "child")
+            .unwrap()
+            .is_empty());
         assert_eq!(
             load_respond_live_preference(&path, "source").unwrap(),
             RespondLivePreference {

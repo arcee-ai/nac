@@ -1252,6 +1252,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let store = root.join("store.db");
         crate::store::initialize(&store).unwrap();
+        crate::store::insert_test_session(&store, "test-session");
         let worker = root.join("worker.sh");
         std::fs::write(&worker, format!("#!/bin/sh\nset -eu\n{script_body}\n")).unwrap();
         std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1730,6 +1731,7 @@ echo "$action""#,
             std::fs::create_dir_all(&root).unwrap();
             runtime.store_path = root.join("store.db");
             crate::store::initialize(&runtime.store_path).unwrap();
+            crate::store::insert_test_session(&runtime.store_path, "test-session");
             let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
             runtime.event_sink = EventSink::channel(sender);
             let run_id = crate::events::SessionRunId::new();
@@ -1783,6 +1785,7 @@ echo "$action""#,
         std::fs::create_dir_all(&root).unwrap();
         runtime.store_path = root.join("store.db");
         crate::store::initialize(&runtime.store_path).unwrap();
+        crate::store::insert_test_session(&runtime.store_path, "test-session");
         let key =
             ThreadDispatchKey::new(crate::events::SessionRunId::new(), "A", "dispatch", "call");
         assert!(runtime.active_threads.try_accept(key.clone()));

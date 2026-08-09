@@ -651,7 +651,7 @@ fn query_session_summary(
     let row = conn
         .query_row(&sql, params![session_id], map_session_summary_row)
         .optional()?;
-    row.map(SessionSummaryRow::into_summary).transpose()
+    row.map(|row| row.into_summary(conn)).transpose()
 }
 
 fn query_session_summaries(
@@ -683,9 +683,7 @@ fn query_session_summaries(
             .query_map([], map_session_summary_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?,
     };
-    rows.into_iter()
-        .map(SessionSummaryRow::into_summary)
-        .collect()
+    rows.into_iter().map(|row| row.into_summary(conn)).collect()
 }
 
 fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummaryRow> {
@@ -737,7 +735,7 @@ struct SessionSummaryRow {
 }
 
 impl SessionSummaryRow {
-    fn into_summary(self) -> Result<SessionSummary> {
+    fn into_summary(self, conn: &rusqlite::Connection) -> Result<SessionSummary> {
         let diagnostics = model_config_diagnostics(
             self.backend_raw.as_deref(),
             self.reasoning_effort_raw.as_deref(),
@@ -763,8 +761,20 @@ impl SessionSummaryRow {
         // a truncation rebuilds them, and the migration backfills blob ++ log.
         let visible_message_count = usize::try_from(self.visible_message_count)
             .context("session visible message count overflowed")?;
-        let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
-        let aggregated = crate::model::TokenUsage::aggregate(&response_usages);
+        let (response_usages, unattributed_usage) =
+            deserialize_token_accounting(self.token_usages_json.as_deref())?;
+        let mut aggregated = crate::model::TokenUsage::aggregate(&response_usages);
+        for additional in [
+            unattributed_usage,
+            crate::store::aggregate_session_worker_usage_with_connection(conn, &self.session_id)?,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            aggregated
+                .get_or_insert_with(crate::model::TokenUsage::default)
+                .add_cost_saturating(&additional);
+        }
         let total_tokens = aggregated.as_ref().map(|usage| usage.billable_tokens());
         let total_cost_micros = aggregated.as_ref().map(|usage| usage.cost.total);
         Ok(SessionSummary {

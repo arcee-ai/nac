@@ -699,6 +699,62 @@ mod tests {
     }
 
     #[test]
+    fn session_list_totals_include_response_unattributed_and_worker_usage() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("list_durable_worker_usage");
+        let mut snapshot = test_snapshot(
+            "usage-session",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        snapshot.token_usages = vec![Some(crate::model::TokenUsage {
+            input_tokens: 10,
+            output_tokens: 2,
+            cost: crate::model::TokenCostMicros {
+                total: 100,
+                ..Default::default()
+            },
+            ..Default::default()
+        })];
+        snapshot.unattributed_token_usage = Some(crate::model::TokenUsage {
+            input_tokens: 3,
+            output_tokens: 1,
+            cost: crate::model::TokenCostMicros {
+                total: 30,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        create_session(&store_path, &snapshot).unwrap();
+        crate::store::upsert_worker_dispatch_usage_total(
+            &store_path,
+            &crate::store::WorkerUsageIdentity {
+                session_id: "usage-session".into(),
+                origin_run_id: "origin-run".into(),
+                dispatch_id: "dispatch".into(),
+                thread_name: "worker".into(),
+                originating_tool_call_id: "call".into(),
+            },
+            &crate::model::TokenUsage {
+                input_tokens: 7,
+                output_tokens: 4,
+                cost: crate::model::TokenCostMicros {
+                    total: 70,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            Some(crate::events::ThreadDispatchStatus::Completed),
+        )
+        .unwrap();
+
+        let summary = list_sessions(&store_path).unwrap().remove(0);
+        assert_eq!(summary.total_tokens, Some(27));
+        assert_eq!(summary.total_cost_micros, Some(200));
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
     fn listing_and_raw_config_isolate_structurally_invalid_model_rows() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("raw_invalid_model_rows");

@@ -73,6 +73,9 @@ pub struct ResponseTimingSnapshot {
     /// Cumulative usage from runs that produced no visible response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattributed_token_usage: Option<crate::model::TokenUsage>,
+    /// Durable cumulative usage reported by background worker dispatches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_worker_token_usage: Option<crate::model::TokenUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cumulative_token_usage: Option<crate::model::TokenUsage>,
 }
@@ -80,6 +83,15 @@ pub struct ResponseTimingSnapshot {
 impl ResponseTimingSnapshot {
     pub fn from_session_snapshot(snapshot: Option<&SessionSnapshot>) -> Self {
         snapshot.map(Self::from).unwrap_or_default()
+    }
+
+    fn add_background_worker_usage(&mut self, usage: Option<crate::model::TokenUsage>) {
+        self.background_worker_token_usage = usage;
+        if let Some(worker_usage) = &self.background_worker_token_usage {
+            self.cumulative_token_usage
+                .get_or_insert_with(crate::model::TokenUsage::default)
+                .add_cost_saturating(worker_usage);
+        }
     }
 }
 
@@ -125,6 +137,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
             token_usages: Some(snapshot.token_usages.clone()),
             last_token_usage,
             unattributed_token_usage: snapshot.unattributed_token_usage.clone(),
+            background_worker_token_usage: None,
             cumulative_token_usage,
         }
     }
@@ -352,6 +365,7 @@ struct FrontendSnapshotBlockingLoad {
     thread_event_boundary: SessionEventBoundary,
     thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     queued_message: Option<crate::store::QueuedRunRecord>,
+    background_worker_token_usage: Option<crate::model::TokenUsage>,
     worksets: WorksetsSnapshot,
     workspace: WorkspaceSnapshot,
 }
@@ -1141,6 +1155,7 @@ impl SessionService {
             thread_event_boundary,
             thread_steering,
             queued_message,
+            background_worker_token_usage,
             worksets,
         ) = {
             let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
@@ -1171,6 +1186,10 @@ impl SessionService {
                 .map(|id| crate::store::queued_runs::load_queued_run_with_connection(&conn, id))
                 .transpose()?
                 .flatten();
+            let background_worker_token_usage = session_id
+                .map(|id| crate::store::aggregate_session_worker_usage_with_connection(&conn, id))
+                .transpose()?
+                .flatten();
             (
                 sessions,
                 threads,
@@ -1179,6 +1198,7 @@ impl SessionService {
                 thread_event_boundary,
                 thread_steering,
                 queued_message,
+                background_worker_token_usage,
                 worksets,
             )
         };
@@ -1190,6 +1210,7 @@ impl SessionService {
             thread_event_boundary,
             thread_steering,
             queued_message,
+            background_worker_token_usage,
             worksets,
             workspace,
         })
@@ -1366,12 +1387,7 @@ impl SessionService {
             let snapshot = self.session_snapshot.lock().await;
             ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref())
         };
-        if let Some(pending) = self.active_threads.pending_worker_usage_total() {
-            response_timing
-                .cumulative_token_usage
-                .get_or_insert_with(crate::model::TokenUsage::default)
-                .add_cost_saturating(&pending);
-        }
+        response_timing.add_background_worker_usage(blocking.background_worker_token_usage);
         let loaded_messages = match options.messages {
             FrontendSnapshotMessages::All => {
                 let projection = self.store_fork_boundary_projection().await?;
@@ -3314,6 +3330,7 @@ fn response_timing_after_run(
         token_usages: None,
         last_token_usage: None,
         unattributed_token_usage: None,
+        background_worker_token_usage: None,
         cumulative_token_usage: None,
     }
 }
@@ -6984,4 +7001,89 @@ pub(super) mod tests {
         );
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
+
+    #[tokio::test]
+    async fn later_consuming_run_usage_stays_response_only_and_worker_usage_is_counted_once() {
+        let (parts, store_path) = test_active_service("worker_consuming_run", "usage-session");
+        let consuming_usage = crate::model::TokenUsage {
+            input_tokens: 20,
+            output_tokens: 3,
+            orchestrator_context_tokens: 500,
+            ..crate::model::TokenUsage::default()
+        };
+        {
+            let mut snapshot = parts.service.session_snapshot.lock().await;
+            snapshot.as_mut().unwrap().token_usages = vec![Some(crate::model::TokenUsage {
+                input_tokens: 10,
+                output_tokens: 2,
+                orchestrator_context_tokens: 300,
+                ..crate::model::TokenUsage::default()
+            }), Some(consuming_usage.clone())];
+        }
+        let identity = crate::store::WorkerUsageIdentity {
+            session_id: "usage-session".into(),
+            origin_run_id: "origin-run".into(),
+            dispatch_id: "late-dispatch".into(),
+            thread_name: "worker".into(),
+            originating_tool_call_id: "origin-call".into(),
+        };
+        let worker_usage = crate::model::TokenUsage {
+            input_tokens: 7,
+            output_tokens: 5,
+            orchestrator_context_tokens: 9_999,
+            ..crate::model::TokenUsage::default()
+        };
+        crate::store::upsert_worker_dispatch_usage_total(
+            &store_path,
+            &identity,
+            &worker_usage,
+            Some(crate::events::ThreadDispatchStatus::Completed),
+        )
+        .unwrap();
+
+        let timing = parts.service.frontend_snapshot().await.unwrap().response_timing;
+        assert_eq!(timing.last_token_usage, Some(consuming_usage.clone()));
+        assert_eq!(timing.token_usages.as_ref().unwrap().last(), Some(&Some(consuming_usage)));
+        let projected_worker = timing.background_worker_token_usage.unwrap();
+        assert_eq!(projected_worker.input_tokens, worker_usage.input_tokens);
+        assert_eq!(projected_worker.output_tokens, worker_usage.output_tokens);
+        assert_eq!(projected_worker.orchestrator_context_tokens, 0);
+        let cumulative = timing.cumulative_token_usage.unwrap();
+        assert_eq!(cumulative.input_tokens, 37);
+        assert_eq!(cumulative.output_tokens, 10);
+        assert_eq!(cumulative.orchestrator_context_tokens, 500);
+        assert_eq!(
+            crate::store::load_session_worker_usage(&store_path, "usage-session")
+                .unwrap()
+                .len(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn durable_worker_usage_is_added_once_without_replacing_orchestrator_context() {
+        let mut timing = ResponseTimingSnapshot {
+            cumulative_token_usage: Some(crate::model::TokenUsage {
+                input_tokens: 100,
+                orchestrator_context_tokens: 700,
+                ..crate::model::TokenUsage::default()
+            }),
+            ..ResponseTimingSnapshot::default()
+        };
+        timing.add_background_worker_usage(Some(crate::model::TokenUsage {
+            input_tokens: 30,
+            output_tokens: 20,
+            orchestrator_context_tokens: 9_999,
+            ..crate::model::TokenUsage::default()
+        }));
+
+        let worker = timing.background_worker_token_usage.as_ref().unwrap();
+        assert_eq!(worker.input_tokens, 30);
+        let cumulative = timing.cumulative_token_usage.as_ref().unwrap();
+        assert_eq!(cumulative.input_tokens, 130);
+        assert_eq!(cumulative.output_tokens, 20);
+        assert_eq!(cumulative.orchestrator_context_tokens, 700);
+    }
+
 }

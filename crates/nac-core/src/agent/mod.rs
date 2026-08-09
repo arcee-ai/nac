@@ -725,9 +725,6 @@ impl Agent {
                     self.tool_runtime.terminal_manager.remove_all().await;
                     return Err(error);
                 };
-                // Capture workers that completed after the preceding tool round,
-                // but only from this run's origin-keyed ledger.
-                self.fold_worker_usage(&mut accumulated_usage).await;
                 self.emit(AgentEvent::AssistantMessage {
                     thread_name: self.thread_name.clone(),
                     content: content.clone(),
@@ -754,10 +751,6 @@ impl Agent {
                 self.thread_name.clone(),
             )
             .await;
-
-            // Fold worker token usage (including workers that completed while
-            // thread_wait was parked) before another model call or finish.
-            self.fold_worker_usage(&mut accumulated_usage).await;
 
             self.last_usage = Some(accumulated_usage.clone());
 
@@ -807,7 +800,6 @@ impl Agent {
                     reasoning_field: None,
                 })
                 .await?;
-                self.fold_worker_usage(&mut accumulated_usage).await;
                 self.emit(AgentEvent::AssistantMessage {
                     thread_name: self.thread_name.clone(),
                     content: content.clone(),
@@ -868,15 +860,6 @@ impl Agent {
             .tool_runtime
             .active_threads
             .dispatch_ids_for_run(&run_id))
-    }
-
-    async fn fold_worker_usage(&self, accumulated_usage: &mut TokenUsage) {
-        let run_id = self.event_sink.run_id().cloned().unwrap_or_else(|| {
-            crate::events::SessionRunId::from_string("foreground-compat".to_string())
-        });
-        if let Some(worker_usage) = self.tool_runtime.active_threads.take_worker_usage(&run_id) {
-            accumulated_usage.add_cost_saturating(&worker_usage);
-        }
     }
 
     #[cfg(test)]

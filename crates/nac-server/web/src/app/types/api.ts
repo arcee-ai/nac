@@ -147,6 +147,8 @@ export interface ResponseTimingSnapshot {
   response_durations_ms: (number | null)[] | null;
   token_usages?: (TokenUsage | null)[];
   last_token_usage?: TokenUsage;
+  unattributed_token_usage?: TokenUsage;
+  background_worker_token_usage?: TokenUsage;
   cumulative_token_usage?: TokenUsage;
 }
 

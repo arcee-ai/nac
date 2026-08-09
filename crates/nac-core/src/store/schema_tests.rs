@@ -286,10 +286,25 @@ fn assert_current_schema(conn: &Connection) {
         table_columns(conn, "session_preferences"),
         ["session_id", "respond_live", "version"]
     );
+    assert_eq!(
+        table_columns(conn, "session_worker_usage"),
+        [
+            "session_id",
+            "origin_run_id",
+            "dispatch_id",
+            "thread_name",
+            "originating_tool_call_id",
+            "usage_json",
+            "terminal_status",
+            "created_at",
+            "updated_at",
+        ]
+    );
     for table in [
         "session_queued_runs",
         "session_message_receipts",
         "session_preferences",
+        "session_worker_usage",
     ] {
         assert_session_cascade(conn, table);
     }
@@ -1201,5 +1216,51 @@ fn queued_run_tables_enforce_state_shape_and_cascade_with_session() {
         assert_eq!(count, 0);
     }
     drop(conn);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn v13_migration_creates_empty_worker_usage_ledger_without_backfill() {
+    let path = temp_store_path("v13_worker_usage");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "preserved");
+    let legacy_accounting = r#"[{"input_tokens":7,"output_tokens":3,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"total_tokens":10,"cost":{"input":0,"output":0,"cache_read":0,"cache_write":0,"total":0}}]"#;
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "UPDATE sessions SET token_usages_json = ?1 WHERE session_id = 'preserved'",
+        params![legacy_accounting],
+    )
+    .unwrap();
+    conn.execute_batch(
+        "DROP TABLE session_worker_usage;
+         PRAGMA user_version = 13;",
+    )
+    .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_current_schema(&migrated);
+    assert_eq!(
+        migrated
+            .query_row(
+                "SELECT COUNT(*) FROM session_worker_usage",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        migrated
+            .query_row(
+                "SELECT token_usages_json FROM sessions WHERE session_id = 'preserved'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        legacy_accounting
+    );
+    drop(migrated);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

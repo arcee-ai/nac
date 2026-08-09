@@ -1,7 +1,7 @@
 use super::*;
 
-// Version 13 adds persisted per-session delivery preferences.
-const STORE_SCHEMA_VERSION: i64 = 13;
+// Version 14 adds durable, dispatch-keyed background worker usage.
+const STORE_SCHEMA_VERSION: i64 = 14;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -93,6 +93,7 @@ fn inspect_schema_shape(conn: &Connection) -> Result<SchemaShape> {
         "session_queued_runs",
         "session_message_receipts",
         "session_preferences",
+        "session_worker_usage",
     ];
     let has_run_count = column_exists(conn, "sessions", "run_count")?;
     let has_visible_message_count = column_exists(conn, "sessions", "visible_message_count")?;
@@ -228,7 +229,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -292,6 +293,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     create_session_lineage_table(&transaction)?;
     create_queued_run_tables(&transaction)?;
     create_session_preferences_table(&transaction)?;
+    create_session_worker_usage_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -929,6 +931,29 @@ fn create_session_preferences_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn create_session_worker_usage_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_worker_usage (
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             origin_run_id TEXT NOT NULL,
+             dispatch_id TEXT NOT NULL,
+             thread_name TEXT NOT NULL,
+             originating_tool_call_id TEXT NOT NULL,
+             usage_json TEXT NOT NULL,
+             terminal_status TEXT
+                 CHECK (terminal_status IS NULL OR terminal_status IN ('completed', 'failed', 'cancelled')),
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             PRIMARY KEY (session_id, dispatch_id),
+             UNIQUE (session_id, origin_run_id, thread_name, dispatch_id, originating_tool_call_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_worker_usage_origin
+             ON session_worker_usage(session_id, origin_run_id);",
+    )?;
+    Ok(())
+}
+
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
     for table in [
         "thread_steering",
@@ -939,6 +964,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "session_queued_runs",
         "session_message_receipts",
         "session_preferences",
+        "session_worker_usage",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {
