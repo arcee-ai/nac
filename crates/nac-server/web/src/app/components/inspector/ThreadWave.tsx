@@ -10,55 +10,42 @@ interface ThreadBoxProps {
 }
 
 const STATE_ORDER: Record<ThreadState, number> = {
-  error: 0,
+  failed: 0,
   cancelled: 1,
   cancelling: 2,
   running: 3,
-  pending: 4,
-  done: 5,
+  accepted: 4,
+  dependency_pending: 4,
+  completed: 5,
+};
+
+const STATE_LABEL: Record<ThreadState, string> = {
+  accepted: "Accepted",
+  dependency_pending: "Pending",
+  running: "Running",
+  cancelling: "Cancelling",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
 };
 
 function StateIcon({ state }: { state: ThreadState }) {
   if (state === "running" || state === "cancelling") {
     return <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />;
   }
-  if (state === "pending") {
-    return (
-      <Icon
-        iconName={IconName.Timelaps}
-        size={20}
-        className="[&>path]:!fill-basic-muted"
-      />
-    );
+  if (state === "accepted" || state === "dependency_pending") {
+    return <Icon iconName={IconName.Timelaps} size={20} className="[&>path]:!fill-basic-muted" />;
   }
-  if (state === "error" || state === "cancelled") {
-    return (
-      <Icon
-        iconName={IconName.Danger}
-        size={20}
-        // Beat `.btn-ghost .icon path { fill: … }` from atoms.css.
-        className={
-          state === "error"
-            ? "[&>path]:!fill-error-primary"
-            : "[&>path]:!fill-basic-muted"
-        }
-      />
-    );
+  if (state === "failed" || state === "cancelled") {
+    return <Icon iconName={IconName.Danger} size={20} className={state === "failed" ? "[&>path]:!fill-error-primary" : "[&>path]:!fill-basic-muted"} />;
   }
-  return (
-    <Icon
-      iconName={IconName.CheckCircle}
-      size={20}
-      className="[&>path]:!fill-basic-primary"
-    />
-  );
+  return <Icon iconName={IconName.CheckCircle} size={20} className="[&>path]:!fill-basic-primary" />;
 }
 
 function worstState(threads: TranscriptThread[]): ThreadState {
   return threads.reduce<ThreadState>(
-    (worst, thread) =>
-      STATE_ORDER[thread.state] < STATE_ORDER[worst] ? thread.state : worst,
-    "done",
+    (worst, thread) => STATE_ORDER[thread.state] < STATE_ORDER[worst] ? thread.state : worst,
+    "completed",
   );
 }
 
@@ -66,7 +53,9 @@ function worstState(threads: TranscriptThread[]): ThreadState {
 function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
   const running = thread.state === "running";
   const cancelling = thread.state === "cancelling";
-  const pending = thread.state === "pending";
+  const pending = thread.state === "accepted" || thread.state === "dependency_pending";
+  const stateLabel = STATE_LABEL[thread.state];
+  const deliveryLabel = thread.delivery === "available" ? "Result available" : thread.delivery === "delivered" ? "Result delivered" : null;
   // Before the first command there is nothing to tail, so the card keeps
   // showing what the thread was asked to do.
   const tail = thread.log.length
@@ -99,6 +88,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           selected ? "btn-ghost-highlighted" : "btn-ghost",
         )}
         aria-pressed={selected}
+        aria-label={`${thread.name}: ${stateLabel}${deliveryLabel ? `, ${deliveryLabel}` : ""}`}
         onClick={() => onSelect(thread.name, thread.key)}
       >
         <div className="flex items-center gap-2 shrink-0 p-2 w-full">
@@ -110,12 +100,15 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
                 ? "text-shimmer-basic"
                 : pending
                   ? "text-basic-muted"
-                  : thread.state === "error"
+                  : thread.state === "failed"
                     ? "text-error-primary"
                     : "text-basic-primary",
             )}
           >
             {thread.name}
+          </span>
+          <span className="label-micro text-basic-muted shrink-0">
+            {stateLabel}
           </span>
         </div>
         {running ? (
@@ -128,7 +121,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           // needs a plain wrapper to stay clamped.
           <div className="w-full px-2 pt-2">
             <span className="line-clamp-2 text-micro text-basic-muted !my-0 !text-[11px]">
-              {pending ? "Pending..." : cancelling ? "Cancelling…" : thread.summary}
+              {deliveryLabel ?? (pending ? stateLabel : cancelling ? "Cancelling…" : thread.summary)}
             </span>
           </div>
         )}
@@ -157,7 +150,7 @@ function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
         "overflow-x-auto hide-scrollbar",
         // Fade the row out on the right so a wave reads as scrollable.
         "[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]",
-        state === "error"
+        state === "failed"
           ? "border-error-primary"
           : state === "running" || state === "cancelling"
             ? "border-primary"

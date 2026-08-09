@@ -127,7 +127,22 @@ pub enum ThreadCancelOutcome {
 }
 
 const TERMINAL_TOMBSTONE_LIMIT: usize = 256;
+/// Frontend completion metadata is intentionally bounded independently of the
+/// completion payload queue. Payloads remain private and exactly-once.
+pub const FRONTEND_BUFFERED_COMPLETION_LIMIT: usize = 256;
 const CANCELLATION_TASK_GRACE: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferedThreadCompletionSnapshot {
+    pub key: ThreadDispatchKey,
+    pub status: crate::events::ThreadDispatchStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadActivitySnapshot {
+    pub active: Vec<ActiveThreadDispatchSnapshot>,
+    pub buffered: Vec<BufferedThreadCompletionSnapshot>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveThreadDispatchSnapshot {
@@ -648,6 +663,40 @@ impl ActiveThreadRegistry {
         }
         state.completions = retained;
         matching
+    }
+
+    /// Atomically snapshot active dispatches and bounded, exact identities for
+    /// completions currently available for exactly-once delivery. Completion
+    /// content is deliberately excluded. Taking a completion removes it from
+    /// the next snapshot, which authoritatively reconciles delivery.
+    pub fn activity_snapshot(&self, completion_limit: usize) -> ThreadActivitySnapshot {
+        let state = self.lock();
+        let active = state
+            .active_by_name
+            .values()
+            .map(|dispatch| ActiveThreadDispatchSnapshot {
+                key: dispatch.key.clone(),
+                state: dispatch.state,
+            })
+            .collect();
+        let skip = state.completions.len().saturating_sub(completion_limit);
+        let buffered = state
+            .completions
+            .iter()
+            .skip(skip)
+            .filter_map(|completion| {
+                state
+                    .terminals
+                    .iter()
+                    .rev()
+                    .find(|terminal| terminal.key == completion.key)
+                    .map(|terminal| BufferedThreadCompletionSnapshot {
+                        key: completion.key.clone(),
+                        status: terminal.status,
+                    })
+            })
+            .collect();
+        ThreadActivitySnapshot { active, buffered }
     }
 
     pub(crate) fn restore_completions(&self, completions: Vec<ThreadCompletion>) {
@@ -1750,6 +1799,63 @@ mod active_thread_registry_tests {
             .take_completions(&HashSet::new(), &HashSet::new())
             .is_empty());
         assert!(!registry.has_completions_for_run(&run_a));
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn buffered_completion_snapshot_is_exact_content_free_and_reconciles_consumption() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let completed = key(&run, "worker", "dispatch-ok", "call-ok");
+        let failed = key(&run, "worker-2", "dispatch-failed", "call-failed");
+        assert!(registry.try_accept(completed.clone()));
+        assert!(registry.try_accept(failed.clone()));
+        registry
+            .complete(
+                &store,
+                "session",
+                completion(completed.clone(), "SECRET_RESULT"),
+            )
+            .unwrap();
+        registry
+            .complete(
+                &store,
+                "session",
+                ThreadCompletion {
+                    key: failed.clone(),
+                    content: "SECRET_ERROR".to_string(),
+                    is_error: true,
+                },
+            )
+            .unwrap();
+
+        let snapshot = registry
+            .activity_snapshot(FRONTEND_BUFFERED_COMPLETION_LIMIT)
+            .buffered;
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(snapshot[0].key, completed);
+        assert_eq!(
+            snapshot[0].status,
+            crate::events::ThreadDispatchStatus::Completed
+        );
+        assert_eq!(snapshot[1].key, failed);
+        assert_eq!(
+            snapshot[1].status,
+            crate::events::ThreadDispatchStatus::Failed
+        );
+
+        let selected = HashSet::from(["dispatch-ok".to_string()]);
+        assert_eq!(
+            registry.take_completions(&HashSet::new(), &selected).len(),
+            1
+        );
+        let after_delivery = registry
+            .activity_snapshot(FRONTEND_BUFFERED_COMPLETION_LIMIT)
+            .buffered;
+        assert_eq!(after_delivery.len(), 1);
+        assert_eq!(after_delivery[0].key, failed);
+        assert!(registry.activity_snapshot(0).buffered.is_empty());
         let _ = std::fs::remove_file(store);
     }
 

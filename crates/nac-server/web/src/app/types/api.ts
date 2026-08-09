@@ -528,6 +528,18 @@ export type AgentEvent =
       dispatch_id?: string;
       tool_call_id?: string;
       status?: ThreadDispatchStatus;
+      persisted_sequence_id?: number;
+      persisted_at?: string;
+    }
+  | {
+      type: "thread_completion_delivered";
+      name: string;
+      origin_run_id: string;
+      dispatch_id: string;
+      originating_tool_call_id: string;
+      consuming_run_id: string;
+      persisted_sequence_id?: number;
+      persisted_at?: string;
     }
   | {
       type: "assistant_message";
@@ -647,6 +659,15 @@ export interface ActiveThreadDispatchSnapshot {
   status: ThreadDispatchStatus | "cancelling";
 }
 
+export interface BufferedThreadCompletionSnapshot {
+  run_id: string;
+  thread_name: string;
+  dispatch_id: string;
+  tool_call_id: string;
+  status: ThreadDispatchStatus;
+  delivery_status: "available";
+}
+
 export interface RespondLivePreference {
   enabled: boolean;
   version: number;
@@ -675,6 +696,7 @@ export interface SessionFrontendSnapshot {
   sessions: SessionSummarySnapshot[];
   active_threads: string[];
   active_thread_dispatches?: ActiveThreadDispatchSnapshot[];
+  buffered_thread_completions?: BufferedThreadCompletionSnapshot[];
   threads: ThreadSnapshot[];
   thread_episodes: Record<string, EpisodeSnapshot[]>;
   thread_events: Record<string, AgentEvent[]>;

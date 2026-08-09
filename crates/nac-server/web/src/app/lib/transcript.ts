@@ -16,6 +16,7 @@ import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
   ActiveThreadDispatchSnapshot,
+  BufferedThreadCompletionSnapshot,
   SessionSnapshotResponse,
   ToolCall,
 } from "@/app/types/api";
@@ -36,11 +37,12 @@ const SILENT_TOOLS = new Set([
 ]);
 
 export type ThreadState =
+  | "accepted"
+  | "dependency_pending"
   | "running"
-  | "pending"
   | "cancelling"
-  | "done"
-  | "error"
+  | "completed"
+  | "failed"
   | "cancelled";
 
 export interface TranscriptThread {
@@ -59,6 +61,7 @@ export interface TranscriptThread {
   /** Commands the thread has issued, oldest first, for the tail on its card. */
   log: ThreadLogLine[];
   state: ThreadState;
+  delivery?: "available" | "delivered" | null;
 }
 
 export type TranscriptBlock =
@@ -132,6 +135,8 @@ interface BuildContext {
   /** How often each name is dispatched across the whole transcript. */
   dispatchCounts: Record<string, number>;
   activeDispatches: ActiveThreadDispatchSnapshot[];
+  bufferedCompletions: BufferedThreadCompletionSnapshot[];
+  deliveredDispatchIds: Set<string>;
 }
 
 /**
@@ -345,11 +350,15 @@ function describeThread(
   );
   // Exact identity wins. Name-only live records are only a compatibility
   // fallback for the newest card, never for every historical reuse of a name.
-  const candidate = newest ? ctx.liveThreads[name] : undefined;
-  const live = candidate &&
-    (candidate.toolCallId == null || candidate.toolCallId === call.id)
-      ? candidate
-      : undefined;
+  const liveCandidates = Object.values(ctx.liveThreads).filter(
+    (thread) => thread.name === name && thread.toolCallId === call.id,
+  );
+  const exactLive = active
+    ? liveCandidates.find((thread) =>
+        thread.runId === active.run_id && thread.dispatchId === active.dispatch_id)
+    : liveCandidates.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+  const compatibilityLive = newest ? ctx.liveThreads[`name:${name}`] : undefined;
+  const live = exactLive ?? compatibilityLive;
 
   const waitingOnBatchDep = sourceThreads(call).some(
     (source) => batchNames.has(source) && !finishedNames.has(source),
@@ -378,15 +387,29 @@ function describeThread(
 
   let state: ThreadState;
   const status = live?.status ?? active?.status ?? terminalStatus;
-  if (rejection || status === "failed") state = "error";
+  if (rejection || status === "failed") state = "failed";
   else if (status === "cancelled" || (acceptance && runCancelled)) state = "cancelled";
   else if (status === "cancelling") state = "cancelling";
-  else if (status === "completed" || legacyCompletion) state = "done";
-  else if (status === "dependency_pending" || waitingOnBatchDep) state = "pending";
+  else if (status === "completed" || legacyCompletion) state = "completed";
+  else if (status === "accepted") state = "accepted";
+  else if (status === "dependency_pending" || waitingOnBatchDep) state = "dependency_pending";
   else state = "running";
 
+  const exactDispatchId = active?.dispatch_id ??
+    (terminal?.type === "thread_finished" ? terminal.dispatch_id : undefined) ??
+    live?.dispatchId;
+  const buffered = ctx.bufferedCompletions.find((item) =>
+    item.tool_call_id === call.id && item.thread_name === name &&
+    (!exactDispatchId || item.dispatch_id === exactDispatchId));
+  const delivery = buffered ? "available" : exactDispatchId != null && ctx.deliveredDispatchIds.has(completionIdentity(
+    active?.run_id ?? (terminal?.type === "thread_finished" ? terminal.run_id : undefined) ?? live?.runId ?? "",
+    name,
+    exactDispatchId,
+    call.id,
+  )) ? "delivered" : null;
+
   return {
-    key: active?.dispatch_id ?? live?.dispatchId ?? `${name}#${episode}`,
+    key: exactDispatchId ?? `${name}#${episode}`,
     name,
     action,
     // The thread tool result is acceptance, not worker completion. Completion
@@ -397,6 +420,7 @@ function describeThread(
       live?.log ?? [],
     ),
     state,
+    delivery,
   };
 }
 
@@ -498,6 +522,48 @@ export function withStreamedOutput(
  * Group the snapshot messages into user bubbles and model messages. Live thread
  * state comes from the SSE store so a wave animates before the snapshot lands.
  */
+export function terminalThreadEventsNewestLast(
+  events: SessionSnapshotResponse["thread_events"],
+): Extract<AgentEvent, { type: "thread_finished" }>[] {
+  return Object.values(events).flat().filter(
+    (event): event is Extract<AgentEvent, { type: "thread_finished" }> =>
+      event.type === "thread_finished" && Boolean(event.run_id && event.dispatch_id && event.tool_call_id),
+  ).sort((left, right) => {
+    const sequence = (left.persisted_sequence_id ?? -1) - (right.persisted_sequence_id ?? -1);
+    if (sequence) return sequence;
+    const timestamp = (left.persisted_at ?? "").localeCompare(right.persisted_at ?? "");
+    if (timestamp) return timestamp;
+    return completionIdentity(
+      left.run_id ?? "", left.name, left.dispatch_id ?? "", left.tool_call_id ?? "",
+    ).localeCompare(completionIdentity(
+      right.run_id ?? "", right.name, right.dispatch_id ?? "", right.tool_call_id ?? "",
+    ));
+  });
+}
+
+export function completionIdentity(runId: string, name: string, dispatchId: string, toolCallId: string): string {
+  return JSON.stringify([runId, name, dispatchId, toolCallId]);
+}
+
+export function deliveredCompletionDispatchIds(
+  events: SessionSnapshotResponse["thread_events"],
+): Set<string> {
+  const delivered = new Set<string>();
+  for (const threadEvents of Object.values(events)) {
+    for (const event of threadEvents) {
+      if (event.type === "thread_completion_delivered") {
+        delivered.add(completionIdentity(
+          event.origin_run_id,
+          event.name,
+          event.dispatch_id,
+          event.originating_tool_call_id,
+        ));
+      }
+    }
+  }
+  return delivered;
+}
+
 export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
   liveThreads: Record<string, RuntimeThread>,
@@ -512,6 +578,8 @@ export function buildTranscript(
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts: countThreadDispatches(messages),
     activeDispatches: snapshot?.active_thread_dispatches ?? [],
+    bufferedCompletions: snapshot?.buffered_thread_completions ?? [],
+    deliveredDispatchIds: deliveredCompletionDispatchIds(snapshot?.thread_events ?? {}),
   };
   /** Dispatches of a name walked past, which is what numbers each card's episode. */
   const dispatchesSeen: Record<string, number> = {};

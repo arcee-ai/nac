@@ -394,6 +394,8 @@ pub async fn execute_parsed_dispatch(
             dispatch_id: None,
             tool_call_id: None,
             status: None,
+            persisted_sequence_id: None,
+            persisted_at: None,
         });
     }
 
@@ -683,6 +685,17 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
             }
             let mut output = String::from("Thread updates:");
             for completion in completions {
+                runtime
+                    .event_sink
+                    .emit(AgentEvent::ThreadCompletionDelivered {
+                        name: completion.key.thread_name.clone(),
+                        origin_run_id: completion.key.run_id.clone(),
+                        dispatch_id: completion.key.dispatch_id.clone(),
+                        originating_tool_call_id: completion.key.tool_call_id.clone(),
+                        consuming_run_id: run_id.clone(),
+                        persisted_sequence_id: None,
+                        persisted_at: None,
+                    });
                 output.push_str(&format!(
                     "\n\n## {} ({})\norigin_run_id: {}\ndispatch_id: {}\noriginating_tool_call_id: {}\n{}",
                     completion.key.thread_name,
@@ -1011,6 +1024,8 @@ pub(crate) fn finalize_thread_dispatch(
                 dispatch_id: Some(key.dispatch_id),
                 tool_call_id: Some(key.tool_call_id),
                 status: Some(resolved_status),
+                persisted_sequence_id: None,
+                persisted_at: None,
             });
             if let Some(error) = outcome.steering_error {
                 runtime.event_sink.emit(AgentEvent::Error {
@@ -1129,7 +1144,10 @@ mod tests {
         crate::store::insert_test_session(&runtime.store_path, "test-session");
         let run_id = SessionRunId::new();
         runtime.event_sink = EventSink::bus_with_context(
-            SessionEventBus::new(Some("test-session".to_string())),
+            SessionEventBus::with_thread_event_store(
+                Some("test-session".to_string()),
+                runtime.store_path.clone(),
+            ),
             Some(run_id.clone()),
             None,
         );
@@ -1396,12 +1414,43 @@ mod tests {
         assert!(result.content.contains(origin_run.as_str()));
         assert!(result.content.contains(&old.tool_call_id));
         assert!(!result.content.contains("unrelated result"));
+        let records =
+            crate::store::load_all_thread_events(&runtime.store_path, "test-session", 32).unwrap();
+        let delivered = records["first"]
+            .iter()
+            .filter_map(|record| serde_json::from_str::<AgentEvent>(&record.event_json).ok())
+            .filter(|event| matches!(event, AgentEvent::ThreadCompletionDelivered { .. }))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            delivered.as_slice(),
+            [AgentEvent::ThreadCompletionDelivered {
+                name,
+                origin_run_id,
+                dispatch_id,
+                originating_tool_call_id,
+                consuming_run_id,
+                ..
+            }] if name == "first"
+                && origin_run_id == &origin_run
+                && dispatch_id == &old.dispatch_id
+                && originating_tool_call_id == &old.tool_call_id
+                && consuming_run_id == &consuming_run
+        ));
         let again = execute_thread_wait(
             json!({"dispatch_ids": [old.dispatch_id], "timeout": 1}),
             &runtime,
         )
         .await;
         assert!(again.content.contains("No eligible"));
+        let records =
+            crate::store::load_all_thread_events(&runtime.store_path, "test-session", 32).unwrap();
+        assert_eq!(
+            records["first"]
+                .iter()
+                .filter(|record| record.event_json.contains("thread_completion_delivered"))
+                .count(),
+            1
+        );
         let unrelated =
             execute_thread_wait(json!({"names": ["second"], "timeout": 1}), &runtime).await;
         assert!(unrelated.content.contains("unrelated result"));

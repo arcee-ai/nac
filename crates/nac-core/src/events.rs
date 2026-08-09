@@ -256,6 +256,23 @@ pub enum AgentEvent {
         tool_call_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         status: Option<ThreadDispatchStatus>,
+        /// Database ordering metadata, populated only when persisted events are read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        persisted_sequence_id: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        persisted_at: Option<String>,
+    },
+    /// Exact, content-free evidence that a buffered completion was consumed.
+    ThreadCompletionDelivered {
+        name: String,
+        origin_run_id: SessionRunId,
+        dispatch_id: String,
+        originating_tool_call_id: String,
+        consuming_run_id: SessionRunId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        persisted_sequence_id: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        persisted_at: Option<String>,
     },
     AssistantMessage {
         thread_name: Option<String>,
@@ -747,7 +764,8 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
         | AgentEvent::ThreadSteeringQueued { name, .. }
         | AgentEvent::ThreadSteeringDelivered { name, .. }
         | AgentEvent::ThreadSteeringExpired { name, .. }
-        | AgentEvent::ThreadFinished { name, .. } => Some(name),
+        | AgentEvent::ThreadFinished { name, .. }
+        | AgentEvent::ThreadCompletionDelivered { name, .. } => Some(name),
         // Usage updates are deliberately live-only. Persisting them would
         // consume slots in the user-facing thread-event pages and make a DB
         // written by this version unreadable by older AgentEvent enums.
@@ -879,6 +897,23 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
                 instruction_preview: "steering expired".to_string(),
             }
         }
+        AgentEvent::ThreadCompletionDelivered {
+            name,
+            origin_run_id,
+            dispatch_id,
+            originating_tool_call_id,
+            consuming_run_id,
+            persisted_sequence_id,
+            persisted_at,
+        } => AgentEvent::ThreadCompletionDelivered {
+            name,
+            origin_run_id,
+            dispatch_id,
+            originating_tool_call_id,
+            consuming_run_id,
+            persisted_sequence_id,
+            persisted_at,
+        },
         AgentEvent::ThreadFinished {
             name,
             exit_code,
@@ -888,6 +923,8 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             dispatch_id,
             tool_call_id,
             status,
+            persisted_sequence_id,
+            persisted_at,
             ..
         } => AgentEvent::ThreadFinished {
             name,
@@ -899,6 +936,8 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             dispatch_id,
             tool_call_id,
             status,
+            persisted_sequence_id,
+            persisted_at,
         },
         AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
             thread_name,
@@ -2160,6 +2199,8 @@ mod tests {
             dispatch_id: None,
             tool_call_id: None,
             status: None,
+            persisted_sequence_id: None,
+            persisted_at: None,
         });
 
         let channel_event = receiver.try_recv().unwrap();

@@ -51,8 +51,9 @@ import {
   type ThreadLogLine,
   type ToolCallEntry,
 } from "@/app/lib/threadLog";
-import { dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
-import { useLiveThreads } from "@/app/store/runtimeStore";
+import { completionIdentity, deliveredCompletionDispatchIds, dispatchThreadName, terminalThreadEventsNewestLast, partitionThreadCalls } from "@/app/lib/transcript";
+import { dispatchControlLabel } from "@/app/lib/threadActivity";
+import { selectNewestThreadsByName, useLiveThreads } from "@/app/store/runtimeStore";
 import type {
   ActiveThreadDispatchSnapshot,
   AgentEvent,
@@ -358,6 +359,7 @@ function Detail({
   sessionId,
   dispatch,
   steeringStatus,
+  deliveryStatus,
 }: {
   thread: ThreadSnapshot;
   episodes: EpisodeSnapshot[];
@@ -370,6 +372,7 @@ function Detail({
   /** Exact snapshot identity selected from a card/list row. */
   dispatch: ActiveThreadDispatchSnapshot | null;
   steeringStatus: "queued" | "delivered" | "expired" | null;
+  deliveryStatus: "available" | "delivered" | null;
 }) {
   const paneRef = useRef<HTMLDivElement>(null);
   const [instruction, setInstruction] = useState("");
@@ -397,6 +400,11 @@ function Detail({
   const cancelling =
     dispatchStatus === "cancelling" || cancelDispatch.isPending || acceptedCancellation;
   const actionable = dispatch != null && !terminal;
+  const terminalControlLabel = dispatchControlLabel(
+    dispatchStatus,
+    cancelling,
+    cancelDispatch.data?.terminal_status === "cancelled",
+  );
   const shownSteeringStatus = steeringStatus ?? localSteeringStatus;
 
   return (
@@ -408,7 +416,7 @@ function Detail({
           {thread.updated_at}
         </span>
         {dispatchStatus ? (
-          <span role="status" className="shrink-0 label-micro text-basic-muted">
+          <span className="shrink-0 label-micro text-basic-muted">
             {cancelling
               ? "Cancelling"
               : cancelDispatch.isSuccess && cancelDispatch.data.terminal_status === "cancelled"
@@ -416,6 +424,11 @@ function Detail({
                 : dispatchStatus === "cancelled"
                   ? "Cancelled"
                   : dispatchStatus.replace("_", " ")}
+          </span>
+        ) : null}
+        {deliveryStatus ? (
+          <span className="shrink-0 label-micro text-basic-muted">
+            {deliveryStatus === "available" ? "Result available" : "Result delivered"}
           </span>
         ) : null}
         <span className="shrink-0 code code-small text-basic-muted">
@@ -430,7 +443,7 @@ function Detail({
               type="button"
               className="btn-secondary px-3 py-1.5 label-small"
               disabled={!actionable || cancelling}
-              aria-label={`Cancel dispatch ${thread.name}`}
+              aria-label={`${terminalControlLabel} ${thread.name}`}
               onClick={() => {
                 void cancelDispatch
                   .mutateAsync({ id: sessionId, dispatch })
@@ -441,12 +454,7 @@ function Detail({
                   });
               }}
             >
-              {cancelling
-                ? "Cancelling…"
-                : dispatchStatus === "cancelled" ||
-                    cancelDispatch.data?.terminal_status === "cancelled"
-                  ? "Cancelled"
-                  : "Cancel dispatch"}
+              {terminalControlLabel}
             </button>
             <span className="code code-micro text-basic-muted break-all">
               {`Run ${dispatch.run_id} · dispatch ${dispatch.dispatch_id}`}
@@ -496,7 +504,7 @@ function Detail({
             </button>
           </form>
           {shownSteeringStatus ? (
-            <span role="status" className={cn(
+            <span className={cn(
               "label-micro",
               shownSteeringStatus === "error" || shownSteeringStatus === "expired"
                 ? "text-error-primary"
@@ -543,13 +551,41 @@ export function ThreadsView({
   selectedEpisode?: string | null;
   onSelect: (name: string, episodeKey?: string | null) => void;
 }) {
-  const liveThreads = useLiveThreads();
+  const runtimeThreads = useLiveThreads();
+  const liveThreads = useMemo(() => selectNewestThreadsByName(runtimeThreads), [runtimeThreads]);
   const updateRespondLive = useUpdateRespondLive();
   const toast = useToast();
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
   const activeDispatches = snapshot?.active_thread_dispatches;
   const sessionId = snapshot?.metadata.session_id ?? "";
+  const deliveredCompletionIds = useMemo(
+    () => deliveredCompletionDispatchIds(snapshot?.thread_events ?? {}),
+    [snapshot?.thread_events],
+  );
+  const knownDispatches = useMemo(() => {
+    const byId = new Map<string, ActiveThreadDispatchSnapshot & { persisted_sequence_id?: number }>();
+    const key = (dispatch: ActiveThreadDispatchSnapshot) => completionIdentity(
+      dispatch.run_id, dispatch.thread_name, dispatch.dispatch_id, dispatch.tool_call_id,
+    );
+    const terminalEvents = terminalThreadEventsNewestLast(snapshot?.thread_events ?? {});
+    for (const event of terminalEvents) {
+        if (event.type !== "thread_finished" || !event.run_id || !event.dispatch_id || !event.tool_call_id) continue;
+        byId.set(completionIdentity(event.run_id, event.name, event.dispatch_id, event.tool_call_id), {
+          run_id: event.run_id,
+          thread_name: event.name,
+          dispatch_id: event.dispatch_id,
+          tool_call_id: event.tool_call_id,
+          status: event.status ?? (event.exit_code ? "failed" : "completed"),
+          persisted_sequence_id: event.persisted_sequence_id,
+        });
+    }
+    for (const completion of snapshot?.buffered_thread_completions ?? []) {
+      byId.set(key(completion), completion);
+    }
+    for (const dispatch of activeDispatches ?? []) byId.set(key(dispatch), dispatch);
+    return [...byId.values()];
+  }, [snapshot?.thread_events, snapshot?.buffered_thread_completions, activeDispatches]);
   const waveRank = useMemo(
     () => waveRankByName(snapshot?.messages),
     [snapshot?.messages],
@@ -633,7 +669,7 @@ export function ThreadsView({
   // identity. In particular, a reused name never targets whichever run happens
   // to be current.
   const selectedDispatch =
-    activeDispatches?.find(
+    knownDispatches.find(
       (dispatch) =>
         dispatch.dispatch_id === selectedEpisode &&
         dispatch.thread_name === current?.name,
@@ -701,9 +737,10 @@ export function ThreadsView({
             const pending = pendingNames.has(thread.name);
             const running = runningNames.has(thread.name);
             const errored = liveThreads[thread.name]?.isError;
-            const exact = activeDispatches?.find(
+            const exact = knownDispatches.slice().reverse().find(
               (dispatch) => dispatch.thread_name === thread.name,
             );
+            const rowStatus = exact?.status ?? (errored ? "failed" : "completed");
             const disabled = pending && !exact;
             return (
               <PanelRow
@@ -738,8 +775,9 @@ export function ThreadsView({
                   )
                 }
                 trailing={
-                  <span className="code code-micro text-basic-muted shrink-0">
-                    {thread.episode_count}
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="label-micro text-basic-muted">{rowStatus.replace("dependency_", "")}</span>
+                    <span className="code code-micro text-basic-muted">{thread.episode_count}</span>
                   </span>
                 }
                 onClick={() => onSelect(thread.name, exact?.dispatch_id ?? null)}
@@ -765,6 +803,18 @@ export function ThreadsView({
           sessionId={sessionId}
           dispatch={selectedDispatch}
           steeringStatus={selectedSteeringStatus}
+          deliveryStatus={
+            snapshot.buffered_thread_completions?.some((item) => item.dispatch_id === selectedDispatch?.dispatch_id)
+              ? "available"
+              : selectedDispatch && deliveredCompletionIds.has(completionIdentity(
+                  selectedDispatch.run_id,
+                  selectedDispatch.thread_name,
+                  selectedDispatch.dispatch_id,
+                  selectedDispatch.tool_call_id,
+                ))
+                ? "delivered"
+                : null
+          }
         />
       ) : (
         <PanelEmpty>No threads yet for this session.</PanelEmpty>

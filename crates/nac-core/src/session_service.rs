@@ -189,6 +189,24 @@ pub struct ActiveThreadDispatchFrontendSnapshot {
     pub status: crate::events::ThreadDispatchStatus,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionDeliveryStatus {
+    Available,
+}
+
+/// Bounded, content-free metadata for a terminal worker result that remains
+/// available for exactly-once delivery to an orchestrator.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BufferedThreadCompletionFrontendSnapshot {
+    pub run_id: SessionRunId,
+    pub thread_name: String,
+    pub dispatch_id: String,
+    pub tool_call_id: String,
+    pub status: crate::events::ThreadDispatchStatus,
+    pub delivery_status: CompletionDeliveryStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchCancelDisposition {
@@ -234,6 +252,8 @@ pub struct SessionFrontendSnapshot {
     pub active_threads: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_thread_dispatches: Vec<ActiveThreadDispatchFrontendSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buffered_thread_completions: Vec<BufferedThreadCompletionFrontendSnapshot>,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     #[serde(default)]
@@ -930,6 +950,56 @@ impl SessionService {
         dispatches
     }
 
+    fn thread_activity_snapshot(
+        &self,
+    ) -> (
+        Vec<ActiveThreadDispatchFrontendSnapshot>,
+        Vec<BufferedThreadCompletionFrontendSnapshot>,
+    ) {
+        let snapshot = self
+            .active_threads
+            .activity_snapshot(crate::tools::FRONTEND_BUFFERED_COMPLETION_LIMIT);
+        let mut active = snapshot
+            .active
+            .into_iter()
+            .map(|dispatch| ActiveThreadDispatchFrontendSnapshot {
+                run_id: dispatch.key.run_id,
+                thread_name: dispatch.key.thread_name,
+                dispatch_id: dispatch.key.dispatch_id,
+                tool_call_id: dispatch.key.tool_call_id,
+                status: match dispatch.state {
+                    crate::tools::ThreadDispatchState::PendingDependency => {
+                        crate::events::ThreadDispatchStatus::DependencyPending
+                    }
+                    crate::tools::ThreadDispatchState::Running => {
+                        crate::events::ThreadDispatchStatus::Running
+                    }
+                    crate::tools::ThreadDispatchState::Cancelling => {
+                        crate::events::ThreadDispatchStatus::Cancelling
+                    }
+                },
+            })
+            .collect::<Vec<_>>();
+        active.sort_by(|left, right| {
+            left.thread_name
+                .cmp(&right.thread_name)
+                .then_with(|| left.dispatch_id.cmp(&right.dispatch_id))
+        });
+        let buffered = snapshot
+            .buffered
+            .into_iter()
+            .map(|completion| BufferedThreadCompletionFrontendSnapshot {
+                run_id: completion.key.run_id,
+                thread_name: completion.key.thread_name,
+                dispatch_id: completion.key.dispatch_id,
+                tool_call_id: completion.key.tool_call_id,
+                status: completion.status,
+                delivery_status: CompletionDeliveryStatus::Available,
+            })
+            .collect();
+        (active, buffered)
+    }
+
     pub fn queue_thread_steering_exact(
         &self,
         key: &crate::tools::ThreadDispatchKey,
@@ -1369,7 +1439,8 @@ impl SessionService {
         let blocking_task = tokio::task::spawn_blocking(move || {
             blocking_service.load_frontend_snapshot_blocking(options)
         });
-        let active_thread_dispatches = self.active_thread_dispatches();
+        let (active_thread_dispatches, buffered_thread_completions) =
+            self.thread_activity_snapshot();
         let active_threads = active_thread_dispatches
             .iter()
             .map(|dispatch| dispatch.thread_name.clone())
@@ -1431,6 +1502,7 @@ impl SessionService {
             sessions: blocking.sessions,
             active_threads,
             active_thread_dispatches,
+            buffered_thread_completions,
             threads: blocking.threads,
             thread_episodes: blocking.thread_episodes,
             thread_events: blocking.thread_events.events,
@@ -2867,6 +2939,8 @@ impl SessionService {
                 dispatch_id: Some(key.dispatch_id),
                 tool_call_id: Some(key.tool_call_id),
                 status: Some(finalization.status),
+                persisted_sequence_id: None,
+                persisted_at: None,
             });
             if let Some(error) = finalization.steering_error {
                 self.event_bus.emit_agent(AgentEvent::Error {
@@ -3239,7 +3313,26 @@ fn decode_thread_event(
 ) -> Option<AgentEvent> {
     let decoded = serde_json::from_str::<AgentEvent>(&record.event_json)
         .ok()
-        .and_then(crate::events::sanitize_external_agent_event);
+        .and_then(crate::events::sanitize_external_agent_event)
+        .map(|mut event| {
+            match &mut event {
+                AgentEvent::ThreadFinished {
+                    persisted_sequence_id,
+                    persisted_at,
+                    ..
+                }
+                | AgentEvent::ThreadCompletionDelivered {
+                    persisted_sequence_id,
+                    persisted_at,
+                    ..
+                } => {
+                    *persisted_sequence_id = Some(record.id);
+                    *persisted_at = Some(record.created_at.clone());
+                }
+                _ => {}
+            }
+            event
+        });
     if decoded.is_none() && diagnostics.len() < MAX_THREAD_EVENT_DIAGNOSTICS {
         diagnostics.push(ThreadEventDecodeDiagnostic {
             id: record.id,
@@ -4510,7 +4603,7 @@ pub(super) mod tests {
             "dispatch-ui",
             "thread-call-ui",
         );
-        assert!(parts.service.active_threads.try_accept(active_key));
+        assert!(parts.service.active_threads.try_accept(active_key.clone()));
 
         let snapshot = parts.service.frontend_snapshot().await.unwrap();
         assert!(snapshot.metadata.extra_headers.is_empty());
@@ -4531,6 +4624,39 @@ pub(super) mod tests {
         assert_eq!(
             snapshot.active_thread_dispatches[0].status,
             crate::events::ThreadDispatchStatus::DependencyPending
+        );
+        assert!(snapshot.buffered_thread_completions.is_empty());
+
+        parts
+            .service
+            .active_threads
+            .complete(
+                &store_path,
+                "activity-session",
+                crate::tools::ThreadCompletion {
+                    key: active_key,
+                    content: "CANARY_BUFFERED_SECRET".to_string(),
+                    is_error: false,
+                },
+            )
+            .unwrap();
+        let completed_snapshot = parts.service.frontend_snapshot().await.unwrap();
+        assert!(completed_snapshot.active_thread_dispatches.is_empty());
+        assert_eq!(completed_snapshot.buffered_thread_completions.len(), 1);
+        let available = &completed_snapshot.buffered_thread_completions[0];
+        assert_eq!(available.dispatch_id, "dispatch-ui");
+        assert_eq!(
+            available.status,
+            crate::events::ThreadDispatchStatus::Completed
+        );
+        assert_eq!(
+            available.delivery_status,
+            CompletionDeliveryStatus::Available
+        );
+        assert!(
+            !serde_json::to_string(&completed_snapshot)
+                .unwrap()
+                .contains("CANARY_BUFFERED_SECRET")
         );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

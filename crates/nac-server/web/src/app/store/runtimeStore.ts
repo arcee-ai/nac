@@ -8,7 +8,9 @@ import { threadLogLine, type ThreadLogLine } from "@/app/lib/threadLog";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
   ActiveRunSnapshot,
+  ActiveThreadDispatchSnapshot,
   AgentEvent,
+  BufferedThreadCompletionSnapshot,
   AssistantStreamDelta,
   SessionEventEnvelope,
 } from "@/app/types/api";
@@ -37,7 +39,8 @@ export interface RuntimeGuidance {
 
 export interface RuntimeThread {
   name: string;
-  status: "accepted" | "dependency_pending" | "running" | "completed" | "failed" | "cancelled";
+  status: "accepted" | "dependency_pending" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+  deliveryStatus?: "available" | "delivered" | null;
   runId: string | null;
   dispatchId: string | null;
   toolCallId: string | null;
@@ -49,6 +52,8 @@ export interface RuntimeThread {
    * card tails the last few lines of it and the side panel shows all of them.
    */
   log: ThreadLogLine[];
+  /** Monotonic local order used only for newest-name compatibility. */
+  updatedAt?: number;
 }
 
 /**
@@ -236,6 +241,48 @@ export function syncRunFromSnapshot(
   });
 }
 
+/** Reconcile exact active and buffered dispatch identities after reload/reconnect. */
+export function syncThreadsFromSnapshot(
+  active: ActiveThreadDispatchSnapshot[] | null | undefined,
+  buffered: BufferedThreadCompletionSnapshot[] | null | undefined,
+): void {
+  setState((state) => {
+    // These two lists are one authoritative registry projection. Persisted
+    // terminal history is rebuilt from thread_finished events by transcript
+    // selectors; keeping identities absent here would leave delivered results
+    // or completed live entries stuck in the runtime store after reconnect.
+    const threads: Record<string, RuntimeThread> = {};
+    for (const item of [...(active ?? []), ...(buffered ?? [])]) {
+      const identity = {
+        name: item.thread_name,
+        runId: item.run_id,
+        dispatchId: item.dispatch_id,
+        toolCallId: item.tool_call_id,
+      };
+      const key = runtimeThreadKey(identity);
+      const prior = state.threads[key] ?? emptyThread(item.thread_name);
+      threadSequence += 1;
+      threads[key] = {
+        ...prior,
+        ...identity,
+        status: item.status,
+        deliveryStatus: "delivery_status" in item ? "available" : null,
+        isError: item.status === "failed",
+        updatedAt: threadSequence,
+      };
+    }
+    return { threads };
+  });
+}
+
+export function selectNewestThreadsByName(threads: Record<string, RuntimeThread>) {
+  const selected: Record<string, RuntimeThread> = {};
+  for (const thread of Object.values(threads)) {
+    if (!selected[thread.name] || (selected[thread.name].updatedAt ?? 0) < (thread.updatedAt ?? 0)) selected[thread.name] = thread;
+  }
+  return selected;
+}
+
 /** Record a client-side event so the Events tab shows the full interaction. */
 export function pushLocalEvent(
   kind: RuntimeEventKind,
@@ -258,6 +305,16 @@ function pushEvent(
   });
 }
 
+let threadSequence = 0;
+
+export function runtimeThreadKey(identity: {
+  runId: string | null; name: string; dispatchId: string | null; toolCallId: string | null;
+}): string {
+  return identity.runId && identity.dispatchId && identity.toolCallId
+    ? `${identity.runId}\u001f${identity.name}\u001f${identity.dispatchId}\u001f${identity.toolCallId}`
+    : `name:${identity.name}`;
+}
+
 const emptyThread = (name: string): RuntimeThread => ({
   name,
   status: "running",
@@ -267,17 +324,35 @@ const emptyThread = (name: string): RuntimeThread => ({
   action: "",
   exitCode: null,
   isError: false,
+  deliveryStatus: null,
   log: [],
+  updatedAt: 0,
 });
+
+function newestThreadByName(threads: Record<string, RuntimeThread>, name: string) {
+  return Object.values(threads)
+    .filter((thread) => thread.name === name)
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+}
 
 function updateThread(name: string, patch: Partial<RuntimeThread>) {
   if (!name) return;
-  setState((state) => ({
-    threads: {
-      ...state.threads,
-      [name]: { ...(state.threads[name] ?? emptyThread(name)), ...patch },
-    },
-  }));
+  setState((state) => {
+    const identity = {
+      name,
+      runId: patch.runId ?? null,
+      dispatchId: patch.dispatchId ?? null,
+      toolCallId: patch.toolCallId ?? null,
+    };
+    let key = runtimeThreadKey(identity);
+    if (key.startsWith("name:")) {
+      const newest = newestThreadByName(state.threads, name);
+      if (newest) key = runtimeThreadKey(newest);
+    }
+    const current = state.threads[key] ?? emptyThread(name);
+    threadSequence += 1;
+    return { threads: { ...state.threads, [key]: { ...current, ...patch, updatedAt: threadSequence } } };
+  });
 }
 
 function markRunThreadsTerminal(runId: string | undefined, status: "failed" | "cancelled") {
@@ -310,9 +385,11 @@ function pushThreadLog(name: string | undefined, event: AgentEvent) {
   const line = threadLogLine(event, logSequence);
   if (!line) return;
   setState((state) => {
-    const thread = state.threads[name] ?? emptyThread(name);
+    const thread = newestThreadByName(state.threads, name) ?? emptyThread(name);
+    const key = runtimeThreadKey(thread);
+    threadSequence += 1;
     const log = [...thread.log, line].slice(-THREAD_LOG_LIMIT);
-    return { threads: { ...state.threads, [name]: { ...thread, log } } };
+    return { threads: { ...state.threads, [key]: { ...thread, log, updatedAt: threadSequence } } };
   });
 }
 
@@ -636,6 +713,7 @@ export const useActivity = () => useStore((s) => s.activity);
 export const useRunError = () => useStore((s) => s.error);
 export const useLiveEvents = () => useStore((s) => s.events);
 export const useStreamStatus = () => useStore((s) => s.streamStatus);
+export const useRuntimeThreads = () => useStore((s) => s.threads);
 export const useLiveThreads = () => useStore((s) => s.threads);
 export const useStreamText = () => useStore((s) => s.streamText);
 export const useStreamReasoning = () => useStore((s) => s.streamReasoning);

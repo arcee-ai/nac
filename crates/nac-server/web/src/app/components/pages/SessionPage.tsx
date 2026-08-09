@@ -17,6 +17,7 @@ import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import {
   useRunStateSync,
+  useThreadStateSync,
   useSessionStream,
 } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
@@ -110,6 +111,7 @@ export default function SessionPage() {
   const expanded = useSidePanelExpanded();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
+  useThreadStateSync(snapshot?.active_thread_dispatches, snapshot?.buffered_thread_completions);
   useAutoSshConnect(id, entry?.summary);
 
   useEffect(() => {

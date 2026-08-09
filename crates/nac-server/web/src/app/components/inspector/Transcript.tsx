@@ -11,6 +11,7 @@ import {
   MessageBoxSize,
   MessageBoxVariant,
 } from "@/app/atoms";
+import { ActivityAnnouncement } from "@/app/components/inspector/ActivityAnnouncement";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { QueuedMessage } from "@/app/components/inspector/QueuedMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
@@ -53,7 +54,7 @@ import {
   setOptimisticUserPrompt,
   useAdmittedQueuedRunId,
   useActivity,
-  useLiveThreads,
+  useRuntimeThreads,
   useOptimisticUserPrompt,
   useRunError,
   useRunning,
@@ -111,7 +112,7 @@ export function Transcript({
   const running = useRunning();
   const activity = useActivity();
   const error = useRunError();
-  const liveThreads = useLiveThreads();
+  const liveThreads = useRuntimeThreads();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const optimisticPrompt = useOptimisticUserPrompt();
@@ -146,6 +147,25 @@ export function Transcript({
       }),
     [snapshotTurns, streamText, streamReasoning],
   );
+  const activitySummary = useMemo(() => {
+    const threads = turns.flatMap((turn) =>
+      turn.kind === "model"
+        ? turn.blocks.flatMap((block) => block.kind === "wave" ? block.rows.flat() : [])
+        : [],
+    );
+    if (!threads.length) return "";
+    const newest = threads[threads.length - 1];
+    const state = newest.state === "dependency_pending"
+      ? "pending"
+      : newest.state.replace("_", " ");
+    const delivery = newest.delivery === "available"
+      ? ", result available"
+      : newest.delivery === "delivered"
+        ? ", result delivered"
+        : "";
+    return `Thread ${newest.name}: ${state}${delivery}`;
+  }, [turns]);
+
   perfMark("transcript:turns", {
     fields: { turns: turns.length, streamChars: streamText.length },
     throttleMs: 1000,
@@ -340,6 +360,7 @@ export function Transcript({
           ref={contentRef}
           className="flex flex-col pt-[72px] pb-[320px] [&>*]:shrink-0 mx-auto max-w-[840px]"
         >
+          <ActivityAnnouncement summary={activitySummary} />
           {!snapshot && !errorNotice ? (
             <div className="text-basic-muted label-small">Loading…</div>
           ) : null}

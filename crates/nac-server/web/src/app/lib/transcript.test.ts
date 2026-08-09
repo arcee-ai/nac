@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTranscript, partitionThreadCalls } from "@/app/lib/transcript";
+import { buildTranscript, partitionThreadCalls, terminalThreadEventsNewestLast } from "@/app/lib/transcript";
 import type { SessionSnapshotResponse, ToolCall } from "@/app/types/api";
 
 function threadCall(
@@ -66,7 +66,7 @@ describe("transcript projection", () => {
           kind: "wave",
           rows: [
             [{ name: "research", state: "running" }],
-            [{ name: "implement", state: "pending" }],
+            [{ name: "implement", state: "dependency_pending" }],
           ],
         },
       ],
@@ -136,7 +136,7 @@ describe("background dispatch identity", () => {
     projected.active_threads = ["impl"];
     projected.active_thread_dispatches = [{ run_id: "run-1", thread_name: "impl", dispatch_id: "dispatch-1", tool_call_id: call.id, status: "dependency_pending" }];
     expect(threadCards(buildTranscript(projected, {}))).toEqual([
-      expect.objectContaining({ key: "dispatch-1", name: "impl", state: "pending" }),
+      expect.objectContaining({ key: "dispatch-1", name: "impl", state: "dependency_pending" }),
     ]);
   });
 
@@ -147,7 +147,7 @@ describe("background dispatch identity", () => {
       { role: "user", content: "first" },
       { role: "assistant", content: "", tool_calls: [first] },
       { role: "tool", tool_call_id: first.id, content: "legacy completed output" },
-      { role: "assistant", content: "done" },
+      { role: "assistant", content: "completed" },
       { role: "user", content: "again" },
       { role: "assistant", content: "", tool_calls: [second] },
       { role: "tool", tool_call_id: second.id, content: "Thread 'impl' accepted for background execution." },
@@ -155,7 +155,7 @@ describe("background dispatch identity", () => {
     projected.active_thread_dispatches = [{ run_id: "run-2", thread_name: "impl", dispatch_id: "dispatch-new", tool_call_id: second.id, status: "running" }];
     const live = { impl: { name: "impl", status: "failed" as const, runId: "run-2", dispatchId: "dispatch-new", toolCallId: second.id, action: "again", exitCode: 1, isError: true, log: [] } };
     const cards = threadCards(buildTranscript(projected, live));
-    expect(cards.map((card) => card.state)).toEqual(["done", "error"]);
+    expect(cards.map((card) => card.state)).toEqual(["completed", "failed"]);
     expect(cards.map((card) => card.key)).toEqual(["impl#0", "dispatch-new"]);
   });
 
@@ -170,7 +170,7 @@ describe("background dispatch identity", () => {
       { role: "assistant", content: "[run cancelled by user]" },
     ]);
     projected.thread_events = { research: [{ type: "thread_finished", name: "research", exit_code: 1, timed_out: false, run_id: "run-1", dispatch_id: "dispatch-failed", tool_call_id: failed.id, status: "failed" }] };
-    expect(threadCards(buildTranscript(projected, {})).map((card) => card.state)).toEqual(["error", "cancelled"]);
+    expect(threadCards(buildTranscript(projected, {})).map((card) => card.state)).toEqual(["failed", "cancelled"]);
   });
 
   it("keeps thread_wait completion text out of user turns", () => {
@@ -211,5 +211,56 @@ it("reconciles an older exact completion when the newest reused name was cancell
     }],
   };
   expect(threadCards(buildTranscript(projected, {})).map((card) => card.state))
-    .toEqual(["done", "cancelled"]);
+    .toEqual(["completed", "cancelled"]);
+});
+
+describe("structured completion delivery", () => {
+  it("projects available then delivered by exact dispatch identity", () => {
+    const call = threadCall("call-delivery", "impl");
+    const projected = snapshot([
+      { role: "user", content: "work" },
+      { role: "assistant", content: "", tool_calls: [call] },
+      { role: "tool", tool_call_id: call.id, content: "Thread accepted" },
+    ]);
+    projected.thread_events = { impl: [{
+      type: "thread_finished", name: "impl", exit_code: 0, timed_out: false,
+      run_id: "run-origin", dispatch_id: "dispatch-delivery", tool_call_id: call.id,
+      status: "completed", persisted_sequence_id: 10,
+    }] };
+    projected.buffered_thread_completions = [{
+      run_id: "run-origin", thread_name: "impl", dispatch_id: "dispatch-delivery",
+      tool_call_id: call.id, status: "completed", delivery_status: "available",
+    }];
+    expect(threadCards(buildTranscript(projected, {}))[0]).toMatchObject({ delivery: "available" });
+
+    projected.buffered_thread_completions = [];
+    projected.thread_events.impl.push({
+      type: "thread_completion_delivered", name: "impl", origin_run_id: "run-origin",
+      dispatch_id: "dispatch-delivery", originating_tool_call_id: call.id,
+      consuming_run_id: "run-consumer", persisted_sequence_id: 11,
+    });
+    expect(threadCards(buildTranscript(projected, {}))[0]).toMatchObject({ delivery: "delivered" });
+  });
+
+  it("does not infer delivery from thread_wait result text", () => {
+    const call = threadCall("call-not-delivered", "impl");
+    const wait: ToolCall = { id: "wait", type: "function", function: { name: "thread_wait", arguments: "{}" } };
+    const projected = snapshot([
+      { role: "assistant", content: "", tool_calls: [call, wait] },
+      { role: "tool", tool_call_id: wait.id, content: "originating_tool_call_id: call-not-delivered" },
+    ]);
+    projected.thread_events = { impl: [{
+      type: "thread_finished", name: "impl", exit_code: 0, timed_out: false,
+      run_id: "run", dispatch_id: "dispatch", tool_call_id: call.id, status: "completed",
+    }] };
+    expect(threadCards(buildTranscript(projected, {}))[0]?.delivery).toBeNull();
+  });
+});
+
+
+it("orders reused-name terminal events by persisted sequence, not object insertion", () => {
+  const newer = { type: "thread_finished" as const, name: "impl", exit_code: 1, timed_out: false, run_id: "run-new", dispatch_id: "dispatch-new", tool_call_id: "call-new", status: "failed" as const, persisted_sequence_id: 20, persisted_at: "2026-01-02" };
+  const older = { type: "thread_finished" as const, name: "impl", exit_code: 0, timed_out: false, run_id: "run-old", dispatch_id: "dispatch-old", tool_call_id: "call-old", status: "completed" as const, persisted_sequence_id: 10, persisted_at: "2026-01-01" };
+  const ordered = terminalThreadEventsNewestLast({ z: [newer], a: [older] });
+  expect(ordered.map((event) => event.dispatch_id)).toEqual(["dispatch-old", "dispatch-new"]);
 });

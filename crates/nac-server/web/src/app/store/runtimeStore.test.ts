@@ -6,8 +6,10 @@ import {
   getRuntimeState,
   resetRuntime,
   runtimeStore,
+  selectNewestThreadsByName,
   setStreamStatus,
   syncRunFromSnapshot,
+  syncThreadsFromSnapshot,
 } from "@/app/store/runtimeStore";
 import type { SessionEventEnvelope } from "@/app/types/api";
 
@@ -60,7 +62,7 @@ describe("runtime external store", () => {
       running: true,
       activity: "Thread frontend: Add Vitest",
       threads: {
-        frontend: {
+        "name:frontend": {
           status: "running",
           action: "Add Vitest",
           isError: false,
@@ -307,7 +309,7 @@ it("cancels only the exact run before a queued successor reuses the name", () =>
     },
   }));
   applyEnvelope(envelope(3, { type: "run_cancelled" }));
-  expect(getRuntimeState().threads.impl).toMatchObject({
+  expect(selectNewestThreadsByName(getRuntimeState().threads).impl).toMatchObject({
     status: "cancelled",
     dispatchId: "dispatch-1",
   });
@@ -327,7 +329,7 @@ it("cancels only the exact run before a queued successor reuses the name", () =>
   });
   successor.run_id = "run-2";
   applyEnvelope(successor);
-  expect(getRuntimeState().threads.impl).toMatchObject({
+  expect(selectNewestThreadsByName(getRuntimeState().threads).impl).toMatchObject({
     status: "running",
     runId: "run-2",
     dispatchId: "dispatch-2",
@@ -350,11 +352,65 @@ it("projects immediate accepted identity before the worker starts", () => {
       dispatch_status: "accepted",
     },
   }));
-  expect(getRuntimeState().threads.impl).toMatchObject({
+  expect(selectNewestThreadsByName(getRuntimeState().threads).impl).toMatchObject({
     status: "accepted",
     runId: "run-1",
     dispatchId: "dispatch-1",
     toolCallId: "call-1",
+  });
+});
+
+describe("authoritative thread snapshot reconciliation", () => {
+  const active = (dispatch: string, name = "worker") => ({
+    run_id: "run-1",
+    thread_name: name,
+    dispatch_id: dispatch,
+    tool_call_id: `call-${dispatch}`,
+    status: "running" as const,
+  });
+
+  const buffered = (dispatch: string, name = "worker") => ({
+    ...active(dispatch, name),
+    status: "completed" as const,
+    delivery_status: "available" as const,
+  });
+
+  it("removes stale active and consumed buffered identities", () => {
+    resetRuntime("session-1");
+    syncThreadsFromSnapshot([active("old")], [buffered("result")]);
+    expect(Object.values(getRuntimeState().threads)).toHaveLength(2);
+    expect(
+      Object.values(getRuntimeState().threads).find(
+        (thread) => thread.dispatchId === "result",
+      ),
+    ).toMatchObject({ status: "completed", deliveryStatus: "available" });
+
+    syncThreadsFromSnapshot([active("new")], []);
+    expect(Object.values(getRuntimeState().threads)).toEqual([
+      expect.objectContaining({ dispatchId: "new", deliveryStatus: null }),
+    ]);
+
+    syncThreadsFromSnapshot([], []);
+    expect(getRuntimeState().threads).toEqual({});
+  });
+
+  it("keeps reused names as exact identities without inheriting state", () => {
+    resetRuntime("session-1");
+    syncThreadsFromSnapshot(
+      [active("first", "impl"), active("second", "impl")],
+      [],
+    );
+    const projected = Object.values(getRuntimeState().threads);
+    expect(projected.map((thread) => thread.dispatchId).sort()).toEqual([
+      "first",
+      "second",
+    ]);
+    expect(Object.keys(getRuntimeState().threads)).toEqual(
+      expect.arrayContaining([
+        "run-1\u001fimpl\u001ffirst\u001fcall-first",
+        "run-1\u001fimpl\u001fsecond\u001fcall-second",
+      ]),
+    );
   });
 });
 

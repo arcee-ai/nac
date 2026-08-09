@@ -11,8 +11,9 @@ import {
   resetRuntime,
   setStreamStatus,
   syncRunFromSnapshot,
+  syncThreadsFromSnapshot,
 } from "@/app/store/runtimeStore";
-import type { ActiveRunSnapshot } from "@/app/types/api";
+import type { ActiveRunSnapshot, ActiveThreadDispatchSnapshot, BufferedThreadCompletionSnapshot } from "@/app/types/api";
 
 // Events arrive far faster than a snapshot can be fetched, so reloads are
 // coalesced into one request per window.
@@ -90,4 +91,12 @@ export function useRunStateSync(
   useEffect(() => {
     syncRunFromSnapshot(activeRun);
   }, [activeRun]);
+}
+
+/** Reconcile exact thread identities and completion availability on snapshot refresh. */
+export function useThreadStateSync(
+  active: ActiveThreadDispatchSnapshot[] | null | undefined,
+  buffered: BufferedThreadCompletionSnapshot[] | null | undefined,
+): void {
+  useEffect(() => syncThreadsFromSnapshot(active, buffered), [active, buffered]);
 }

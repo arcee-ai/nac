@@ -140,12 +140,9 @@ export const ModelMessage = memo(function ModelMessage({
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
           {active && activity ? (
-            <>
-              {" "}
-              {/*<span className="label-micro text-shimmer-basic min-w-0 truncate max-w-[120px]">
+            <span className="label-micro text-shimmer-basic min-w-0 truncate max-w-[160px]">
               {activity}
-            </span>*/}
-            </>
+            </span>
           ) : turn.durationMs != null ? (
             <span className="label-micro text-basic-muted shrink-0 fade">
               {formatDurationShort(turn.durationMs)}
