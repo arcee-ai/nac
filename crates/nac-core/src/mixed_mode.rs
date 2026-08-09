@@ -34,26 +34,6 @@ pub struct MixedModeConfig {
     pub hard: MixedTierSettings,
 }
 
-impl MixedModeConfig {
-    /// Tier labels and settings in classifier order.
-    pub fn tiers(&self) -> [(&'static str, &MixedTierSettings); 3] {
-        [
-            ("easy", &self.easy),
-            ("medium", &self.medium),
-            ("hard", &self.hard),
-        ]
-    }
-
-    /// Mutable tier labels and settings in classifier order.
-    pub fn tiers_mut(&mut self) -> [(&'static str, &mut MixedTierSettings); 3] {
-        [
-            ("easy", &mut self.easy),
-            ("medium", &mut self.medium),
-            ("hard", &mut self.hard),
-        ]
-    }
-}
-
 fn resolve_tier_client(tier: &MixedTierSettings, label: &str) -> Result<ModelClient> {
     let backend = tier
         .backend

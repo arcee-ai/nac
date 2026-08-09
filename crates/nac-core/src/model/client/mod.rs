@@ -819,12 +819,12 @@ impl ModelClient {
     pub(crate) fn new_for_test_settings(
         backend: BackendKind,
         model: &str,
-        reasoning_effort: Option<ReasoningEffort>,
+        reasoning_effort: ReasoningEffort,
     ) -> Self {
         let mut client = Self::new_for_test();
         client.backend = backend;
         client.model = model.to_string();
-        client.reasoning_effort = reasoning_effort;
+        client.reasoning_effort = Some(reasoning_effort);
         client.resolved_model = catalog::resolve(backend, model);
         client
     }

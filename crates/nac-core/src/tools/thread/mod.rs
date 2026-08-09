@@ -820,7 +820,7 @@ mod tests {
         model: &str,
         effort: crate::model::ReasoningEffort,
     ) -> ModelClient {
-        ModelClient::new_for_test_settings(backend, model, Some(effort))
+        ModelClient::new_for_test_settings(backend, model, effort)
     }
 
     fn mixed_runtime() -> ToolRuntime {

@@ -23,11 +23,7 @@ export function loadLastMixed(): MixedModels | null {
     if (!isTier(mixed.easy) || !isTier(mixed.medium) || !isTier(mixed.hard)) {
       return null;
     }
-    return {
-      easy: mixed.easy,
-      medium: mixed.medium,
-      hard: mixed.hard,
-    };
+    return parsed as MixedModels;
   } catch {
     return null;
   }

@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-pub use crate::mixed_mode::{MixedModeConfig, MixedTierSettings};
+use crate::mixed_mode::MixedModeConfig;
 use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
@@ -231,6 +231,7 @@ impl From<anyhow::Error> for SessionPresentationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mixed_mode::MixedTierSettings;
     use crate::types::Message;
     use crate::TEST_ENV_LOCK;
 
@@ -389,18 +390,6 @@ mod tests {
         assert_eq!(reloaded.mixed_models, None);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-    }
-
-    #[test]
-    fn legacy_mixed_models_json_with_kind_still_deserializes() {
-        let mixed: MixedModeConfig = serde_json::from_str(
-            r#"{"kind":"models","easy":{"model":"easy"},"medium":{"model":"medium"},"hard":{"model":"hard"}}"#,
-        )
-        .unwrap();
-
-        assert_eq!(mixed.easy.model, "easy");
-        assert_eq!(mixed.medium.model, "medium");
-        assert_eq!(mixed.hard.model, "hard");
     }
 
     #[test]

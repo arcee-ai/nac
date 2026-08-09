@@ -90,7 +90,7 @@ pub(crate) fn rotate_inherited_credential(
     mixed: &mut MixedModeConfig,
     credential: InheritedCredential<'_>,
 ) {
-    for (_, tier) in mixed.tiers_mut() {
+    for tier in [&mut mixed.easy, &mut mixed.medium, &mut mixed.hard] {
         let tier_backend = tier
             .backend
             .or_else(|| provider_for_model(tier.model.as_str()));
