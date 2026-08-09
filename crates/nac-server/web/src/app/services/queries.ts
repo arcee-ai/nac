@@ -29,6 +29,7 @@ import type {
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  UpdateRespondLiveRequest,
   SshConfigurationList,
   CreateSshConfigurationRequest,
   UpdateSshConfigurationRequest,
@@ -717,6 +718,25 @@ export function useTogglePin() {
         expectedVersion: summary.presentation_version ?? 0,
       }),
   };
+}
+
+export function useUpdateRespondLive() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...payload }: UpdateRespondLiveRequest & { id: string }) =>
+      api.updateRespondLive(id, payload),
+    onSuccess: (respondLive, { id }) => {
+      client.setQueryData<SessionSnapshotResponse>(
+        queryKeys.session(id),
+        (snapshot) => snapshot ? { ...snapshot, respond_live: respondLive } : snapshot,
+      );
+    },
+    onError: (error, { id }) => {
+      if (error instanceof ApiError && error.status === 409) {
+        void client.invalidateQueries({ queryKey: queryKeys.session(id) });
+      }
+    },
+  });
 }
 
 export function useUpdateConfig() {

@@ -558,6 +558,7 @@ export type SessionEvent =
   /** The user stopped the run, which is an outcome rather than a fault. */
   | { type: "run_cancelled" }
   | { type: "snapshot_saved"; session_id: string }
+  | { type: "respond_live_updated"; enabled: boolean; version: number }
   /** The orchestrator transcript grew: a message was committed to the log. */
   | { type: "transcript_appended"; transcript_len: number }
   /** A revert cut the transcript back; everything past this length is gone. */
@@ -643,6 +644,16 @@ export interface ActiveThreadDispatchSnapshot {
   status: ThreadDispatchStatus;
 }
 
+export interface RespondLivePreference {
+  enabled: boolean;
+  version: number;
+}
+
+export interface UpdateRespondLiveRequest {
+  enabled: boolean;
+  expected_version: number;
+}
+
 export interface SessionFrontendSnapshot {
   metadata: SessionMetadata;
   messages: Message[];
@@ -654,6 +665,7 @@ export interface SessionFrontendSnapshot {
   /** Opaque tokens aligned with messages; null entries are not forkable. */
   fork_boundary_tokens?: (string | null)[];
   response_timing: ResponseTimingSnapshot;
+  respond_live: RespondLivePreference;
   active_run?: ActiveRunSnapshot;
   active_compaction?: ActiveCompactionSnapshot;
   queued_message?: QueuedRunRecord;

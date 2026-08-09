@@ -16,6 +16,7 @@ import {
   LoaderSize,
   LoaderVariant,
   Separator,
+  Switch,
 } from "@/app/atoms";
 import {
   PanelEmpty,
@@ -30,6 +31,8 @@ import {
   useThreadLogHeightRatio,
 } from "@/app/hooks/useThreadLogHeight";
 import { cn } from "@/app/lib/cn";
+import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { useUpdateRespondLive } from "@/app/services/queries";
 import { Markdown } from "@/app/lib/markdown";
 import {
   STICK_TOLERANCE_PX,
@@ -413,6 +416,8 @@ export function ThreadsView({
   onSelect: (name: string) => void;
 }) {
   const liveThreads = useLiveThreads();
+  const updateRespondLive = useUpdateRespondLive();
+  const toast = useToast();
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
   const activeDispatches = snapshot?.active_thread_dispatches;
@@ -492,11 +497,38 @@ export function ThreadsView({
   return (
     <PanelSplit
       list={
-        ordered.length === 0 ? (
-          <div className="p-1 label-micro text-basic-muted">
-            No threads yet for this session.
+        <>
+          <div className="flex items-center justify-between gap-3 border-b border-basic-translucent p-3">
+            <div className="min-w-0">
+              <div className="label-small text-basic-primary">Respond live</div>
+              <div className="label-micro text-basic-muted">
+                Continue this turn as its threads finish
+              </div>
+            </div>
+            <Switch
+              aria-label="Respond live"
+              checked={snapshot.respond_live.enabled}
+              disabled={updateRespondLive.isPending}
+              onChange={(enabled) => {
+                void updateRespondLive
+                  .mutateAsync({
+                    id: sessionId,
+                    enabled,
+                    expected_version: snapshot.respond_live.version,
+                  })
+                  .catch((error) => {
+                    toast.error(
+                      `Respond live was not changed: ${errorMessage(error)}`,
+                    );
+                  });
+              }}
+            />
           </div>
-        ) : (
+          {ordered.length === 0 ? (
+            <div className="p-1 label-micro text-basic-muted">
+              No threads yet for this session.
+            </div>
+          ) : (
           ordered.map((thread) => {
             const pending = pendingNames.has(thread.name);
             const running = runningNames.has(thread.name);
@@ -542,7 +574,8 @@ export function ThreadsView({
               />
             );
           })
-        )
+        )}
+        </>
       }
     >
       {current ? (

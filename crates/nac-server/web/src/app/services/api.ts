@@ -31,6 +31,7 @@ import type {
   ProviderModelsRequest,
   QueuedRunRecord,
   RawSessionConfig,
+  RespondLivePreference,
   RecentEventsResponse,
   ReorderSessionsRequest,
   ReorderSessionsResponse,
@@ -53,6 +54,7 @@ import type {
   UpdateConfigRequest,
   UpdateModelConfigurationRequest,
   UpdateSessionPresentationRequest,
+  UpdateRespondLiveRequest,
   WorkspaceDiffStage,
   WorkspaceFileContent,
   WorkspaceFileDiff,
@@ -325,6 +327,11 @@ export const api = {
     request<LaunchModelDefaults>("POST", "/sessions/launch-defaults", {
       body: payload,
       signal,
+    }),
+
+  updateRespondLive: (id: string, payload: UpdateRespondLiveRequest) =>
+    request<RespondLivePreference>("PUT", `${sessionPath(id)}/respond-live`, {
+      body: payload,
     }),
 
   updatePresentation: (id: string, payload: UpdateSessionPresentationRequest) =>

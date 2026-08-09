@@ -356,6 +356,12 @@ pub enum SessionEvent {
     SnapshotSaved {
         session_id: String,
     },
+    /// Persisted delivery-preference change. Replayed from the in-process
+    /// event ring so reconnecting clients converge without optimistic state.
+    RespondLiveUpdated {
+        enabled: bool,
+        version: u64,
+    },
     /// Live-only signal that the orchestrator transcript log gained rows
     /// (DB-direct transcript workset, step 3). `transcript_len` is the raw
     /// merged transcript length after the append. Emitted at each transcript

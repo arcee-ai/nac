@@ -357,3 +357,13 @@ it("projects immediate accepted identity before the worker starts", () => {
     toolCallId: "call-1",
   });
 });
+
+describe("respond-live events", () => {
+  it("invalidates the authoritative session snapshot", () => {
+    expect(applyEnvelope(envelope(91, {
+      type: "respond_live_updated",
+      enabled: true,
+      version: 4,
+    }))).toBe(true);
+  });
+});

@@ -418,6 +418,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
       return true;
     case "snapshot_saved":
+    case "respond_live_updated":
       return true;
     case "transcript_appended":
       // A message was committed, so the active call is retired. Cross-channel

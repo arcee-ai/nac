@@ -1,9 +1,7 @@
 use super::*;
 
-// Version 12 adds the durable single-slot queued orchestrator run and its
-// session-lifetime idempotency receipts. Version 11 remains the immutable
-// session-lineage milestone.
-const STORE_SCHEMA_VERSION: i64 = 12;
+// Version 13 adds persisted per-session delivery preferences.
+const STORE_SCHEMA_VERSION: i64 = 13;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -94,6 +92,7 @@ fn inspect_schema_shape(conn: &Connection) -> Result<SchemaShape> {
         "session_lineage",
         "session_queued_runs",
         "session_message_receipts",
+        "session_preferences",
     ];
     let has_run_count = column_exists(conn, "sessions", "run_count")?;
     let has_visible_message_count = column_exists(conn, "sessions", "visible_message_count")?;
@@ -229,7 +228,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -292,6 +291,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     create_ssh_configurations_table(&transaction)?;
     create_session_lineage_table(&transaction)?;
     create_queued_run_tables(&transaction)?;
+    create_session_preferences_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -909,6 +909,26 @@ fn create_queued_run_tables(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn create_session_preferences_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_preferences (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             respond_live INTEGER NOT NULL DEFAULT 0 CHECK (respond_live IN (0, 1)),
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0)
+         );
+         CREATE TRIGGER IF NOT EXISTS initialize_session_preferences
+         AFTER INSERT ON sessions
+         BEGIN
+             INSERT OR IGNORE INTO session_preferences (session_id, respond_live, version)
+             VALUES (NEW.session_id, 0, 0);
+         END;
+         INSERT OR IGNORE INTO session_preferences (session_id, respond_live, version)
+             SELECT session_id, 0, 0 FROM sessions;",
+    )?;
+    Ok(())
+}
+
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
     for table in [
         "thread_steering",
@@ -918,6 +938,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "session_lineage",
         "session_queued_runs",
         "session_message_receipts",
+        "session_preferences",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

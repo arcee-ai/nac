@@ -70,6 +70,7 @@ use nac_core::{
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
+    RespondLivePreference, UpdateRespondLiveError,
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -576,6 +577,12 @@ pub struct UpdateSessionPresentationRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct UpdateRespondLiveRequest {
+    pub enabled: bool,
+    pub expected_version: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ReorderSessionsRequest {
     pub pinned: bool,
     pub session_ids: Vec<String>,
@@ -1021,6 +1028,43 @@ impl SessionManager {
                 "session presentation update task failed: {error}"
             ))
         })?
+    }
+
+    pub async fn update_respond_live(
+        &self,
+        session_id: &str,
+        enabled: bool,
+        expected_version: u64,
+    ) -> std::result::Result<RespondLivePreference, ApiError> {
+        // Serialize against attach/delete, but deliberately do not acquire the
+        // operation lease: this preference is legal during runs and model calls.
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let store_path = self.inner.store_path.clone();
+        let owned_id = session_id.to_string();
+        let preference = tokio::task::spawn_blocking(move || {
+            nac_core::update_respond_live_preference(
+                &store_path,
+                &owned_id,
+                enabled,
+                expected_version,
+            )
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("respond-live update task failed: {error}")))?
+        .map_err(ApiError::from)?;
+        if let Some(service) = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+        {
+            // Durability precedes local visibility and notification.
+            service.set_respond_live_preference(preference);
+        }
+        Ok(preference)
     }
 
     pub async fn reorder_sessions(
@@ -2431,6 +2475,10 @@ fn api_router(manager: SessionManager) -> Router {
             put(update_session_presentation_handler),
         )
         .route("/sessions/{session_id}/fork", post(fork_session_handler))
+        .route(
+            "/sessions/{session_id}/respond-live",
+            put(update_respond_live_handler),
+        )
         .route("/sessions/{session_id}/messages", get(session_messages))
         .route(
             "/sessions/{session_id}/threads/{thread_name}/events",
@@ -3250,6 +3298,19 @@ async fn update_session_presentation_handler(
         )
         .await?;
     Ok(Json(summary))
+}
+
+async fn update_respond_live_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdateRespondLiveRequest>, JsonRejection>,
+) -> std::result::Result<Json<RespondLivePreference>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .update_respond_live(&session_id, request.enabled, request.expected_version)
+            .await?,
+    ))
 }
 
 async fn reorder_sessions_handler(
@@ -4109,6 +4170,20 @@ impl From<JsonRejection> for ApiError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: format!("invalid JSON request body: {error}"),
+        }
+    }
+}
+
+impl From<UpdateRespondLiveError> for ApiError {
+    fn from(error: UpdateRespondLiveError) -> Self {
+        let status = match &error {
+            UpdateRespondLiveError::SessionNotFound(_) => StatusCode::NOT_FOUND,
+            UpdateRespondLiveError::VersionConflict { .. } => StatusCode::CONFLICT,
+            UpdateRespondLiveError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
         }
     }
 }
@@ -8176,6 +8251,91 @@ model = "gpt-5.2"
                 message: message.to_string(),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn respond_live_handler_is_durable_and_versioned() {
+        let root = temp_root("respond_live");
+        seed_session(&root, "known", "2026-01-01 00:00:00.000000000");
+        let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("test-key"));
+        let manager = test_manager(&root);
+
+        let Json(updated) = update_respond_live_handler(
+            State(manager.clone()),
+            AxumPath("known".to_string()),
+            Ok(Json(UpdateRespondLiveRequest {
+                enabled: true,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            updated,
+            RespondLivePreference {
+                enabled: true,
+                version: 1
+            }
+        );
+        assert_eq!(
+            nac_core::load_respond_live_preference(&root.join("store.db"), "known").unwrap(),
+            updated
+        );
+
+        let service = manager.attach_session("known").await.unwrap();
+        assert_eq!(service.respond_live_preference(), updated);
+        let _held_operation_lease =
+            sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "known").unwrap();
+        let mut events = service.subscribe_events();
+        let Json(disabled) = update_respond_live_handler(
+            State(manager.clone()),
+            AxumPath("known".to_string()),
+            Ok(Json(UpdateRespondLiveRequest {
+                enabled: false,
+                expected_version: 1,
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            disabled,
+            RespondLivePreference {
+                enabled: false,
+                version: 2
+            }
+        );
+        assert_eq!(service.respond_live_preference(), disabled);
+        assert_eq!(
+            events.recv().await.unwrap().event,
+            nac_core::events::SessionEvent::RespondLiveUpdated {
+                enabled: false,
+                version: 2,
+            }
+        );
+
+        let stale = update_respond_live_handler(
+            State(manager.clone()),
+            AxumPath("known".to_string()),
+            Ok(Json(UpdateRespondLiveRequest {
+                enabled: true,
+                expected_version: 1,
+            })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(stale.status, StatusCode::CONFLICT);
+        let missing = update_respond_live_handler(
+            State(manager),
+            AxumPath("missing".to_string()),
+            Ok(Json(UpdateRespondLiveRequest {
+                enabled: true,
+                expected_version: 0,
+            })),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(missing.status, StatusCode::NOT_FOUND);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

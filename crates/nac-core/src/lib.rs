@@ -52,7 +52,11 @@ pub mod session_service;
 pub mod sessions;
 mod skills;
 mod store;
-pub use store::{initialize as initialize_store, pinned_backup_paths as pinned_store_backup_paths};
+pub use store::{
+    initialize as initialize_store, load_respond_live_preference,
+    pinned_backup_paths as pinned_store_backup_paths, update_respond_live_preference,
+    RespondLivePreference, UpdateRespondLiveError,
+};
 mod terminal;
 mod tools;
 pub mod types;

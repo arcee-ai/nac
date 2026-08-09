@@ -250,6 +250,7 @@ mod tests {
         snapshot.config_version = 7;
         snapshot.orchestrator_compaction_threshold = Some(1234);
         crate::sessions::create_session(&path, &snapshot).unwrap();
+        update_respond_live_preference(&path, "source", true, 0).unwrap();
         let writer = TranscriptLogWriter::new(&path).unwrap();
         writer
             .append_batch(
@@ -280,6 +281,17 @@ mod tests {
         assert_eq!(child.config_version, 0);
         assert_eq!(child.orchestrator_compaction_threshold, Some(1234));
         assert!(child.token_usages.is_empty());
+        assert_eq!(
+            load_respond_live_preference(&path, "source").unwrap(),
+            RespondLivePreference {
+                enabled: true,
+                version: 1,
+            }
+        );
+        assert_eq!(
+            load_respond_live_preference(&path, "child").unwrap(),
+            RespondLivePreference::default()
+        );
         let conn = open_runtime_connection(&path).unwrap();
         let reset: (i64, i64, i64) = conn
             .query_row(

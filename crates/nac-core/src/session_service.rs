@@ -190,6 +190,8 @@ pub struct SessionFrontendSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fork_boundary_tokens: Vec<Option<String>>,
     pub response_timing: ResponseTimingSnapshot,
+    #[serde(default)]
+    pub respond_live: crate::store::RespondLivePreference,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -527,6 +529,7 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    respond_live: Arc<StdMutex<crate::store::RespondLivePreference>>,
     #[cfg(test)]
     frontend_snapshot_after_workspace_gate: Option<Arc<FrontendSnapshotAfterWorkspaceGate>>,
 }
@@ -688,6 +691,14 @@ impl SessionService {
         };
         let session_snapshot = run_config.session.into_snapshot();
         let active_threads = run_config.agent.active_threads_handle();
+        let respond_live = metadata
+            .session_id
+            .as_deref()
+            .and_then(|session_id| {
+                crate::store::load_respond_live_preference(&metadata.store_path, session_id).ok()
+            })
+            .unwrap_or_default();
+        active_threads.set_live_thread_updates(respond_live.enabled);
         let transcript_log = run_config.agent.transcript_log_writer();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
@@ -708,6 +719,7 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            respond_live: Arc::new(StdMutex::new(respond_live)),
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
         };
@@ -1190,6 +1202,29 @@ impl SessionService {
         )
     }
 
+    pub fn respond_live_preference(&self) -> crate::store::RespondLivePreference {
+        *self
+            .respond_live
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Reconciles a preference that has already committed durably. This is not
+    /// itself a persistence API, so callers cannot expose an in-memory value
+    /// that the store rejected.
+    pub fn set_respond_live_preference(&self, preference: crate::store::RespondLivePreference) {
+        *self
+            .respond_live
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = preference;
+        self.active_threads
+            .set_live_thread_updates(preference.enabled);
+        self.event_bus.emit(SessionEvent::RespondLiveUpdated {
+            enabled: preference.enabled,
+            version: preference.version,
+        });
+    }
+
     pub fn workspace_snapshot(&self) -> WorkspaceSnapshot {
         view::workspace_snapshot(&self.metadata.cwd, self.workspace_git.as_ref())
     }
@@ -1287,6 +1322,7 @@ impl SessionService {
             message_created_at: loaded_messages.created_at,
             fork_boundary_tokens: loaded_messages.fork_boundary_tokens,
             response_timing,
+            respond_live: self.respond_live_preference(),
             active_run: self.active_run(),
             queued_message: blocking.queued_message,
             active_compaction: self.active_compaction(),
@@ -3503,6 +3539,14 @@ pub(super) mod tests {
         label: &str,
         session_id: &str,
     ) -> (SessionServiceParts, PathBuf) {
+        test_active_service_with_respond_live(label, session_id, None)
+    }
+
+    fn test_active_service_with_respond_live(
+        label: &str,
+        session_id: &str,
+        respond_live: Option<bool>,
+    ) -> (SessionServiceParts, PathBuf) {
         let store_path = test_store_path(label);
         let client = ModelClient::new_for_test();
         let agent = test_agent(
@@ -3524,6 +3568,10 @@ pub(super) mod tests {
             BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
+        if let Some(enabled) = respond_live {
+            crate::store::update_respond_live_preference(&store_path, session_id, enabled, 0)
+                .unwrap();
+        }
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
@@ -6633,5 +6681,65 @@ pub(super) mod tests {
             )
             .unwrap();
         assert_eq!(run_count, 2);
+    }
+
+    #[tokio::test]
+    async fn respond_live_projection_and_notification_follow_local_reconciliation() {
+        let (persisted_parts, persisted_path) = test_active_service_with_respond_live(
+            "respond_live_reload",
+            "persisted-session",
+            Some(true),
+        );
+        assert_eq!(
+            persisted_parts.service.respond_live_preference(),
+            crate::store::RespondLivePreference {
+                enabled: true,
+                version: 1
+            }
+        );
+        assert!(persisted_parts.service.active_threads.live_thread_updates());
+        let _ = std::fs::remove_dir_all(persisted_path.parent().unwrap());
+
+        let (mut parts, store_path) = test_active_service("respond_live_projection", "session");
+        assert_eq!(
+            parts.service.respond_live_preference(),
+            crate::store::RespondLivePreference::default()
+        );
+        assert!(!parts.service.active_threads.live_thread_updates());
+        let preference = crate::store::RespondLivePreference {
+            enabled: true,
+            version: 7,
+        };
+        parts.service.set_respond_live_preference(preference);
+        assert!(parts.service.active_threads.live_thread_updates());
+        assert_eq!(
+            parts
+                .service
+                .frontend_snapshot()
+                .await
+                .unwrap()
+                .respond_live,
+            preference
+        );
+        let envelope = parts.events.recv().await.unwrap();
+        assert_eq!(
+            envelope.event,
+            SessionEvent::RespondLiveUpdated {
+                enabled: true,
+                version: 7
+            }
+        );
+        assert!(parts
+            .service
+            .recent_events(None, 16)
+            .iter()
+            .any(|envelope| {
+                envelope.event
+                    == SessionEvent::RespondLiveUpdated {
+                        enabled: true,
+                        version: 7,
+                    }
+            }));
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 }

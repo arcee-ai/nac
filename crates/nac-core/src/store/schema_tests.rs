@@ -282,7 +282,15 @@ fn assert_current_schema(conn: &Connection) {
             "updated_at",
         ]
     );
-    for table in ["session_queued_runs", "session_message_receipts"] {
+    assert_eq!(
+        table_columns(conn, "session_preferences"),
+        ["session_id", "respond_live", "version"]
+    );
+    for table in [
+        "session_queued_runs",
+        "session_message_receipts",
+        "session_preferences",
+    ] {
         assert_session_cascade(conn, table);
     }
 
@@ -1066,7 +1074,39 @@ fn pr_style_v5_shape_is_recognized_without_reusing_its_version_meaning() {
 }
 
 #[test]
-fn v11_store_migrates_to_v12_without_changing_existing_data() {
+fn v12_store_backfills_default_off_preferences() {
+    let path = temp_store_path("v12_to_v13");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "existing");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE session_preferences; PRAGMA user_version = 12;")
+        .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    assert_eq!(
+        migrated
+            .query_row(
+                "SELECT respond_live, version FROM session_preferences WHERE session_id='existing'",
+                [],
+                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, u64>(1)?)),
+            )
+            .unwrap(),
+        (false, 0)
+    );
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v11_store_migrates_to_v13_without_changing_existing_data() {
     let path = temp_store_path("v11_to_v12");
     initialize(&path).unwrap();
     insert_test_session(&path, "preserved");
@@ -1088,8 +1128,16 @@ fn v11_store_migrates_to_v12_without_changing_existing_data() {
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        12
+        STORE_SCHEMA_VERSION
     );
+    let preference: (bool, u64) = migrated
+        .query_row(
+            "SELECT respond_live, version FROM session_preferences WHERE session_id='preserved'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(preference, (false, 0));
     let kept: String = migrated
         .query_row(
             "SELECT name FROM threads WHERE session_id='preserved'",
