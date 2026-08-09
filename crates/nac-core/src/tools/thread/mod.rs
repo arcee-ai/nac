@@ -8,14 +8,14 @@ use crate::model::ModelClient;
 use crate::skills::SkillRegistry;
 use crate::store;
 use crate::tools::{
-    require_str, require_string_array, ThreadCompletion, ThreadDispatchKey, ToolResult, ToolRuntime,
+    ThreadCompletion, ThreadDispatchKey, ToolResult, ToolRuntime, require_str, require_string_array,
 };
 use crate::types::ToolDefinition;
 
 mod worker;
 #[cfg(test)]
 pub(crate) use worker::worker_model_arguments_for_test;
-use worker::{run_worker, WorkerInvocation};
+use worker::{WorkerInvocation, run_worker};
 
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
@@ -204,6 +204,13 @@ pub async fn execute_parsed_dispatch(
         status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Running),
     });
 
+    let cancellation = dispatch_key
+        .and_then(|key| runtime.active_threads.cancellation(key))
+        .unwrap_or_default();
+    let origin_run_id = dispatch_key
+        .map(|key| key.run_id.clone())
+        .or_else(|| runtime.event_sink.run_id().cloned())
+        .unwrap_or_else(|| SessionRunId::from_string("foreground-compat".to_string()));
     let result = run_worker(
         runtime,
         client,
@@ -215,115 +222,152 @@ pub async fn execute_parsed_dispatch(
             source_threads: &source_threads,
             scheduled_skills: &scheduled_skills,
             timeout_secs,
+            cancellation: &cancellation,
+            origin_run_id: Some(&origin_run_id),
+            dispatch_key,
         },
     )
     .await;
 
-    // Fold worker token usage into the shared runtime accumulator so the
-    // orchestrator's agent loop can include it in session totals.
-    if let Ok(run) = &result {
-        if let Some(usage) = &run.usage {
-            let origin_run = dispatch_key
-                .map(|key| key.run_id.clone())
-                .or_else(|| runtime.event_sink.run_id().cloned())
-                .unwrap_or_else(|| SessionRunId::from_string("foreground-compat".to_string()));
-            runtime
-                .active_threads
-                .record_worker_usage(origin_run, usage);
+    let (tool_result, exit_code, timed_out, timeout_reason, usage, status, process_owner) =
+        match result {
+            Err(error) => {
+                runtime.event_sink.emit(AgentEvent::Error {
+                    thread_name: Some(thread_name.clone()),
+                    message: format!("Failed to spawn thread '{}': {}", thread_name, error),
+                });
+                (
+                    ToolResult {
+                        content: format!("Failed to spawn thread '{}': {}", thread_name, error),
+                        is_error: true,
+                    },
+                    -1,
+                    false,
+                    None,
+                    None,
+                    crate::events::ThreadDispatchStatus::Failed,
+                    None,
+                )
+            }
+            Ok(run) if run.cancelled => (
+                ToolResult {
+                    content: format!("Thread '{}' was cancelled.", thread_name),
+                    is_error: true,
+                },
+                run.exit_code,
+                false,
+                None,
+                run.usage,
+                crate::events::ThreadDispatchStatus::Cancelled,
+                Some((run.child, run.process_group)),
+            ),
+            Ok(run) if run.timed_out => {
+                let reason = run.timeout_reason.clone();
+                (
+                    ToolResult {
+                        content: match &reason {
+                            Some(reason) => format!(
+                                "Thread '{}' timed out after {}s.\n{}",
+                                thread_name, timeout_secs, reason
+                            ),
+                            None => {
+                                format!(
+                                    "Thread '{}' timed out after {}s",
+                                    thread_name, timeout_secs
+                                )
+                            }
+                        },
+                        is_error: true,
+                    },
+                    run.exit_code,
+                    true,
+                    reason,
+                    run.usage,
+                    crate::events::ThreadDispatchStatus::Failed,
+                    Some((run.child, run.process_group)),
+                )
+            }
+            Ok(run) if run.exit_code != 0 => {
+                let details = if !run.stderr.trim().is_empty() {
+                    run.stderr.trim().to_string()
+                } else if !run.stdout.trim().is_empty() {
+                    run.stdout.trim().to_string()
+                } else {
+                    "no output".to_string()
+                };
+                (
+                    ToolResult {
+                        content: format!(
+                            "Thread '{}' failed (exit {}):\n{}",
+                            thread_name, run.exit_code, details
+                        ),
+                        is_error: true,
+                    },
+                    run.exit_code,
+                    false,
+                    None,
+                    run.usage,
+                    crate::events::ThreadDispatchStatus::Failed,
+                    Some((run.child, run.process_group)),
+                )
+            }
+            Ok(run) => (
+                ToolResult {
+                    content: run.stdout.trim().to_string(),
+                    is_error: false,
+                },
+                run.exit_code,
+                false,
+                None,
+                run.usage,
+                crate::events::ThreadDispatchStatus::Completed,
+                Some((run.child, run.process_group)),
+            ),
+        };
+
+    let mut resolved_result = tool_result;
+    let mut resolved_status = status;
+    if let Some(key) = dispatch_key {
+        #[cfg(test)]
+        runtime.active_threads.run_before_finalize_hook(key);
+        if let Some(finalized) = finalize_thread_dispatch(
+            runtime,
+            &session_id,
+            key.clone(),
+            &resolved_result,
+            status,
+            exit_code,
+            timed_out,
+            timeout_reason,
+            usage,
+        ) {
+            resolved_status = finalized.status;
+            resolved_result = ToolResult {
+                content: finalized.completion.content,
+                is_error: finalized.completion.is_error,
+            };
         }
+    } else {
+        runtime.event_sink.emit(AgentEvent::ThreadFinished {
+            name: thread_name,
+            exit_code,
+            timed_out,
+            timeout_reason,
+            usage,
+            run_id: None,
+            dispatch_id: None,
+            tool_call_id: None,
+            status: None,
+        });
     }
 
-    match result {
-        Err(e) => {
-            runtime.event_sink.emit(AgentEvent::Error {
-                thread_name: Some(thread_name.clone()),
-                message: format!("Failed to spawn thread '{}': {}", thread_name, e),
-            });
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name.clone(),
-                exit_code: -1,
-                timed_out: false,
-                timeout_reason: None,
-                usage: None,
-                run_id: dispatch_key.map(|key| key.run_id.clone()),
-                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
-                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
-                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Failed),
-            });
-            ToolResult {
-                content: format!("Failed to spawn thread '{}': {}", thread_name, e),
-                is_error: true,
-            }
+    if let Some((mut child, mut process_group)) = process_owner {
+        if resolved_status == crate::events::ThreadDispatchStatus::Cancelled {
+            process_group.terminate(&mut child).await;
         }
-        Ok(run) if run.timed_out => {
-            let timeout_reason = run.timeout_reason.clone();
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name.clone(),
-                exit_code: run.exit_code,
-                timed_out: true,
-                timeout_reason: timeout_reason.clone(),
-                usage: run.usage.clone(),
-                run_id: dispatch_key.map(|key| key.run_id.clone()),
-                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
-                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
-                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Failed),
-            });
-            ToolResult {
-                content: match timeout_reason {
-                    Some(reason) => format!(
-                        "Thread '{}' timed out after {}s.\n{}",
-                        thread_name, timeout_secs, reason
-                    ),
-                    None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
-                },
-                is_error: true,
-            }
-        }
-        Ok(run) if run.exit_code != 0 => {
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name.clone(),
-                exit_code: run.exit_code,
-                timed_out: false,
-                timeout_reason: None,
-                usage: run.usage.clone(),
-                run_id: dispatch_key.map(|key| key.run_id.clone()),
-                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
-                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
-                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Failed),
-            });
-            let details = if !run.stderr.trim().is_empty() {
-                run.stderr.trim().to_string()
-            } else if !run.stdout.trim().is_empty() {
-                run.stdout.trim().to_string()
-            } else {
-                "no output".to_string()
-            };
-            ToolResult {
-                content: format!(
-                    "Thread '{}' failed (exit {}):\n{}",
-                    thread_name, run.exit_code, details
-                ),
-                is_error: true,
-            }
-        }
-        Ok(run) => {
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name.clone(),
-                exit_code: run.exit_code,
-                timed_out: false,
-                timeout_reason: None,
-                usage: run.usage.clone(),
-                run_id: dispatch_key.map(|key| key.run_id.clone()),
-                dispatch_id: dispatch_key.map(|key| key.dispatch_id.clone()),
-                tool_call_id: dispatch_key.map(|key| key.tool_call_id.clone()),
-                status: dispatch_key.map(|_| crate::events::ThreadDispatchStatus::Completed),
-            });
-            ToolResult {
-                content: run.stdout.trim().to_string(),
-                is_error: false,
-            }
-        }
+        process_group.disarm();
     }
+    resolved_result
 }
 
 pub async fn execute_dispatch(
@@ -368,13 +412,13 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
                 return ToolResult {
                     content: format!("Error listing threads: {}", error),
                     is_error: true,
-                }
+                };
             }
             Err(join_error) => {
                 return ToolResult {
                     content: format!("Internal error listing threads: {}", join_error),
                     is_error: true,
-                }
+                };
             }
         };
 
@@ -436,7 +480,7 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
                 return ToolResult {
                     content: "Error: 'timeout' must be a positive integer".to_string(),
                     is_error: true,
-                }
+                };
             }
         },
     };
@@ -453,7 +497,7 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
             return ToolResult {
                 content: "Error: invalid automatic thread_wait run identity".to_string(),
                 is_error: true,
-            }
+            };
         }
     };
     let session_id = match require_session(runtime) {
@@ -516,13 +560,13 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
                     return ToolResult {
                         content: RESPOND_LIVE_YIELD_DISABLED.to_string(),
                         is_error: false,
-                    }
+                    };
                 }
                 Ok(Err(error)) => {
                     return ToolResult {
                         content: format!("Error checking Respond-live preference: {error}"),
                         is_error: true,
-                    }
+                    };
                 }
                 Err(error) => {
                     return ToolResult {
@@ -530,7 +574,7 @@ pub async fn execute_thread_wait(args: Value, runtime: &ToolRuntime) -> ToolResu
                             "Internal error checking Respond-live preference: {error}"
                         ),
                         is_error: true,
-                    }
+                    };
                 }
             }
         }
@@ -827,36 +871,100 @@ fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
         .max(MIN_THREAD_TIMEOUT_SECS)
 }
 
-pub(crate) fn complete_thread_dispatch(
+pub(crate) struct FinalizedDispatch {
+    pub(crate) status: crate::events::ThreadDispatchStatus,
+    pub(crate) completion: ThreadCompletion,
+}
+
+pub(crate) fn finalize_thread_dispatch(
     runtime: &ToolRuntime,
     session_id: &str,
     key: ThreadDispatchKey,
     result: &ToolResult,
-) {
+    status: crate::events::ThreadDispatchStatus,
+    exit_code: i32,
+    timed_out: bool,
+    timeout_reason: Option<String>,
+    usage: Option<crate::model::TokenUsage>,
+) -> Option<FinalizedDispatch> {
     let thread_name = key.thread_name.clone();
-    match runtime.active_threads.complete(
+    match runtime.active_threads.finalize_once(
         &runtime.store_path,
         session_id,
         ThreadCompletion {
-            key,
+            key: key.clone(),
             content: result.content.clone(),
             is_error: result.is_error,
         },
+        status,
+        true,
     ) {
-        Ok(expired) => {
-            for record in expired {
+        Ok(Some(outcome)) => {
+            let resolved_status = outcome.status;
+            let cancelled = resolved_status == crate::events::ThreadDispatchStatus::Cancelled;
+            runtime.event_sink.emit(AgentEvent::ThreadFinished {
+                name: key.thread_name,
+                exit_code,
+                timed_out: if cancelled { false } else { timed_out },
+                timeout_reason: if cancelled { None } else { timeout_reason },
+                usage,
+                run_id: Some(key.run_id),
+                dispatch_id: Some(key.dispatch_id),
+                tool_call_id: Some(key.tool_call_id),
+                status: Some(resolved_status),
+            });
+            if let Some(error) = outcome.steering_error {
+                runtime.event_sink.emit(AgentEvent::Error {
+                    thread_name: Some(thread_name),
+                    message: format!("thread terminalized but steering expiration failed: {error}"),
+                });
+            }
+            for record in outcome.expired {
                 runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
                     name: record.thread_name,
                     steering_id: record.id,
                     instruction_preview: record.instruction.chars().take(160).collect(),
                 });
             }
+            Some(FinalizedDispatch {
+                status: resolved_status,
+                completion: outcome.completion,
+            })
         }
-        Err(error) => runtime.event_sink.emit(AgentEvent::Error {
-            thread_name: Some(thread_name),
-            message: format!("failed to complete background thread dispatch: {error}"),
-        }),
+        Ok(None) => None,
+        Err(error) => {
+            runtime.event_sink.emit(AgentEvent::Error {
+                thread_name: Some(thread_name),
+                message: format!("failed to finalize background thread dispatch: {error}"),
+            });
+            None
+        }
     }
+}
+
+pub(crate) fn complete_thread_dispatch(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    key: ThreadDispatchKey,
+    result: &ToolResult,
+) {
+    let cancelling = runtime
+        .active_threads
+        .active_dispatches()
+        .iter()
+        .any(|dispatch| {
+            dispatch.key == key && dispatch.state == crate::tools::ThreadDispatchState::Cancelling
+        });
+    let status = if cancelling {
+        crate::events::ThreadDispatchStatus::Cancelled
+    } else if result.is_error {
+        crate::events::ThreadDispatchStatus::Failed
+    } else {
+        crate::events::ThreadDispatchStatus::Completed
+    };
+    finalize_thread_dispatch(
+        runtime, session_id, key, result, status, -1, false, None, None,
+    );
 }
 
 pub(crate) fn mark_thread_active(
@@ -987,9 +1095,11 @@ mod tests {
 
     #[test]
     fn dispatch_definition_skills_schema_depends_on_registry() {
-        assert!(dispatch_definition(None).function.parameters["properties"]
-            .get("skills")
-            .is_none());
+        assert!(
+            dispatch_definition(None).function.parameters["properties"]
+                .get("skills")
+                .is_none()
+        );
 
         let registry = test_registry();
         let definition = dispatch_definition(Some(&registry));
@@ -1005,9 +1115,11 @@ mod tests {
     #[test]
     fn scheduled_skills_validation_dedupes_and_rejects_invalid_requests() {
         let registry = test_registry();
-        assert!(resolve_scheduled_skills(&json!({}), None)
-            .unwrap()
-            .is_empty());
+        assert!(
+            resolve_scheduled_skills(&json!({}), None)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             resolve_scheduled_skills(
                 &json!({ "skills": ["review", "lint", "review"] }),
@@ -1159,11 +1271,13 @@ mod tests {
         assert_eq!(reused.dispatch_id, "dispatch-b");
 
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-b");
-        assert!(runtime
-            .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "too late",)
-            .unwrap()
-            .is_none());
+        assert!(
+            runtime
+                .active_threads
+                .queue(&runtime.store_path, "test-session", "worker", "too late",)
+                .unwrap()
+                .is_none()
+        );
         let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
     }
 
@@ -1379,13 +1493,15 @@ mod tests {
 
         let result = wait.await.unwrap();
         assert!(result.content.contains("guidance is pending for this run"));
-        assert!(crate::store::has_queued_thread_steering(
-            &runtime.store_path,
-            "test-session",
-            crate::store::ORCHESTRATOR_STEERING_TARGET,
-            run_id.as_str(),
-        )
-        .unwrap());
+        assert!(
+            crate::store::has_queued_thread_steering(
+                &runtime.store_path,
+                "test-session",
+                crate::store::ORCHESTRATOR_STEERING_TARGET,
+                run_id.as_str(),
+            )
+            .unwrap()
+        );
         runtime
             .active_threads
             .close(&runtime.store_path, "test-session", &worker)
@@ -1459,5 +1575,111 @@ mod tests {
             .active_threads
             .close(&runtime.store_path, "test-session", &running)
             .unwrap();
+    }
+
+    #[test]
+    fn concurrent_cancel_finalize_race_emits_one_event_and_one_authoritative_completion() {
+        let (mut runtime, run_id) = wait_runtime("cancel_finalize_event_race");
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        runtime.event_sink = EventSink::channel(sender);
+        let runtime = Arc::new(runtime);
+        let key = wait_key(&run_id, "racer");
+        assert!(runtime.active_threads.try_accept(key.clone()));
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+
+        let cancel_runtime = runtime.clone();
+        let cancel_key = key.clone();
+        let cancel_barrier = barrier.clone();
+        let cancel = std::thread::spawn(move || {
+            cancel_barrier.wait();
+            cancel_runtime
+                .active_threads
+                .request_cancel(&cancel_key)
+                .unwrap()
+        });
+        let finalize_runtime = runtime.clone();
+        let finalize_key = key.clone();
+        let finalize_barrier = barrier.clone();
+        let finalize = std::thread::spawn(move || {
+            finalize_barrier.wait();
+            finalize_thread_dispatch(
+                &finalize_runtime,
+                "test-session",
+                finalize_key,
+                &ToolResult {
+                    content: "natural success".to_string(),
+                    is_error: false,
+                },
+                crate::events::ThreadDispatchStatus::Completed,
+                0,
+                true,
+                Some("conflicting natural timeout".to_string()),
+                None,
+            )
+        });
+        barrier.wait();
+        let cancel_outcome = cancel.join().unwrap();
+        assert!(finalize.join().unwrap().is_some());
+        assert!(
+            finalize_thread_dispatch(
+                &runtime,
+                "test-session",
+                key.clone(),
+                &ToolResult {
+                    content: "duplicate".to_string(),
+                    is_error: true,
+                },
+                crate::events::ThreadDispatchStatus::Failed,
+                -1,
+                false,
+                None,
+                None,
+            )
+            .is_none()
+        );
+
+        let completions = runtime
+            .active_threads
+            .take_completions(&HashSet::new(), &HashSet::new());
+        assert_eq!(completions.len(), 1);
+        let (expected, expected_timed_out, expected_timeout_reason) = match cancel_outcome {
+            crate::tools::ThreadCancelOutcome::CancelRequested => {
+                assert!(completions[0].is_error);
+                assert!(completions[0].content.contains("was cancelled"));
+                assert!(completions[0].content.contains(run_id.as_str()));
+                (crate::events::ThreadDispatchStatus::Cancelled, false, None)
+            }
+            crate::tools::ThreadCancelOutcome::AlreadyTerminal(status) => {
+                assert_eq!(completions[0].content, "natural success");
+                assert!(!completions[0].is_error);
+                (
+                    status,
+                    true,
+                    Some("conflicting natural timeout".to_string()),
+                )
+            }
+            outcome => panic!("unexpected race outcome: {outcome:?}"),
+        };
+        let events = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+        assert_eq!(events.len(), 1, "events: {events:?}");
+        assert!(matches!(
+            &events[0],
+            AgentEvent::ThreadFinished {
+                name,
+                run_id: Some(event_run_id),
+                dispatch_id: Some(dispatch_id),
+                tool_call_id: Some(tool_call_id),
+                timed_out,
+                timeout_reason,
+                status: Some(status),
+                ..
+            } if name == &key.thread_name
+                && event_run_id == &key.run_id
+                && dispatch_id == &key.dispatch_id
+                && tool_call_id == &key.tool_call_id
+                && status == &expected
+                && timed_out == &expected_timed_out
+                && timeout_reason == &expected_timeout_reason
+        ));
     }
 }

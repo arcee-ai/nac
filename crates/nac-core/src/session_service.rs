@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{mpsc, Mutex},
+    sync::{Mutex, mpsc},
     task::JoinHandle,
 };
 use uuid::Uuid;
@@ -883,6 +883,9 @@ impl SessionService {
                     }
                     crate::tools::ThreadDispatchState::Running => {
                         crate::events::ThreadDispatchStatus::Running
+                    }
+                    crate::tools::ThreadDispatchState::Cancelling => {
+                        crate::events::ThreadDispatchStatus::Cancelling
                     }
                 },
             })
@@ -1987,10 +1990,10 @@ impl SessionService {
         let active = match guard.as_ref() {
             Some(ActiveSessionOperation::Run(run)) if !run.finishing => &run.snapshot,
             Some(ActiveSessionOperation::Run(_)) => {
-                return Err(crate::store::QueuedRunStoreError::Conflict.into())
+                return Err(crate::store::QueuedRunStoreError::Conflict.into());
             }
             Some(ActiveSessionOperation::ManualCompaction(_)) => {
-                return Err(crate::store::QueuedRunStoreError::Conflict.into())
+                return Err(crate::store::QueuedRunStoreError::Conflict.into());
             }
             None => return Err(crate::store::QueuedRunStoreError::Conflict.into()),
         };
@@ -2405,18 +2408,21 @@ impl SessionService {
         let mut outcome = outcome;
         if matches!(outcome, RunOutcome::Failed(..)) {
             let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
-            if let Err(error) = self
+            match self
                 .active_threads
                 .abort_run_and_drain(&self.metadata.store_path, session_id, run_id)
                 .await
             {
-                let cleanup_error = format!("failed to clean up background work: {error:#}");
-                outcome = match outcome {
-                    RunOutcome::Completed(..) => unreachable!(),
-                    RunOutcome::Failed(message, usage) => {
-                        RunOutcome::Failed(format!("{message}\n{cleanup_error}"), usage)
-                    }
-                };
+                Ok(finalizations) => self.emit_thread_finalizations(finalizations),
+                Err(error) => {
+                    let cleanup_error = format!("failed to clean up background work: {error:#}");
+                    outcome = match outcome {
+                        RunOutcome::Completed(..) => unreachable!(),
+                        RunOutcome::Failed(message, usage) => {
+                            RunOutcome::Failed(format!("{message}\n{cleanup_error}"), usage)
+                        }
+                    };
+                }
             }
         }
         self.expire_orchestrator_steering(run_id);
@@ -2618,7 +2624,9 @@ impl SessionService {
                                     &still_queued.queued_run_id,
                                     task_run_id.as_str(),
                                 ) {
-                                    eprintln!("nac: failed to roll back uncommitted queued prompt: {error:#}");
+                                    eprintln!(
+                                        "nac: failed to roll back uncommitted queued prompt: {error:#}"
+                                    );
                                 }
                             }
                         }
@@ -2730,7 +2738,7 @@ impl SessionService {
             .abort_run_and_drain(&self.metadata.store_path, session_id, run_id)
             .await
         {
-            Ok(records) => self.emit_steering_expired(records),
+            Ok(finalizations) => self.emit_thread_finalizations(finalizations),
             Err(error) => eprintln!("nac: failed to abort background workers: {error:#}"),
         }
     }
@@ -2739,12 +2747,36 @@ impl SessionService {
     /// this before eviction, sandbox destruction, row deletion, or shutdown.
     pub async fn shutdown_background(&self) -> anyhow::Result<()> {
         let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
-        let records = self
+        let finalizations = self
             .active_threads
             .shutdown_and_drain(&self.metadata.store_path, session_id)
             .await?;
-        self.emit_steering_expired(records);
+        self.emit_thread_finalizations(finalizations);
         Ok(())
+    }
+
+    fn emit_thread_finalizations(&self, finalizations: Vec<crate::tools::ThreadFinalization>) {
+        for finalization in finalizations {
+            let key = finalization.completion.key;
+            self.event_bus.emit_agent(AgentEvent::ThreadFinished {
+                name: key.thread_name.clone(),
+                exit_code: -1,
+                timed_out: false,
+                timeout_reason: None,
+                usage: None,
+                run_id: Some(key.run_id),
+                dispatch_id: Some(key.dispatch_id),
+                tool_call_id: Some(key.tool_call_id),
+                status: Some(finalization.status),
+            });
+            if let Some(error) = finalization.steering_error {
+                self.event_bus.emit_agent(AgentEvent::Error {
+                    thread_name: Some(key.thread_name),
+                    message: format!("thread terminalized but steering expiration failed: {error}"),
+                });
+            }
+            self.emit_steering_expired(finalization.expired);
+        }
     }
 
     fn emit_steering_expired(&self, records: Vec<crate::store::ThreadSteeringRecord>) {
@@ -3462,10 +3494,12 @@ pub(super) mod tests {
             vec!["alpha".to_string(), "zeta".to_string()]
         );
         assert!(thread_tool_call_names(&messages[..2]).is_empty());
-        assert!(thread_tool_call_names(&[Message::System {
-            content: "only system".to_string(),
-        }])
-        .is_empty());
+        assert!(
+            thread_tool_call_names(&[Message::System {
+                content: "only system".to_string(),
+            }])
+            .is_empty()
+        );
     }
 
     pub(super) fn test_store_path(label: &str) -> PathBuf {
@@ -4299,10 +4333,12 @@ pub(super) mod tests {
         let serialized = serde_json::to_string(&snapshot).unwrap();
         assert!(!serialized.contains("CANARY"));
         assert!(serialized.contains("/safe/api"));
-        assert!(!snapshot
-            .thread_event_diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.error.contains('{')));
+        assert!(
+            !snapshot
+                .thread_event_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.error.contains('{'))
+        );
 
         let first_page = parts
             .service
@@ -6051,12 +6087,14 @@ pub(super) mod tests {
         assert!(active_after_finishing.submitted_user_message.is_none());
 
         let frontend_before_persist = parts.service.frontend_snapshot().await.unwrap();
-        assert!(frontend_before_persist
-            .active_run
-            .as_ref()
-            .unwrap()
-            .submitted_user_message
-            .is_none());
+        assert!(
+            frontend_before_persist
+                .active_run
+                .as_ref()
+                .unwrap()
+                .submitted_user_message
+                .is_none()
+        );
         assert!(matches!(
             frontend_before_persist.messages.last(),
             Some(Message::User { content }) if content == "persisted prompt"
@@ -6091,12 +6129,14 @@ pub(super) mod tests {
         assert!(active_after_save.submitted_user_message.is_none());
 
         let frontend_after_persist = parts.service.frontend_snapshot().await.unwrap();
-        assert!(frontend_after_persist
-            .active_run
-            .as_ref()
-            .unwrap()
-            .submitted_user_message
-            .is_none());
+        assert!(
+            frontend_after_persist
+                .active_run
+                .as_ref()
+                .unwrap()
+                .submitted_user_message
+                .is_none()
+        );
         assert!(matches!(
             frontend_after_persist.messages.last(),
             Some(Message::User { content }) if content == "persisted prompt"
@@ -6405,6 +6445,22 @@ pub(super) mod tests {
         assert!(matches!(
             events.recv().await.unwrap().event,
             SessionEvent::Agent {
+                event: AgentEvent::ThreadFinished {
+                    name,
+                    run_id: Some(run_id),
+                    dispatch_id: Some(dispatch_id),
+                    tool_call_id: Some(tool_call_id),
+                    status: Some(crate::events::ThreadDispatchStatus::Cancelled),
+                    ..
+                }
+            } if name == "worker"
+                && run_id == active.run_id
+                && dispatch_id == "worker-dispatch"
+                && tool_call_id == "worker-call"
+        ));
+        assert!(matches!(
+            events.recv().await.unwrap().event,
+            SessionEvent::Agent {
                 event: AgentEvent::ThreadSteeringExpired { .. }
             }
         ));
@@ -6424,10 +6480,12 @@ pub(super) mod tests {
         assert_eq!(cancelled.event, SessionEvent::RunCancelled);
         assert!(parts.service.active_run().is_none());
         assert!(parts.service.active_thread_names().await.is_empty());
-        assert!(crate::store::list_thread_steering(&store_path, &session_id)
-            .unwrap()
-            .iter()
-            .all(|record| record.status == "expired"));
+        assert!(
+            crate::store::list_thread_steering(&store_path, &session_id)
+                .unwrap()
+                .iter()
+                .all(|record| record.status == "expired")
+        );
 
         // Never-fold (step 4): the cancel path persists bookkeeping only —
         // the blob keeps the system head and the cancellation marker lives
@@ -6528,14 +6586,16 @@ pub(super) mod tests {
                 .unwrap(),
             SessionQueueOutcome::Replay(_)
         ));
-        assert!(parts
-            .service
-            .queue_prepared_next_turn(
-                "client-message-2".to_string(),
-                "occupied".to_string(),
-                "occupied".to_string(),
-            )
-            .is_err());
+        assert!(
+            parts
+                .service
+                .queue_prepared_next_turn(
+                    "client-message-2".to_string(),
+                    "occupied".to_string(),
+                    "occupied".to_string(),
+                )
+                .is_err()
+        );
 
         assert!(
             parts
@@ -6576,10 +6636,12 @@ pub(super) mod tests {
         );
         assert!(parts.service.active_run().is_none());
         assert!(parts.service.active_threads.matches(&key));
-        assert!(parts
-            .service
-            .active_threads
-            .has_work_for_run(&active.run_id));
+        assert!(
+            parts
+                .service
+                .active_threads
+                .has_work_for_run(&active.run_id)
+        );
     }
 
     #[tokio::test]
@@ -6602,8 +6664,43 @@ pub(super) mod tests {
         );
         assert!(parts.service.active_threads.try_accept(origin_key.clone()));
         assert!(parts.service.active_threads.try_accept(other_key.clone()));
+        let mut events = parts
+            .service
+            .subscribe_events_for_client(SessionClientId::new());
 
         parts.service.request_cancel(&active.run_id).await.unwrap();
+
+        let emitted = std::iter::from_fn(|| events.receiver.try_recv().ok()).collect::<Vec<_>>();
+        let finished = emitted
+            .iter()
+            .filter(|envelope| {
+                matches!(
+                    &envelope.event,
+                    SessionEvent::Agent {
+                        event: AgentEvent::ThreadFinished {
+                            name,
+                            run_id: Some(run_id),
+                            dispatch_id: Some(dispatch_id),
+                            tool_call_id: Some(tool_call_id),
+                            status: Some(crate::events::ThreadDispatchStatus::Cancelled),
+                            ..
+                        }
+                    } if name == &origin_key.thread_name
+                        && run_id == &origin_key.run_id
+                        && dispatch_id == &origin_key.dispatch_id
+                        && tool_call_id == &origin_key.tool_call_id
+                )
+            })
+            .count();
+        assert_eq!(finished, 1, "events: {emitted:?}");
+        let completions = parts.service.active_threads.take_completions(
+            &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
+        );
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].key, origin_key);
+        assert!(completions[0].is_error);
+        assert!(completions[0].content.contains("was cancelled"));
 
         assert!(!parts.service.active_threads.matches(&origin_key));
         assert!(parts.service.active_threads.matches(&other_key));
@@ -6729,17 +6826,19 @@ pub(super) mod tests {
                 version: 7
             }
         );
-        assert!(parts
-            .service
-            .recent_events(None, 16)
-            .iter()
-            .any(|envelope| {
-                envelope.event
-                    == SessionEvent::RespondLiveUpdated {
-                        enabled: true,
-                        version: 7,
-                    }
-            }));
+        assert!(
+            parts
+                .service
+                .recent_events(None, 16)
+                .iter()
+                .any(|envelope| {
+                    envelope.event
+                        == SessionEvent::RespondLiveUpdated {
+                            enabled: true,
+                            version: 7,
+                        }
+                })
+        );
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 }

@@ -129,6 +129,7 @@ pub enum ThreadDispatchStatus {
     Accepted,
     DependencyPending,
     Running,
+    Cancelling,
     Completed,
     Failed,
     Cancelled,
@@ -868,6 +869,10 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             exit_code,
             timed_out,
             usage,
+            run_id,
+            dispatch_id,
+            tool_call_id,
+            status,
             ..
         } => AgentEvent::ThreadFinished {
             name,
@@ -875,10 +880,10 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             timed_out,
             timeout_reason: timed_out.then(|| "thread timed out".to_string()),
             usage,
-            run_id: None,
-            dispatch_id: None,
-            tool_call_id: None,
-            status: None,
+            run_id,
+            dispatch_id,
+            tool_call_id,
+            status,
         },
         AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
             thread_name,
@@ -1600,13 +1605,11 @@ mod tests {
             bus.emit_agent(event.clone()).unwrap();
         }
 
-        assert!(crate::store::load_all_thread_events(
-            &path,
-            "session-compaction-events",
-            events.len()
-        )
-        .unwrap()
-        .is_empty());
+        assert!(
+            crate::store::load_all_thread_events(&path, "session-compaction-events", events.len())
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             bus.recent_events(None, events.len())
                 .into_iter()
@@ -2343,9 +2346,11 @@ mod tests {
             });
             emitted_sender.send(envelope).unwrap();
         });
-        assert!(emitted_receiver
-            .recv_timeout(std::time::Duration::from_millis(50))
-            .is_err());
+        assert!(
+            emitted_receiver
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err()
+        );
         release_sender.send(()).unwrap();
         let boundary = query.join().unwrap();
         let emitted = emitted_receiver.recv().unwrap();

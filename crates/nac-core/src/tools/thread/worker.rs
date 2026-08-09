@@ -6,20 +6,24 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::time::timeout;
 
-use crate::events::{decode_stderr_event, AgentEvent};
+use crate::events::{AgentEvent, decode_stderr_event};
 use crate::model::{ModelClient, TokenUsage};
-use crate::process::{isolate_process_group, terminate_child_tree};
-use crate::tools::ToolRuntime;
+use crate::process::{ProcessGroupGuard, isolate_process_group};
+use crate::tools::{ThreadCancellation, ToolRuntime};
 
 pub(super) struct WorkerRun {
     pub(super) stdout: String,
     pub(super) stderr: String,
     pub(super) exit_code: i32,
     pub(super) timed_out: bool,
+    pub(super) cancelled: bool,
     pub(super) timeout_reason: Option<String>,
     pub(super) usage: Option<TokenUsage>,
+    // Retained until the registry terminal transition resolves. A cancellation
+    // that wins after natural child exit can still sweep pipe-holding descendants.
+    pub(super) child: tokio::process::Child,
+    pub(super) process_group: ProcessGroupGuard,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -156,6 +160,9 @@ pub(super) struct WorkerInvocation<'a> {
     pub(super) source_threads: &'a [String],
     pub(super) scheduled_skills: &'a [String],
     pub(super) timeout_secs: u64,
+    pub(super) cancellation: &'a ThreadCancellation,
+    pub(super) origin_run_id: Option<&'a crate::events::SessionRunId>,
+    pub(super) dispatch_key: Option<&'a crate::tools::ThreadDispatchKey>,
 }
 
 fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
@@ -245,13 +252,33 @@ pub(super) async fn run_worker(
     command.kill_on_drop(true);
 
     let mut child = command.spawn()?;
+    let process_group = ProcessGroupGuard::for_child(&child);
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child.stderr.take().unwrap();
     let event_sink = runtime.event_sink.clone();
+    let usage_registry = runtime.active_threads.clone();
+    // Reader guards participate in exact dispatch draining. Dropping the outer
+    // process-owner aborts the JoinSet, but drain does not complete until both
+    // cancelled reader tasks have actually dropped these guards.
+    let stderr_task_guard = invocation
+        .dispatch_key
+        .map(|key| runtime.active_threads.register_dispatch_task(key.clone()));
+    let stdout_task_guard = invocation
+        .dispatch_key
+        .map(|key| runtime.active_threads.register_dispatch_task(key.clone()));
+    let origin_run_id = invocation.origin_run_id.cloned();
     let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
-    let stderr_handle = tokio::spawn(async move {
+    enum ReaderOutput {
+        Stderr(String, Option<TokenUsage>),
+        Stdout(String),
+    }
+    // JoinSet owns the pipe readers. If this process-owner future is force
+    // aborted, dropping the set aborts both readers instead of detaching them.
+    let mut readers = tokio::task::JoinSet::new();
+    readers.spawn(async move {
+        let _task_guard = stderr_task_guard;
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
         let mut output = String::new();
@@ -264,6 +291,12 @@ pub(super) async fn run_worker(
                 } = &event
                 {
                     worker_usage += usage.clone();
+                    // Account usage as it becomes durable in the event stream.
+                    // A later forced abort can therefore not discard usage
+                    // already reported by the worker.
+                    if let Some(run_id) = &origin_run_id {
+                        usage_registry.record_worker_usage(run_id.clone(), usage);
+                    }
                 }
                 event_sink.emit(event);
             } else {
@@ -286,11 +319,12 @@ pub(super) async fn run_worker(
         } else {
             Some(worker_usage)
         };
-        (output, usage)
+        ReaderOutput::Stderr(output, usage)
     });
 
     let stdout = child.stdout.take().unwrap();
-    let stdout_handle = tokio::spawn(async move {
+    readers.spawn(async move {
+        let _task_guard = stdout_task_guard;
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut output = String::new();
@@ -300,25 +334,72 @@ pub(super) async fn run_worker(
             }
             output.push_str(&line);
         }
-        output
+        ReaderOutput::Stdout(output)
     });
 
-    let status = timeout(Duration::from_secs(invocation.timeout_secs), child.wait()).await;
-    let timed_out = status.is_err();
-    if timed_out {
-        terminate_child_tree(&mut child).await;
+    let deadline = tokio::time::sleep(Duration::from_secs(invocation.timeout_secs));
+    tokio::pin!(deadline);
+    let cancelled_signal = invocation.cancellation.cancelled();
+    tokio::pin!(cancelled_signal);
+    let mut timed_out = false;
+    let mut cancelled = false;
+    let status = tokio::select! {
+        status = child.wait() => Some(status),
+        _ = &mut deadline => {
+            timed_out = true;
+            None
+        }
+        _ = &mut cancelled_signal => {
+            cancelled = true;
+            None
+        }
+    };
+    // Cancellation may linearize concurrently with child exit. Recheck the
+    // token before relinquishing process-group ownership so descendants cannot
+    // survive merely because child.wait() won the select.
+    if !cancelled && invocation.cancellation.is_cancelled() {
+        cancelled = true;
+    }
+    if timed_out || cancelled {
+        process_group.terminate(&mut child).await;
     }
 
-    let (stderr, worker_usage) = stderr_handle.await.unwrap_or_default();
-    let stdout = stdout_handle.await.unwrap_or_default();
+    let mut stderr = String::new();
+    let mut stdout = String::new();
+    let mut worker_usage = None;
+    while !readers.is_empty() {
+        tokio::select! {
+            biased;
+            _ = &mut cancelled_signal, if !cancelled => {
+                cancelled = true;
+                timed_out = false;
+                process_group.terminate(&mut child).await;
+            }
+            _ = &mut deadline, if !timed_out && !cancelled => {
+                timed_out = true;
+                process_group.terminate(&mut child).await;
+            }
+            reader = readers.join_next() => {
+                let Some(reader) = reader else { break; };
+                match reader {
+                    Ok(ReaderOutput::Stderr(output, usage)) => {
+                        stderr = output;
+                        worker_usage = usage;
+                    }
+                    Ok(ReaderOutput::Stdout(output)) => stdout = output,
+                    Err(_) => {}
+                }
+            }
+        }
+    }
     let timeout_reason = if timed_out {
         Some(timeout_trace.lock().await.timeout_reason())
     } else {
         None
     };
     let exit_code = match status {
-        Ok(wait_result) => wait_result?.code().unwrap_or(-1),
-        Err(_) => -1,
+        Some(wait_result) => wait_result?.code().unwrap_or(-1),
+        None => -1,
     };
 
     Ok(WorkerRun {
@@ -326,16 +407,19 @@ pub(super) async fn run_worker(
         stderr,
         exit_code,
         timed_out,
+        cancelled,
         timeout_reason,
         usage: worker_usage,
+        child,
+        process_group,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BackendKind, EffectiveModelSettings};
     use crate::TEST_ENV_LOCK;
+    use crate::model::{BackendKind, EffectiveModelSettings};
 
     #[test]
     fn worker_model_transport_is_complete_with_absent_effort_and_empty_headers() {
@@ -385,6 +469,174 @@ mod tests {
             Some(value) => unsafe { std::env::set_var(key_name, value) },
             None => unsafe { std::env::remove_var(key_name) },
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_worker_drains_readers_kills_tree_and_preserves_partial_usage() {
+        use crate::events::{STDERR_EVENT_PREFIX, SessionRunId};
+        use crate::tools::test_runtime;
+        use std::os::unix::fs::PermissionsExt;
+
+        tokio::time::timeout(Duration::from_secs(4), async {
+            let root = std::env::temp_dir()
+                .join(format!("nac_worker_cancel_{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let usage = TokenUsage {
+                input_tokens: 17,
+                output_tokens: 5,
+                ..TokenUsage::default()
+            };
+            let event = serde_json::to_string(&AgentEvent::AssistantMessage {
+                thread_name: Some("A".to_string()),
+                content: "partial".to_string(),
+                usage: Some(usage.clone()),
+            })
+            .unwrap();
+            let executable = root.join("worker.sh");
+            std::fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\ntrap '' TERM\n(trap '' TERM; while :; do sleep 1; done) &\necho $! > '{grandchild}'\necho '{prefix}{event}' >&2\necho ready > '{ready}'\nwhile :; do echo stdout; echo stderr >&2; sleep 0.02; done\n",
+                    grandchild = root.join("grandchild.pid").display(),
+                    ready = root.join("ready").display(),
+                    prefix = STDERR_EVENT_PREFIX,
+                ),
+            )
+            .unwrap();
+            let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&executable, permissions).unwrap();
+
+            let mut runtime = test_runtime();
+            runtime.worker_executable = Some(executable);
+            runtime.workspace_cwd = root.clone();
+            runtime.config_cwd = root.clone();
+            let cancellation = ThreadCancellation::default();
+            let canceller = cancellation.clone();
+            let ready = root.join("ready");
+            tokio::spawn(async move {
+                while !ready.exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                canceller.cancel();
+            });
+            let run_id = SessionRunId::new();
+            let result = run_worker(
+                &runtime,
+                &ModelClient::new_for_test(),
+                WorkerInvocation {
+                    session_id: "test-session",
+                    thread_name: "A",
+                    dispatch_id: "dispatch",
+                    action: "work",
+                    source_threads: &[],
+                    scheduled_skills: &[],
+                    timeout_secs: 30,
+                    cancellation: &cancellation,
+                    origin_run_id: Some(&run_id),
+                    dispatch_key: None,
+                },
+            )
+            .await
+            .unwrap();
+            assert!(result.cancelled);
+            assert_eq!(result.usage, Some(usage.clone()));
+            assert_eq!(runtime.active_threads.take_worker_usage(&run_id), Some(usage));
+            let grandchild = std::fs::read_to_string(root.join("grandchild.pid"))
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while std::fs::read_to_string(format!("/proc/{grandchild}/stat"))
+                    .ok()
+                    .is_some_and(|stat| stat.split_whitespace().nth(2) != Some("Z"))
+                {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("grandchild survived worker cancellation");
+            let _ = std::fs::remove_dir_all(root);
+        })
+        .await
+        .expect("worker cancellation test timed out");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_after_leader_exit_sweeps_pipe_holding_descendant() {
+        use crate::tools::test_runtime;
+        use std::os::unix::fs::PermissionsExt;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let root = std::env::temp_dir()
+                .join(format!("nac_worker_exited_leader_{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("worker.sh");
+            std::fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\n/bin/sh -c 'trap \"\" TERM; while :; do sleep 1; done' &\necho $! > '{descendant}'\necho exited > '{exited}'\nexit 0\n",
+                    descendant = root.join("descendant.pid").display(),
+                    exited = root.join("leader-exited").display(),
+                ),
+            )
+            .unwrap();
+            let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&executable, permissions).unwrap();
+
+            let mut runtime = test_runtime();
+            runtime.worker_executable = Some(executable);
+            runtime.workspace_cwd = root.clone();
+            runtime.config_cwd = root.clone();
+            let cancellation = ThreadCancellation::default();
+            let canceller = cancellation.clone();
+            let exited = root.join("leader-exited");
+            tokio::spawn(async move {
+                while !exited.exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                canceller.cancel();
+            });
+            let mut result = run_worker(
+                &runtime,
+                &ModelClient::new_for_test(),
+                WorkerInvocation {
+                    session_id: "test-session",
+                    thread_name: "A",
+                    dispatch_id: "dispatch",
+                    action: "work",
+                    source_threads: &[],
+                    scheduled_skills: &[],
+                    timeout_secs: 30,
+                    cancellation: &cancellation,
+                    origin_run_id: None,
+                    dispatch_key: None,
+                },
+            )
+            .await
+            .unwrap();
+            assert!(result.cancelled);
+            let descendant = std::fs::read_to_string(root.join("descendant.pid"))
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while std::path::Path::new(&format!("/proc/{descendant}")).exists() {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("pipe-holding descendant remained live or zombie");
+            result.process_group.disarm();
+            let _ = std::fs::remove_dir_all(root);
+        })
+        .await
+        .expect("leader-exit cancellation test timed out");
     }
 
     #[test]

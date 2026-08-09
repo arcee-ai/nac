@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use tokio::task::JoinSet;
 
 use super::*;
-use crate::tools::thread::{self, ParsedDispatchParams};
 use crate::tools::ThreadDispatchKey;
+use crate::tools::thread::{self, ParsedDispatchParams};
 
 /// A successfully parsed `thread` tool call, ready for DAG-ordered execution.
 pub(crate) struct ParsedThreadDispatch {
@@ -330,16 +330,41 @@ impl Drop for CoordinatorCleanup {
         // Covers coordinator cancellation and panic. Normal completions have
         // already removed their exact keys, so these closes become no-ops.
         for key in &self.keys {
-            if let Err(error) =
+            let cancelling =
                 self.runtime
                     .active_threads
-                    .close(&self.runtime.store_path, &self.session_id, key)
-            {
-                self.runtime.event_sink.emit(AgentEvent::Error {
-                    thread_name: Some(key.thread_name.clone()),
-                    message: format!("failed to clean up background coordinator: {error}"),
-                });
-            }
+                    .active_dispatches()
+                    .iter()
+                    .any(|dispatch| {
+                        dispatch.key == *key
+                            && dispatch.state == crate::tools::ThreadDispatchState::Cancelling
+                    });
+            let result = ToolResult {
+                content: if cancelling {
+                    format!("Thread '{}' was cancelled.", key.thread_name)
+                } else {
+                    format!(
+                        "Thread '{}' ended because its coordinator stopped.",
+                        key.thread_name
+                    )
+                },
+                is_error: true,
+            };
+            thread::finalize_thread_dispatch(
+                &self.runtime,
+                &self.session_id,
+                key.clone(),
+                &result,
+                if cancelling {
+                    crate::events::ThreadDispatchStatus::Cancelled
+                } else {
+                    crate::events::ThreadDispatchStatus::Failed
+                },
+                -1,
+                false,
+                None,
+                None,
+            );
         }
     }
 }
@@ -442,6 +467,46 @@ fn accept_and_launch_background(
     immediate
 }
 
+fn finalize_pending_cancellations(
+    thread_dispatches: &[ParsedThreadDispatch],
+    ctx: &DagExecContext,
+    in_flight: &HashSet<usize>,
+    failed_indices: &mut HashSet<usize>,
+) {
+    let cancelling = ctx
+        .runtime
+        .active_threads
+        .active_dispatches()
+        .into_iter()
+        .filter(|dispatch| dispatch.state == crate::tools::ThreadDispatchState::Cancelling)
+        .map(|dispatch| dispatch.key)
+        .collect::<HashSet<_>>();
+    for (index, dispatch) in thread_dispatches.iter().enumerate() {
+        if failed_indices.contains(&index)
+            || in_flight.contains(&index)
+            || !cancelling.contains(&dispatch.key)
+        {
+            continue;
+        }
+        let result = ToolResult {
+            content: format!("Thread '{}' was cancelled.", dispatch.params.thread_name),
+            is_error: true,
+        };
+        thread::finalize_thread_dispatch(
+            &ctx.runtime,
+            &dispatch.params.session_id,
+            dispatch.key.clone(),
+            &result,
+            crate::events::ThreadDispatchStatus::Cancelled,
+            -1,
+            false,
+            None,
+            None,
+        );
+        failed_indices.insert(index);
+    }
+}
+
 async fn run_background_dag(
     thread_dispatches: Vec<ParsedThreadDispatch>,
     dag: Dag,
@@ -465,7 +530,9 @@ async fn run_background_dag(
 
     for wave in waves {
         let mut workers: JoinSet<(usize, ToolResult)> = JoinSet::new();
+        let mut task_dispatches = HashMap::new();
         let mut in_flight = HashSet::new();
+        finalize_pending_cancellations(&thread_dispatches, &ctx, &in_flight, &mut failed_indices);
 
         for dispatch_idx in wave {
             if failed_indices.contains(&dispatch_idx) {
@@ -489,17 +556,6 @@ async fn run_background_dag(
                     thread_name: Some(dispatch.params.thread_name.clone()),
                     message: result.content.clone(),
                 });
-                ctx.event_sink.emit(AgentEvent::ThreadFinished {
-                    name: dispatch.params.thread_name.clone(),
-                    exit_code: -1,
-                    timed_out: false,
-                    timeout_reason: None,
-                    usage: None,
-                    run_id: Some(dispatch.key.run_id.clone()),
-                    dispatch_id: Some(dispatch.key.dispatch_id.clone()),
-                    tool_call_id: Some(dispatch.key.tool_call_id.clone()),
-                    status: Some(crate::events::ThreadDispatchStatus::Failed),
-                });
                 thread::complete_thread_dispatch(
                     &ctx.runtime,
                     &dispatch.params.session_id,
@@ -511,6 +567,12 @@ async fn run_background_dag(
             }
 
             if !ctx.runtime.active_threads.mark_running(&dispatch.key) {
+                finalize_pending_cancellations(
+                    &thread_dispatches,
+                    &ctx,
+                    &in_flight,
+                    &mut failed_indices,
+                );
                 failed_indices.insert(dispatch_idx);
                 continue;
             }
@@ -521,7 +583,7 @@ async fn run_background_dag(
             let task_guard = ctx
                 .runtime
                 .active_threads
-                .register_task(dispatch.key.run_id.clone());
+                .register_dispatch_task(dispatch.key.clone());
             let abort = workers.spawn(async move {
                 let _task_guard = task_guard;
                 let result =
@@ -529,66 +591,101 @@ async fn run_background_dag(
                         .await;
                 (dispatch_idx, result)
             });
+            let task_id = abort.id();
             if ctx
                 .runtime
                 .active_threads
-                .attach_worker(&dispatch.key, abort)
+                .attach_worker(&dispatch.key, abort.clone())
             {
+                task_dispatches.insert(task_id, dispatch_idx);
                 in_flight.insert(dispatch_idx);
             } else {
+                abort.abort();
                 failed_indices.insert(dispatch_idx);
             }
         }
 
-        while let Some(join_result) = workers.join_next().await {
-            match join_result {
-                Ok((dispatch_idx, result)) => {
-                    in_flight.remove(&dispatch_idx);
-                    let dispatch = &thread_dispatches[dispatch_idx];
-                    if result.is_error {
-                        failed_indices.insert(dispatch_idx);
-                    }
-                    thread::complete_thread_dispatch(
-                        &ctx.runtime,
-                        &dispatch.params.session_id,
-                        dispatch.key.clone(),
-                        &result,
-                    );
-                }
-                Err(error) if !error.is_cancelled() => {
-                    workers.abort_all();
-                    let message = format!("Background thread task failed: {error}");
-                    for dispatch_idx in in_flight.drain() {
+        while !workers.is_empty() {
+            let observed = ctx.runtime.active_threads.activity_epoch();
+            tokio::select! {
+                join_result = workers.join_next_with_id() => {
+                    let Some(join_result) = join_result else { break; };
+                match join_result {
+                    Ok((task_id, (dispatch_idx, result))) => {
+                        task_dispatches.remove(&task_id);
+                        in_flight.remove(&dispatch_idx);
                         let dispatch = &thread_dispatches[dispatch_idx];
-                        let result = ToolResult {
-                            content: message.clone(),
-                            is_error: true,
-                        };
-                        ctx.event_sink.emit(AgentEvent::Error {
-                            thread_name: Some(dispatch.params.thread_name.clone()),
-                            message: message.clone(),
-                        });
-                        ctx.event_sink.emit(AgentEvent::ThreadFinished {
-                            name: dispatch.params.thread_name.clone(),
-                            exit_code: -1,
-                            timed_out: false,
-                            timeout_reason: None,
-                            usage: None,
-                            run_id: Some(dispatch.key.run_id.clone()),
-                            dispatch_id: Some(dispatch.key.dispatch_id.clone()),
-                            tool_call_id: Some(dispatch.key.tool_call_id.clone()),
-                            status: Some(crate::events::ThreadDispatchStatus::Failed),
-                        });
+                        if result.is_error {
+                            failed_indices.insert(dispatch_idx);
+                        }
                         thread::complete_thread_dispatch(
                             &ctx.runtime,
                             &dispatch.params.session_id,
                             dispatch.key.clone(),
                             &result,
                         );
-                        failed_indices.insert(dispatch_idx);
+                    }
+                    Err(error) if error.is_cancelled() => {
+                        // JoinError carries the exact task id, allowing a forced
+                        // worker abort to become a dependency failure without
+                        // aborting independent members in the same wave.
+                        if let Some(dispatch_idx) = task_dispatches.remove(&error.id()) {
+                            in_flight.remove(&dispatch_idx);
+                            failed_indices.insert(dispatch_idx);
+                            let dispatch = &thread_dispatches[dispatch_idx];
+                            let result = ToolResult {
+                                content: format!(
+                                    "Thread '{}' was cancelled.",
+                                    dispatch.params.thread_name
+                                ),
+                                is_error: true,
+                            };
+                            thread::finalize_thread_dispatch(
+                                &ctx.runtime,
+                                &dispatch.params.session_id,
+                                dispatch.key.clone(),
+                                &result,
+                                crate::events::ThreadDispatchStatus::Cancelled,
+                                -1,
+                                false,
+                                None,
+                                None,
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        workers.abort_all();
+                        let message = format!("Background thread task failed: {error}");
+                        for dispatch_idx in in_flight.drain() {
+                            let dispatch = &thread_dispatches[dispatch_idx];
+                            let result = ToolResult {
+                                content: message.clone(),
+                                is_error: true,
+                            };
+                            ctx.event_sink.emit(AgentEvent::Error {
+                                thread_name: Some(dispatch.params.thread_name.clone()),
+                                message: message.clone(),
+                            });
+                            thread::complete_thread_dispatch(
+                                &ctx.runtime,
+                                &dispatch.params.session_id,
+                                dispatch.key.clone(),
+                                &result,
+                            );
+                            failed_indices.insert(dispatch_idx);
+                        }
+                        task_dispatches.clear();
                     }
                 }
-                Err(_) => {}
+                }
+                _ = ctx.runtime.active_threads.wait_for_activity_since(observed) => {
+                    finalize_pending_cancellations(
+                        &thread_dispatches,
+                        &ctx,
+                        &in_flight,
+                        &mut failed_indices,
+                    );
+                }
             }
         }
     }
@@ -1106,10 +1203,12 @@ mod tests {
         assert!(other_calls.is_empty());
         assert_eq!(parse_errors.len(), 1);
         assert!(parse_errors[0].3.is_error);
-        assert!(parse_errors[0]
-            .3
-            .content
-            .contains("no skills are available"));
+        assert!(
+            parse_errors[0]
+                .3
+                .content
+                .contains("no skills are available")
+        );
     }
 
     /// Partition should succeed when a thread call has an empty skills array.
@@ -1182,7 +1281,7 @@ mod tests {
             dag,
             DagExecContext {
                 client: ModelClient::new_for_test(),
-                event_sink: EventSink::none(),
+                event_sink: runtime.event_sink.clone(),
                 agent_thread_name: None,
                 runtime,
             },
@@ -1380,14 +1479,207 @@ echo should-not-run"#,
             .active_threads
             .abort_run(&runtime.store_path, "test-session", &run_id)
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(runtime
-            .active_threads
-            .active_for_run(&run_id, &HashSet::new())
-            .is_empty());
+        let completions = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            wait_for_completions(&runtime, &run_id, 1),
+        )
+        .await
+        .expect("cooperative cancellation did not terminalize");
+        assert_eq!(completions.len(), 1);
+        assert!(completions[0].is_error);
+        assert!(completions[0].content.contains("cancelled"));
+        assert!(
+            runtime
+                .active_threads
+                .active_for_run(&run_id, &HashSet::new())
+                .is_empty()
+        );
         assert!(!root.join("survived").exists());
-        assert!(!runtime.active_threads.has_completions_for_run(&run_id));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_between_worker_return_and_finalize_fails_dependents() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (mut runtime, root) = background_runtime(
+                r#"action=""
+previous=""
+for argument in "$@"; do
+  [ "$previous" = "--action" ] && action="$argument"
+  previous="$argument"
+done
+echo "$action" >> actions
+echo "natural success""#,
+            );
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            runtime.event_sink = EventSink::channel(sender);
+            let registry = runtime.active_threads.clone();
+            let cancel_registry = registry.clone();
+            registry.set_before_finalize_hook(Arc::new(move |key| {
+                if key.thread_name == "A" {
+                    assert_eq!(
+                        cancel_registry.request_cancel(key).unwrap(),
+                        crate::tools::ThreadCancelOutcome::CancelRequested
+                    );
+                }
+            }));
+            let run_id = crate::events::SessionRunId::new();
+            launch_calls(
+                runtime.clone(),
+                vec![
+                    make_tool_call("a", "thread", json!({"name": "A", "action": "source"})),
+                    make_tool_call(
+                        "b",
+                        "thread",
+                        json!({"name": "B", "action": "dependent", "threads": ["A"]}),
+                    ),
+                ],
+                run_id.clone(),
+            )
+            .await;
+
+            let completions = wait_for_completions(&runtime, &run_id, 2).await;
+            let by_name = completions
+                .iter()
+                .map(|completion| (completion.key.thread_name.as_str(), completion))
+                .collect::<HashMap<_, _>>();
+            assert!(by_name["A"].is_error);
+            assert!(by_name["A"].content.contains("was cancelled"));
+            assert!(by_name["B"].is_error);
+            assert!(by_name["B"].content.contains("Source thread 'A' failed"));
+            assert_eq!(
+                std::fs::read_to_string(root.join("actions")).unwrap(),
+                "source\n"
+            );
+            let events = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+            assert!(
+                events.iter().any(|event| matches!(
+                    event,
+                    AgentEvent::ThreadFinished {
+                        name,
+                        timed_out: false,
+                        timeout_reason: None,
+                        status: Some(crate::events::ThreadDispatchStatus::Cancelled),
+                        ..
+                    } if name == "A"
+                )),
+                "events: {events:?}"
+            );
+            let _ = std::fs::remove_dir_all(root);
+        })
+        .await
+        .expect("finalization race test timed out");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn forced_running_cancel_fails_dependents_and_preserves_independent_sibling() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (mut runtime, root) = background_runtime(
+                r#"action=""
+previous=""
+for argument in "$@"; do
+  [ "$previous" = "--action" ] && action="$argument"
+  previous="$argument"
+done
+echo "$action" >> actions
+[ "$action" = "slow" ] && { echo $$ > leader; while :; do echo output; echo error >&2; sleep 0.02; done; }
+echo "$action""#,
+            );
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            runtime.event_sink = EventSink::channel(sender);
+            let run_id = crate::events::SessionRunId::new();
+            launch_calls(
+                runtime.clone(),
+                vec![
+                    make_tool_call("a", "thread", json!({"name": "A", "action": "slow"})),
+                    make_tool_call(
+                        "b",
+                        "thread",
+                        json!({"name": "B", "action": "dependent", "threads": ["A"]}),
+                    ),
+                    make_tool_call("c", "thread", json!({"name": "C", "action": "sibling"})),
+                ],
+                run_id.clone(),
+            )
+            .await;
+
+            let key = loop {
+                let active = runtime
+                    .active_threads
+                    .active_for_run(&run_id, &HashSet::new());
+                if let Some(dispatch) = active.into_iter().find(|dispatch| {
+                    dispatch.key.thread_name == "A"
+                        && dispatch.state == crate::tools::ThreadDispatchState::Running
+                }) {
+                    break dispatch.key;
+                }
+                tokio::task::yield_now().await;
+            };
+            let leader = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                loop {
+                    if let Ok(pid) = std::fs::read_to_string(root.join("leader")) {
+                        break pid.trim().parse::<u32>().unwrap();
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("worker process did not start");
+            assert_eq!(
+                runtime.active_threads.request_cancel(&key).unwrap(),
+                crate::tools::ThreadCancelOutcome::CancelRequested
+            );
+            assert!(runtime.active_threads.force_abort_worker_for_test(&key));
+
+            let completions = wait_for_completions(&runtime, &run_id, 3).await;
+            assert_eq!(completions.len(), 3);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                runtime.active_threads.drain_dispatch(&key),
+            )
+            .await
+            .expect("forced dispatch did not drain owned reader tasks");
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while std::path::Path::new(&format!("/proc/{leader}")).exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("forced worker child was killed but not reaped");
+            let by_name = completions
+                .iter()
+                .map(|completion| (completion.key.thread_name.as_str(), completion))
+                .collect::<HashMap<_, _>>();
+            assert!(by_name["A"].content.contains("cancelled"));
+            assert!(by_name["B"].content.contains("Source thread 'A' failed"));
+            assert!(!by_name["C"].is_error);
+            let actions = std::fs::read_to_string(root.join("actions")).unwrap();
+            assert!(actions.lines().any(|action| action == "sibling"));
+            assert!(!actions.lines().any(|action| action == "dependent"));
+            assert!(matches!(
+                runtime.active_threads.request_cancel(&key).unwrap(),
+                crate::tools::ThreadCancelOutcome::AlreadyTerminal(
+                    crate::events::ThreadDispatchStatus::Cancelled
+                )
+            ));
+            let events = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event,
+                        AgentEvent::ThreadFinished { name, .. } if name == "A"
+                    ))
+                    .count(),
+                1,
+                "events: {events:?}"
+            );
+            let _ = std::fs::remove_dir_all(root);
+        })
+        .await
+        .expect("forced running cancellation timed out");
     }
 
     #[cfg(unix)]
@@ -1419,12 +1711,68 @@ echo should-not-run"#,
         .await;
         assert_eq!(wait_for_completions(&runtime, &run_id, 1).await.len(), 1);
         let arguments = std::fs::read_to_string(root.join("arguments")).unwrap();
-        assert!(arguments
-            .lines()
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|pair| pair == ["--skill", "lint"]));
+        assert!(
+            arguments
+                .lines()
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|pair| pair == ["--skill", "lint"])
+        );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn pending_cancellation_finalizer_emits_once_and_preserves_sibling() {
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            let mut runtime = test_runtime();
+            let root = std::env::temp_dir()
+                .join(format!("nac_pending_cancel_{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            runtime.store_path = root.join("store.db");
+            crate::store::initialize(&runtime.store_path).unwrap();
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            runtime.event_sink = EventSink::channel(sender);
+            let run_id = crate::events::SessionRunId::new();
+            let (dispatches, _, errors) = partition_tool_calls(
+                vec![
+                    make_tool_call("a", "thread", json!({"name": "A", "action": "one"})),
+                    make_tool_call("b", "thread", json!({"name": "B", "action": "two"})),
+                ],
+                &runtime,
+                &run_id,
+            );
+            assert!(errors.is_empty());
+            assert!(runtime
+                .active_threads
+                .try_accept_batch(dispatches.iter().map(|dispatch| dispatch.key.clone()).collect())
+                .into_iter()
+                .all(|accepted| accepted));
+            runtime
+                .active_threads
+                .request_cancel(&dispatches[1].key)
+                .unwrap();
+            let ctx = DagExecContext {
+                client: ModelClient::new_for_test(),
+                event_sink: runtime.event_sink.clone(),
+                agent_thread_name: None,
+                runtime: runtime.clone(),
+            };
+            let mut failed = HashSet::new();
+            finalize_pending_cancellations(&dispatches, &ctx, &HashSet::new(), &mut failed);
+            assert!(failed.contains(&1));
+            assert!(runtime.active_threads.matches(&dispatches[0].key));
+            assert!(!runtime.active_threads.matches(&dispatches[1].key));
+            let cancelled_name = dispatches[1].key.thread_name.clone();
+            let events = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+            let finished = events
+                .iter()
+                .filter(|event| matches!(event, AgentEvent::ThreadFinished { name, .. } if name == &cancelled_name))
+                .count();
+            assert_eq!(finished, 1, "events: {events:?}");
+            let _ = std::fs::remove_dir_all(root);
+        })
+        .await
+        .expect("pending cancellation finalizer timed out");
     }
 
     #[test]

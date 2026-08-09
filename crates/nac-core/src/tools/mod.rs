@@ -86,7 +86,48 @@ impl ThreadDispatchKey {
 pub enum ThreadDispatchState {
     PendingDependency,
     Running,
+    Cancelling,
 }
+
+#[derive(Clone, Default)]
+pub(crate) struct ThreadCancellation {
+    cancelled: Arc<AtomicBool>,
+    activity: Arc<Notify>,
+}
+
+impl ThreadCancellation {
+    fn cancel(&self) {
+        if !self.cancelled.swap(true, Ordering::AcqRel) {
+            self.activity.notify_waiters();
+        }
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        loop {
+            let notified = self.activity.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadCancelOutcome {
+    CancelRequested,
+    AlreadyCancelling,
+    AlreadyTerminal(crate::events::ThreadDispatchStatus),
+    NotFound,
+    IdentityMismatch,
+}
+
+const TERMINAL_TOMBSTONE_LIMIT: usize = 256;
+const CANCELLATION_TASK_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveThreadDispatchSnapshot {
@@ -101,18 +142,34 @@ pub struct ThreadCompletion {
     pub is_error: bool,
 }
 
+pub struct ThreadFinalization {
+    pub completion: ThreadCompletion,
+    pub expired: Vec<crate::store::ThreadSteeringRecord>,
+    pub status: crate::events::ThreadDispatchStatus,
+    pub steering_error: Option<anyhow::Error>,
+}
+
 struct ActiveThreadDispatch {
     key: ThreadDispatchKey,
     state: ThreadDispatchState,
     coordinator_abort: Option<AbortHandle>,
     worker_abort: Option<AbortHandle>,
+    cancellation: ThreadCancellation,
+}
+
+#[derive(Debug, Clone)]
+struct ThreadTerminalTombstone {
+    key: ThreadDispatchKey,
+    status: crate::events::ThreadDispatchStatus,
 }
 
 #[derive(Default)]
 struct ActiveThreadState {
     active_by_name: HashMap<String, ActiveThreadDispatch>,
     completions: VecDeque<ThreadCompletion>,
+    terminals: VecDeque<ThreadTerminalTombstone>,
     owned_tasks_by_run: HashMap<SessionRunId, usize>,
+    owned_tasks_by_dispatch: HashMap<ThreadDispatchKey, usize>,
     worker_usage_by_run: HashMap<SessionRunId, crate::model::TokenUsage>,
     shutting_down: bool,
 }
@@ -123,6 +180,8 @@ pub struct ActiveThreadRegistry {
     activity: Notify,
     activity_epoch: AtomicU64,
     live_thread_updates: AtomicBool,
+    #[cfg(test)]
+    before_finalize_hook: StdMutex<Option<Arc<dyn Fn(&ThreadDispatchKey) + Send + Sync>>>,
 }
 
 /// Registration held by every spawned coordinator and worker until its future
@@ -132,6 +191,7 @@ pub struct ActiveThreadRegistry {
 pub struct ThreadTaskGuard {
     registry: Arc<ActiveThreadRegistry>,
     run_id: SessionRunId,
+    dispatch_key: Option<ThreadDispatchKey>,
 }
 
 impl Drop for ThreadTaskGuard {
@@ -141,6 +201,14 @@ impl Drop for ThreadTaskGuard {
             *count -= 1;
             if *count == 0 {
                 state.owned_tasks_by_run.remove(&self.run_id);
+            }
+        }
+        if let Some(key) = &self.dispatch_key {
+            if let Some(count) = state.owned_tasks_by_dispatch.get_mut(key) {
+                *count -= 1;
+                if *count == 0 {
+                    state.owned_tasks_by_dispatch.remove(key);
+                }
             }
         }
         drop(state);
@@ -155,12 +223,29 @@ impl Default for ActiveThreadRegistry {
             activity: Notify::new(),
             activity_epoch: AtomicU64::new(0),
             live_thread_updates: AtomicBool::new(false),
+            #[cfg(test)]
+            before_finalize_hook: StdMutex::new(None),
         }
     }
 }
 
 #[allow(dead_code)] // Exact background APIs are wired by subsequent integration commits.
 impl ActiveThreadRegistry {
+    #[cfg(test)]
+    pub(crate) fn set_before_finalize_hook(
+        &self,
+        hook: Arc<dyn Fn(&ThreadDispatchKey) + Send + Sync>,
+    ) {
+        *self.before_finalize_hook.lock().unwrap() = Some(hook);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn run_before_finalize_hook(&self, key: &ThreadDispatchKey) {
+        if let Some(hook) = self.before_finalize_hook.lock().unwrap().take() {
+            hook(key);
+        }
+    }
+
     pub fn names(&self) -> Vec<String> {
         self.lock().active_by_name.keys().cloned().collect()
     }
@@ -214,6 +299,7 @@ impl ActiveThreadRegistry {
                         state: ThreadDispatchState::PendingDependency,
                         coordinator_abort: None,
                         worker_abort: None,
+                        cancellation: ThreadCancellation::default(),
                     },
                 );
             }
@@ -231,7 +317,7 @@ impl ActiveThreadRegistry {
         let Some(dispatch) = state.active_by_name.get_mut(&key.thread_name) else {
             return false;
         };
-        if dispatch.key != *key {
+        if dispatch.key != *key || dispatch.state != ThreadDispatchState::PendingDependency {
             return false;
         }
         dispatch.state = ThreadDispatchState::Running;
@@ -249,11 +335,15 @@ impl ActiveThreadRegistry {
     fn attach_abort(&self, key: &ThreadDispatchKey, abort: AbortHandle, worker: bool) -> bool {
         let mut state = self.lock();
         let Some(dispatch) = state.active_by_name.get_mut(&key.thread_name) else {
-            abort.abort();
+            if worker {
+                abort.abort();
+            }
             return false;
         };
         if dispatch.key != *key {
-            abort.abort();
+            if worker {
+                abort.abort();
+            }
             return false;
         }
         let slot = if worker {
@@ -288,26 +378,139 @@ impl ActiveThreadRegistry {
         .map(Some)
     }
 
+    pub(crate) fn cancellation(&self, key: &ThreadDispatchKey) -> Option<ThreadCancellation> {
+        self.lock()
+            .active_by_name
+            .get(&key.thread_name)
+            .filter(|dispatch| dispatch.key == *key)
+            .map(|dispatch| dispatch.cancellation.clone())
+    }
+
+    pub fn request_cancel(&self, key: &ThreadDispatchKey) -> anyhow::Result<ThreadCancelOutcome> {
+        let mut state = self.lock();
+        if let Some(terminal) = state.terminals.iter().find(|terminal| terminal.key == *key) {
+            return Ok(ThreadCancelOutcome::AlreadyTerminal(terminal.status));
+        }
+        if state
+            .terminals
+            .iter()
+            .any(|terminal| terminal.key.dispatch_id == key.dispatch_id)
+        {
+            return Ok(ThreadCancelOutcome::IdentityMismatch);
+        }
+        let Some(dispatch) = state.active_by_name.get_mut(&key.thread_name) else {
+            return Ok(ThreadCancelOutcome::NotFound);
+        };
+        if dispatch.key != *key {
+            return Ok(if dispatch.key.dispatch_id == key.dispatch_id {
+                ThreadCancelOutcome::IdentityMismatch
+            } else {
+                ThreadCancelOutcome::NotFound
+            });
+        }
+        if dispatch.state == ThreadDispatchState::Cancelling {
+            return Ok(ThreadCancelOutcome::AlreadyCancelling);
+        }
+        dispatch.state = ThreadDispatchState::Cancelling;
+        dispatch.cancellation.cancel();
+        drop(state);
+        self.notify_activity();
+        Ok(ThreadCancelOutcome::CancelRequested)
+    }
+
     pub fn close(
         &self,
         store_path: &Path,
         session_id: &str,
         key: &ThreadDispatchKey,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut state = self.lock();
-        if !state
-            .active_by_name
-            .get(&key.thread_name)
-            .is_some_and(|dispatch| dispatch.key == *key)
-        {
-            return Ok(Vec::new());
-        }
-        let expired =
-            crate::store::expire_thread_steering(store_path, session_id, &key.dispatch_id)?;
-        state.active_by_name.remove(&key.thread_name);
-        drop(state);
+        self.finalize_once(
+            store_path,
+            session_id,
+            ThreadCompletion {
+                key: key.clone(),
+                content: String::new(),
+                is_error: false,
+            },
+            crate::events::ThreadDispatchStatus::Completed,
+            false,
+        )
+        .and_then(|outcome| match outcome {
+            Some(outcome) => match outcome.steering_error {
+                Some(error) => Err(error),
+                None => Ok(outcome.expired),
+            },
+            None => Ok(Vec::new()),
+        })
+    }
+
+    /// The sole exact terminal transition. Completion consumption is separate
+    /// from bounded tombstones, so stale cancellation remains mismatch-safe.
+    pub fn finalize_once(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        completion: ThreadCompletion,
+        status: crate::events::ThreadDispatchStatus,
+        queue_completion: bool,
+    ) -> anyhow::Result<Option<ThreadFinalization>> {
+        // The registry transition is authoritative and linearizes before I/O.
+        // Once cancellation is accepted, no natural result may overwrite it.
+        let (status, completion) = {
+            let mut completion = completion;
+            let mut state = self.lock();
+            let Some(dispatch) = state.active_by_name.get(&completion.key.thread_name) else {
+                return Ok(None);
+            };
+            if dispatch.key != completion.key {
+                return Ok(None);
+            }
+            let status = if dispatch.state == ThreadDispatchState::Cancelling {
+                crate::events::ThreadDispatchStatus::Cancelled
+            } else {
+                status
+            };
+            if status == crate::events::ThreadDispatchStatus::Cancelled {
+                completion.content = format!(
+                    "Thread '{}' was cancelled (run_id={}, dispatch_id={}, tool_call_id={}).",
+                    completion.key.thread_name,
+                    completion.key.run_id,
+                    completion.key.dispatch_id,
+                    completion.key.tool_call_id,
+                );
+                completion.is_error = true;
+            }
+            state.active_by_name.remove(&completion.key.thread_name);
+            state.terminals.push_back(ThreadTerminalTombstone {
+                key: completion.key.clone(),
+                status,
+            });
+            while state.terminals.len() > TERMINAL_TOMBSTONE_LIMIT {
+                state.terminals.pop_front();
+            }
+            if queue_completion {
+                state.completions.push_back(completion.clone());
+            }
+            (status, completion)
+        };
         self.notify_activity();
-        Ok(expired)
+
+        // Steering persistence is best-effort after terminal ownership has
+        // transferred. A broken store can no longer reserve the name forever.
+        let (expired, steering_error) = match crate::store::expire_thread_steering(
+            store_path,
+            session_id,
+            &completion.key.dispatch_id,
+        ) {
+            Ok(expired) => (expired, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
+        Ok(Some(ThreadFinalization {
+            completion,
+            expired,
+            status,
+            steering_error,
+        }))
     }
 
     pub fn complete(
@@ -316,24 +519,29 @@ impl ActiveThreadRegistry {
         session_id: &str,
         completion: ThreadCompletion,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut state = self.lock();
-        if !state
+        let status = self
+            .lock()
             .active_by_name
             .get(&completion.key.thread_name)
-            .is_some_and(|dispatch| dispatch.key == completion.key)
-        {
-            return Ok(Vec::new());
-        }
-        let expired = crate::store::expire_thread_steering(
-            store_path,
-            session_id,
-            &completion.key.dispatch_id,
-        )?;
-        state.active_by_name.remove(&completion.key.thread_name);
-        state.completions.push_back(completion);
-        drop(state);
-        self.notify_activity();
-        Ok(expired)
+            .filter(|dispatch| dispatch.key == completion.key)
+            .map(|dispatch| dispatch.state)
+            .filter(|state| *state == ThreadDispatchState::Cancelling)
+            .map(|_| crate::events::ThreadDispatchStatus::Cancelled)
+            .unwrap_or_else(|| {
+                if completion.is_error {
+                    crate::events::ThreadDispatchStatus::Failed
+                } else {
+                    crate::events::ThreadDispatchStatus::Completed
+                }
+            });
+        self.finalize_once(store_path, session_id, completion, status, true)
+            .and_then(|outcome| match outcome {
+                Some(outcome) => match outcome.steering_error {
+                    Some(error) => Err(error),
+                    None => Ok(outcome.expired),
+                },
+                None => Ok(Vec::new()),
+            })
     }
 
     /// Take eligible buffered completions across the session exactly once.
@@ -535,7 +743,7 @@ impl ActiveThreadRegistry {
         store_path: &Path,
         session_id: &str,
         run_id: &SessionRunId,
-    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+    ) -> anyhow::Result<Vec<ThreadFinalization>> {
         self.abort_matching(store_path, session_id, Some(run_id))
     }
 
@@ -548,6 +756,35 @@ impl ActiveThreadRegistry {
         ThreadTaskGuard {
             registry: self.clone(),
             run_id,
+            dispatch_key: None,
+        }
+    }
+
+    pub fn register_dispatch_task(self: &Arc<Self>, key: ThreadDispatchKey) -> ThreadTaskGuard {
+        let mut state = self.lock();
+        *state
+            .owned_tasks_by_run
+            .entry(key.run_id.clone())
+            .or_default() += 1;
+        *state
+            .owned_tasks_by_dispatch
+            .entry(key.clone())
+            .or_default() += 1;
+        drop(state);
+        ThreadTaskGuard {
+            registry: self.clone(),
+            run_id: key.run_id.clone(),
+            dispatch_key: Some(key),
+        }
+    }
+
+    pub async fn drain_dispatch(&self, key: &ThreadDispatchKey) {
+        loop {
+            let observed = self.activity_epoch();
+            if !self.lock().owned_tasks_by_dispatch.contains_key(key) {
+                return;
+            }
+            self.wait_for_activity_since(observed).await;
         }
     }
 
@@ -568,22 +805,127 @@ impl ActiveThreadRegistry {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn force_abort_worker_for_test(&self, key: &ThreadDispatchKey) -> bool {
+        let abort = self
+            .lock()
+            .active_by_name
+            .get(&key.thread_name)
+            .filter(|dispatch| dispatch.key == *key)
+            .and_then(|dispatch| dispatch.worker_abort.clone());
+        if let Some(abort) = abort {
+            abort.abort();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn cancel_and_drain(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        key: &ThreadDispatchKey,
+    ) -> anyhow::Result<(ThreadCancelOutcome, Vec<ThreadFinalization>)> {
+        let pending_without_worker = self
+            .lock()
+            .active_by_name
+            .get(&key.thread_name)
+            .is_some_and(|dispatch| {
+                dispatch.key == *key
+                    && dispatch.state == ThreadDispatchState::PendingDependency
+                    && dispatch.worker_abort.is_none()
+            });
+        let outcome = self.request_cancel(key)?;
+        if !matches!(
+            outcome,
+            ThreadCancelOutcome::CancelRequested | ThreadCancelOutcome::AlreadyCancelling
+        ) {
+            return Ok((outcome, Vec::new()));
+        }
+        if pending_without_worker {
+            let finalizations =
+                self.finalize_cancelled_keys(store_path, session_id, HashSet::from([key.clone()]));
+            return Ok((outcome, finalizations));
+        }
+
+        let drain = async {
+            self.drain_dispatch(key).await;
+            loop {
+                let observed = self.activity_epoch();
+                if !self.matches(key) {
+                    return;
+                }
+                self.wait_for_activity_since(observed).await;
+            }
+        };
+        if tokio::time::timeout(CANCELLATION_TASK_GRACE, drain)
+            .await
+            .is_ok()
+        {
+            return Ok((outcome, Vec::new()));
+        }
+
+        // An exact cancellation may force only its worker. A pending member has
+        // no worker to abort; its shared coordinator is notified through the
+        // registry activity signal and remains responsible for terminalization.
+        let worker_abort = self
+            .lock()
+            .active_by_name
+            .get(&key.thread_name)
+            .filter(|dispatch| dispatch.key == *key)
+            .and_then(|dispatch| dispatch.worker_abort.clone());
+        if let Some(abort) = worker_abort {
+            abort.abort();
+        }
+        let forced_drain = async {
+            self.drain_dispatch(key).await;
+            loop {
+                let observed = self.activity_epoch();
+                if !self.matches(key) {
+                    return;
+                }
+                self.wait_for_activity_since(observed).await;
+            }
+        };
+        tokio::time::timeout(CANCELLATION_TASK_GRACE, forced_drain)
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("timed out draining cancelled thread '{}'", key.thread_name)
+            })?;
+        Ok((outcome, Vec::new()))
+    }
+
     pub async fn abort_run_and_drain(
         &self,
         store_path: &Path,
         session_id: &str,
         run_id: &SessionRunId,
-    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let result = self.abort_run(store_path, session_id, run_id);
-        self.drain_tasks(Some(run_id)).await;
-        result
+    ) -> anyhow::Result<Vec<ThreadFinalization>> {
+        let mut result = self.abort_run(store_path, session_id, run_id)?;
+        if tokio::time::timeout(CANCELLATION_TASK_GRACE, self.drain_tasks(Some(run_id)))
+            .await
+            .is_err()
+        {
+            self.force_abort_matching(Some(run_id));
+            tokio::time::timeout(CANCELLATION_TASK_GRACE, self.drain_tasks(Some(run_id)))
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out force-draining background run {run_id}"))?;
+        }
+        result.extend(self.finalize_cancelled_matching(
+            store_path,
+            session_id,
+            Some(run_id),
+            false,
+        ));
+        Ok(result)
     }
 
     pub fn shutdown(
         &self,
         store_path: &Path,
         session_id: &str,
-    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+    ) -> anyhow::Result<Vec<ThreadFinalization>> {
         {
             let mut state = self.lock();
             state.shutting_down = true;
@@ -595,10 +937,35 @@ impl ActiveThreadRegistry {
         &self,
         store_path: &Path,
         session_id: &str,
-    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let result = self.shutdown(store_path, session_id);
-        self.drain_tasks(None).await;
-        result
+    ) -> anyhow::Result<Vec<ThreadFinalization>> {
+        let mut result = self.shutdown(store_path, session_id)?;
+        if tokio::time::timeout(CANCELLATION_TASK_GRACE, self.drain_tasks(None))
+            .await
+            .is_err()
+        {
+            self.force_abort_matching(None);
+            tokio::time::timeout(CANCELLATION_TASK_GRACE, self.drain_tasks(None))
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out force-draining session background work"))?;
+        }
+        result.extend(self.finalize_cancelled_matching(store_path, session_id, None, false));
+        Ok(result)
+    }
+
+    fn force_abort_matching(&self, run_id: Option<&SessionRunId>) {
+        let state = self.lock();
+        for dispatch in state
+            .active_by_name
+            .values()
+            .filter(|dispatch| run_id.is_none_or(|run_id| dispatch.key.run_id == *run_id))
+        {
+            if let Some(abort) = &dispatch.worker_abort {
+                abort.abort();
+            }
+            if let Some(abort) = &dispatch.coordinator_abort {
+                abort.abort();
+            }
+        }
     }
 
     fn abort_matching(
@@ -606,37 +973,81 @@ impl ActiveThreadRegistry {
         store_path: &Path,
         session_id: &str,
         run_id: Option<&SessionRunId>,
-    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut state = self.lock();
-        let keys = state
+    ) -> anyhow::Result<Vec<ThreadFinalization>> {
+        let keys = self
+            .lock()
             .active_by_name
             .values()
             .filter(|dispatch| run_id.is_none_or(|run_id| dispatch.key.run_id == *run_id))
-            .map(|dispatch| dispatch.key.clone())
+            .map(|dispatch| {
+                (
+                    dispatch.key.clone(),
+                    dispatch.state == ThreadDispatchState::PendingDependency
+                        && dispatch.worker_abort.is_none(),
+                )
+            })
             .collect::<Vec<_>>();
-        let mut expired = Vec::new();
-        let mut first_error = None;
+        for (key, _) in &keys {
+            let _ = self.request_cancel(key)?;
+        }
+        // Pending entries have no independently-owned process to drain. Remove
+        // them now without aborting their shared coordinator; mark_running will
+        // later fail for the exact tombstoned member and propagate dependency
+        // failure through the DAG.
+        let immediate = keys
+            .into_iter()
+            .filter_map(|(key, immediate)| immediate.then_some(key))
+            .collect::<HashSet<_>>();
+        Ok(self.finalize_cancelled_keys(store_path, session_id, immediate))
+    }
+
+    fn finalize_cancelled_matching(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        run_id: Option<&SessionRunId>,
+        ownerless_only: bool,
+    ) -> Vec<ThreadFinalization> {
+        let keys = self
+            .lock()
+            .active_by_name
+            .values()
+            .filter(|dispatch| {
+                dispatch.state == ThreadDispatchState::Cancelling
+                    && run_id.is_none_or(|run_id| dispatch.key.run_id == *run_id)
+                    && (!ownerless_only || dispatch.worker_abort.is_none())
+            })
+            .map(|dispatch| dispatch.key.clone())
+            .collect::<HashSet<_>>();
+        self.finalize_cancelled_keys(store_path, session_id, keys)
+    }
+
+    fn finalize_cancelled_keys(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        keys: HashSet<ThreadDispatchKey>,
+    ) -> Vec<ThreadFinalization> {
+        let mut finalizations = Vec::new();
         for key in keys {
-            if let Some(dispatch) = state.active_by_name.remove(&key.thread_name) {
-                if let Some(abort) = dispatch.worker_abort {
-                    abort.abort();
-                }
-                if let Some(abort) = dispatch.coordinator_abort {
-                    abort.abort();
-                }
-            }
-            match crate::store::expire_thread_steering(store_path, session_id, &key.dispatch_id) {
-                Ok(records) => expired.extend(records),
-                Err(error) if first_error.is_none() => first_error = Some(error),
-                Err(_) => {}
+            let completion = ThreadCompletion {
+                content: format!("Thread '{}' was cancelled.", key.thread_name),
+                key,
+                is_error: true,
+            };
+            match self.finalize_once(
+                store_path,
+                session_id,
+                completion,
+                crate::events::ThreadDispatchStatus::Cancelled,
+                true,
+            ) {
+                Ok(Some(outcome)) => finalizations.push(outcome),
+                Ok(None) => {}
+                Err(error) => eprintln!("nac: failed to terminalize cancelled thread: {error:#}"),
             }
         }
-        state
-            .completions
-            .retain(|completion| run_id.is_some_and(|run_id| completion.key.run_id != *run_id));
-        drop(state);
-        self.notify_activity();
-        first_error.map_or(Ok(expired), Err)
+        finalizations
     }
 
     // Compatibility for the foreground DAG until background execution supplies
@@ -669,7 +1080,11 @@ impl ActiveThreadRegistry {
         store_path: &Path,
         session_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        self.abort_matching(store_path, session_id, None)
+        Ok(self
+            .abort_matching(store_path, session_id, None)?
+            .into_iter()
+            .flat_map(|finalization| finalization.expired)
+            .collect())
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ActiveThreadState> {
@@ -1204,14 +1619,18 @@ mod active_thread_registry_tests {
         assert!(registry.try_accept(current.clone()));
 
         let missing = Path::new("/store/must/not/be/opened");
-        assert!(registry
-            .close(missing, "session", &stale)
-            .unwrap()
-            .is_empty());
-        assert!(registry
-            .complete(missing, "session", completion(stale, "stale"))
-            .unwrap()
-            .is_empty());
+        assert!(
+            registry
+                .close(missing, "session", &stale)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            registry
+                .complete(missing, "session", completion(stale, "stale"))
+                .unwrap()
+                .is_empty()
+        );
         assert!(registry.matches(&current));
         assert!(!registry.has_completions_for_run(&run));
     }
@@ -1225,10 +1644,12 @@ mod active_thread_registry_tests {
         let second = key(&run, "worker", "dispatch-second", "call-second");
         assert!(registry.try_accept(first.clone()));
 
-        assert!(registry
-            .close(&store, "session", &first)
-            .unwrap()
-            .is_empty());
+        assert!(
+            registry
+                .close(&store, "session", &first)
+                .unwrap()
+                .is_empty()
+        );
         assert!(!registry.matches(&first));
         assert!(!registry.has_completions_for_run(&run));
         assert!(registry.try_accept(second.clone()));
@@ -1267,9 +1688,11 @@ mod active_thread_registry_tests {
                 .collect::<Vec<_>>(),
             ["second"]
         );
-        assert!(registry
-            .take_completions(&selected, &HashSet::new())
-            .is_empty());
+        assert!(
+            registry
+                .take_completions(&selected, &HashSet::new())
+                .is_empty()
+        );
         let remaining = registry.take_completions(&HashSet::new(), &HashSet::new());
         assert_eq!(
             remaining
@@ -1278,9 +1701,11 @@ mod active_thread_registry_tests {
                 .collect::<Vec<_>>(),
             ["first", "foreign"]
         );
-        assert!(registry
-            .take_completions(&HashSet::new(), &HashSet::new())
-            .is_empty());
+        assert!(
+            registry
+                .take_completions(&HashSet::new(), &HashSet::new())
+                .is_empty()
+        );
         assert!(!registry.has_completions_for_run(&run_a));
         let _ = std::fs::remove_file(store);
     }
@@ -1360,16 +1785,30 @@ mod active_thread_registry_tests {
             .complete(&store, "session", completion(done_b, "done-b"))
             .unwrap();
 
-        registry.abort_run(&store, "session", &run_a).unwrap();
-        assert!(coordinator.await.unwrap_err().is_cancelled());
-        assert!(worker.await.unwrap_err().is_cancelled());
-        assert!(registry.active_for_run(&run_a, &HashSet::new()).is_empty());
-        assert!(!registry.has_completions_for_run(&run_a));
-        assert!(registry.matches(&active_b));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            registry.abort_run(&store, "session", &run_a).unwrap();
+        })
+        .await
+        .expect("cooperative abort request blocked");
+        assert!(!coordinator.is_finished());
+        assert!(!worker.is_finished());
         assert_eq!(
-            registry.take_completions(&HashSet::new(), &HashSet::new())[0].content,
-            "done-b"
+            registry.active_for_run(&run_a, &HashSet::new())[0].state,
+            ThreadDispatchState::Cancelling
         );
+        assert!(registry.has_completions_for_run(&run_a));
+        assert!(registry.matches(&active_b));
+        let mut completion_contents = registry
+            .take_completions(&HashSet::new(), &HashSet::new())
+            .into_iter()
+            .map(|completion| completion.content)
+            .collect::<Vec<_>>();
+        completion_contents.sort();
+        assert_eq!(completion_contents, ["done-a", "done-b"]);
+        coordinator.abort();
+        worker.abort();
+        let _ = coordinator.await;
+        let _ = worker.await;
         let _ = std::fs::remove_file(store);
     }
 
@@ -1388,11 +1827,21 @@ mod active_thread_registry_tests {
             .complete(&store, "session", completion(done, "done"))
             .unwrap();
 
-        registry.shutdown(&store, "session").unwrap();
-        assert!(coordinator.await.unwrap_err().is_cancelled());
-        assert!(registry.names().is_empty());
-        assert!(!registry.has_completions_for_run(&run));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            registry.shutdown(&store, "session").unwrap();
+        })
+        .await
+        .expect("cooperative shutdown request blocked");
+        assert!(!coordinator.is_finished());
+        assert!(registry.active_dispatches().is_empty());
+        assert_eq!(
+            registry.request_cancel(&active).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Cancelled)
+        );
+        assert!(registry.has_completions_for_run(&run));
         assert!(!registry.try_accept(key(&run, "later", "dispatch", "call")));
+        coordinator.abort();
+        let _ = coordinator.await;
         let _ = std::fs::remove_file(store);
     }
 
@@ -1411,14 +1860,354 @@ mod active_thread_registry_tests {
         assert!(registry.attach_worker(&dispatch, task.abort_handle()));
 
         tokio::time::timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(5),
             registry.abort_run_and_drain(&store, "session", &run),
         )
         .await
         .expect("drain deadlocked")
         .unwrap();
         assert!(task.await.unwrap_err().is_cancelled());
-        assert!(!registry.has_work_for_run(&run));
+        assert!(!registry.matches(&dispatch));
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Cancelled)
+        );
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn cancellation_is_exact_idempotent_and_terminal_tombstone_survives_consumption() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let dispatch = key(&run, "worker", "dispatch", "call");
+        assert!(registry.try_accept(dispatch.clone()));
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::CancelRequested
+        );
+        assert_eq!(
+            registry.active_dispatches()[0].state,
+            ThreadDispatchState::Cancelling
+        );
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::AlreadyCancelling
+        );
+        assert!(
+            registry
+                .finalize_once(
+                    &store,
+                    "session",
+                    ThreadCompletion {
+                        key: dispatch.clone(),
+                        content: "cancelled".into(),
+                        is_error: true,
+                    },
+                    crate::events::ThreadDispatchStatus::Cancelled,
+                    true,
+                )
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            registry
+                .take_completions(&HashSet::new(), &HashSet::new())
+                .len(),
+            1
+        );
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Cancelled)
+        );
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn stale_cancellation_and_losing_finalizer_cannot_touch_same_name_replacement() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let old = key(&run, "worker", "old", "old-call");
+        let replacement = key(&run, "worker", "new", "new-call");
+        assert!(registry.try_accept(old.clone()));
+        assert!(
+            registry
+                .finalize_once(
+                    &store,
+                    "session",
+                    completion(old.clone(), "done"),
+                    crate::events::ThreadDispatchStatus::Completed,
+                    true,
+                )
+                .unwrap()
+                .is_some()
+        );
+        assert!(registry.try_accept(replacement.clone()));
+        assert_eq!(
+            registry.request_cancel(&old).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Completed)
+        );
+        assert!(
+            registry
+                .finalize_once(
+                    &store,
+                    "session",
+                    completion(old, "late"),
+                    crate::events::ThreadDispatchStatus::Failed,
+                    true,
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert!(registry.matches(&replacement));
+        assert_eq!(
+            registry
+                .take_completions(&HashSet::new(), &HashSet::new())
+                .len(),
+            1
+        );
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[tokio::test]
+    async fn pending_exact_cancel_drains_via_coordinator_notification_without_aborting_sibling() {
+        let registry = Arc::new(ActiveThreadRegistry::default());
+        let store = test_store();
+        let run = SessionRunId::new();
+        let cancelled = key(&run, "cancelled", "dispatch-a", "call-a");
+        let sibling = key(&run, "sibling", "dispatch-b", "call-b");
+        assert!(
+            registry
+                .try_accept_batch(vec![cancelled.clone(), sibling.clone()])
+                .into_iter()
+                .all(|accepted| accepted)
+        );
+        let coordinator = tokio::spawn(pending::<()>());
+        assert!(registry.attach_coordinator(&cancelled, coordinator.abort_handle()));
+        assert!(registry.attach_coordinator(&sibling, coordinator.abort_handle()));
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(1),
+            registry.cancel_and_drain(&store, "session", &cancelled),
+        )
+        .await
+        .expect("pending exact cancellation did not drain")
+        .unwrap();
+        assert_eq!(outcome.0, ThreadCancelOutcome::CancelRequested);
+        assert_eq!(outcome.1.len(), 1);
+        assert!(!coordinator.is_finished());
+        assert!(registry.matches(&sibling));
+        assert_eq!(
+            registry.request_cancel(&cancelled).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Cancelled)
+        );
+        coordinator.abort();
+        let _ = coordinator.await;
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[tokio::test]
+    async fn exact_cancel_signals_worker_without_aborting_shared_coordinator() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let cancelled = key(&run, "cancelled", "dispatch-a", "call-a");
+        let sibling = key(&run, "sibling", "dispatch-b", "call-b");
+        assert!(
+            registry
+                .try_accept_batch(vec![cancelled.clone(), sibling.clone()])
+                .iter()
+                .all(|v| *v)
+        );
+        let coordinator = tokio::spawn(pending::<()>());
+        assert!(registry.attach_coordinator(&cancelled, coordinator.abort_handle()));
+        assert!(registry.attach_coordinator(&sibling, coordinator.abort_handle()));
+        assert_eq!(
+            registry.request_cancel(&cancelled).unwrap(),
+            ThreadCancelOutcome::CancelRequested
+        );
+        tokio::task::yield_now().await;
+        assert!(!coordinator.is_finished());
+        assert!(registry.matches(&sibling));
+        coordinator.abort();
+        let _ = coordinator.await;
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn cancellation_before_natural_finalizer_resolves_cancelled() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let dispatch = key(&run, "worker", "dispatch", "call");
+        assert!(registry.try_accept(dispatch.clone()));
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::CancelRequested
+        );
+        let finalized = registry
+            .finalize_once(
+                &store,
+                "session",
+                completion(dispatch.clone(), "natural result"),
+                crate::events::ThreadDispatchStatus::Completed,
+                true,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            finalized.status,
+            crate::events::ThreadDispatchStatus::Cancelled
+        );
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Cancelled)
+        );
+        let completions = registry.take_completions(&HashSet::new(), &HashSet::new());
+        assert_eq!(completions.len(), 1);
+        assert!(completions[0].is_error);
+        assert!(completions[0].content.contains("was cancelled"));
+        assert!(completions[0].content.contains(dispatch.run_id.as_str()));
+        assert!(completions[0].content.contains(&dispatch.dispatch_id));
+        assert!(completions[0].content.contains(&dispatch.tool_call_id));
+        assert_eq!(finalized.completion, completions[0]);
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn concurrent_cancel_and_natural_finalize_has_one_linearized_terminal_owner() {
+        let registry = Arc::new(ActiveThreadRegistry::default());
+        let store = test_store();
+        let run = SessionRunId::new();
+        let dispatch = key(&run, "worker", "dispatch", "call");
+        assert!(registry.try_accept(dispatch.clone()));
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+
+        let cancel_registry = registry.clone();
+        let cancel_key = dispatch.clone();
+        let cancel_barrier = barrier.clone();
+        let cancel = std::thread::spawn(move || {
+            cancel_barrier.wait();
+            cancel_registry.request_cancel(&cancel_key).unwrap()
+        });
+        let finalize_registry = registry.clone();
+        let finalize_key = dispatch.clone();
+        let finalize_store = store.clone();
+        let finalize_barrier = barrier.clone();
+        let finalize = std::thread::spawn(move || {
+            finalize_barrier.wait();
+            finalize_registry
+                .finalize_once(
+                    &finalize_store,
+                    "session",
+                    completion(finalize_key, "natural result"),
+                    crate::events::ThreadDispatchStatus::Completed,
+                    true,
+                )
+                .unwrap()
+        });
+        barrier.wait();
+        let cancel_outcome = cancel.join().unwrap();
+        let finalization = finalize.join().unwrap().unwrap();
+        let expected = match cancel_outcome {
+            ThreadCancelOutcome::CancelRequested => crate::events::ThreadDispatchStatus::Cancelled,
+            ThreadCancelOutcome::AlreadyTerminal(status) => status,
+            outcome => panic!("unexpected cancel race outcome: {outcome:?}"),
+        };
+        assert_eq!(finalization.status, expected);
+        let completions = registry.take_completions(&HashSet::new(), &HashSet::new());
+        assert_eq!(completions.len(), 1);
+        if expected == crate::events::ThreadDispatchStatus::Cancelled {
+            assert!(finalization.completion.is_error);
+            assert!(finalization.completion.content.contains("was cancelled"));
+            assert!(
+                finalization
+                    .completion
+                    .content
+                    .contains(dispatch.run_id.as_str())
+            );
+            assert_eq!(finalization.completion, completions[0]);
+        } else {
+            assert!(!completions[0].is_error);
+            assert_eq!(completions[0].content, "natural result");
+        }
+        assert!(!registry.matches(&dispatch));
+        let _ = std::fs::remove_file(store);
+    }
+
+    #[test]
+    fn steering_store_failure_does_not_strand_terminal_dispatch() {
+        let registry = ActiveThreadRegistry::default();
+        let run = SessionRunId::new();
+        let dispatch = key(&run, "worker", "dispatch", "call");
+        assert!(registry.try_accept(dispatch.clone()));
+        let invalid_store = std::env::temp_dir();
+        let outcome = registry
+            .finalize_once(
+                &invalid_store,
+                "session",
+                completion(dispatch.clone(), "done"),
+                crate::events::ThreadDispatchStatus::Completed,
+                true,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(outcome.steering_error.is_some());
+        assert!(!registry.matches(&dispatch));
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Completed)
+        );
+        assert_eq!(
+            registry
+                .take_completions(&HashSet::new(), &HashSet::new())
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn natural_completion_wins_cancel_race_exactly_once() {
+        let registry = ActiveThreadRegistry::default();
+        let store = test_store();
+        let run = SessionRunId::new();
+        let dispatch = key(&run, "worker", "dispatch", "call");
+        assert!(registry.try_accept(dispatch.clone()));
+        assert!(
+            registry
+                .finalize_once(
+                    &store,
+                    "session",
+                    completion(dispatch.clone(), "done"),
+                    crate::events::ThreadDispatchStatus::Completed,
+                    true,
+                )
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            registry.request_cancel(&dispatch).unwrap(),
+            ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Completed)
+        );
+        assert!(
+            registry
+                .finalize_once(
+                    &store,
+                    "session",
+                    completion(dispatch, "duplicate"),
+                    crate::events::ThreadDispatchStatus::Cancelled,
+                    true,
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            registry
+                .take_completions(&HashSet::new(), &HashSet::new())
+                .len(),
+            1
+        );
         let _ = std::fs::remove_file(store);
     }
 
