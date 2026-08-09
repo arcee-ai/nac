@@ -46,6 +46,7 @@ import {
 import {
   buildSettingsPatch,
   managedLaunchBaseUrl,
+  sameMixedModels,
   type CredentialMode,
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
@@ -406,7 +407,7 @@ function SettingsForm({
         setError("Complete the easy, medium and hard tiers before saving.");
         return;
       }
-      if (JSON.stringify(mixed.mixed) !== JSON.stringify(initialMixed)) {
+      if (!sameMixedModels(mixed.mixed, initialMixed)) {
         patch.mixed_models = mixed.mixed;
       }
     } else if (initialMixed) {

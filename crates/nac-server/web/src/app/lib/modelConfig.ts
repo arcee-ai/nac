@@ -2,7 +2,11 @@
 // backends with a fixed base URL, credential modes, reasoning-effort clearing
 // and extra-header validation. Ported from the legacy UI unchanged.
 
-import type { UpdateConfigRequest } from "@/app/types/api";
+import type {
+  MixedModels,
+  MixedTierSettings,
+  UpdateConfigRequest,
+} from "@/app/types/api";
 
 export const MANAGED_LAUNCH_BASE_URLS: Record<string, string> = {
   "arcee-auth": "https://api.arcee.ai/api/v1",
@@ -115,6 +119,40 @@ function sameHeaderObject(
   const l = Object.keys(left).sort();
   const r = Object.keys(right).sort();
   return l.length === r.length && l.every((key, i) => key === r[i] && left[key] === right[key]);
+}
+
+function sameTier(left: MixedTierSettings, right: MixedTierSettings): boolean {
+  return (
+    left.model === right.model &&
+    (left.backend ?? null) === (right.backend ?? null) &&
+    (left.base_url ?? null) === (right.base_url ?? null) &&
+    (left.api_key_env ?? null) === (right.api_key_env ?? null) &&
+    (left.reasoning_effort ?? null) === (right.reasoning_effort ?? null)
+  );
+}
+
+/** Field-by-field comparison, so serialization order can never fake a change. */
+export function sameMixedModels(
+  left: MixedModels | null,
+  right: MixedModels | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if (left.kind === "efforts" && right.kind === "efforts") {
+    return (
+      left.easy === right.easy &&
+      left.medium === right.medium &&
+      left.hard === right.hard
+    );
+  }
+  if (left.kind === "models" && right.kind === "models") {
+    return (
+      sameTier(left.easy, right.easy) &&
+      sameTier(left.medium, right.medium) &&
+      sameTier(left.hard, right.hard)
+    );
+  }
+  return false;
 }
 
 export interface LaunchLocation {

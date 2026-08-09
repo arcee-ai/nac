@@ -5214,6 +5214,95 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn model_patch_revalidates_stored_mixed_efforts_against_the_new_model() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("mixed_efforts_model_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
+        seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+        let manager = test_manager(&root);
+
+        let efforts_patch =
+            |model: RequestField<String>,
+             backend: RequestField<String>,
+             base_url: RequestField<String>,
+             mixed_models: RequestField<MixedModelsRequest>| {
+                UpdateConfigRequest {
+                    model,
+                    base_url,
+                    backend,
+                    reasoning_effort: RequestField::Omitted,
+                    api_key_env: RequestField::Omitted,
+                    extra_headers: RequestField::Omitted,
+                    orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models,
+                }
+            };
+
+        manager
+            .update_session_config(
+                "session",
+                efforts_patch(
+                    RequestField::Value("gpt-5.2".to_string()),
+                    RequestField::Omitted,
+                    RequestField::Omitted,
+                    RequestField::Value(MixedModelsRequest::Efforts {
+                        easy: "low".to_string(),
+                        medium: "medium".to_string(),
+                        hard: "high".to_string(),
+                    }),
+                ),
+            )
+            .await
+            .expect("efforts the session model supports should persist");
+
+        // Moving the session to a model whose thinking-level map rejects the
+        // stored tiers must fail the PATCH and leave the config untouched,
+        // even though the request itself never names the mixed config.
+        let error = manager
+            .update_session_config(
+                "session",
+                efforts_patch(
+                    RequestField::Value("claude-fable-5".to_string()),
+                    RequestField::Value("anthropic-messages".to_string()),
+                    RequestField::Value("https://api.anthropic.com".to_string()),
+                    RequestField::Omitted,
+                ),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("not supported by model 'claude-fable-5'"),
+            "{error:#}"
+        );
+        let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "gpt-5.2");
+        assert!(stored.mixed_models.is_some());
+
+        // Clearing the mixed config in the same PATCH makes the move legal.
+        manager
+            .update_session_config(
+                "session",
+                efforts_patch(
+                    RequestField::Value("claude-fable-5".to_string()),
+                    RequestField::Value("anthropic-messages".to_string()),
+                    RequestField::Value("https://api.anthropic.com".to_string()),
+                    RequestField::Null,
+                ),
+            )
+            .await
+            .expect("clearing the efforts should unblock the model change");
+        let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.model, "claude-fable-5");
+        assert!(stored.mixed_models.is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn seed_session(root: &std::path::Path, session_id: &str, created_at: &str) {
         let mut snapshot = sessions::new_snapshot(
             session_id.to_string(),

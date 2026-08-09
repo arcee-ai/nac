@@ -124,8 +124,22 @@ fn encode_mixed_models(
         .transpose()
 }
 
-fn decode_mixed_models(raw: Option<&str>) -> Option<crate::sessions::MixedModeConfig> {
-    raw.and_then(|json| serde_json::from_str(json).ok())
+/// Only `encode_mixed_models` ever writes the column, so a row that fails to
+/// parse is real corruption; fail the read rather than silently loading the
+/// setup as single-model.
+fn decode_mixed_models(
+    raw: Option<&str>,
+) -> rusqlite::Result<Option<crate::sessions::MixedModeConfig>> {
+    raw.map(|json| {
+        serde_json::from_str(json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                12,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    })
+    .transpose()
 }
 
 fn is_unique_violation(error: &rusqlite::Error) -> bool {
@@ -148,7 +162,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfiguration
         extra_headers: decode_headers(&extra_headers),
         orchestrator_compaction_threshold: row.get(8)?,
         initial_prompt: row.get(9)?,
-        mixed_models: decode_mixed_models(row.get::<_, Option<String>>(12)?.as_deref()),
+        mixed_models: decode_mixed_models(row.get::<_, Option<String>>(12)?.as_deref())?,
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
     })

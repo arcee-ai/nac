@@ -349,6 +349,12 @@ impl ModelClient {
         self.reasoning_effort
     }
 
+    /// Catalog cost rates of the resolved model, USD per 1M tokens.
+    /// All-zero means the catalog has no pricing for it.
+    pub(crate) fn cost_rates(&self) -> catalog::ModelCostRates {
+        self.resolved_model.cost
+    }
+
     pub fn api_key_env(&self) -> Option<&str> {
         self.api_key_env.as_deref()
     }

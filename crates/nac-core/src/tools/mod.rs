@@ -169,20 +169,34 @@ impl MixedDispatchClients {
         ]
     }
 
-    /// One "- easy: model (effort: low)" line per tier, shared by the
-    /// dispatch tool schema and the orchestrator system prompt.
+    /// One "- easy: model (effort: low, ~$0.25/$1.25 per 1M tokens)" line
+    /// per tier, shared by the dispatch tool schema and the orchestrator
+    /// system prompt. Catalog cost rates, when known, give the classifier a
+    /// real signal for what each tier spends.
     pub fn describe_tiers(&self) -> String {
         let mut description = String::new();
         for (complexity, client) in self.tiers() {
-            let effort = client
-                .reasoning_effort()
-                .map(|effort| format!(" (effort: {effort})"))
-                .unwrap_or_default();
+            let mut traits = Vec::new();
+            if let Some(effort) = client.reasoning_effort() {
+                traits.push(format!("effort: {effort}"));
+            }
+            let cost = client.cost_rates();
+            if cost.input > 0.0 || cost.output > 0.0 {
+                traits.push(format!(
+                    "~${}/${} per 1M tokens in/out",
+                    cost.input, cost.output
+                ));
+            }
+            let traits = if traits.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", traits.join(", "))
+            };
             description.push_str(&format!(
                 "\n- {}: {}{}",
                 complexity.as_str(),
                 client.model,
-                effort
+                traits
             ));
         }
         description

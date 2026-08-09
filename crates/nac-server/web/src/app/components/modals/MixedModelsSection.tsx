@@ -212,9 +212,13 @@ export function MixedModelsSection({
     initialEfforts(initial),
   );
 
+  const primarySupported = resolveCatalogModel(
+    catalog.data,
+    primary?.backend,
+    primary?.model,
+  ).supportedEfforts;
   const primaryEffortOptions = reasoningOptionsFor(
-    resolveCatalogModel(catalog.data, primary?.backend, primary?.model)
-      .supportedEfforts,
+    primarySupported,
     "",
     REQUIRED_EFFORT_OPTIONS,
   );
@@ -335,6 +339,12 @@ export function MixedModelsSection({
                   }
                 />
               ))}
+          {variant === "efforts" && primarySupported.length === 0 ? (
+            <p className="text-micro text-basic-muted !my-0">
+              The catalog has no effort data for this model, so every level is
+              offered; unsupported levels are rejected when you save.
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>
