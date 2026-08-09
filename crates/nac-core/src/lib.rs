@@ -59,6 +59,7 @@ pub use store::{
 };
 mod terminal;
 mod tools;
+pub use tools::ThreadDispatchKey;
 pub mod types;
 pub mod upgrade;
 pub mod view;

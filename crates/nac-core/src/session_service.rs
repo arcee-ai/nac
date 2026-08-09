@@ -176,6 +176,24 @@ pub struct ActiveThreadDispatchFrontendSnapshot {
     pub status: crate::events::ThreadDispatchStatus,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchCancelDisposition {
+    Requested,
+    AlreadyCancelling,
+    AlreadyTerminal,
+    NotFound,
+    IdentityMismatch,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DispatchCancelResult {
+    pub disposition: DispatchCancelDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_status: Option<crate::events::ThreadDispatchStatus>,
+    pub terminal: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFrontendSnapshot {
     pub metadata: SessionMetadata,
@@ -898,9 +916,9 @@ impl SessionService {
         dispatches
     }
 
-    pub async fn queue_thread_steering(
+    pub fn queue_thread_steering_exact(
         &self,
-        thread_name: &str,
+        key: &crate::tools::ThreadDispatchKey,
         instruction: &str,
     ) -> Result<crate::store::ThreadSteeringRecord> {
         let session_id = self
@@ -908,26 +926,91 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        if self.active_run().is_none() {
-            return Err(anyhow::anyhow!("session has no active run"));
-        }
         let record = self
             .active_threads
-            .queue(
-                &self.metadata.store_path,
-                session_id,
-                thread_name,
-                instruction,
-            )?
-            .ok_or_else(|| {
-                anyhow::anyhow!("thread '{thread_name}' is not active in this session")
+            .queue_exact(&self.metadata.store_path, session_id, key, instruction)?
+            .map_err(|outcome| match outcome {
+                crate::tools::ThreadCancelOutcome::IdentityMismatch => {
+                    anyhow::anyhow!("dispatch identity mismatch")
+                }
+                crate::tools::ThreadCancelOutcome::AlreadyCancelling => {
+                    anyhow::anyhow!("dispatch is cancelling")
+                }
+                _ => anyhow::anyhow!("dispatch was not found"),
             })?;
+        self.active_threads.signal_activity();
         self.event_bus.emit_agent(AgentEvent::ThreadSteeringQueued {
-            name: thread_name.to_string(),
+            name: key.thread_name.clone(),
+            dispatch_id: key.dispatch_id.clone(),
             steering_id: record.id,
             instruction_preview: record.instruction.chars().take(160).collect(),
         });
         Ok(record)
+    }
+
+    /// Name-only compatibility wrapper. It resolves the currently active exact
+    /// identity once and returns the record carrying that dispatch id.
+    pub async fn queue_thread_steering(
+        &self,
+        thread_name: &str,
+        instruction: &str,
+    ) -> Result<crate::store::ThreadSteeringRecord> {
+        let key = self
+            .active_threads
+            .resolve_active(thread_name)
+            .ok_or_else(|| {
+                anyhow::anyhow!("thread '{thread_name}' is not active in this session")
+            })?;
+        self.queue_thread_steering_exact(&key, instruction)
+    }
+
+    pub async fn cancel_thread_dispatch(
+        &self,
+        key: &crate::tools::ThreadDispatchKey,
+        wait_ms: u64,
+    ) -> Result<DispatchCancelResult> {
+        let outcome = self.active_threads.request_cancel(key)?;
+        if wait_ms > 0
+            && matches!(
+                outcome,
+                crate::tools::ThreadCancelOutcome::CancelRequested
+                    | crate::tools::ThreadCancelOutcome::AlreadyCancelling
+            )
+        {
+            let session_id = self.metadata.session_id.as_deref().unwrap_or_default();
+            if let Ok(Ok((_, finalizations))) = tokio::time::timeout(
+                Duration::from_millis(wait_ms.min(30_000)),
+                self.active_threads
+                    .cancel_and_drain(&self.metadata.store_path, session_id, key),
+            )
+            .await
+            {
+                self.emit_thread_finalizations(finalizations);
+            }
+        }
+        let terminal = !self.active_threads.matches(key);
+        let (disposition, terminal_status) = match outcome {
+            crate::tools::ThreadCancelOutcome::CancelRequested => {
+                (DispatchCancelDisposition::Requested, None)
+            }
+            crate::tools::ThreadCancelOutcome::AlreadyCancelling => {
+                (DispatchCancelDisposition::AlreadyCancelling, None)
+            }
+            crate::tools::ThreadCancelOutcome::AlreadyTerminal(status) => {
+                (DispatchCancelDisposition::AlreadyTerminal, Some(status))
+            }
+            crate::tools::ThreadCancelOutcome::NotFound => {
+                (DispatchCancelDisposition::NotFound, None)
+            }
+            crate::tools::ThreadCancelOutcome::IdentityMismatch => {
+                (DispatchCancelDisposition::IdentityMismatch, None)
+            }
+        };
+        Ok(DispatchCancelResult {
+            disposition,
+            terminal_status,
+            terminal,
+        })
     }
 
     pub fn queue_orchestrator_steering(
@@ -2792,6 +2875,7 @@ impl SessionService {
                 self.event_bus
                     .emit_agent(AgentEvent::ThreadSteeringExpired {
                         name: record.thread_name,
+                        dispatch_id: record.dispatch_id,
                         steering_id: record.id,
                         instruction_preview,
                     });
@@ -4450,51 +4534,32 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn steering_requires_an_active_run_and_active_target_thread() {
+    async fn steering_targets_active_old_run_without_active_orchestrator() {
         let (parts, store_path) = test_active_service("steering", "session-steering");
         let service = parts.service;
-        let no_run = service
-            .queue_thread_steering("impl/ui", "make the layout denser")
-            .await
-            .unwrap_err();
-        assert!(no_run.to_string().contains("no active run"));
-
-        *service
-            .active_operation
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            Some(ActiveSessionOperation::Run(ActiveRunState {
-                snapshot: ActiveRunSnapshot {
-                    run_id: SessionRunId::new(),
-                    client_id: None,
-                    prompt_preview: "revamp the UI".to_string(),
-                    submitted_user_message: None,
-                    started_at_epoch_ms: 0,
-                },
-                started_at: Instant::now(),
-                finishing: false,
-                task: None,
-                transcript_baseline: None,
-                operation_lease: None,
-            }));
         let inactive = service
-            .queue_thread_steering("impl/ui", "make the layout denser")
+            .queue_thread_steering("impl/ui", "make denser")
             .await
             .unwrap_err();
         assert!(inactive.to_string().contains("not active"));
 
-        service.active_threads.mark("impl/ui", "worker-dispatch");
+        let key = crate::tools::ThreadDispatchKey::new(
+            SessionRunId::from_string("completed-origin-run".to_string()),
+            "impl/ui",
+            "worker-dispatch",
+            "origin-call",
+        );
+        assert!(service.active_threads.try_accept(key.clone()));
+        assert!(service.active_threads.mark_running(&key));
         let queued = service
-            .queue_thread_steering("impl/ui", "make the layout denser")
-            .await
+            .queue_thread_steering_exact(&key, "make denser")
             .unwrap();
-        assert_eq!(queued.status, "queued");
         assert_eq!(queued.dispatch_id, "worker-dispatch");
+        assert!(service.active_run().is_none());
         assert_eq!(
             crate::store::list_thread_steering(&store_path, "session-steering").unwrap(),
             vec![queued]
         );
-
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
@@ -6642,6 +6707,65 @@ pub(super) mod tests {
                 .active_threads
                 .has_work_for_run(&active.run_id)
         );
+    }
+
+    #[tokio::test]
+    async fn exact_cross_run_cancel_is_idempotent_mismatch_safe_and_reuse_safe() {
+        let (parts, _store_path) = test_active_service("exact_cancel", "exact-cancel-session");
+        let key = crate::tools::ThreadDispatchKey::new(
+            SessionRunId::from_string("completed-run".to_string()),
+            "impl/ui",
+            "dispatch-old",
+            "call-old",
+        );
+        assert!(parts.service.active_threads.try_accept(key.clone()));
+        assert!(parts.service.active_run().is_none());
+
+        let mismatch = crate::tools::ThreadDispatchKey::new(
+            key.run_id.clone(),
+            key.thread_name.clone(),
+            key.dispatch_id.clone(),
+            "wrong-call",
+        );
+        assert_eq!(
+            parts
+                .service
+                .cancel_thread_dispatch(&mismatch, 0)
+                .await
+                .unwrap()
+                .disposition,
+            DispatchCancelDisposition::IdentityMismatch
+        );
+        let first = parts
+            .service
+            .cancel_thread_dispatch(&key, 100)
+            .await
+            .unwrap();
+        assert_eq!(first.disposition, DispatchCancelDisposition::Requested);
+        assert!(first.terminal);
+        let repeated = parts.service.cancel_thread_dispatch(&key, 0).await.unwrap();
+        assert_eq!(
+            repeated.disposition,
+            DispatchCancelDisposition::AlreadyTerminal
+        );
+        assert_eq!(
+            repeated.terminal_status,
+            Some(crate::events::ThreadDispatchStatus::Cancelled)
+        );
+
+        let replacement = crate::tools::ThreadDispatchKey::new(
+            SessionRunId::new(),
+            key.thread_name.clone(),
+            "dispatch-new",
+            "call-new",
+        );
+        assert!(parts.service.active_threads.try_accept(replacement.clone()));
+        let stale = parts.service.cancel_thread_dispatch(&key, 0).await.unwrap();
+        assert_eq!(
+            stale.disposition,
+            DispatchCancelDisposition::AlreadyTerminal
+        );
+        assert!(parts.service.active_threads.matches(&replacement));
     }
 
     #[tokio::test]

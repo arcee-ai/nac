@@ -125,6 +125,25 @@ pub fn thread_wait_definition() -> ToolDefinition {
     )
 }
 
+pub fn thread_cancel_definition() -> ToolDefinition {
+    use serde_json::json;
+    def(
+        "thread_cancel",
+        "Cancel one exact active dispatch. Identity is never inferred from a thread name.",
+        json!({
+            "type": "object",
+            "properties": {
+                "origin_run_id": { "type": "string" },
+                "name": { "type": "string" },
+                "dispatch_id": { "type": "string" },
+                "originating_tool_call_id": { "type": "string" },
+                "wait_ms": { "type": "integer", "minimum": 0, "maximum": 30000 }
+            },
+            "required": ["origin_run_id", "name", "dispatch_id", "originating_tool_call_id"]
+        }),
+    )
+}
+
 pub fn thread_delete_definition() -> ToolDefinition {
     use serde_json::json;
     def(
@@ -763,6 +782,68 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
     }
 }
 
+pub async fn execute_thread_cancel(args: Value, runtime: &ToolRuntime) -> ToolResult {
+    let field = |name| require_str(&args, name);
+    let origin_run_id = match field("origin_run_id") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let name = match field("name") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let dispatch_id = match field("dispatch_id") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let tool_call_id = match field("originating_tool_call_id") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let wait_ms = args
+        .get("wait_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .min(30_000);
+    let key = ThreadDispatchKey::new(
+        SessionRunId::from_string(origin_run_id),
+        name,
+        dispatch_id,
+        tool_call_id,
+    );
+    let outcome = match runtime.active_threads.request_cancel(&key) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            return ToolResult {
+                content: format!("Error cancelling dispatch: {error}"),
+                is_error: true,
+            };
+        }
+    };
+    if wait_ms > 0
+        && matches!(
+            outcome,
+            crate::tools::ThreadCancelOutcome::CancelRequested
+                | crate::tools::ThreadCancelOutcome::AlreadyCancelling
+        )
+    {
+        let _ = tokio::time::timeout(Duration::from_millis(wait_ms), async {
+            while runtime.active_threads.matches(&key) {
+                runtime.active_threads.wait_for_activity().await;
+            }
+        })
+        .await;
+    }
+    let (label, is_error) = match outcome {
+        crate::tools::ThreadCancelOutcome::CancelRequested => ("requested", false),
+        crate::tools::ThreadCancelOutcome::AlreadyCancelling => ("already_cancelling", false),
+        crate::tools::ThreadCancelOutcome::AlreadyTerminal(_) => ("already_terminal", false),
+        crate::tools::ThreadCancelOutcome::NotFound => ("not_found", true),
+        crate::tools::ThreadCancelOutcome::IdentityMismatch => ("identity_mismatch", true),
+    };
+    ToolResult { content: serde_json::json!({"outcome": label, "origin_run_id": key.run_id, "name": key.thread_name, "dispatch_id": key.dispatch_id, "originating_tool_call_id": key.tool_call_id, "terminal": !runtime.active_threads.matches(&key)}).to_string(), is_error }
+}
+
 pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let thread_name = match require_str(&args, "name") {
         Ok(s) => s,
@@ -921,7 +1002,8 @@ pub(crate) fn finalize_thread_dispatch(
             }
             for record in outcome.expired {
                 runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
-                    name: record.thread_name,
+                    name: record.thread_name.clone(),
+                    dispatch_id: record.dispatch_id.clone(),
                     steering_id: record.id,
                     instruction_preview: record.instruction.chars().take(160).collect(),
                 });
@@ -990,7 +1072,8 @@ pub(crate) fn close_thread_dispatch(
         Ok(expired) => {
             for record in expired {
                 runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
-                    name: record.thread_name,
+                    name: record.thread_name.clone(),
+                    dispatch_id: record.dispatch_id.clone(),
                     steering_id: record.id,
                     instruction_preview: record.instruction.chars().take(160).collect(),
                 });
@@ -1681,5 +1764,37 @@ mod tests {
                 && timed_out == &expected_timed_out
                 && timeout_reason == &expected_timeout_reason
         ));
+    }
+
+    #[tokio::test]
+    async fn thread_cancel_tool_requires_and_matches_complete_identity() {
+        let runtime = crate::tools::test_runtime();
+        let key = ThreadDispatchKey::new(
+            SessionRunId::from_string("old-run".to_string()),
+            "worker",
+            "dispatch",
+            "call",
+        );
+        assert!(runtime.active_threads.try_accept(key.clone()));
+        let mismatch = execute_thread_cancel(
+            serde_json::json!({"origin_run_id":"old-run","name":"worker","dispatch_id":"dispatch","originating_tool_call_id":"wrong"}),
+            &runtime,
+        ).await;
+        assert!(mismatch.is_error);
+        assert!(mismatch.content.contains("identity_mismatch"));
+        assert!(runtime.active_threads.matches(&key));
+
+        let requested = execute_thread_cancel(
+            serde_json::json!({"origin_run_id":"old-run","name":"worker","dispatch_id":"dispatch","originating_tool_call_id":"call","wait_ms":0}),
+            &runtime,
+        ).await;
+        assert!(!requested.is_error);
+        assert!(requested.content.contains("requested"));
+        let repeated = execute_thread_cancel(
+            serde_json::json!({"origin_run_id":"old-run","name":"worker","dispatch_id":"dispatch","originating_tool_call_id":"call"}),
+            &runtime,
+        ).await;
+        assert!(!repeated.is_error);
+        assert!(repeated.content.contains("already_cancelling"));
     }
 }

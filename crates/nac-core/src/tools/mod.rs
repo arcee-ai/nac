@@ -357,6 +357,57 @@ impl ActiveThreadRegistry {
         true
     }
 
+    pub fn resolve_active(&self, thread_name: &str) -> Option<ThreadDispatchKey> {
+        self.lock()
+            .active_by_name
+            .get(thread_name)
+            .map(|dispatch| dispatch.key.clone())
+    }
+
+    pub fn queue_exact(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        key: &ThreadDispatchKey,
+        instruction: &str,
+    ) -> anyhow::Result<Result<crate::store::ThreadSteeringRecord, ThreadCancelOutcome>> {
+        let state = self.lock();
+        let Some(dispatch) = state.active_by_name.get(&key.thread_name) else {
+            return Ok(Err(
+                if state
+                    .active_by_name
+                    .values()
+                    .any(|active| active.key.dispatch_id == key.dispatch_id)
+                    || state
+                        .terminals
+                        .iter()
+                        .any(|terminal| terminal.key.dispatch_id == key.dispatch_id)
+                {
+                    ThreadCancelOutcome::IdentityMismatch
+                } else {
+                    ThreadCancelOutcome::NotFound
+                },
+            ));
+        };
+        if dispatch.key != *key {
+            return Ok(Err(if dispatch.key.dispatch_id == key.dispatch_id {
+                ThreadCancelOutcome::IdentityMismatch
+            } else {
+                ThreadCancelOutcome::NotFound
+            }));
+        }
+        if dispatch.state == ThreadDispatchState::Cancelling {
+            return Ok(Err(ThreadCancelOutcome::AlreadyCancelling));
+        }
+        Ok(Ok(crate::store::queue_thread_steering(
+            store_path,
+            session_id,
+            &key.thread_name,
+            &key.dispatch_id,
+            instruction,
+        )?))
+    }
+
     pub fn queue(
         &self,
         store_path: &Path,
@@ -399,7 +450,17 @@ impl ActiveThreadRegistry {
             return Ok(ThreadCancelOutcome::IdentityMismatch);
         }
         let Some(dispatch) = state.active_by_name.get_mut(&key.thread_name) else {
-            return Ok(ThreadCancelOutcome::NotFound);
+            return Ok(
+                if state
+                    .active_by_name
+                    .values()
+                    .any(|active| active.key.dispatch_id == key.dispatch_id)
+                {
+                    ThreadCancelOutcome::IdentityMismatch
+                } else {
+                    ThreadCancelOutcome::NotFound
+                },
+            );
         };
         if dispatch.key != *key {
             return Ok(if dispatch.key.dispatch_id == key.dispatch_id {
@@ -833,7 +894,8 @@ impl ActiveThreadRegistry {
             .get(&key.thread_name)
             .is_some_and(|dispatch| {
                 dispatch.key == *key
-                    && dispatch.state == ThreadDispatchState::PendingDependency
+                    && (dispatch.state == ThreadDispatchState::PendingDependency
+                        || dispatch.state == ThreadDispatchState::Cancelling)
                     && dispatch.worker_abort.is_none()
             });
         let outcome = self.request_cancel(key)?;
@@ -1410,6 +1472,7 @@ pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<Tool
         thread::thread_wait_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
+        thread::thread_cancel_definition(),
         workset::define_definition(),
         workset::read_definition(),
         workset::list_definition(),
@@ -1508,6 +1571,7 @@ pub async fn execute_tool(
         "thread_wait" => thread::execute_thread_wait(args, runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,
         "thread_delete" => thread::execute_thread_delete(args, runtime).await,
+        "thread_cancel" => thread::execute_thread_cancel(args, runtime).await,
         "workset_define" => workset::execute_define(args, runtime).await,
         "workset_read" => workset::execute_read(args, runtime).await,
         "workset_list" => workset::execute_list(args, runtime).await,
@@ -1619,18 +1683,14 @@ mod active_thread_registry_tests {
         assert!(registry.try_accept(current.clone()));
 
         let missing = Path::new("/store/must/not/be/opened");
-        assert!(
-            registry
-                .close(missing, "session", &stale)
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            registry
-                .complete(missing, "session", completion(stale, "stale"))
-                .unwrap()
-                .is_empty()
-        );
+        assert!(registry
+            .close(missing, "session", &stale)
+            .unwrap()
+            .is_empty());
+        assert!(registry
+            .complete(missing, "session", completion(stale, "stale"))
+            .unwrap()
+            .is_empty());
         assert!(registry.matches(&current));
         assert!(!registry.has_completions_for_run(&run));
     }
@@ -1644,12 +1704,10 @@ mod active_thread_registry_tests {
         let second = key(&run, "worker", "dispatch-second", "call-second");
         assert!(registry.try_accept(first.clone()));
 
-        assert!(
-            registry
-                .close(&store, "session", &first)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(registry
+            .close(&store, "session", &first)
+            .unwrap()
+            .is_empty());
         assert!(!registry.matches(&first));
         assert!(!registry.has_completions_for_run(&run));
         assert!(registry.try_accept(second.clone()));
@@ -1688,11 +1746,9 @@ mod active_thread_registry_tests {
                 .collect::<Vec<_>>(),
             ["second"]
         );
-        assert!(
-            registry
-                .take_completions(&selected, &HashSet::new())
-                .is_empty()
-        );
+        assert!(registry
+            .take_completions(&selected, &HashSet::new())
+            .is_empty());
         let remaining = registry.take_completions(&HashSet::new(), &HashSet::new());
         assert_eq!(
             remaining
@@ -1701,11 +1757,9 @@ mod active_thread_registry_tests {
                 .collect::<Vec<_>>(),
             ["first", "foreign"]
         );
-        assert!(
-            registry
-                .take_completions(&HashSet::new(), &HashSet::new())
-                .is_empty()
-        );
+        assert!(registry
+            .take_completions(&HashSet::new(), &HashSet::new())
+            .is_empty());
         assert!(!registry.has_completions_for_run(&run_a));
         let _ = std::fs::remove_file(store);
     }
@@ -1894,22 +1948,20 @@ mod active_thread_registry_tests {
             registry.request_cancel(&dispatch).unwrap(),
             ThreadCancelOutcome::AlreadyCancelling
         );
-        assert!(
-            registry
-                .finalize_once(
-                    &store,
-                    "session",
-                    ThreadCompletion {
-                        key: dispatch.clone(),
-                        content: "cancelled".into(),
-                        is_error: true,
-                    },
-                    crate::events::ThreadDispatchStatus::Cancelled,
-                    true,
-                )
-                .unwrap()
-                .is_some()
-        );
+        assert!(registry
+            .finalize_once(
+                &store,
+                "session",
+                ThreadCompletion {
+                    key: dispatch.clone(),
+                    content: "cancelled".into(),
+                    is_error: true,
+                },
+                crate::events::ThreadDispatchStatus::Cancelled,
+                true,
+            )
+            .unwrap()
+            .is_some());
         assert_eq!(
             registry
                 .take_completions(&HashSet::new(), &HashSet::new())
@@ -1931,35 +1983,31 @@ mod active_thread_registry_tests {
         let old = key(&run, "worker", "old", "old-call");
         let replacement = key(&run, "worker", "new", "new-call");
         assert!(registry.try_accept(old.clone()));
-        assert!(
-            registry
-                .finalize_once(
-                    &store,
-                    "session",
-                    completion(old.clone(), "done"),
-                    crate::events::ThreadDispatchStatus::Completed,
-                    true,
-                )
-                .unwrap()
-                .is_some()
-        );
+        assert!(registry
+            .finalize_once(
+                &store,
+                "session",
+                completion(old.clone(), "done"),
+                crate::events::ThreadDispatchStatus::Completed,
+                true,
+            )
+            .unwrap()
+            .is_some());
         assert!(registry.try_accept(replacement.clone()));
         assert_eq!(
             registry.request_cancel(&old).unwrap(),
             ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Completed)
         );
-        assert!(
-            registry
-                .finalize_once(
-                    &store,
-                    "session",
-                    completion(old, "late"),
-                    crate::events::ThreadDispatchStatus::Failed,
-                    true,
-                )
-                .unwrap()
-                .is_none()
-        );
+        assert!(registry
+            .finalize_once(
+                &store,
+                "session",
+                completion(old, "late"),
+                crate::events::ThreadDispatchStatus::Failed,
+                true,
+            )
+            .unwrap()
+            .is_none());
         assert!(registry.matches(&replacement));
         assert_eq!(
             registry
@@ -1977,12 +2025,10 @@ mod active_thread_registry_tests {
         let run = SessionRunId::new();
         let cancelled = key(&run, "cancelled", "dispatch-a", "call-a");
         let sibling = key(&run, "sibling", "dispatch-b", "call-b");
-        assert!(
-            registry
-                .try_accept_batch(vec![cancelled.clone(), sibling.clone()])
-                .into_iter()
-                .all(|accepted| accepted)
-        );
+        assert!(registry
+            .try_accept_batch(vec![cancelled.clone(), sibling.clone()])
+            .into_iter()
+            .all(|accepted| accepted));
         let coordinator = tokio::spawn(pending::<()>());
         assert!(registry.attach_coordinator(&cancelled, coordinator.abort_handle()));
         assert!(registry.attach_coordinator(&sibling, coordinator.abort_handle()));
@@ -2014,12 +2060,10 @@ mod active_thread_registry_tests {
         let run = SessionRunId::new();
         let cancelled = key(&run, "cancelled", "dispatch-a", "call-a");
         let sibling = key(&run, "sibling", "dispatch-b", "call-b");
-        assert!(
-            registry
-                .try_accept_batch(vec![cancelled.clone(), sibling.clone()])
-                .iter()
-                .all(|v| *v)
-        );
+        assert!(registry
+            .try_accept_batch(vec![cancelled.clone(), sibling.clone()])
+            .iter()
+            .all(|v| *v));
         let coordinator = tokio::spawn(pending::<()>());
         assert!(registry.attach_coordinator(&cancelled, coordinator.abort_handle()));
         assert!(registry.attach_coordinator(&sibling, coordinator.abort_handle()));
@@ -2121,12 +2165,10 @@ mod active_thread_registry_tests {
         if expected == crate::events::ThreadDispatchStatus::Cancelled {
             assert!(finalization.completion.is_error);
             assert!(finalization.completion.content.contains("was cancelled"));
-            assert!(
-                finalization
-                    .completion
-                    .content
-                    .contains(dispatch.run_id.as_str())
-            );
+            assert!(finalization
+                .completion
+                .content
+                .contains(dispatch.run_id.as_str()));
             assert_eq!(finalization.completion, completions[0]);
         } else {
             assert!(!completions[0].is_error);
@@ -2174,34 +2216,30 @@ mod active_thread_registry_tests {
         let run = SessionRunId::new();
         let dispatch = key(&run, "worker", "dispatch", "call");
         assert!(registry.try_accept(dispatch.clone()));
-        assert!(
-            registry
-                .finalize_once(
-                    &store,
-                    "session",
-                    completion(dispatch.clone(), "done"),
-                    crate::events::ThreadDispatchStatus::Completed,
-                    true,
-                )
-                .unwrap()
-                .is_some()
-        );
+        assert!(registry
+            .finalize_once(
+                &store,
+                "session",
+                completion(dispatch.clone(), "done"),
+                crate::events::ThreadDispatchStatus::Completed,
+                true,
+            )
+            .unwrap()
+            .is_some());
         assert_eq!(
             registry.request_cancel(&dispatch).unwrap(),
             ThreadCancelOutcome::AlreadyTerminal(crate::events::ThreadDispatchStatus::Completed)
         );
-        assert!(
-            registry
-                .finalize_once(
-                    &store,
-                    "session",
-                    completion(dispatch, "duplicate"),
-                    crate::events::ThreadDispatchStatus::Cancelled,
-                    true,
-                )
-                .unwrap()
-                .is_none()
-        );
+        assert!(registry
+            .finalize_once(
+                &store,
+                "session",
+                completion(dispatch, "duplicate"),
+                crate::events::ThreadDispatchStatus::Cancelled,
+                true,
+            )
+            .unwrap()
+            .is_none());
         assert_eq!(
             registry
                 .take_completions(&HashSet::new(), &HashSet::new())

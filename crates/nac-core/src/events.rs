@@ -194,16 +194,19 @@ pub enum AgentEvent {
     },
     ThreadSteeringQueued {
         name: String,
+        dispatch_id: String,
         steering_id: i64,
         instruction_preview: String,
     },
     ThreadSteeringDelivered {
         name: String,
+        dispatch_id: String,
         steering_id: i64,
         instruction_preview: String,
     },
     ThreadSteeringExpired {
         name: String,
+        dispatch_id: String,
         steering_id: i64,
         instruction_preview: String,
     },
@@ -826,23 +829,35 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             status: None,
         },
         AgentEvent::ThreadSteeringQueued {
-            name, steering_id, ..
+            name,
+            dispatch_id,
+            steering_id,
+            ..
         } => AgentEvent::ThreadSteeringQueued {
             name,
+            dispatch_id,
             steering_id,
             instruction_preview: "steering queued".to_string(),
         },
         AgentEvent::ThreadSteeringDelivered {
-            name, steering_id, ..
+            name,
+            dispatch_id,
+            steering_id,
+            ..
         } => AgentEvent::ThreadSteeringDelivered {
             name,
+            dispatch_id,
             steering_id,
             instruction_preview: "steering delivered".to_string(),
         },
         AgentEvent::ThreadSteeringExpired {
-            name, steering_id, ..
+            name,
+            dispatch_id,
+            steering_id,
+            ..
         } => AgentEvent::ThreadSteeringExpired {
             name,
+            dispatch_id,
             steering_id,
             instruction_preview: "steering expired".to_string(),
         },
@@ -992,6 +1007,17 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
             copy_safe_u64(object, &mut safe, "timeout");
         }
         "thread_read" | "thread_delete" => copy_safe_string(object, &mut safe, "name"),
+        "thread_cancel" => {
+            for key in [
+                "origin_run_id",
+                "name",
+                "dispatch_id",
+                "originating_tool_call_id",
+            ] {
+                copy_safe_string(object, &mut safe, key);
+            }
+            copy_safe_u64(object, &mut safe, "wait_ms");
+        }
         _ => {}
     }
     serde_json::Value::Object(safe).to_string()

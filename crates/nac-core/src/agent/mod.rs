@@ -1209,6 +1209,7 @@ impl Agent {
             if let Some(thread_name) = &thread_name {
                 self.emit(AgentEvent::ThreadSteeringDelivered {
                     name: thread_name.clone(),
+                    dispatch_id: record.dispatch_id.clone(),
                     steering_id: record.id,
                     instruction_preview: preview(&record.instruction, 160),
                 });

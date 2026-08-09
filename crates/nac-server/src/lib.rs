@@ -23,37 +23,38 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_stream::stream;
 use axum::{
-    extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
-    http::{header, StatusCode},
+    Json, Router,
+    extract::{Path as AxumPath, Query, State, rejection::JsonRejection},
+    http::{StatusCode, header},
     middleware::{self, Next},
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::{delete, get, patch, post, put},
-    Json, Router,
 };
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use nac_core::{
+    RespondLivePreference, UpdateRespondLiveError,
     commands::{FrontendCommand, PreparedUserInput},
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
-    lineage::{create_session_fork, load_session_lineage, SessionLineageRecord},
+    lineage::{SessionLineageRecord, create_session_fork, load_session_lineage},
     model::{
-        list_managed_provider_models, list_provider_models, list_stored_api_keys,
-        managed_backend_base_url, provider_default_base_url, provider_for_model,
-        provider_uses_api_key, remove_api_key, resolve_backend_api_key, resolve_model_base_url,
-        store_api_key, validate_caller_supplied_base_url, validate_model_configuration,
         BackendKind, EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError,
-        ModelListing, ProviderModel, ReasoningEffort,
+        ModelListing, ProviderModel, ReasoningEffort, list_managed_provider_models,
+        list_provider_models, list_stored_api_keys, managed_backend_base_url,
+        provider_default_base_url, provider_for_model, provider_uses_api_key, remove_api_key,
+        resolve_backend_api_key, resolve_model_base_url, store_api_key,
+        validate_caller_supplied_base_url, validate_model_configuration,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
     queued_runs::{
-        MessageReceiptDisposition, QueuedRunRecord, QueuedRunStoreError, MAX_QUEUED_ID_BYTES,
+        MAX_QUEUED_ID_BYTES, MessageReceiptDisposition, QueuedRunRecord, QueuedRunStoreError,
     },
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
@@ -70,7 +71,6 @@ use nac_core::{
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
-    RespondLivePreference, UpdateRespondLiveError,
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -78,8 +78,8 @@ use tokio::{
     sync::{Mutex, RwLock},
 };
 use tower_http::compression::{
-    predicate::{DefaultPredicate, NotForContentType, Predicate},
     CompressionLayer,
+    predicate::{DefaultPredicate, NotForContentType, Predicate},
 };
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
@@ -667,12 +667,43 @@ pub struct ThreadSteeringRequest {
     pub instruction: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExactThreadSteeringRequest {
+    pub origin_run_id: String,
+    pub thread_name: String,
+    pub originating_tool_call_id: String,
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ThreadCancelRequest {
+    pub origin_run_id: String,
+    pub thread_name: String,
+    pub originating_tool_call_id: String,
+    #[serde(default)]
+    pub wait_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ThreadSteeringResponse {
     pub steering_id: i64,
+    pub origin_run_id: String,
     pub thread_name: String,
+    pub dispatch_id: String,
+    pub originating_tool_call_id: String,
     pub status: String,
     pub instruction_preview: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThreadCancelResponse {
+    pub outcome: nac_core::session_service::DispatchCancelDisposition,
+    pub origin_run_id: String,
+    pub thread_name: String,
+    pub dispatch_id: String,
+    pub originating_tool_call_id: String,
+    pub terminal: bool,
+    pub terminal_status: Option<nac_core::events::ThreadDispatchStatus>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1803,13 +1834,13 @@ impl SessionManager {
                 let prompt = match client.prepare_user_input(&request.prompt) {
                     PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
                     PreparedUserInput::InvalidSlashCommand { message } => {
-                        return Err(anyhow!(message))
+                        return Err(anyhow!(message));
                     }
                     PreparedUserInput::FrontendCommand(command) => {
                         return Err(anyhow!(
                             "frontend command '{}' is not supported by the server API",
                             frontend_command_name(command)
-                        ))
+                        ));
                     }
                     PreparedUserInput::SubmitPrompt(prompt) => prompt,
                 };
@@ -1944,7 +1975,7 @@ impl SessionManager {
                 return Err(anyhow!(
                     "frontend command '{}' is not supported by the server API",
                     frontend_command_name(command)
-                ))
+                ));
             }
         };
         if let Some(service) = service {
@@ -2004,11 +2035,71 @@ impl SessionManager {
         let record = service
             .queue_thread_steering(thread_name, &request.instruction)
             .await?;
+        let key = service
+            .active_thread_dispatches()
+            .into_iter()
+            .find(|dispatch| dispatch.dispatch_id == record.dispatch_id)
+            .ok_or_else(|| anyhow!("active dispatch changed before steering response"))?;
         Ok(ThreadSteeringResponse {
             steering_id: record.id,
-            thread_name: record.thread_name,
+            origin_run_id: key.run_id.to_string(),
+            thread_name: key.thread_name,
+            dispatch_id: key.dispatch_id,
+            originating_tool_call_id: key.tool_call_id,
             status: record.status,
             instruction_preview: record.instruction.chars().take(160).collect(),
+        })
+    }
+
+    pub async fn queue_thread_steering_exact(
+        &self,
+        session_id: &str,
+        dispatch_id: &str,
+        request: ExactThreadSteeringRequest,
+    ) -> Result<ThreadSteeringResponse> {
+        let service = self.attach_session(session_id).await?;
+        let key = nac_core::ThreadDispatchKey::new(
+            nac_core::events::SessionRunId::from_string(request.origin_run_id.clone()),
+            request.thread_name.clone(),
+            dispatch_id,
+            request.originating_tool_call_id.clone(),
+        );
+        let record = service.queue_thread_steering_exact(&key, &request.instruction)?;
+        Ok(ThreadSteeringResponse {
+            steering_id: record.id,
+            origin_run_id: request.origin_run_id,
+            thread_name: request.thread_name,
+            dispatch_id: dispatch_id.to_string(),
+            originating_tool_call_id: request.originating_tool_call_id,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
+    }
+
+    pub async fn cancel_thread_dispatch(
+        &self,
+        session_id: &str,
+        dispatch_id: &str,
+        request: ThreadCancelRequest,
+    ) -> Result<ThreadCancelResponse> {
+        let service = self.attach_session(session_id).await?;
+        let key = nac_core::ThreadDispatchKey::new(
+            nac_core::events::SessionRunId::from_string(request.origin_run_id.clone()),
+            request.thread_name.clone(),
+            dispatch_id,
+            request.originating_tool_call_id.clone(),
+        );
+        let result = service
+            .cancel_thread_dispatch(&key, request.wait_ms)
+            .await?;
+        Ok(ThreadCancelResponse {
+            outcome: result.disposition,
+            origin_run_id: request.origin_run_id,
+            thread_name: request.thread_name,
+            dispatch_id: dispatch_id.to_string(),
+            originating_tool_call_id: request.originating_tool_call_id,
+            terminal: result.terminal,
+            terminal_status: result.terminal_status,
         })
     }
 
@@ -2532,6 +2623,14 @@ fn api_router(manager: SessionManager) -> Router {
         .route(
             "/sessions/{session_id}/threads/{thread_name}/steering",
             post(queue_thread_steering_handler),
+        )
+        .route(
+            "/sessions/{session_id}/thread-dispatches/{dispatch_id}/steering",
+            post(queue_exact_thread_steering_handler),
+        )
+        .route(
+            "/sessions/{session_id}/thread-dispatches/{dispatch_id}/cancel",
+            post(cancel_thread_dispatch_handler),
         )
         .route("/sessions/{session_id}/events", get(recent_events))
         .route("/sessions/{session_id}/events/stream", get(stream_events))
@@ -3574,6 +3673,46 @@ async fn queue_thread_steering_handler(
     ))
 }
 
+async fn queue_exact_thread_steering_handler(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, dispatch_id)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<ExactThreadSteeringRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ThreadSteeringResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    validate_steering_instruction(&request.instruction)?;
+    let response = manager
+        .queue_thread_steering_exact(&session_id, &dispatch_id, request)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(response)))
+}
+
+async fn cancel_thread_dispatch_handler(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, dispatch_id)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<ThreadCancelRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ThreadCancelResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    if request.wait_ms > 30_000 {
+        return Err(ApiError::bad_request("wait_ms must not exceed 30000"));
+    }
+    let response = manager
+        .cancel_thread_dispatch(&session_id, &dispatch_id, request)
+        .await?;
+    use nac_core::session_service::DispatchCancelDisposition as D;
+    let status = match response.outcome {
+        D::NotFound => return Err(ApiError::not_found("dispatch was not found")),
+        D::IdentityMismatch => {
+            return Err(ApiError {
+                status: StatusCode::CONFLICT,
+                message: "dispatch identity mismatch".into(),
+            });
+        }
+        D::Requested | D::AlreadyCancelling => StatusCode::ACCEPTED,
+        D::AlreadyTerminal => StatusCode::OK,
+    };
+    Ok((status, Json(response)))
+}
+
 async fn recent_events(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -4341,6 +4480,8 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("not active")
             || message.contains("active run is finishing")
             || message.contains("active run changed before guidance")
+            || message.contains("identity mismatch")
+            || message.contains("is cancelling")
         {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
@@ -4377,7 +4518,7 @@ mod tests {
     use std::io::Read;
 
     use axum::{
-        body::{to_bytes, Body, Bytes},
+        body::{Body, Bytes, to_bytes},
         http::Request,
     };
     use flate2::read::GzDecoder;
@@ -4587,10 +4728,12 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{fetch_site}");
-            assert!(response
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                .is_none());
+            assert!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .is_none()
+            );
         }
 
         let response = app
@@ -4814,10 +4957,12 @@ mod tests {
 
         let json_identity = get_response(app.clone(), "/store", None).await;
         assert_eq!(json_identity.status(), StatusCode::OK);
-        assert!(json_identity
-            .headers()
-            .get(header::CONTENT_ENCODING)
-            .is_none());
+        assert!(
+            json_identity
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .is_none()
+        );
         let json_identity_body = response_body(json_identity).await;
         let _: serde_json::Value = serde_json::from_slice(&json_identity_body).unwrap();
 
@@ -5715,9 +5860,11 @@ mod tests {
             assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
             let response = ApiError::from(error);
             assert_eq!(response.status, StatusCode::BAD_REQUEST);
-            assert!(response
-                .message
-                .contains("failed to parse stored Arcee auth"));
+            assert!(
+                response
+                    .message
+                    .contains("failed to parse stored Arcee auth")
+            );
             let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
             assert_eq!(stored.backend, BackendKind::OpenAiResponses);
             assert_eq!(stored.base_url, "https://api.openai.com/v1");
@@ -6076,9 +6223,11 @@ thread_timeout_secs = 7200
         .await
         .unwrap();
         assert_eq!(endpoint_config.session_id, "missing-selector");
-        assert!(!serde_json::to_string(&endpoint_config)
-            .unwrap()
-            .contains("server-repair-key"));
+        assert!(
+            !serde_json::to_string(&endpoint_config)
+                .unwrap()
+                .contains("server-repair-key")
+        );
 
         let listed = manager.list_sessions(false).await.unwrap();
         let listed_ids = listed
@@ -6548,9 +6697,11 @@ thread_timeout_secs = 7200
             .expect("patch should run after submission")
             .unwrap()
             .unwrap_err();
-        assert!(patch_error
-            .to_string()
-            .contains("busy with an active operation"));
+        assert!(
+            patch_error
+                .to_string()
+                .contains("busy with an active operation")
+        );
         assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -6702,12 +6853,14 @@ thread_timeout_secs = 7200
         let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(after.model, before.model);
         assert_eq!(after.config_version, before.config_version);
-        assert!(!patch_manager
-            .inner
-            .active_sessions
-            .read()
-            .await
-            .contains_key("session"));
+        assert!(
+            !patch_manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session")
+        );
 
         running_manager.cancel_active_run("session").await.unwrap();
         endpoint.abort();
@@ -6816,9 +6969,11 @@ thread_timeout_secs = 7200
             )
             .await
             .expect_err("a concurrent shared lease must reject PATCH without waiting");
-        assert!(conflict
-            .to_string()
-            .contains("busy with an active operation"));
+        assert!(
+            conflict
+                .to_string()
+                .contains("busy with an active operation")
+        );
         assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
         assert_eq!(
             sessions::load_session(&root.join("store.db"), "session")
@@ -6934,13 +7089,15 @@ threshold_tokens = 64000
             Some("{\"X-Config\":\"yes\"}")
         );
         assert_eq!(config.orchestrator_compaction_threshold, Some(64_000));
-        assert!(manager
-            .snapshot(&inherited_id)
-            .await
-            .unwrap()
-            .metadata
-            .extra_headers
-            .is_empty());
+        assert!(
+            manager
+                .snapshot(&inherited_id)
+                .await
+                .unwrap()
+                .metadata
+                .extra_headers
+                .is_empty()
+        );
 
         let cleared = manager
             .create_session(CreateSessionRequest {
@@ -7463,12 +7620,14 @@ model = "gpt-5.2"
         assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
         assert!(error.to_string().contains("not configured"));
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
-        assert!(!manager
-            .inner
-            .active_sessions
-            .read()
-            .await
-            .contains_key("session"));
+        assert!(
+            !manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session")
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -7514,12 +7673,14 @@ model = "gpt-5.2"
             assert_eq!(after.backend, before.backend);
             assert_eq!(after.base_url, before.base_url);
             assert_eq!(after.api_key_env, before.api_key_env);
-            assert!(manager
-                .inner
-                .active_sessions
-                .read()
-                .await
-                .contains_key("session"));
+            assert!(
+                manager
+                    .inner
+                    .active_sessions
+                    .read()
+                    .await
+                    .contains_key("session")
+            );
         }
 
         #[cfg(unix)]
@@ -7553,12 +7714,14 @@ model = "gpt-5.2"
             assert_eq!(after.backend, before.backend);
             assert_eq!(after.base_url, before.base_url);
             assert_eq!(after.api_key_env, before.api_key_env);
-            assert!(manager
-                .inner
-                .active_sessions
-                .read()
-                .await
-                .contains_key("session"));
+            assert!(
+                manager
+                    .inner
+                    .active_sessions
+                    .read()
+                    .await
+                    .contains_key("session")
+            );
         }
 
         #[cfg(unix)]
@@ -7590,12 +7753,14 @@ model = "gpt-5.2"
             let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
             assert_eq!(after.backend, before.backend);
             assert_eq!(after.base_url, before.base_url);
-            assert!(manager
-                .inner
-                .active_sessions
-                .read()
-                .await
-                .contains_key("session"));
+            assert!(
+                manager
+                    .inner
+                    .active_sessions
+                    .read()
+                    .await
+                    .contains_key("session")
+            );
             assert_eq!(std::fs::read_to_string(target).unwrap(), "secret-target");
         }
 
@@ -7717,12 +7882,14 @@ model = "gpt-5.2"
         let manager = test_manager(&root);
 
         manager.attach_session("session").await.unwrap();
-        assert!(manager
-            .inner
-            .active_sessions
-            .read()
-            .await
-            .contains_key("session"));
+        assert!(
+            manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session")
+        );
 
         manager
             .update_session_config(
@@ -7742,12 +7909,14 @@ model = "gpt-5.2"
             )
             .await
             .unwrap();
-        assert!(!manager
-            .inner
-            .active_sessions
-            .read()
-            .await
-            .contains_key("session"));
+        assert!(
+            !manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key("session")
+        );
         let replaced = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(replaced.model, "replacement-model");
         assert_eq!(replaced.reasoning_effort, Some(ReasoningEffort::High));
@@ -7993,12 +8162,14 @@ model = "gpt-5.2"
             assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
             assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
             assert_eq!(stored.extra_headers.get("X-Original").unwrap(), "yes");
-            assert!(manager
-                .inner
-                .active_sessions
-                .read()
-                .await
-                .contains_key("session"));
+            assert!(
+                manager
+                    .inner
+                    .active_sessions
+                    .read()
+                    .await
+                    .contains_key("session")
+            );
         }
 
         let _ = std::fs::remove_dir_all(&root);
@@ -8070,9 +8241,11 @@ model = "gpt-5.2"
             })
             .await
             .unwrap_err();
-        assert!(create_error
-            .downcast_ref::<ModelConfigurationError>()
-            .is_some());
+        assert!(
+            create_error
+                .downcast_ref::<ModelConfigurationError>()
+                .is_some()
+        );
         assert_eq!(ApiError::from(create_error).status, StatusCode::BAD_REQUEST);
         assert!(
             !store_path.exists(),
@@ -8097,9 +8270,11 @@ model = "gpt-5.2"
                 .contains("set the ARCEE_API_KEY environment variable"),
             "{attach_error:#}"
         );
-        assert!(attach_error
-            .downcast_ref::<ModelConfigurationError>()
-            .is_some());
+        assert!(
+            attach_error
+                .downcast_ref::<ModelConfigurationError>()
+                .is_some()
+        );
         assert_eq!(ApiError::from(attach_error).status, StatusCode::BAD_REQUEST);
 
         seed_session(&root, "update", "2026-01-02 00:00:00.000000000");
@@ -8347,10 +8522,12 @@ model = "gpt-5.2"
         assert_eq!(update.title, "  Build release  ");
         assert!(update.pinned);
         assert_eq!(update.expected_version, 3);
-        assert!(serde_json::from_str::<UpdateSessionPresentationRequest>(
-            r#"{"pinned":true,"expected_version":3}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<UpdateSessionPresentationRequest>(
+                r#"{"pinned":true,"expected_version":3}"#
+            )
+            .is_err()
+        );
 
         let reorder: ReorderSessionsRequest = serde_json::from_str(
             r#"{"pinned":false,"session_ids":["b","a"],"expected_versions":{"a":2,"b":4}}"#,
@@ -8544,10 +8721,12 @@ model = "gpt-5.2"
         );
         assert_eq!(reordered.sessions[0].sort_order, 0);
         assert_eq!(reordered.sessions[1].sort_order, 1);
-        assert!(reordered
-            .sessions
-            .iter()
-            .all(|summary| summary.presentation_version == 2));
+        assert!(
+            reordered
+                .sessions
+                .iter()
+                .all(|summary| summary.presentation_version == 2)
+        );
 
         let listed = manager.list_sessions(false).await.unwrap();
         assert_eq!(
@@ -8655,8 +8834,8 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn sse_route_is_never_compressed_and_preserves_boundary_ordering() {
-        async fn finite_sse_route(
-        ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
+        async fn finite_sse_route()
+        -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
             let replayed = vec![test_event(4, "replayed-4"), test_event(5, "replayed-5")];
             let live = test_event(6, "live-6");
             let (sender, receiver) = tokio::sync::broadcast::channel(4);
