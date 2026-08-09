@@ -12,16 +12,24 @@ import {
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { FilesView } from "@/app/components/inspector/FilesView";
+import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
-import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
+import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import {
+  DEFAULT_SESSION_PANEL,
+  SESSION_PANEL_LABEL,
+  WIDE_SESSION_PANELS,
+  type SessionPanel,
+} from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
 import {
   selectRevision,
   selectThread,
   selectWorkset,
+  showSidePanelList,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
   useSelectedRevision,
@@ -35,14 +43,6 @@ import type {
   WorkspaceSnapshot,
 } from "@/app/types/api";
 
-// The `files` panel is called Changes in the design; its route keeps the older
-// name so links that are already out there still land on it.
-const PANEL_LABEL: Record<SessionPanel, string> = {
-  threads: "Threads",
-  files: "Files",
-  worksets: "Worksets",
-};
-
 interface SessionSideBoxProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
@@ -53,18 +53,30 @@ interface SessionSideBoxProps {
 function FooterChip({
   iconName,
   label,
+  compact = false,
 }: {
   iconName: IconName;
   label: string;
+  compact?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-[6px] shrink-0 min-w-0 pl-1 pr-3 py-1 rounded-[4px]">
+    <div
+      className={cn(
+        "flex items-center gap-[6px] shrink-0 min-w-0 py-1 rounded-[4px]",
+        compact ? "pl-1 pr-1" : "pl-1 pr-3",
+      )}
+    >
       <Icon
         iconName={iconName}
         size={16}
         color="var(--color-fill-basic-tertiary)"
       />
-      <span className="label-micro text-basic-tertiary truncate max-w-[128px]">
+      <span
+        className={cn(
+          "label-micro text-basic-tertiary truncate",
+          compact ? "max-w-[64px]" : "max-w-[128px]",
+        )}
+      >
         {label}
       </span>
     </div>
@@ -76,10 +88,13 @@ function SideBoxFooter({
   sessionId,
   workspace,
   revision,
+  compact,
 }: {
   sessionId: string;
   workspace: WorkspaceSnapshot | null;
   revision: number | null;
+  /** Phone width: the chips give up room so the diff total stays visible. */
+  compact: boolean;
 }) {
   const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
   const branch = workspace?.branch ?? null;
@@ -93,9 +108,25 @@ function SideBoxFooter({
   const deletions = totals?.total_deletions ?? 0;
 
   return (
-    <div className="flex h-10 items-center gap-[10px] px-4 shrink-0 border-t border-muted bg-elevation-level-1">
-      <div className="flex flex-1 min-w-0 items-center gap-[10px]">
-        {repo ? <FooterChip iconName={IconName.Folder} label={repo} /> : null}
+    <div
+      className={cn(
+        "flex h-10 items-center gap-[10px] shrink-0 border-t border-muted bg-elevation-level-1",
+        compact ? "px-2 gap-1" : "px-4",
+      )}
+    >
+      <div
+        className={cn(
+          "flex flex-1 min-w-0 items-center",
+          compact ? "gap-1" : "gap-[10px]",
+        )}
+      >
+        {repo ? (
+          <FooterChip
+            iconName={IconName.Folder}
+            label={repo}
+            compact={compact}
+          />
+        ) : null}
         {branch ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
         <RevisionPicker
           sessionId={sessionId}
@@ -115,7 +146,9 @@ function SideBoxFooter({
 
 /**
  * The left half of the session screen: one box with the Threads / Files /
- * Worksets panels, sized by the shared layout store.
+ * Worksets panels, sized by the shared layout store. On a phone the panels are
+ * the body of the modal box that SessionPage puts them in, and its chrome —
+ * header, bottom bar — belongs to the dialog rather than to this box.
  */
 export function SessionSideBox({
   sessionId,
@@ -124,10 +157,55 @@ export function SessionSideBox({
   onPanelChange,
 }: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const selectedThread = useSelectedThread();
   const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
+
+  // History belongs to the phone's bottom bar: a wide box reaches revisions
+  // through its footer chip, so a link to that panel lands on the default one.
+  const active =
+    !isMobile && panel === "history" ? DEFAULT_SESSION_PANEL : panel;
+
+  const body = (
+    <>
+      {active === "files" ? (
+        <FilesView
+          sessionId={sessionId}
+          snapshot={snapshot}
+          revision={selectedRevision}
+        />
+      ) : null}
+      {active === "worksets" ? (
+        <WorksetsView
+          snapshot={snapshot}
+          selected={selectedWorkset}
+          onSelect={selectWorkset}
+        />
+      ) : null}
+      {active === "threads" ? (
+        <ThreadsView
+          snapshot={snapshot}
+          selected={selectedThread}
+          selectedEpisode={selectedThreadEpisode}
+          onSelect={selectThread}
+        />
+      ) : null}
+      {active === "history" ? (
+        <HistoryView
+          sessionId={sessionId}
+          selected={selectedRevision}
+          onSelect={selectRevision}
+        />
+      ) : null}
+    </>
+  );
+
+  if (isMobile) {
+    return <div className="flex flex-col flex-1 min-h-0">{body}</div>;
+  }
 
   return (
     <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-md border border-muted">
@@ -139,20 +217,26 @@ export function SessionSideBox({
         )}
       >
         <div className="flex flex-1 min-w-0 items-center gap-1" role="tablist">
-          {SESSION_PANELS.map((name) => (
+          {WIDE_SESSION_PANELS.map((name) => (
             <HorizontalTabsItem
               key={name}
               role="tab"
-              aria-selected={panel === name}
-              active={panel === name}
+              aria-selected={active === name}
+              active={active === name}
               variant={HorizontalTabsItemVariant.Neutral}
-              onClick={() => onPanelChange(name)}
+              onClick={() => {
+                // A tablet shows one column at a time, and a new panel opens on
+                // its selected row; a desktop split ignores the flag entirely.
+                showSidePanelList(false);
+                onPanelChange(name);
+              }}
             >
-              {PANEL_LABEL[name]}
+              {SESSION_PANEL_LABEL[name]}
             </HorizontalTabsItem>
           ))}
         </div>
-        {/* Expand/hide live here in the split; once fullscreen the Modal owns Close. */}
+        {/* Expand/hide live here in the split; once fullscreen the Modal owns
+            Close. */}
         {expanded ? null : (
           <div className="flex items-center gap-2 pb-[2px] shrink-0">
             <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft}>
@@ -181,35 +265,13 @@ export function SessionSideBox({
         )}
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col">
-        {panel === "files" ? (
-          <FilesView
-            sessionId={sessionId}
-            snapshot={snapshot}
-            revision={selectedRevision}
-          />
-        ) : null}
-        {panel === "worksets" ? (
-          <WorksetsView
-            snapshot={snapshot}
-            selected={selectedWorkset}
-            onSelect={selectWorkset}
-          />
-        ) : null}
-        {panel === "threads" ? (
-          <ThreadsView
-            snapshot={snapshot}
-            selected={selectedThread}
-            selectedEpisode={selectedThreadEpisode}
-            onSelect={selectThread}
-          />
-        ) : null}
-      </div>
+<div className="flex-1 min-h-0 flex flex-col">{body}</div>
 
       <SideBoxFooter
         sessionId={sessionId}
         workspace={snapshot?.workspace ?? null}
         revision={selectedRevision}
+        compact={isTablet}
       />
     </div>
   );

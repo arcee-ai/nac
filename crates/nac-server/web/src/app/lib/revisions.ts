@@ -8,6 +8,12 @@
 import type { ModelTurn, TranscriptTurn } from "@/app/lib/transcript";
 import type { WorkspaceRevision } from "@/app/types/api";
 
+/** How a revision is named once it is no longer the working tree. */
+export const revisionTitle = (ordinal: number) => `Snapshot ${ordinal}`;
+
+/** The list arrives newest first, so the oldest revision is number one. */
+export const revisionOrdinal = (index: number, total: number) => total - index;
+
 /**
  * The revision each model turn was captured by, keyed by turn, leaving out the
  * runs that changed nothing — most of them, in a session that mostly talks.

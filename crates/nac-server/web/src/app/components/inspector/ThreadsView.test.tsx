@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
@@ -62,16 +63,18 @@ function renderThreads(
   });
   client.setQueryData(["session", value.metadata.session_id], value);
   return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <ThreadsView
-          snapshot={value}
-          selected={selected}
-          selectedEpisode={selectedEpisode}
-          onSelect={() => {}}
-        />
-      </ToastProvider>
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <ThreadsView
+            snapshot={value}
+            selected={selected}
+            selectedEpisode={selectedEpisode}
+            onSelect={() => {}}
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -149,6 +152,45 @@ describe("exact dispatch actions", () => {
     renderThreads(activeSnapshot(), "worker", "missing-historical-key");
     expect(screen.queryByRole("button", { name: /Cancel dispatch/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Steer selected dispatch")).not.toBeInTheDocument();
+  });
+
+  it("keeps the responsive log selector and exact controls together on mobile", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("max-width: 767.98px"),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    const value = activeSnapshot();
+    value.buffered_thread_completions = [
+      {
+        run_id: "old-run",
+        thread_name: "worker",
+        dispatch_id: "old-dispatch",
+        tool_call_id: "old-call",
+        status: "running",
+      },
+    ];
+
+    renderThreads(value, "worker", "old-dispatch");
+
+    expect(screen.getByRole("button", { name: "Command Log" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Overview" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Cancel dispatch worker" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Steer selected dispatch")).toBeInTheDocument();
+    expect(screen.getByText("Result available")).toBeInTheDocument();
   });
 
   it("reports a stale identity conflict instead of retargeting the replacement", async () => {

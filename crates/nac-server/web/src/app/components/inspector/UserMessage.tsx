@@ -13,6 +13,7 @@ import {
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 interface UserMessageProps {
   text: string;
@@ -58,6 +59,7 @@ export const UserMessage = memo(function UserMessage({
   perfRender("UserMessage");
   const canRefresh = onRefresh != null && messageIndex != null;
   const canRevert = onRevert != null && messageIndex != null;
+  const isMobile = useIsMobile();
   return (
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
       <div
@@ -73,11 +75,13 @@ export const UserMessage = memo(function UserMessage({
       {!pending ? (
         <div
           className={cn(
-            "flex items-center justify-end gap-3 pt-1",
+            "flex items-center justify-end gap-3 pt-3",
             // Keep the row hittable while moving from the bubble to the actions.
             "opacity-0 pointer-events-none transition-opacity duration-150",
             "group-hover/user-msg:opacity-100 group-hover/user-msg:pointer-events-auto",
             "group-focus-within/user-msg:opacity-100 group-focus-within/user-msg:pointer-events-auto",
+            // Nothing hovers on a touch screen, so the row simply stays out.
+            "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
           )}
         >
           {timestamp ? (
@@ -104,13 +108,15 @@ export const UserMessage = memo(function UserMessage({
           {canRefresh ? (
             <Tooltip title="Resend" position={TooltipPosition.TopCenter}>
               <Button
-                size={ButtonSize.Small}
-                variant={ButtonVariant.Tertiary}
+                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                variant={
+                  isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                }
                 content={ButtonContent.Icon}
                 aria-label="Resend"
                 disabled={actionsDisabled}
                 onClick={() => onRefresh(messageIndex)}
-                className="!h-4 !min-h-4 !p-0"
+                className="md:!h-4 md:!min-h-4 md:!p-0"
               >
                 <Icon iconName={IconName.Refresh} size={16} />
               </Button>
@@ -123,13 +129,15 @@ export const UserMessage = memo(function UserMessage({
               position={TooltipPosition.TopCenter}
             >
               <Button
-                size={ButtonSize.Small}
-                variant={ButtonVariant.Tertiary}
+                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                variant={
+                  isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                }
                 content={ButtonContent.Icon}
                 aria-label="Revert to this snapshot"
                 disabled={actionsDisabled}
                 onClick={() => onRevert(messageIndex, text)}
-                className="!h-4 !min-h-4 !p-0"
+                className="md:!h-4 md:!min-h-4 md:!p-0"
               >
                 <Icon iconName={IconName.TurnLeft} size={16} />
               </Button>
@@ -141,12 +149,14 @@ export const UserMessage = memo(function UserMessage({
             >
               <span className="inline-flex">
                 <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Tertiary}
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled
-                  className="!h-4 !min-h-4 !p-0"
+                  className="md:!h-4 md:!min-h-4 md:!p-0"
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -156,11 +166,11 @@ export const UserMessage = memo(function UserMessage({
 
           <CopyButton
             value={text}
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Tertiary}
+            size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+            variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
             title="Copy message"
             position={TooltipPosition.TopCenter}
-            className="!h-4 !min-h-4 !p-0"
+            className="md:!h-4 md:!min-h-4 md:!p-0"
           />
         </div>
       ) : null}

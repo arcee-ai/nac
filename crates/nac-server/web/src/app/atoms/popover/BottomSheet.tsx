@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useLocation } from "react-router-dom";
 import { cn } from "../../lib/cn";
 import CoverBackground from "../cover-background";
 
 /** Kept in step with the transition below, so the sheet is torn down after it. */
-const EXIT_MS = 150;
+const EXIT_MS = 300;
 
 interface BottomSheetProps {
   open: boolean;
@@ -28,6 +29,8 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   const [mounted, setMounted] = useState(open);
   const [down, setDown] = useState(true);
   const [wasOpen, setWasOpen] = useState(open);
+  const previousPathnameRef = useRef("");
+  const location = useLocation();
 
   // Both edges start from the off-screen transform: opening mounts there and
   // slides up, closing drops back down and unmounts once the transition ends.
@@ -57,20 +60,40 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     return () => clearTimeout(timer);
   }, [open, mounted]);
 
+  // Dismiss when the route changes — a sheet left open over a new page is
+  // almost always a leftover from the previous screen.
+  useEffect(() => {
+    if (
+      previousPathnameRef.current &&
+      previousPathnameRef.current !== location.pathname &&
+      mounted
+    ) {
+      onClose();
+    }
+    previousPathnameRef.current = location.pathname;
+  }, [location.pathname, mounted, onClose]);
+
   if (!mounted) return null;
 
   return createPortal(
     <>
-      <CoverBackground open={!down} zIndex={zIndex} onClick={onClose} />
+      <CoverBackground
+        open={!down}
+        zIndex={zIndex}
+        className="!duration-300"
+        onClick={onClose}
+      />
       <div
         style={{ zIndex }}
         className={cn(
           "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto",
-          "rounded-t-[24px] py-4 bg-elevation-level-2 shadow-2xl",
-          "transition-transform duration-150 ease-out [&>*]:shrink-0",
+          "rounded-t-3xl py-4 bg-elevation-level-2 shadow-2xl",
+          "transition-transform duration-300 ease-in-out [&>*]:shrink-0",
           down ? "translate-y-full" : "translate-y-0",
           className,
         )}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         {children}
       </div>

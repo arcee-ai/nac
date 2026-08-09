@@ -186,8 +186,48 @@
 .input-wrapper .input-btn-leading { left: 0; }
 .input-wrapper .input-btn-trailing { right: 0; }
 
+/* ============================ STICKY ============================ */
+/* Sticky controls are a 40px pill floating on its own elevated wrapper, which
+   owns the radius and the shadow. The inner control therefore has to give up
+   the height, radius and shadow that `.btn` / `.input` hardcode above — and
+   since this file is unlayered, Tailwind utilities cannot do that (see the
+   note under TABS). Selectors mirror the specificity of the rules they
+   override and rely on coming later in the source. */
+.btn-sticky { height: 40px; border-radius: 9999px; box-shadow: none; }
+.btn-sticky.btn-large.btn-icon { height: 40px; padding: 0 8px; }
+.btn-sticky.btn-large.btn-icon-left { height: 40px; padding-left: 8px; padding-right: 16px; }
+.btn-sticky.btn-large.btn-icon-right { height: 40px; padding-left: 16px; padding-right: 8px; }
+.btn-sticky.btn-large.btn-text { height: 40px; padding: 0 16px; }
+
+.input-sticky {
+  height: 40px;
+  font-size: 1rem;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* The mobile header's controls are 40px circles around a 24px icon, which no
+   size in the matrix above produces. Unlike `.btn-sticky` they keep whatever
+   shadow their colour variant brings. */
+.btn-round { border-radius: 9999px; }
+.btn-round.btn-medium.btn-icon { height: 40px; padding: 0 8px; }
+/* The glyph has to grow with it, and the rule above only sets the box: an
+   `<Icon size>` prop cannot win against `.btn-medium .icon`. */
+.btn-round.btn-medium .icon,
+.btn-round.btn-medium .icon > svg {
+  width: 24px; height: 24px; min-width: 24px; min-height: 24px;
+}
+
+/* A large select that fills a form column reads as a field, so its label sits
+   flush with the 12px padding instead of `.btn-large.btn-icon-right`'s 24px
+   lead-in. Same unlayered-CSS reason as the note under TABS. */
+.btn-large.btn-icon-right.btn-field { padding-left: 12px; }
+
 /* ============================ TABS ============================ */
 .tab-btn { justify-content: flex-start; }
+/* Only the touch-sized rows are used, and the design spaces their 24px icons
+   further from the label than `.btn-large`'s 8px. */
+.tab-btn.btn-large { gap: 12px; }
 
 /* The underline, the corners and the active label colour have to be declared
    here rather than as utility classes on the element. This file is imported

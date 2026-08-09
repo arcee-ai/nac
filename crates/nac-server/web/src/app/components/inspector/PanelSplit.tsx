@@ -6,6 +6,18 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  Icon,
+  IconName,
+  Modal,
+  TabButton,
+  TabButtonSize,
+} from "@/app/atoms";
+import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import {
   clampPanelListWidth,
@@ -14,22 +26,46 @@ import {
   setPanelListWidth,
   usePanelListWidth,
 } from "@/app/hooks/usePanelListWidth";
+import {
+  showSidePanelList,
+  toggleSidePanelList,
+  useSidePanelList,
+} from "@/app/store/sessionLayoutStore";
 
 /**
  * The shape all three side-box panels share: a narrow list of rows on the left
  * and the detail of whatever is selected on the right.
+ *
+ * Below the desktop width there is no room for both, so the panel opens on the
+ * row it has selected and the list is reached from a control of its own: a
+ * dialog over the detail on a phone, the panel's own column on a tablet.
  */
 export function PanelSplit({
   list,
-  listHeader,
+  listToolbar,
+  listTitle,
+  title,
+  actions,
   children,
 }: {
   list: ReactNode;
-  /** Toolbar pinned above the list, staying put while the list scrolls. */
-  listHeader?: ReactNode;
+  /**
+   * The list's own controls, staying put while it scrolls: a bar above it on a
+   * pointer, and a pill floating over its last rows on a phone.
+   */
+  listToolbar?: ReactNode;
+  /** What the list is of, for the header of the phone's list dialog. */
+  listTitle?: string;
+  /** Row that is open, named for the narrow header. */
+  title?: string;
+  /** Panel's own controls, trailing the narrow header. */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const storedWidth = usePanelListWidth();
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
+  const showList = useSidePanelList();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const dragging = useRef(false);
@@ -86,6 +122,79 @@ export function PanelSplit({
     window.addEventListener("pointercancel", onUp);
   };
 
+  if (isMobile) {
+    // The phone's outer dialog already shows the selected row; the list is a
+    // second dialog stacked on top of it.
+    return (
+      <>
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
+          {children}
+        </div>
+        <Modal
+          open={showList}
+          onClose={() => showSidePanelList(false)}
+          title={listTitle}
+          keepOnNavigate
+          bodyClassName="!p-0 relative flex flex-col overflow-hidden"
+        >
+          <div
+            className={cn(
+              "flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 gap-1 [&>*]:shrink-0",
+              // Clearance for the bar floating over the last rows.
+              listToolbar && "pb-[80px]",
+            )}
+          >
+            {list}
+          </div>
+          {listToolbar ? (
+            <div className="absolute inset-x-0 bottom-0 z-10 p-4 pointer-events-none [&>*]:pointer-events-auto">
+              {listToolbar}
+            </div>
+          ) : null}
+        </Modal>
+      </>
+    );
+  }
+
+  if (isTablet) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0 w-full">
+        {/* The list is a screen of its own here, so the row above the detail is
+            what leads back to it. */}
+        {!showList ? (
+          <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-level-1">
+            <span className="flex-1 min-w-0 truncate label-small text-basic-primary">
+              {title}
+            </span>
+            {actions}
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Open list"
+              aria-expanded={false}
+              onClick={toggleSidePanelList}
+            >
+              <Icon iconName={IconName.List} />
+            </Button>
+          </div>
+        ) : null}
+        {showList ? (
+          <div className="flex flex-col flex-1 min-h-0 bg-elevation-level-1">
+            {listToolbar}
+            <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-1 [&>*]:shrink-0">
+              {list}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
@@ -95,7 +204,7 @@ export function PanelSplit({
         className="relative flex flex-col shrink-0 min-h-0 border-r border-muted bg-elevation-level-1"
         style={{ width: listWidth }}
       >
-        {listHeader}
+        {listToolbar}
         <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0">
           {list}
         </div>
@@ -132,7 +241,10 @@ export function PanelSplit({
   );
 }
 
-/** Row of the left list, sized to the 24px tree row in the design. */
+/**
+ * Row of the left list, sized to the 24px tree row in the design — and to the
+ * 48px touch row on a phone, where a finger has none of a pointer's precision.
+ */
 export function PanelRow({
   label,
   active = false,
@@ -154,35 +266,23 @@ export function PanelRow({
   title?: string;
   onClick?: () => void;
 }) {
+  const isMobile = useIsMobile();
   return (
-    <button
+    <TabButton
       type="button"
-      className={cn(
-        "flex items-center gap-1 p-1 w-full rounded-[4px] text-left",
-        disabled
-          ? "opacity-50 cursor-default"
-          : active
-            ? "btn-ghost-highlighted"
-            : "btn-ghost",
-      )}
-      aria-pressed={active}
-      aria-disabled={disabled || undefined}
+      size={isMobile ? TabButtonSize.Large : TabButtonSize.Small}
+      active={active}
       disabled={disabled}
+      aria-pressed={active}
       title={title}
-      onClick={disabled ? undefined : onClick}
+      onClick={onClick}
     >
       {icon}
-      <span
-        className={cn(
-          "flex-1 min-w-0 truncate label-micro",
-          labelClassName ??
-            (disabled ? "text-basic-muted" : "text-btn-secondary"),
-        )}
-      >
+      <span className={cn("flex-1 min-w-0 truncate text-left", labelClassName)}>
         {label}
       </span>
       {trailing}
-    </button>
+    </TabButton>
   );
 }
 

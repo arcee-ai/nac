@@ -24,6 +24,7 @@ import {
   TabButtonSize,
   TabButtonVariant,
 } from "@/app/atoms";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { formatTokensCompact } from "@/app/lib/format";
 import { providerLabel } from "@/app/lib/providers";
@@ -131,10 +132,12 @@ export function CatalogModelPicker({
   value: CatalogPick | null;
   onSelect: (pick: CatalogPick) => void;
 }) {
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const tabSize = isMobile ? TabButtonSize.Large : TabButtonSize.Medium;
 
   const rows = useMemo(() => rowsFor(catalog, query), [catalog, query]);
   // A shorter list can leave the highlight past its end.
@@ -209,28 +212,39 @@ export function CatalogModelPicker({
       size="w-[520px]"
       // Portalled: the dialog scrolls its own body, which would clip the list.
       sticky
-      className="shrink-0"
-      panelClassName="p-2"
+      // Popover's root defaults to `w-fit`, which swallows `w-full` on the trigger.
+      className={cn("shrink-0", isMobile && "w-full")}
+      panelClassName="p-2 overflow-hidden"
+      // The sheet sizes to its content by default (only max-h). Pin the sheet
+      // itself to 70dvh — a height on the child alone loses to flex-1 + auto parent.
+      sheetClassName="h-[70dvh] max-h-[70dvh] min-h-[70dvh] overflow-hidden [&>*]:min-h-0 [&>*]:h-full [&>*]:flex [&>*]:flex-col"
       content={
-        <>
-          <Input
-            inputSize={InputSize.Medium}
-            leading={InputLeading.Icon}
-            leadingIconName={IconName.Search}
-            placeholder="Search models…"
-            autoFocus
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(event) => search(event.target.value)}
-            onKeyDown={onKeyDown}
-          />
+        <div
+          className={cn(
+            "flex flex-col min-h-0",
+            isMobile ? "h-full" : "h-[340px]",
+          )}
+        >
+          <div className="shrink-0 p-4 pt-0 md:p-0 md:pb-2">
+            <Input
+              inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+              leading={InputLeading.Icon}
+              leadingIconName={IconName.Search}
+              placeholder="Search models…"
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              value={query}
+              onChange={(event) => search(event.target.value)}
+              onKeyDown={onKeyDown}
+            />
+          </div>
           <div
             ref={listRef}
-            className="flex flex-col max-h-[320px] overflow-auto [&>*]:shrink-0"
+            className="flex flex-col flex-1 min-h-0 overflow-auto [&>*]:shrink-0"
           >
             {rows.length === 0 ? (
-              <p className="px-2 py-3 text-micro text-basic-muted">
+              <p className="px-4 md:px-2 py-3 text-micro text-basic-muted">
                 {loading
                   ? "Reading the catalog…"
                   : failed
@@ -246,7 +260,10 @@ export function CatalogModelPicker({
                   row.provider.id === value?.backend &&
                   row.model.id === value?.model;
                 return (
-                  <div key={`${row.provider.id}/${row.model.id}`}>
+                  <div
+                    key={`${row.provider.id}/${row.model.id}`}
+                    className="px-2 md:px-0"
+                  >
                     {first ? (
                       <div className="flex items-center gap-2 px-2 pt-6 pb-2">
                         <span className="tag-label text-basic-muted whitespace-nowrap shrink-0">
@@ -259,7 +276,7 @@ export function CatalogModelPicker({
                       </div>
                     ) : null}
                     <TabButton
-                      size={TabButtonSize.Medium}
+                      size={tabSize}
                       variant={
                         chosen
                           ? TabButtonVariant.Accent
@@ -273,9 +290,11 @@ export function CatalogModelPicker({
                       <span className="flex-1 min-w-0 text-left truncate">
                         {modelName(row.model)}
                       </span>
-                      <span className="code-small text-basic-muted truncate max-w-[180px]">
-                        {row.model.id}
-                      </span>
+                      {!isMobile ? (
+                        <span className="code-small text-basic-muted truncate md:max-w-[180px]">
+                          {row.model.id}
+                        </span>
+                      ) : null}
                       <span className="text-micro text-basic-muted shrink-0">
                         {modelMeta(row.model)}
                       </span>
@@ -285,17 +304,17 @@ export function CatalogModelPicker({
               })
             )}
           </div>
-        </>
+        </div>
       }
     >
       <Button
         variant={ButtonVariant.Secondary}
-        size={ButtonSize.Medium}
+        size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
         content={ButtonContent.IconRight}
         disabled={!catalog}
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
-        className="w-[280px]"
+        className="w-full md:w-[280px]"
       >
         <span className="flex-1 min-w-0 text-left truncate">{label}</span>
         {/* Some providers name their flagship after themselves; saying it twice

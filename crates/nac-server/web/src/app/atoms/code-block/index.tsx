@@ -69,13 +69,18 @@ const CodeBody: React.FC<CodeBodyProps> = ({
                   {tokens.length === 0
                     ? "\u00a0"
                     : tokens.map((token, position) => (
-                        <span key={position} className={token.className ?? undefined}>
+                        <span
+                          key={position}
+                          className={token.className ?? undefined}
+                        >
                           {token.text}
                         </span>
                       ))}
                 </div>
               ))
-            : plain.map((line, index) => <div key={index}>{line || "\u00a0"}</div>)}
+            : plain.map((line, index) => (
+                <div key={index}>{line || "\u00a0"}</div>
+              ))}
         </code>
       </pre>
     </div>
@@ -170,7 +175,6 @@ const CodeBlock: React.FC<CodeBlockProps> & { Size: typeof CodeBlockSize } = ({
           title={title ?? language ?? "Code"}
           fullScreen
           flush
-          footer={<CopyButton value={code} title="Copy code" />}
         >
           <div className={cn("code", size)}>{body}</div>
         </Modal>

@@ -18,6 +18,7 @@ import {
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
+import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { statusLabelClass } from "@/app/lib/fileStatus";
 import {
@@ -78,6 +79,7 @@ interface TreeProps {
 
 /** One level of the file tree, indented by a guide line like Figma. */
 function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
+  const isMobile = useIsMobile();
   return (
     // No `w-full`: as a flex child this already stretches, and a full width on
     // top of the indent margin would push every deep level a few pixels past
@@ -123,7 +125,7 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
           labelClassName={statusLabelClass(file.status)}
           // The status letter used to sit here; the label colour already says
           // as much, so the slot shows what kind of file it is instead.
-          icon={<FileIcon path={file.path} />}
+          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
           onClick={() => onSelect(file.path)}
         />
       ))}
@@ -141,6 +143,7 @@ function ChangedList({
   selected: string | null;
   onSelect: (path: string) => void;
 }) {
+  const isMobile = useIsMobile();
   if (files.length === 0) {
     return (
       <div className="p-1 label-micro text-basic-muted">
@@ -158,7 +161,7 @@ function ChangedList({
           active={selected === file.path}
           title={file.path}
           labelClassName={statusLabelClass(file.status)}
-          icon={<FileIcon path={file.path} />}
+          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
           onClick={() => onSelect(file.path)}
         />
       ))}
@@ -170,16 +173,20 @@ function ListingButton({
   iconName,
   label,
   active,
+  round = false,
   onClick,
 }: {
   iconName: IconName;
   label: string;
   active: boolean;
+  /** The phone's 40px circle around a 24px glyph, for the floating pill. */
+  round?: boolean;
   onClick: () => void;
 }) {
   return (
     <Button
-      size={ButtonSize.Small}
+      className={round ? "btn-round" : undefined}
+      size={round ? ButtonSize.Medium : ButtonSize.Small}
       variant={active ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
       content={ButtonContent.Icon}
       aria-pressed={active}
@@ -192,7 +199,7 @@ function ListingButton({
   );
 }
 
-/** The bar above the list: how the files are listed, and the commit action. */
+/** How the files are listed, and the commit action. */
 function ListToolbar({
   sessionId,
   listing,
@@ -204,27 +211,51 @@ function ListToolbar({
   changed: ChangedFileStat[];
   revision: number | null;
 }) {
+  const isMobile = useIsMobile();
+
+  const listingButtons = (
+    <>
+      <ListingButton
+        iconName={IconName.Folders}
+        label="Show every file"
+        active={listing === "tree"}
+        round={isMobile}
+        onClick={() => selectFileListing("tree")}
+      />
+      <ListingButton
+        iconName={IconName.Scheme}
+        label="Show changed files only"
+        active={listing === "changed"}
+        round={isMobile}
+        onClick={() => selectFileListing("changed")}
+      />
+    </>
+  );
+  const commit = (
+    <CommitPopover
+      sessionId={sessionId}
+      changed={changed}
+      revision={revision}
+    />
+  );
+
+  // A phone has no room for a bar of its own above the list, so the design
+  // floats the same two controls over its last rows instead.
+  if (isMobile) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-4 p-1 rounded-full bg-elevation-level-3 shadow-2xl">
+          {listingButtons}
+        </div>
+        {commit}
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
-      <div className="flex items-center gap-2 flex-1">
-        <ListingButton
-          iconName={IconName.Folders}
-          label="Show every file"
-          active={listing === "tree"}
-          onClick={() => selectFileListing("tree")}
-        />
-        <ListingButton
-          iconName={IconName.Scheme}
-          label="Show changed files only"
-          active={listing === "changed"}
-          onClick={() => selectFileListing("changed")}
-        />
-      </div>
-      <CommitPopover
-        sessionId={sessionId}
-        changed={changed}
-        revision={revision}
-      />
+      <div className="flex items-center gap-2 flex-1">{listingButtons}</div>
+      {commit}
     </div>
   );
 }
@@ -343,7 +374,7 @@ function Section({
     return <Notice>No hunks for this section.</Notice>;
 
   return (
-    <>
+    <div className="pb-[128px] md:pb-0">
       {section.hunks.map((hunk, index) => (
         <div key={index} className="flex flex-col w-full">
           <div className="flex items-start w-full border-l-2 border-transparent bg-info-tertiary">
@@ -367,7 +398,7 @@ function Section({
       {section.truncated ? (
         <Notice>Diff was truncated by the backend.</Notice>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -379,9 +410,14 @@ function PaneHeader({
   path: string;
   trailing: React.ReactNode;
 }) {
+  // On a phone the dialog chrome already names the file and carries the badge,
+  // so this bar would only repeat them.
+  const isDesktop = useIsDesktop();
+  if (!isDesktop) return null;
+
   return (
     <div
-      className="flex items-center gap-[10px] h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-0-5"
+      className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-0-5"
       title={path}
     >
       <div className="flex flex-1 items-center gap-[6px] min-w-0">
@@ -678,7 +714,22 @@ export function FilesView({
 
   return (
     <PanelSplit
-      listHeader={
+      listTitle="Files"
+      title={current?.split("/").pop()}
+      actions={
+        currentChange &&
+        (currentChange.additions || currentChange.deletions) ? (
+          <div className="flex items-center gap-2 shrink-0 code code-small">
+            <span className="text-success-primary">
+              +{currentChange.additions ?? 0}
+            </span>
+            <span className="text-error-primary">
+              -{currentChange.deletions ?? 0}
+            </span>
+          </div>
+        ) : null
+      }
+      listToolbar={
         <ListToolbar
           sessionId={sessionId}
           listing={fileListing}

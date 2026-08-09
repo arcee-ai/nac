@@ -33,8 +33,17 @@ function installMatchMedia(initialMatches: boolean) {
   } as unknown as MediaQueryList;
 
   const matchMedia = vi.fn((query: string) => {
-    expect(query).toBe(QUERY);
-    return media;
+    if (query === QUERY) return media;
+    return {
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList;
   });
   vi.stubGlobal("matchMedia", matchMedia);
 
