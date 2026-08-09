@@ -4701,7 +4701,7 @@ mod tests {
 
     #[tokio::test]
     async fn public_proxy_headers_reach_get_json_and_sse_routes() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("public_proxy_headers");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -4781,7 +4781,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_foreign_host_is_refused_until_the_operator_names_it() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("foreign_host");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, None);
@@ -5007,6 +5007,30 @@ mod tests {
 
     static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn recover_test_lock(lock: &std::sync::Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
+        // ScopedModelEnv restores every process variable while unwinding, and this
+        // mutex protects no data invariant. Keep the primary panic without turning
+        // lock poisoning into failures in otherwise unrelated server tests.
+        lock.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn server_model_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        recover_test_lock(&SERVER_MODEL_ENV_LOCK)
+    }
+
+    #[test]
+    fn test_lock_recovery_contains_a_primary_panic() {
+        let lock = std::sync::Mutex::new(());
+        let primary = std::panic::catch_unwind(|| {
+            let _guard = lock.lock().unwrap();
+            panic!("primary test failure");
+        });
+        assert!(primary.is_err());
+        assert!(lock.is_poisoned());
+        drop(recover_test_lock(&lock));
+    }
+
     struct ScopedModelEnv {
         original: Vec<(&'static str, Option<std::ffi::OsString>)>,
     }
@@ -5190,7 +5214,7 @@ mod tests {
 
     #[tokio::test]
     async fn fork_manager_attaches_clean_child_and_projects_lineage() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("fork_manager_success");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -5342,7 +5366,7 @@ mod tests {
 
     #[test]
     fn launch_defaults_reload_config_after_manager_boot() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("launch_defaults_reload");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -5392,7 +5416,7 @@ mod tests {
 
     #[test]
     fn launch_defaults_use_local_cwd_but_server_root_for_ssh_with_relative_config_homes() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
 
         for config_home_kind in ["NAC_HOME", "XDG_CONFIG_HOME", "HOME"] {
             let root = temp_root(&format!("launch_defaults_{config_home_kind}"));
@@ -5481,7 +5505,7 @@ mod tests {
 
     #[test]
     fn launch_defaults_carry_the_configured_model_and_effort() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("launch_defaults_model_effort");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -5654,7 +5678,7 @@ mod tests {
 
     #[tokio::test]
     async fn models_endpoint_computes_auth_status_from_the_environment() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("models_endpoint_status");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -5791,7 +5815,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_create_rejects_removed_backend_names_as_bad_requests() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("removed_backend_create");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, None);
@@ -5831,7 +5855,7 @@ mod tests {
 
     #[tokio::test]
     async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
 
         {
             let root = temp_root("arcee_malformed_auth_status");
@@ -6130,7 +6154,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_attach_ignores_invalid_ambient_model_but_create_remains_strict() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("persisted_attach_invalid_ambient_model");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -6177,7 +6201,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionally_repairable() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("repair_incomplete_settings");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-repair-key"));
@@ -6336,7 +6360,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn structurally_invalid_raw_settings_require_explicit_transactional_repair() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("repair_structurally_invalid_settings");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-repair-key"));
@@ -6490,10 +6514,36 @@ thread_timeout_secs = 7200
         })
     }
 
+    struct DispatchingEndpoint {
+        task: tokio::task::JoinHandle<()>,
+        request_count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl DispatchingEndpoint {
+        fn abort(&self) {
+            self.task.abort();
+        }
+    }
+
+    fn json_contains_string_field(value: &serde_json::Value, field: &str, expected: &str) -> bool {
+        match value {
+            serde_json::Value::Object(fields) => {
+                fields.get(field).and_then(serde_json::Value::as_str) == Some(expected)
+                    || fields
+                        .values()
+                        .any(|value| json_contains_string_field(value, field, expected))
+            }
+            serde_json::Value::Array(values) => values
+                .iter()
+                .any(|value| json_contains_string_field(value, field, expected)),
+            _ => false,
+        }
+    }
+
     async fn point_session_at_dispatching_endpoint(
         root: &std::path::Path,
         session_id: &str,
-    ) -> tokio::task::JoinHandle<()> {
+    ) -> DispatchingEndpoint {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -6502,13 +6552,16 @@ thread_timeout_secs = 7200
         snapshot.base_url = format!("http://{address}/v1");
         sessions::update_session_config(&root.join("store.db"), &snapshot).unwrap();
 
-        tokio::spawn(async move {
+        let request_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let task_request_count = Arc::clone(&request_count);
+        let task = tokio::spawn(async move {
             let orchestrator_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     break;
                 };
                 let orchestrator_calls = Arc::clone(&orchestrator_calls);
+                let request_count = Arc::clone(&task_request_count);
                 tokio::spawn(async move {
                     let mut request = Vec::new();
                     let mut buffer = [0_u8; 4096];
@@ -6543,9 +6596,11 @@ thread_timeout_secs = 7200
                         request.extend_from_slice(&buffer[..read]);
                     }
                     let body = &request[header_end..header_end + content_length];
-                    let is_orchestrator = body
-                        .windows(b"\"name\":\"thread_cancel\"".len())
-                        .any(|window| window == b"\"name\":\"thread_cancel\"");
+                    request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let request_json: serde_json::Value =
+                        serde_json::from_slice(body).expect("mock request body should be JSON");
+                    let is_orchestrator =
+                        json_contains_string_field(&request_json, "name", "thread_cancel");
                     if !is_orchestrator {
                         std::future::pending::<()>().await;
                     }
@@ -6577,32 +6632,154 @@ thread_timeout_secs = 7200
                     socket.write_all(response.as_bytes()).await.unwrap();
                 });
             }
-        })
+        });
+        DispatchingEndpoint {
+            task,
+            request_count,
+        }
     }
 
-    async fn wait_for_dispatch(
+    async fn dispatch_wait_diagnostics(
         service: &nac_core::session_service::SessionService,
-        prior_dispatch_id: Option<&str>,
+        endpoint: &DispatchingEndpoint,
+        waiting_for: &str,
+    ) -> ! {
+        panic!(
+            "timed out after 30s waiting for {waiting_for}; mock_requests={}; active_run={:?}; active_dispatches={:?}; recent_events={:?}; messages={:?}",
+            endpoint
+                .request_count
+                .load(std::sync::atomic::Ordering::SeqCst),
+            service.active_run(),
+            service.active_thread_dispatches(),
+            service.recent_events(None, 32),
+            service.messages_snapshot().await,
+        )
+    }
+
+    async fn wait_for_accepted_dispatch(
+        service: &nac_core::session_service::SessionService,
+        events: &mut nac_core::events::SessionEventReceiver,
+        endpoint: &DispatchingEndpoint,
+        run_id: &str,
+        call_id: &str,
     ) -> nac_core::session_service::ActiveThreadDispatchFrontendSnapshot {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        let accepted = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
-                if let Some(dispatch) = service
-                    .active_thread_dispatches()
-                    .into_iter()
-                    .find(|dispatch| prior_dispatch_id != Some(dispatch.dispatch_id.as_str()))
-                {
-                    return dispatch;
+                let envelope = events.recv().await.expect("session event stream closed");
+                let belongs_to_run = envelope
+                    .run_id
+                    .as_ref()
+                    .is_some_and(|event_run_id| event_run_id.as_str() == run_id);
+                // External session events intentionally sanitize the optional
+                // dispatch fields. The exact run/call plus the unambiguous acceptance
+                // result is the synchronization edge; the registry assertion below
+                // supplies and verifies the complete dispatch identity.
+                match &envelope.event {
+                    nac_core::events::SessionEvent::Agent {
+                        event:
+                            nac_core::events::AgentEvent::ToolCallFinished {
+                                call_id: event_call_id,
+                                name,
+                                content_preview,
+                                is_error: false,
+                                ..
+                            },
+                    } if belongs_to_run
+                        && event_call_id == call_id
+                        && name == "thread"
+                        && content_preview.contains("accepted for background execution") =>
+                    {
+                        break;
+                    }
+                    nac_core::events::SessionEvent::RunFailed { message } if belongs_to_run => {
+                        panic!(
+                            "run {run_id} failed before dispatch {call_id} was accepted: {message}"
+                        );
+                    }
+                    nac_core::events::SessionEvent::RunCompleted { .. }
+                    | nac_core::events::SessionEvent::RunCancelled
+                        if belongs_to_run =>
+                    {
+                        panic!(
+                            "run {run_id} completed before dispatch {call_id} was accepted; mock_requests={}; active={:?}; recent={:?}",
+                            endpoint
+                                .request_count
+                                .load(std::sync::atomic::Ordering::SeqCst),
+                            service.active_thread_dispatches(),
+                            service.recent_events(None, 32),
+                        );
+                    }
+                    _ => {}
                 }
-                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
-        .await
-        .expect("thread dispatch should become active")
+        .await;
+        if accepted.is_err() {
+            dispatch_wait_diagnostics(
+                service,
+                endpoint,
+                &format!("accepted dispatch run={run_id} call={call_id}"),
+            )
+            .await;
+        }
+        service
+            .active_thread_dispatches()
+            .into_iter()
+            .find(|dispatch| {
+                dispatch.run_id.as_str() == run_id
+                    && dispatch.tool_call_id == call_id
+                    && dispatch.thread_name == "same/worker"
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "accepted dispatch identity was absent from active snapshot: run={run_id} call={call_id}; active={:?}",
+                    service.active_thread_dispatches()
+                )
+            })
+    }
+
+    async fn wait_for_thread_finished(
+        service: &nac_core::session_service::SessionService,
+        events: &mut nac_core::events::SessionEventReceiver,
+        endpoint: &DispatchingEndpoint,
+        dispatch_id: &str,
+        call_id: &str,
+        expected_status: nac_core::events::ThreadDispatchStatus,
+    ) {
+        let finished = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let envelope = events.recv().await.expect("session event stream closed");
+                if matches!(
+                    envelope.event,
+                    nac_core::events::SessionEvent::Agent {
+                        event: nac_core::events::AgentEvent::ThreadFinished {
+                            dispatch_id: Some(ref event_dispatch_id),
+                            tool_call_id: Some(ref event_call_id),
+                            status: Some(status),
+                            ..
+                        }
+                    } if event_dispatch_id == dispatch_id
+                        && event_call_id == call_id
+                        && status == expected_status
+                ) {
+                    break;
+                }
+            }
+        })
+        .await;
+        if finished.is_err() {
+            dispatch_wait_diagnostics(
+                service,
+                endpoint,
+                &format!("ThreadFinished dispatch={dispatch_id} call={call_id} status={expected_status:?}"),
+            )
+            .await;
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn exact_cancel_route_preserves_identity_transcript_and_replacement() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("exact_cancel_route");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -6614,6 +6791,8 @@ thread_timeout_secs = 7200
         let manager = test_manager(&root);
         let service = manager.attach_session("session").await.unwrap();
         let app = router(manager.clone());
+        // Subscribe before submission so acceptance cannot race event observation.
+        let mut events = service.subscribe_events();
 
         let first_run = manager
             .submit_prompt(
@@ -6628,7 +6807,14 @@ thread_timeout_secs = 7200
             .run_id()
             .unwrap()
             .to_string();
-        let first = wait_for_dispatch(&service, None).await;
+        let first = wait_for_accepted_dispatch(
+            &service,
+            &mut events,
+            &endpoint,
+            &first_run,
+            "call-dispatch-1",
+        )
+        .await;
         assert_eq!(first.run_id.as_str(), first_run);
         assert_eq!(first.thread_name, "same/worker");
         assert_eq!(first.tool_call_id, "call-dispatch-1");
@@ -6681,17 +6867,22 @@ thread_timeout_secs = 7200
         assert_eq!(requested["dispatch_id"], first.dispatch_id);
         assert_eq!(requested["originating_tool_call_id"], "call-dispatch-1");
 
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while service
+        wait_for_thread_finished(
+            &service,
+            &mut events,
+            &endpoint,
+            &first.dispatch_id,
+            &first.tool_call_id,
+            nac_core::events::ThreadDispatchStatus::Cancelled,
+        )
+        .await;
+        assert!(
+            service
                 .active_thread_dispatches()
                 .iter()
-                .any(|row| row.dispatch_id == first.dispatch_id)
-            {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("cancelled dispatch should terminalize");
+                .all(|row| row.dispatch_id != first.dispatch_id),
+            "cancelled dispatch remained active"
+        );
         let terminal = post_json(app.clone(), &uri, cancel_body.clone()).await;
         assert_eq!(terminal.status(), StatusCode::OK);
         let terminal = response_json(terminal).await;
@@ -6699,13 +6890,10 @@ thread_timeout_secs = 7200
         assert_eq!(terminal["terminal"], true);
         assert_eq!(terminal["terminal_status"], "cancelled");
 
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while service.active_run().is_some() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("first orchestrator run should finish");
+        assert!(
+            service.active_run().is_none(),
+            "first orchestrator run should finish before its cancelled thread terminalizes"
+        );
         let transcript_before_terminal_retry =
             serde_json::to_value(service.messages_snapshot().await.unwrap()).unwrap();
         let terminal_retry = post_json(app.clone(), &uri, cancel_body.clone()).await;
@@ -6719,7 +6907,7 @@ thread_timeout_secs = 7200
             transcript_before_terminal_retry,
             "the cancellation API must not append an orchestrator turn"
         );
-        manager
+        let replacement_run = manager
             .submit_prompt(
                 "session",
                 SubmitPromptRequest {
@@ -6728,8 +6916,18 @@ thread_timeout_secs = 7200
                 },
             )
             .await
-            .unwrap();
-        let replacement = wait_for_dispatch(&service, Some(&first.dispatch_id)).await;
+            .unwrap()
+            .run_id()
+            .unwrap()
+            .to_string();
+        let replacement = wait_for_accepted_dispatch(
+            &service,
+            &mut events,
+            &endpoint,
+            &replacement_run,
+            "call-dispatch-2",
+        )
+        .await;
         assert_eq!(replacement.thread_name, first.thread_name);
         assert_ne!(replacement.run_id, first.run_id);
         assert_eq!(replacement.tool_call_id, "call-dispatch-2");
@@ -6759,13 +6957,22 @@ thread_timeout_secs = 7200
         let cancelled = response_json(cancelled).await;
         assert_eq!(cancelled["outcome"], "requested");
         assert_eq!(cancelled["terminal"], true);
+        wait_for_thread_finished(
+            &service,
+            &mut events,
+            &endpoint,
+            &replacement.dispatch_id,
+            &replacement.tool_call_id,
+            nac_core::events::ThreadDispatchStatus::Cancelled,
+        )
+        .await;
         endpoint.abort();
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
     async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("steering_validation");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -6810,7 +7017,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn active_run_accepts_orchestrator_steering() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("orchestrator_steering");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -6912,7 +7119,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn submission_winning_lifecycle_gate_makes_concurrent_patch_reject_busy() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("submit_before_patch");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -7003,7 +7210,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn patch_winning_lifecycle_gate_evicts_before_concurrent_submission_attaches() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("patch_before_submit");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -7090,7 +7297,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn external_active_operation_lease_rejects_patch_from_independent_manager() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("external_active_patch");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -7142,7 +7349,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn stale_manager_rebuilds_all_model_authority_after_external_patch() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("external_patch_rebuild");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -7222,7 +7429,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn independent_manager_patch_rejects_held_shared_lease() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("cross_manager_config_lease");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -7274,7 +7481,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn empty_patch_does_not_touch_store_credentials_or_attached_service() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("empty_patch_noop");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -7316,7 +7523,7 @@ thread_timeout_secs = 7200
 
     #[tokio::test]
     async fn create_inherits_overrides_and_null_clears_optional_config() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("create_tristate");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -7420,7 +7627,7 @@ threshold_tokens = 64000
 
     #[tokio::test]
     async fn arcee_auth_rejects_non_thinking_model_on_create_and_update() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("arcee_auth_model_contract");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -7477,7 +7684,7 @@ threshold_tokens = 64000
 
     #[tokio::test]
     async fn openai_config_launch_switch_to_arcee_normalizes_the_managed_tuple() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("openai_to_arcee_launch");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -7520,7 +7727,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_bases() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("managed_base_materialization");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -7680,7 +7887,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn patch_repairs_absent_managed_bases_with_the_same_materialized_urls() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("managed_base_patch_repair");
         let nac_home = root.join("nac-home");
         write_codex_auth(&nac_home);
@@ -7731,7 +7938,7 @@ model = "gpt-5.2"
     #[tokio::test]
     async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_endpoint_and_credentials()
     {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("api_key_to_arcee_patch");
         let nac_home = root.join("nac-home");
         write_arcee_auth(&nac_home, "https://api.arcee.ai");
@@ -7775,7 +7982,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn codex_create_preflights_endpoint_and_managed_credentials_before_persistence() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
 
         for (label, base_url, auth, expected_status, expected) in [
             (
@@ -7872,7 +8079,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn codex_resume_preflights_missing_credentials() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("codex-resume-missing");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -7906,7 +8113,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn codex_patch_failures_roll_back_database_and_active_service() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("codex-patch-rollback");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -8042,7 +8249,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn create_rejects_raw_invalid_selectors_without_persisting() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("create_invalid_selectors");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -8084,7 +8291,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn create_rejects_unsupported_backend_and_anthropic_model_efforts_before_persisting() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("create_invalid_reasoning");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -8145,7 +8352,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("patch_tristate");
         let nac_home = root.join("nac-home");
         write_arcee_auth(&nac_home, "https://api.arcee.ai");
@@ -8306,7 +8513,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn invalid_patches_preserve_database_and_active_service() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("patch_rollback");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
@@ -8489,7 +8696,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn server_arcee_configuration_status_and_persistence_are_consistent() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("arcee_config_status");
         let nac_home = root.join("nac-home");
         write_arcee_auth(&nac_home, "https://tenant.arcee.ai");
@@ -8643,7 +8850,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn null_update_clears_legacy_arcee_api_key_env() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("clear_arcee_api_key_env");
         let nac_home = root.join("nac-home");
         write_arcee_auth(&nac_home, "https://api.arcee.ai");
@@ -8703,6 +8910,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn respond_live_handler_is_durable_and_versioned() {
+        let _lock = server_model_env_lock();
         let root = temp_root("respond_live");
         seed_session(&root, "known", "2026-01-01 00:00:00.000000000");
         let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("test-key"));
@@ -9016,7 +9224,7 @@ model = "gpt-5.2"
 
     #[tokio::test]
     async fn snapshot_projection_preserves_defaults_and_all_non_session_fields() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("snapshot_projection");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -9224,7 +9432,7 @@ model = "gpt-5.2"
     /// back out, and the caller reaches the provider by naming it instead.
     #[tokio::test]
     async fn a_supplied_key_is_filed_under_a_generated_name_and_answers_by_it() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("generated_credential");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).expect("create NAC home");
@@ -9281,7 +9489,7 @@ model = "gpt-5.2"
     /// signs in through the browser takes no name at all.
     #[tokio::test]
     async fn the_model_index_refuses_an_unresolvable_name_and_a_login_backend() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let _lock = server_model_env_lock();
         let root = temp_root("model_index_by_name");
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).expect("create NAC home");
