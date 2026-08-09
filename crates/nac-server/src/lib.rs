@@ -1,6 +1,7 @@
 mod compaction;
 mod filesystem;
 mod managed_auth;
+mod mixed_models;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -9,6 +10,7 @@ pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,
 };
+pub use mixed_models::{MixedModelsRequest, MixedTierRequest};
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
     RevertSessionResponse,
@@ -329,31 +331,6 @@ impl<'de> Deserialize<'de> for HeadersRequest {
             }
         }
     }
-}
-
-/// One mixed tier's model identity as a request names it. Same field
-/// semantics as the top-level session model fields; the credential is always
-/// an env/stored-credential name, never a key value.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct MixedTierRequest {
-    pub model: String,
-    #[serde(default)]
-    pub backend: Option<BackendKind>,
-    #[serde(default)]
-    pub base_url: Option<String>,
-    #[serde(default)]
-    pub api_key_env: Option<String>,
-    #[serde(default)]
-    pub reasoning_effort: Option<ReasoningEffort>,
-}
-
-/// Mixed-mode dispatch routing: the classification selects a user-configured
-/// worker model per tier.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct MixedModelsRequest {
-    pub easy: MixedTierRequest,
-    pub medium: MixedTierRequest,
-    pub hard: MixedTierRequest,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1223,7 +1200,7 @@ impl SessionManager {
         )?;
         model.mixed = match request.mixed_models {
             RequestField::Omitted | RequestField::Null => None,
-            RequestField::Value(mixed) => Some(mixed_models_config(
+            RequestField::Value(mixed) => Some(mixed_models::normalize(
                 mixed,
                 &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
                 None,
@@ -1850,7 +1827,7 @@ impl SessionManager {
             RequestField::Omitted => {}
             RequestField::Null => prospective.mixed_models = None,
             RequestField::Value(mixed) => {
-                prospective.mixed_models = Some(mixed_models_config(
+                prospective.mixed_models = Some(mixed_models::normalize(
                     mixed,
                     &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
                     None,
@@ -1884,7 +1861,7 @@ impl SessionManager {
         )?;
         // Fail a broken mixed tier here, not at the session's next launch.
         if let Some(mixed) = prospective.mixed_models.as_ref() {
-            runtime::validate_mixed_models(mixed)
+            nac_core::mixed_mode::validate(mixed)
                 .map_err(|error| request_configuration_error(format!("{error:#}")))?;
         }
         validate_model_configuration(
@@ -2398,10 +2375,16 @@ async fn create_model_config_handler(
     let mixed_models = request
         .mixed_models
         .map(|mixed| {
-            mixed_models_config(
+            mixed_models::normalize(
                 mixed,
                 &policy,
-                credential_name.as_deref().map(|name| (backend, name, None)),
+                credential_name
+                    .as_deref()
+                    .map(|name| mixed_models::InheritedCredential {
+                        backend,
+                        name,
+                        previous: None,
+                    }),
             )
         })
         .transpose()?;
@@ -2571,21 +2554,27 @@ async fn update_model_config_handler(
             RequestField::Omitted => existing.initial_prompt.clone(),
         },
         mixed_models: match request.mixed_models {
-            RequestField::Value(mixed) => Some(mixed_models_config(
+            RequestField::Value(mixed) => Some(mixed_models::normalize(
                 mixed,
                 &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
                 api_key_env
                     .as_deref()
-                    .map(|name| (backend, name, existing.api_key_env.as_deref())),
+                    .map(|name| mixed_models::InheritedCredential {
+                        backend,
+                        name,
+                        previous: existing.api_key_env.as_deref(),
+                    }),
             )?),
             RequestField::Null => None,
             RequestField::Omitted => existing.mixed_models.clone().map(|mut mixed| {
                 if let Some(name) = api_key_env.as_deref() {
-                    inherit_mixed_config_credential(
+                    mixed_models::rotate_inherited_credential(
                         &mut mixed,
-                        backend,
-                        name,
-                        existing.api_key_env.as_deref(),
+                        mixed_models::InheritedCredential {
+                            backend,
+                            name,
+                            previous: existing.api_key_env.as_deref(),
+                        },
                     );
                 }
                 mixed
@@ -3329,70 +3318,6 @@ fn create_compaction_threshold_override(field: RequestField<u64>) -> Result<Opti
         RequestField::Null => Ok(Some(0)),
         RequestField::Value(threshold) => validated_compaction_threshold(threshold).map(Some),
     }
-}
-
-/// Validate and normalize one mixed tier from a request into the persisted
-/// form: the model and supplied base URL must be nonblank, and a custom URL is
-/// held to the same credential destination policy as the top-level model.
-fn mixed_tier_settings(
-    tier: MixedTierRequest,
-    label: &str,
-    policy: &CredentialDestinationPolicy,
-    inherited_credential: Option<(BackendKind, &str, Option<&str>)>,
-) -> Result<sessions::MixedTierSettings> {
-    let model = nonblank_request_string(tier.model, &format!("mixed_models.{label}.model"))?;
-    let base_url = tier
-        .base_url
-        .map(|value| nonblank_request_string(value, &format!("mixed_models.{label}.base_url")))
-        .transpose()?;
-    let tier_backend = tier.backend.or_else(|| provider_for_model(&model));
-    enforce_trusted_base_url(tier_backend, base_url.as_deref(), policy)?;
-    let inherit = inherited_credential.is_some_and(|(backend, _, previous)| {
-        Some(backend) == tier_backend
-            && (tier.api_key_env.is_none() || tier.api_key_env.as_deref() == previous)
-    });
-    let api_key_env = if inherit {
-        inherited_credential.map(|(_, name, _)| name.to_string())
-    } else {
-        tier.api_key_env
-    };
-    Ok(sessions::MixedTierSettings {
-        model,
-        backend: tier.backend,
-        base_url,
-        api_key_env,
-        reasoning_effort: tier.reasoning_effort,
-    })
-}
-
-fn inherit_mixed_config_credential(
-    mixed: &mut sessions::MixedModeConfig,
-    backend: BackendKind,
-    name: &str,
-    previous: Option<&str>,
-) {
-    for tier in [&mut mixed.easy, &mut mixed.medium, &mut mixed.hard] {
-        let tier_backend = tier
-            .backend
-            .or_else(|| provider_for_model(tier.model.as_str()));
-        if tier_backend == Some(backend)
-            && (tier.api_key_env.is_none() || tier.api_key_env.as_deref() == previous)
-        {
-            tier.api_key_env = Some(name.to_string());
-        }
-    }
-}
-
-fn mixed_models_config(
-    request: MixedModelsRequest,
-    policy: &CredentialDestinationPolicy,
-    inherited_credential: Option<(BackendKind, &str, Option<&str>)>,
-) -> Result<sessions::MixedModeConfig> {
-    Ok(sessions::MixedModeConfig {
-        easy: mixed_tier_settings(request.easy, "easy", policy, inherited_credential)?,
-        medium: mixed_tier_settings(request.medium, "medium", policy, inherited_credential)?,
-        hard: mixed_tier_settings(request.hard, "hard", policy, inherited_credential)?,
-    })
 }
 
 fn model_options(

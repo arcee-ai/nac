@@ -6,6 +6,7 @@ mod agents_md;
 pub mod commands;
 pub mod events;
 mod mcp;
+pub mod mixed_mode;
 pub mod model;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a

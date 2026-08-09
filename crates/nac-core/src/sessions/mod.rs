@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+pub use crate::mixed_mode::{MixedModeConfig, MixedTierSettings};
 use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
@@ -32,33 +33,6 @@ pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunSt
 
 use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
-
-/// One tier's worker-model identity in mixed-models mode. The model remains a
-/// catalog id; backend and reasoning effort are typed before entering the
-/// domain model.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MixedTierSettings {
-    pub model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backend: Option<BackendKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key_env: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<ReasoningEffort>,
-}
-
-/// Mixed-mode dispatch routing: the orchestrator classifies every thread
-/// dispatch as easy, medium, or hard, and the classification selects a
-/// user-configured worker model per tier. `Some` on a session means mixed
-/// mode is on; `None` keeps single-model behavior.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MixedModeConfig {
-    pub easy: MixedTierSettings,
-    pub medium: MixedTierSettings,
-    pub hard: MixedTierSettings,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RawSessionConfig {

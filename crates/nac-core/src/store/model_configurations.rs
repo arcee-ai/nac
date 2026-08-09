@@ -24,7 +24,7 @@ pub struct ModelConfigurationRecord {
     pub initial_prompt: Option<String>,
     /// Mixed-mode tier models; `None` keeps single-model behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mixed_models: Option<crate::sessions::MixedModeConfig>,
+    pub mixed_models: Option<crate::mixed_mode::MixedModeConfig>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -40,7 +40,7 @@ pub struct NewModelConfiguration {
     pub extra_headers: BTreeMap<String, String>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub initial_prompt: Option<String>,
-    pub mixed_models: Option<crate::sessions::MixedModeConfig>,
+    pub mixed_models: Option<crate::mixed_mode::MixedModeConfig>,
 }
 
 #[derive(Debug)]
@@ -111,7 +111,7 @@ fn decode_headers(raw: &str) -> BTreeMap<String, String> {
 }
 
 fn encode_mixed_models(
-    mixed: Option<&crate::sessions::MixedModeConfig>,
+    mixed: Option<&crate::mixed_mode::MixedModeConfig>,
 ) -> ConfigurationResult<Option<String>> {
     mixed
         .map(|config| {
@@ -129,7 +129,7 @@ fn encode_mixed_models(
 /// setup as single-model.
 fn decode_mixed_models(
     raw: Option<&str>,
-) -> rusqlite::Result<Option<crate::sessions::MixedModeConfig>> {
+) -> rusqlite::Result<Option<crate::mixed_mode::MixedModeConfig>> {
     raw.map(|json| {
         serde_json::from_str(json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(

@@ -33,6 +33,8 @@ pub mod edit;
 pub mod exec_command;
 pub mod read;
 pub mod thread;
+
+use thread::MixedDispatchClients;
 pub mod workset;
 pub mod write;
 
@@ -134,72 +136,6 @@ impl ActiveThreadRegistry {
         self.dispatches
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-}
-
-/// The three tier worker clients a mixed-mode session resolves at
-/// launch/resume. Each client carries its own catalog metadata, so the
-/// dispatch tool can enumerate and validate per-tier reasoning efforts.
-#[derive(Clone)]
-pub struct MixedDispatchClients {
-    pub easy: crate::model::ModelClient,
-    pub medium: crate::model::ModelClient,
-    pub hard: crate::model::ModelClient,
-}
-
-impl MixedDispatchClients {
-    pub fn for_tier(
-        &self,
-        complexity: crate::model::ThreadComplexity,
-    ) -> &crate::model::ModelClient {
-        match complexity {
-            crate::model::ThreadComplexity::Easy => &self.easy,
-            crate::model::ThreadComplexity::Medium => &self.medium,
-            crate::model::ThreadComplexity::Hard => &self.hard,
-        }
-    }
-
-    /// `(tier label, client)` pairs in easy → hard order, for schema and
-    /// prompt descriptions.
-    pub fn tiers(&self) -> [(crate::model::ThreadComplexity, &crate::model::ModelClient); 3] {
-        [
-            (crate::model::ThreadComplexity::Easy, &self.easy),
-            (crate::model::ThreadComplexity::Medium, &self.medium),
-            (crate::model::ThreadComplexity::Hard, &self.hard),
-        ]
-    }
-
-    /// One "- easy: model (effort: low, ~$0.25/$1.25 per 1M tokens)" line
-    /// per tier, shared by the dispatch tool schema and the orchestrator
-    /// system prompt. Catalog cost rates, when known, give the classifier a
-    /// real signal for what each tier spends.
-    pub fn describe_tiers(&self) -> String {
-        let mut description = String::new();
-        for (complexity, client) in self.tiers() {
-            let mut traits = Vec::new();
-            if let Some(effort) = client.reasoning_effort() {
-                traits.push(format!("effort: {effort}"));
-            }
-            let cost = client.cost_rates();
-            if cost.input > 0.0 || cost.output > 0.0 {
-                traits.push(format!(
-                    "~${}/${} per 1M tokens in/out",
-                    cost.input, cost.output
-                ));
-            }
-            let traits = if traits.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", traits.join(", "))
-            };
-            description.push_str(&format!(
-                "\n- {}: {}{}",
-                complexity.as_str(),
-                client.model,
-                traits
-            ));
-        }
-        description
     }
 }
 

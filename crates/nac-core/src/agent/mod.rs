@@ -84,7 +84,7 @@ pub struct AgentConfig {
     pub agents_md_message: Option<String>,
     pub thread_timeout_secs: u64,
     /// Mixed-mode tier worker clients; `None` keeps single-model dispatch.
-    pub mixed_clients: Option<Arc<tools::MixedDispatchClients>>,
+    pub mixed_clients: Option<Arc<tools::thread::MixedDispatchClients>>,
 }
 
 pub struct Agent {
@@ -125,7 +125,7 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
 
 /// Mixed-mode addendum to the orchestrator system prompt: names each tier's
 /// configured model and reasoning effort.
-fn mixed_mode_prompt_guidance(mixed: &tools::MixedDispatchClients) -> String {
+fn mixed_mode_prompt_guidance(mixed: &tools::thread::MixedDispatchClients) -> String {
     format!(
         "\n\nMixed mode is enabled. Every thread dispatch requires a complexity \
          classification — easy, medium, or hard — and the matching user-configured \

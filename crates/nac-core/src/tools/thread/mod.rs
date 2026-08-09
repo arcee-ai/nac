@@ -4,15 +4,70 @@ use crate::events::AgentEvent;
 use crate::model::{ModelClient, ThreadComplexity};
 use crate::skills::SkillRegistry;
 use crate::store;
-use crate::tools::{
-    require_str, require_string_array, MixedDispatchClients, ToolResult, ToolRuntime,
-};
+use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
 use crate::types::ToolDefinition;
 
 mod worker;
 #[cfg(test)]
 pub(crate) use worker::worker_model_arguments_for_test;
 use worker::{run_worker, WorkerInvocation};
+
+/// The three tier worker clients a mixed-mode session resolves at
+/// launch/resume. Each client carries its own catalog metadata, so dispatch
+/// routing and prompt descriptions share the same identities.
+#[derive(Clone)]
+pub(crate) struct MixedDispatchClients {
+    pub easy: ModelClient,
+    pub medium: ModelClient,
+    pub hard: ModelClient,
+}
+
+impl MixedDispatchClients {
+    pub fn for_tier(&self, complexity: ThreadComplexity) -> &ModelClient {
+        match complexity {
+            ThreadComplexity::Easy => &self.easy,
+            ThreadComplexity::Medium => &self.medium,
+            ThreadComplexity::Hard => &self.hard,
+        }
+    }
+
+    pub fn tiers(&self) -> [(ThreadComplexity, &ModelClient); 3] {
+        [
+            (ThreadComplexity::Easy, &self.easy),
+            (ThreadComplexity::Medium, &self.medium),
+            (ThreadComplexity::Hard, &self.hard),
+        ]
+    }
+
+    pub fn describe_tiers(&self) -> String {
+        let mut description = String::new();
+        for (complexity, client) in self.tiers() {
+            let mut traits = Vec::new();
+            if let Some(effort) = client.reasoning_effort() {
+                traits.push(format!("effort: {effort}"));
+            }
+            let cost = client.cost_rates();
+            if cost.input > 0.0 || cost.output > 0.0 {
+                traits.push(format!(
+                    "~${}/${} per 1M tokens in/out",
+                    cost.input, cost.output
+                ));
+            }
+            let traits = if traits.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", traits.join(", "))
+            };
+            description.push_str(&format!(
+                "\n- {}: {}{}",
+                complexity.as_str(),
+                client.model,
+                traits
+            ));
+        }
+        description
+    }
+}
 
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
@@ -772,7 +827,7 @@ mod tests {
         use crate::model::{BackendKind, ReasoningEffort};
 
         let mut runtime = test_runtime();
-        runtime.mixed_clients = Some(Arc::new(crate::tools::MixedDispatchClients {
+        runtime.mixed_clients = Some(Arc::new(MixedDispatchClients {
             easy: routing_client(
                 BackendKind::AnthropicMessages,
                 "easy-model",
@@ -794,7 +849,7 @@ mod tests {
 
     #[test]
     fn dispatch_definition_mixed_mode_requires_complexity() {
-        let clients = crate::tools::MixedDispatchClients {
+        let clients = MixedDispatchClients {
             easy: ModelClient::new_for_test(),
             medium: ModelClient::new_for_test(),
             hard: ModelClient::new_for_test(),

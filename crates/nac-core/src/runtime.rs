@@ -10,6 +10,7 @@ use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
+use crate::mixed_mode::{resolve_dispatch_clients, MixedModeConfig};
 use crate::model::{
     managed_backend_base_url, BackendKind, EffectiveModelSettings, ModelClient,
     ModelConfigurationError, ReasoningEffort,
@@ -23,10 +24,9 @@ use crate::sandbox::{
     SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
 pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
-use crate::sessions::{self, MixedModeConfig, MixedTierSettings, SessionSnapshot};
+use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
-use crate::tools::MixedDispatchClients;
 use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
 pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
 use crate::workspace::GitTarget;
@@ -704,49 +704,6 @@ pub fn effective_model_settings(
     )
 }
 
-/// Resolve one mixed tier's persisted settings into a validated worker
-/// client, through the same catalog-backed chain as the primary model:
-/// explicit backend → catalog provider for the model id; explicit base_url →
-/// managed-if-explicit-backend → catalog defaults inside `from_optional`.
-fn resolve_mixed_tier_client(tier: &MixedTierSettings, label: &str) -> Result<ModelClient> {
-    let backend = tier
-        .backend
-        .or_else(|| crate::model::provider_for_model(tier.model.as_str()));
-    let selected_managed_base_url = tier
-        .backend
-        .and_then(managed_backend_base_url)
-        .map(str::to_string);
-    let base_url = tier.base_url.clone().or(selected_managed_base_url);
-    let settings = EffectiveModelSettings::from_optional(
-        backend,
-        Some(tier.model.clone()),
-        base_url,
-        tier.reasoning_effort,
-        tier.api_key_env.clone(),
-        BTreeMap::new(),
-    )
-    .with_context(|| format!("invalid {label} tier model settings"))?;
-    ModelClient::from_effective_settings(settings)
-        .with_context(|| format!("invalid {label} tier model settings"))
-}
-
-/// Resolve all three mixed tiers into validated worker clients. Runs at
-/// launch and resume so a misconfigured tier fails loudly up front instead
-/// of at first dispatch.
-pub fn resolve_mixed_dispatch_clients(mixed: &MixedModeConfig) -> Result<MixedDispatchClients> {
-    Ok(MixedDispatchClients {
-        easy: resolve_mixed_tier_client(&mixed.easy, "easy")?,
-        medium: resolve_mixed_tier_client(&mixed.medium, "medium")?,
-        hard: resolve_mixed_tier_client(&mixed.hard, "hard")?,
-    })
-}
-
-/// Validate a mixed configuration without launching anything: resolves
-/// every tier exactly as launch/resume would and discards the clients.
-pub fn validate_mixed_models(mixed: &MixedModeConfig) -> Result<()> {
-    resolve_mixed_dispatch_clients(mixed).map(|_| ())
-}
-
 /// Resolve and normalize the persisted orchestrator compaction threshold for a
 /// new session. Resume never calls this function: its value comes from the
 /// session snapshot instead.
@@ -837,7 +794,7 @@ pub async fn build_run_config(
     let mixed_models = options.model.mixed.clone();
     let mixed_clients = mixed_models
         .as_ref()
-        .map(resolve_mixed_dispatch_clients)
+        .map(resolve_dispatch_clients)
         .transpose()?
         .map(std::sync::Arc::new);
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
@@ -1239,7 +1196,7 @@ async fn build_resume_config_from_snapshot(
     let mixed_clients = snapshot
         .mixed_models
         .as_ref()
-        .map(resolve_mixed_dispatch_clients)
+        .map(resolve_dispatch_clients)
         .transpose()
         .map_err(|error| {
             anyhow::anyhow!(
@@ -1800,51 +1757,6 @@ mod tests {
         assert_eq!(valued.api_key_env.as_deref(), Some("CLI_API_KEY"));
 
         restore_env("OPENAI_API_KEY", original_openai_key);
-    }
-
-    #[test]
-    fn mixed_models_resolve_tiers_and_reject_unsupported_tier_effort() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let original_openai = std::env::var_os("OPENAI_API_KEY");
-        let original_anthropic = std::env::var_os("ANTHROPIC_API_KEY");
-        unsafe {
-            std::env::set_var("OPENAI_API_KEY", "test-key");
-            std::env::set_var("ANTHROPIC_API_KEY", "test-key");
-        }
-
-        let tier = |model: &str, effort: Option<&str>| MixedTierSettings {
-            model: model.to_string(),
-            backend: None,
-            base_url: None,
-            api_key_env: None,
-            reasoning_effort: effort.map(|value| value.parse().unwrap()),
-        };
-        let mixed = MixedModeConfig {
-            easy: tier("gpt-5-mini", Some("low")),
-            medium: tier("gpt-5", None),
-            hard: tier("claude-fable-5", None),
-        };
-        let clients = resolve_mixed_dispatch_clients(&mixed).unwrap();
-        assert_eq!(clients.easy.model, "gpt-5-mini");
-        assert_eq!(clients.easy.reasoning_effort(), Some(ReasoningEffort::Low));
-        assert_eq!(clients.medium.model, "gpt-5");
-        assert_eq!(clients.hard.model, "claude-fable-5");
-        assert_eq!(clients.hard.backend(), BackendKind::AnthropicMessages);
-
-        // A tier effort its model's catalog metadata rejects fails resolution.
-        let mixed = MixedModeConfig {
-            easy: tier("gpt-5-mini", None),
-            medium: tier("gpt-5", None),
-            hard: tier("claude-fable-5", Some("high")),
-        };
-        let error = resolve_mixed_dispatch_clients(&mixed)
-            .map(|_| ())
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("invalid hard tier model settings"));
-
-        restore_env("OPENAI_API_KEY", original_openai);
-        restore_env("ANTHROPIC_API_KEY", original_anthropic);
     }
 
     #[test]
