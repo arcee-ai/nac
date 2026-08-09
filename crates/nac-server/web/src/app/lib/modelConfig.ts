@@ -1,12 +1,34 @@
 // Model and credential rules shared by the launch and settings modals: managed
-// backends with a fixed base URL, credential modes, reasoning-effort clearing
-// and extra-header validation. Ported from the legacy UI unchanged.
+// backends with a fixed base URL, credential modes, mixed-tier credential
+// inheritance, reasoning-effort clearing and extra-header validation.
 
 import type {
+  BackendKind,
   MixedModels,
   MixedTierSettings,
   UpdateConfigRequest,
 } from "@/app/types/api";
+
+export function inheritPrimaryCredential(
+  mixed: MixedModels,
+  primaryBackend: BackendKind,
+  primaryApiKeyEnv: string | null,
+  previousApiKeyEnv: string | null = null,
+): MixedModels {
+  const tier = (settings: MixedTierSettings): MixedTierSettings => ({
+    ...settings,
+    api_key_env:
+      settings.backend === primaryBackend &&
+      (!settings.api_key_env || settings.api_key_env === previousApiKeyEnv)
+        ? primaryApiKeyEnv
+        : settings.api_key_env,
+  });
+  return {
+    easy: tier(mixed.easy),
+    medium: tier(mixed.medium),
+    hard: tier(mixed.hard),
+  };
+}
 
 export const MANAGED_LAUNCH_BASE_URLS: Record<string, string> = {
   "arcee-auth": "https://api.arcee.ai/api/v1",

@@ -41,6 +41,7 @@ import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { loadLastMixed, storeLastMixed } from "@/app/lib/lastMixed";
 import {
+  inheritPrimaryCredential,
   CLEAR_EFFORT,
   csv,
   launchLocationFromValues,
@@ -309,6 +310,11 @@ function LaunchForm({
       return;
     }
 
+    const launchMixed =
+      mixed.mode === "mixed" && mixed.mixed
+        ? inheritPrimaryCredential(mixed.mixed, backend, apiKeyEnv)
+        : null;
+
     const body: CreateSessionRequest = {
       // The connection that answered, rather than what the fields hold now:
       // this is the one already proved to work.
@@ -328,7 +334,7 @@ function LaunchForm({
           : reasoning || configuredEffort || null,
     };
     if (headers !== undefined) body.extra_headers = headers;
-    if (mixed.mode === "mixed" && mixed.mixed) body.mixed_models = mixed.mixed;
+    if (launchMixed) body.mixed_models = launchMixed;
 
     const threshold = nullable(compaction);
     if (threshold !== null)
@@ -349,7 +355,7 @@ function LaunchForm({
     try {
       const snapshot = await createSession.mutateAsync(body);
       const newId = snapshot.metadata.session_id;
-      storeLastMixed(mixed.mode === "mixed" ? mixed.mixed : null);
+      storeLastMixed(launchMixed);
       toast.success("Session created");
 
       // A title is presentation state, so it is applied after creation.
@@ -535,6 +541,10 @@ function LaunchForm({
               <MixedModelsSection
                 key={savedMixedKey}
                 initial={savedMixed}
+                primaryBackend={chosen?.backend ?? null}
+                primaryApiKeyEnv={
+                  selection?.kind === "resolved" ? selection.api_key_env : null
+                }
                 onChange={onMixed}
               />
               <Separator />

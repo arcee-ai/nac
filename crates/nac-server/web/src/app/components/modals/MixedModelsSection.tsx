@@ -1,8 +1,3 @@
-// Mixed-mode dispatch routing. The orchestrator classifies every thread
-// dispatch as easy, medium or hard, and the classification selects a
-// user-configured worker model per tier. Models come out of the catalog, so
-// effort menus only offer the levels the relevant model accepts.
-
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -27,6 +22,7 @@ import {
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useModelCatalog } from "@/app/services/queries";
 import type {
+  BackendKind,
   MixedModels,
   MixedTierSettings,
   ModelCatalog,
@@ -68,11 +64,12 @@ const TIER_EFFORT_OPTIONS: SelectItem[] = [
 interface TierState {
   pick: CatalogPick | null;
   effort: ReasoningEffort | "";
+  apiKeyEnv: string | null;
 }
 
 function tierStateFrom(settings: MixedTierSettings | undefined): TierState {
   if (!settings?.model || !settings.backend) {
-    return { pick: null, effort: "" };
+    return { pick: null, effort: "", apiKeyEnv: null };
   }
   return {
     pick: {
@@ -81,15 +78,23 @@ function tierStateFrom(settings: MixedTierSettings | undefined): TierState {
       baseUrl: settings.base_url ?? "",
     },
     effort: settings.reasoning_effort ?? "",
+    apiKeyEnv: settings.api_key_env ?? null,
   };
 }
 
-function tierSettings(state: TierState): MixedTierSettings | null {
+function tierSettings(
+  state: TierState,
+  primaryBackend: BackendKind | null,
+  primaryApiKeyEnv: string | null,
+): MixedTierSettings | null {
   if (!state.pick || !state.pick.baseUrl) return null;
   return {
     model: state.pick.model,
     backend: state.pick.backend,
     base_url: state.pick.baseUrl,
+    api_key_env:
+      state.apiKeyEnv ??
+      (state.pick.backend === primaryBackend ? primaryApiKeyEnv : null),
     reasoning_effort: state.effort || null,
   };
 }
@@ -127,7 +132,15 @@ function TierModelRow({
             loading={loading}
             failed={failed}
             value={state.pick}
-            onSelect={(pick) => onChange({ ...state, pick, effort: "" })}
+            onSelect={(pick) =>
+              onChange({
+                ...state,
+                pick,
+                effort: "",
+                apiKeyEnv:
+                  pick.backend === state.pick?.backend ? state.apiKeyEnv : null,
+              })
+            }
           />
         }
       />
@@ -173,10 +186,15 @@ function initialTiers(
  */
 export function MixedModelsSection({
   initial,
+  primaryBackend = null,
+  primaryApiKeyEnv = null,
   onChange,
 }: {
   /** Seeds the form; a value opens the section in mixed mode. */
   initial?: MixedModels | null;
+  /** The primary setup credential is reused by tiers on the same backend. */
+  primaryBackend?: BackendKind | null;
+  primaryApiKeyEnv?: string | null;
   onChange: (selection: MixedSelection) => void;
 }) {
   const catalog = useModelCatalog();
@@ -187,14 +205,14 @@ export function MixedModelsSection({
 
   const selection = useMemo<MixedSelection>(() => {
     if (mode === "single") return { mode, mixed: null };
-    const easy = tierSettings(tiers.easy);
-    const medium = tierSettings(tiers.medium);
-    const hard = tierSettings(tiers.hard);
+    const easy = tierSettings(tiers.easy, primaryBackend, primaryApiKeyEnv);
+    const medium = tierSettings(tiers.medium, primaryBackend, primaryApiKeyEnv);
+    const hard = tierSettings(tiers.hard, primaryBackend, primaryApiKeyEnv);
     return {
       mode,
       mixed: easy && medium && hard ? { easy, medium, hard } : null,
     };
-  }, [mode, tiers]);
+  }, [mode, tiers, primaryBackend, primaryApiKeyEnv]);
 
   useEffect(() => {
     onChange(selection);

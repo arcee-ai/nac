@@ -816,6 +816,19 @@ impl ModelClient {
         client
     }
 
+    pub(crate) fn new_for_test_settings(
+        backend: BackendKind,
+        model: &str,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) -> Self {
+        let mut client = Self::new_for_test();
+        client.backend = backend;
+        client.model = model.to_string();
+        client.reasoning_effort = reasoning_effort;
+        client.resolved_model = catalog::resolve(backend, model);
+        client
+    }
+
     pub fn new_for_test() -> Self {
         Self {
             client: no_redirect_model_client().expect("build no-redirect test model client"),

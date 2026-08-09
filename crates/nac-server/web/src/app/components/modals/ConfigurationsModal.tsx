@@ -616,6 +616,8 @@ function ConfigurationForm({
           <Separator />
           <MixedModelsSection
             initial={record?.mixed_models ?? null}
+            primaryBackend={backend}
+            primaryApiKeyEnv={apiKey.trim() ? null : record?.api_key_env}
             onChange={setMixed}
           />
           <Separator />

@@ -47,6 +47,7 @@ import {
   type Validation,
 } from "@/app/lib/apiKey";
 import {
+  inheritPrimaryCredential,
   buildSettingsPatch,
   managedLaunchBaseUrl,
   sameMixedModels,
@@ -428,8 +429,14 @@ function SettingsForm({
         setError("Complete the easy, medium and hard tiers before saving.");
         return;
       }
-      if (!sameMixedModels(mixed.mixed, initialMixed)) {
-        patch.mixed_models = mixed.mixed;
+      const finalMixed = inheritPrimaryCredential(
+        mixed.mixed,
+        kind,
+        apiKeyEnv || null,
+        initial.api_key_env,
+      );
+      if (!sameMixedModels(finalMixed, initialMixed)) {
+        patch.mixed_models = finalMixed;
       }
     } else if (initialMixed) {
       patch.mixed_models = null;
@@ -615,6 +622,8 @@ function SettingsForm({
 
         <MixedModelsSection
           initial={initialMixed}
+          primaryBackend={kind}
+          primaryApiKeyEnv={editingKey ? null : initial.api_key_env}
           onChange={setMixed}
         />
 

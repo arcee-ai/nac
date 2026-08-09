@@ -760,12 +760,34 @@ mod tests {
     // mixed mode
     // ------------------------------------------------------------------
 
+    fn routing_client(
+        backend: crate::model::BackendKind,
+        model: &str,
+        effort: crate::model::ReasoningEffort,
+    ) -> ModelClient {
+        ModelClient::new_for_test_settings(backend, model, Some(effort))
+    }
+
     fn mixed_runtime() -> ToolRuntime {
+        use crate::model::{BackendKind, ReasoningEffort};
+
         let mut runtime = test_runtime();
         runtime.mixed_clients = Some(Arc::new(crate::tools::MixedDispatchClients {
-            easy: ModelClient::new_for_test(),
-            medium: ModelClient::new_for_test(),
-            hard: ModelClient::new_for_test(),
+            easy: routing_client(
+                BackendKind::AnthropicMessages,
+                "easy-model",
+                ReasoningEffort::Low,
+            ),
+            medium: routing_client(
+                BackendKind::TogetherChat,
+                "medium-model",
+                ReasoningEffort::Medium,
+            ),
+            hard: routing_client(
+                BackendKind::FireworksChat,
+                "hard-model",
+                ReasoningEffort::High,
+            ),
         }));
         runtime
     }
@@ -831,33 +853,89 @@ mod tests {
     }
 
     #[test]
-    fn select_dispatch_client_routes_tiers() {
-        let orchestrator = ModelClient::new_for_test();
+    fn select_dispatch_client_routes_distinct_tier_identities() {
+        use crate::model::{BackendKind, ReasoningEffort};
 
-        // Single mode: the orchestrator client, unchanged.
+        let orchestrator = routing_client(
+            BackendKind::OpenAiResponses,
+            "orchestrator-model",
+            ReasoningEffort::Xhigh,
+        );
+
         let runtime = test_runtime();
         let params =
             parse_dispatch_args(&json!({ "name": "t1", "action": "w" }), &runtime).unwrap();
         let client = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
-        assert_eq!(client.reasoning_effort(), orchestrator.reasoning_effort());
+        assert_eq!(client.model, "orchestrator-model");
+        assert_eq!(client.backend(), BackendKind::OpenAiResponses);
+        assert_eq!(client.reasoning_effort(), Some(ReasoningEffort::Xhigh));
 
-        // Mixed mode: the parsed complexity picks the tier client.
         let runtime = mixed_runtime();
-        for complexity in ["easy", "medium", "hard"] {
+        let expected = [
+            (
+                "easy",
+                "easy-model",
+                BackendKind::AnthropicMessages,
+                ReasoningEffort::Low,
+            ),
+            (
+                "medium",
+                "medium-model",
+                BackendKind::TogetherChat,
+                ReasoningEffort::Medium,
+            ),
+            (
+                "hard",
+                "hard-model",
+                BackendKind::FireworksChat,
+                ReasoningEffort::High,
+            ),
+        ];
+        for (complexity, model, backend, effort) in expected {
             let params = parse_dispatch_args(
                 &json!({ "name": "t1", "action": "w", "complexity": complexity }),
                 &runtime,
             )
             .unwrap();
             let client = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
-            let tier = runtime
-                .mixed_clients
-                .as_deref()
-                .unwrap()
-                .for_tier(params.complexity.unwrap());
-            assert_eq!(client.model, tier.model);
-            assert_eq!(client.reasoning_effort(), tier.reasoning_effort());
+            assert_eq!(client.model, model);
+            assert_eq!(client.backend(), backend);
+            assert_eq!(client.reasoning_effort(), Some(effort));
         }
+    }
+
+    #[test]
+    fn selected_tier_identity_reaches_worker_cli_transport() {
+        use crate::model::{BackendKind, ReasoningEffort};
+
+        let runtime = mixed_runtime();
+        let orchestrator = routing_client(
+            BackendKind::OpenAiResponses,
+            "orchestrator-model",
+            ReasoningEffort::Xhigh,
+        );
+        let params = parse_dispatch_args(
+            &json!({ "name": "t1", "action": "w", "complexity": "hard" }),
+            &runtime,
+        )
+        .unwrap();
+        let selected = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
+
+        assert_eq!(
+            super::worker::worker_model_arguments_for_test(&selected),
+            vec![
+                "--api-model",
+                "hard-model",
+                "--api-base-url",
+                "https://api.openai.com/v1",
+                "--backend",
+                "fireworks-chat",
+                "--effort",
+                "high",
+                "--extra-headers",
+                "{}",
+            ]
+        );
     }
 
     #[test]
