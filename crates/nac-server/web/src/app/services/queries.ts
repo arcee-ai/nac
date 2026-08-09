@@ -9,6 +9,13 @@ import {
   type UseQueryOptions,
 } from "@tanstack/react-query";
 
+import {
+  pinGroup,
+  placeSessionId,
+  reorderRequest,
+  sameOrder,
+  withUpdatedSummary,
+} from "@/app/lib/sessionOrder";
 import { api } from "@/app/services/api";
 import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
 import type {
@@ -692,6 +699,54 @@ export function useTogglePin() {
         expectedVersion: summary.presentation_version ?? 0,
       }),
   };
+}
+
+export interface MoveSessionOrderVariables {
+  /** Full unfiltered list — `/sessions/order` requires entire pin-group membership. */
+  sessions: ManagedSessionSummary[];
+  sessionId: string;
+  targetPinned: boolean;
+  /** Index within the destination pin group after the move. */
+  targetIndex: number;
+}
+
+/**
+ * Reorder within a pin group, optionally pinning/unpinning first when the
+ * destination group differs. One invalidation at the end.
+ */
+export function useMoveSessionOrder() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: async ({
+      sessions,
+      sessionId,
+      targetPinned,
+      targetIndex,
+    }: MoveSessionOrderVariables) => {
+      let entries = sessions;
+      const entry = entries.find((e) => e.summary.session_id === sessionId);
+      if (!entry) {
+        throw new Error(`Session '${sessionId}' was not found`);
+      }
+
+      if (Boolean(entry.summary.pinned) !== targetPinned) {
+        const summary = await api.updatePresentation(sessionId, {
+          title: entry.summary.title ?? "",
+          pinned: targetPinned,
+          expected_version: entry.summary.presentation_version ?? 0,
+        });
+        entries = withUpdatedSummary(entries, summary);
+      }
+
+      const group = pinGroup(entries, targetPinned);
+      const currentIds = group.map((e) => e.summary.session_id);
+      const nextIds = placeSessionId(currentIds, sessionId, targetIndex);
+      if (sameOrder(currentIds, nextIds)) return null;
+
+      return api.reorderSessions(reorderRequest(targetPinned, nextIds, group));
+    },
+    onSuccess: () => invalidate.sessions(),
+  });
 }
 
 export function useUpdateConfig() {

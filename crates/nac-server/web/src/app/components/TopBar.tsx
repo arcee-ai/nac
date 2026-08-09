@@ -68,7 +68,7 @@ export function TopBar() {
             aria-label="All sessions"
           >
             <Logo
-              height={isMobile ? 32 : isTablet ? 36 : 28}
+              height={isMobile ? 36 : isTablet ? 36 : 36}
               markOnly={isMobile || isTablet}
               className="text-basic-primary"
             />

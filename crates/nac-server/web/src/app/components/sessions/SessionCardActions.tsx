@@ -14,6 +14,7 @@ interface IconActionProps {
   icon: IconName;
   onClick: () => void;
   variant?: ButtonVariant;
+  disabled?: boolean;
 }
 
 // `sticky` keeps the box out of the card's clipped overflow; it opens upwards so
@@ -23,6 +24,7 @@ function IconAction({
   icon,
   onClick,
   variant = ButtonVariant.Ghost,
+  disabled = false,
 }: IconActionProps) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter} sticky>
@@ -31,6 +33,7 @@ function IconAction({
         size={ButtonSize.Small}
         content={ButtonContent.Icon}
         aria-label={title}
+        disabled={disabled}
         onClick={(e) => {
           e.stopPropagation();
           onClick();
@@ -49,6 +52,13 @@ interface SessionCardActionsProps {
   onRename: () => void;
   onDelete: () => void;
   onStop: () => void;
+  /** Tablet/mobile reorder controls (Default sort). */
+  reorder?: {
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+    onMoveUp: () => void;
+    onMoveDown: () => void;
+  };
 }
 
 /**
@@ -62,9 +72,32 @@ export function SessionCardActions({
   onRename,
   onDelete,
   onStop,
+  reorder,
 }: SessionCardActionsProps) {
   return (
-    <div className="flex items-center gap-4 xl:gap-1.5 shrink-0">
+    <div
+      className={
+        reorder
+          ? "flex items-center gap-1.5 shrink-0"
+          : "flex items-center gap-4 xl:gap-1.5 shrink-0"
+      }
+    >
+      {reorder ? (
+        <>
+          <IconAction
+            title="Move down"
+            icon={IconName.ArrowDown}
+            disabled={!reorder.canMoveDown}
+            onClick={reorder.onMoveDown}
+          />
+          <IconAction
+            title="Move up"
+            icon={IconName.ArrowTop}
+            disabled={!reorder.canMoveUp}
+            onClick={reorder.onMoveUp}
+          />
+        </>
+      ) : null}
       <IconAction
         title={pinned ? "Unpin session" : "Pin session"}
         icon={pinned ? IconName.Unpin : IconName.Pin}
