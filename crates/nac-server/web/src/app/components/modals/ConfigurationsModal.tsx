@@ -1,4 +1,10 @@
-import { useMemo, useState } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   Button,
@@ -9,21 +15,16 @@ import {
   IconName,
   Input,
   InputSize,
-  Loader,
-  LoaderSize,
   Modal,
   ModalSize,
-  PopoverPlacement,
-  Select,
   type SelectItem,
   Separator,
-  TabButton,
-  TabButtonSize,
-  TabButtonVariant,
+  StickyButton,
   TextArea,
 } from "@/app/atoms";
+import { AuthenticationRow } from "@/app/components/modals/AuthenticationRow";
+import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
-import { AuthenticationRow } from "@/app/components/modals/ConfigurationsPanel";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
   MixedModelsSection,
@@ -33,8 +34,11 @@ import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
+import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
+import { useExitTransition } from "@/app/hooks/useExitTransition";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import {
   KEY_DEBOUNCE_MS,
@@ -42,6 +46,7 @@ import {
   modelItems,
   type Validation,
 } from "@/app/lib/apiKey";
+import { cn } from "@/app/lib/cn";
 import { CLEAR_EFFORT, serializeExtraHeaders } from "@/app/lib/modelConfig";
 import {
   PROVIDER_KINDS,
@@ -94,13 +99,22 @@ export function ConfigurationsModal({
   open: boolean;
   onClose: () => void;
 }) {
-  if (!open) return null;
-  return <ConfigurationsManager onClose={onClose} />;
+  const mounted = useExitTransition(open);
+  if (!mounted) return null;
+  return <ConfigurationsManager open={open} onClose={onClose} />;
 }
 
-function ConfigurationsManager({ onClose }: { onClose: () => void }) {
+function ConfigurationsManager({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const isMobile = useIsMobile();
   const { data, isLoading } = useModelConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
+  const [footer, setFooter] = useState<ReactNode>(null);
 
   // Null until the user picks, so the default below can still settle once the
   // list arrives. The server orders by creation, hence the last entry.
@@ -111,49 +125,28 @@ function ConfigurationsManager({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title="Configurations"
       size={ModalSize.Large}
       flush
       className="max-w-[820px] md:h-[720px]"
       bodyClassName="p-0 overflow-hidden"
+      footer={footer}
     >
       <div className="flex flex-col md:flex-row items-stretch h-full min-h-0">
-        {/* A phone has no room for a column, so the picker becomes the strip
-            above the form rather than disappearing with the setups behind it. */}
-        <div className="flex flex-row md:flex-col shrink-0 gap-2 md:w-[240px] overflow-x-auto md:overflow-x-hidden md:overflow-y-auto border-b md:border-b-0 md:border-r border-muted px-2 py-2 md:py-4 [&>*]:shrink-0">
-          <TabButton
-            size={TabButtonSize.Medium}
-            variant={TabButtonVariant.Regular}
-            active={selected === DRAFT}
-            onClick={() => setPicked(DRAFT)}
-          >
-            <Icon iconName={IconName.Add} />
-            <span className="text-left flex-grow truncate">
-              New configuration
-            </span>
-          </TabButton>
-          {configurations.length ? (
-            <Separator className="hidden md:block" />
-          ) : null}
-          {configurations.map((entry) => (
-            <TabButton
-              key={entry.config_id}
-              size={TabButtonSize.Medium}
-              active={selected === entry.config_id}
-              onClick={() => setPicked(entry.config_id)}
-            >
-              <span className="text-left flex-grow truncate">{entry.name}</span>
-            </TabButton>
-          ))}
-          {isLoading ? (
-            <div className="flex items-center gap-2 px-2 py-1">
-              <Loader size={LoaderSize.Micro} />
-              <span className="text-micro text-basic-muted">Loading…</span>
-            </div>
-          ) : null}
-        </div>
+        <ConfigListNav
+          draftLabel="New configuration"
+          draftSelected={selected === DRAFT}
+          onSelectDraft={() => setPicked(DRAFT)}
+          entries={configurations.map((entry) => ({
+            id: entry.config_id,
+            name: entry.name,
+          }))}
+          selectedId={selected}
+          onSelect={setPicked}
+          isLoading={isLoading}
+        />
 
         <ConfigurationForm
           key={selected}
@@ -164,6 +157,8 @@ function ConfigurationsManager({ onClose }: { onClose: () => void }) {
           onClose={onClose}
           onSaved={setPicked}
           onDeleted={() => setPicked(null)}
+          setFooter={setFooter}
+          isMobile={isMobile}
         />
       </div>
     </Modal>
@@ -184,12 +179,16 @@ function ConfigurationForm({
   onClose,
   onSaved,
   onDeleted,
+  setFooter,
+  isMobile,
 }: {
   record: ModelConfigurationRecord | null;
   takenNames: string[];
   onClose: () => void;
   onSaved: (configId: string) => void;
   onDeleted: () => void;
+  setFooter: (footer: ReactNode) => void;
+  isMobile: boolean;
 }) {
   const toast = useToast();
   const createConfig = useCreateModelConfig();
@@ -381,10 +380,107 @@ function ConfigurationForm({
     }
   };
 
+  const saveRef = useRef(save);
+  const removeRef = useRef(remove);
+
+  useLayoutEffect(() => {
+    saveRef.current = save;
+    removeRef.current = remove;
+  });
+
+  useLayoutEffect(() => {
+    const saving = createConfig.isPending || updateConfig.isPending;
+    setFooter(
+      <>
+        {record ? (
+          isMobile ? (
+            <StickyButton
+              variant={ButtonVariant.SecondaryDestructive}
+              content={ButtonContent.Icon}
+              className="mr-auto"
+              disabled={busy}
+              loading={deleteConfig.isPending}
+              onClick={() => void removeRef.current()}
+            >
+              <Icon iconName={IconName.Trash} />
+            </StickyButton>
+          ) : (
+            <Button
+              variant={ButtonVariant.SecondaryDestructive}
+              size={ButtonSize.Large}
+              content={ButtonContent.Icon}
+              className="mr-auto"
+              disabled={busy}
+              loading={deleteConfig.isPending}
+              onClick={() => void removeRef.current()}
+            >
+              <Icon iconName={IconName.Trash} />
+            </Button>
+          )
+        ) : null}
+        {isMobile ? (
+          <StickyButton
+            variant={ButtonVariant.Secondary}
+            content={ButtonContent.Text}
+            onClick={onClose}
+          >
+            Cancel
+          </StickyButton>
+        ) : (
+          <Button
+            variant={ButtonVariant.Ghost}
+            size={ButtonSize.Large}
+            content={ButtonContent.Text}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+        )}
+        {isMobile ? (
+          <StickyButton
+            variant={ButtonVariant.Primary}
+            content={ButtonContent.Text}
+            disabled={busy}
+            loading={saving}
+            onClick={() => void saveRef.current()}
+          >
+            Save
+          </StickyButton>
+        ) : (
+          <Button
+            variant={ButtonVariant.Primary}
+            size={ButtonSize.Large}
+            content={ButtonContent.Text}
+            disabled={busy}
+            loading={saving}
+            onClick={() => void saveRef.current()}
+          >
+            Save
+          </Button>
+        )}
+      </>,
+    );
+    return () => setFooter(null);
+  }, [
+    busy,
+    createConfig.isPending,
+    deleteConfig.isPending,
+    isMobile,
+    onClose,
+    record,
+    setFooter,
+    updateConfig.isPending,
+  ]);
+
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
-      <div className="flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0">
-        <div className="flex flex-col rounded-[8px] bg-elevation-level-2 border border-muted p-3 gap-2">
+      <div
+        className={cn(
+          "flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
+          isMobile && "pb-[88px]",
+        )}
+      >
+        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
           <ConfigRow
             label="Provider"
             required
@@ -406,10 +502,11 @@ function ConfigurationForm({
             label="Name"
             required
             hint="How this setup is listed the next time a session is created."
+            verticalOnMobile
             control={
               <Input
-                inputSize={InputSize.Medium}
-                className="w-[280px]"
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                className="w-full md:w-[280px]"
                 value={name}
                 onChange={(event) => edit(setNameDraft)(event.target.value)}
               />
@@ -421,6 +518,7 @@ function ConfigurationForm({
               label="API Key"
               required
               invalid={validation.status === "error"}
+              verticalOnMobile
               hint={
                 record
                   ? "Held by nac for this configuration; type a new key to replace it."
@@ -428,8 +526,8 @@ function ConfigurationForm({
               }
               control={
                 <Input
-                  inputSize={InputSize.Medium}
-                  className="w-[280px]"
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  className="w-full md:w-[280px]"
                   type="password"
                   autoComplete="off"
                   placeholder={
@@ -451,19 +549,21 @@ function ConfigurationForm({
             hint="Endpoint the session sends its requests to; blank uses the provider's own."
             control={
               <Input
-                inputSize={InputSize.Medium}
-                className="w-[280px]"
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                className="w-full md:w-[280px]"
                 placeholder="https://api.openai.com/v1"
                 value={baseUrl}
                 onChange={(event) => edit(setBaseUrl)(event.target.value)}
               />
             }
+            verticalOnMobile
           />
           <Separator />
           <ConfigRow
             label="Default Model"
             required
             hint="Model sessions started from this setup begin with."
+            verticalOnMobile={models.length ? false : true}
             control={
               models.length ? (
                 <SmallSelect
@@ -474,8 +574,8 @@ function ConfigurationForm({
                 />
               ) : (
                 <Input
-                  inputSize={InputSize.Medium}
-                  className="w-[280px]"
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  className="w-full md:w-[280px]"
                   placeholder="gpt-5.5"
                   value={model}
                   onChange={(event) => edit(setModel)(event.target.value)}
@@ -498,12 +598,13 @@ function ConfigurationForm({
           <Separator />
           <ConfigRow
             label="Orchestrator compaction threshold"
+            verticalOnMobile
             labelClassName="max-w-none"
             hint="Context size that triggers compaction; 0 disables it."
             control={
               <Input
-                inputSize={InputSize.Medium}
-                className="w-[105px]"
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                className="w-full md:w-[105px]"
                 inputClassName="text-right"
                 placeholder="config.toml"
                 inputMode="numeric"
@@ -542,38 +643,6 @@ function ConfigurationForm({
         ) : null}
         <p className="text-micro text-basic-muted pt-2">* Required fields</p>
       </div>
-
-      <div className="flex items-center justify-between gap-2 p-4 border-t border-muted shrink-0">
-        <Button
-          variant={ButtonVariant.SecondaryDestructive}
-          size={ButtonSize.Large}
-          content={ButtonContent.Text}
-          disabled={!record}
-          loading={deleteConfig.isPending}
-          onClick={() => void remove()}
-        >
-          Delete
-        </Button>
-        <div className="flex items-center gap-2">
-          <Button
-            variant={ButtonVariant.Ghost}
-            size={ButtonSize.Large}
-            content={ButtonContent.Text}
-            onClick={onClose}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant={ButtonVariant.Primary}
-            size={ButtonSize.Large}
-            content={ButtonContent.Text}
-            loading={createConfig.isPending || updateConfig.isPending}
-            onClick={() => void save()}
-          >
-            Save
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -585,29 +654,4 @@ function autoName(backend: BackendKind, taken: string[]): string {
     const candidate = `${backend}-config-${index}`;
     if (!names.has(candidate)) return candidate;
   }
-}
-
-function SmallSelect({
-  items,
-  value,
-  onValueChange,
-  placeholder,
-}: {
-  items: SelectItem[];
-  value: string;
-  onValueChange: (id: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <Select
-      items={items}
-      value={value}
-      onValueChange={onValueChange}
-      placeholder={placeholder}
-      size={ButtonSize.Medium}
-      variant={ButtonVariant.Ghost}
-      placement={PopoverPlacement.CenterLeft}
-      panelClassName="max-h-[200px] overflow-auto min-w-[220px]"
-    />
-  );
 }

@@ -12,11 +12,9 @@ import {
 import { cn } from "@/app/lib/cn";
 import { formatStoreTime } from "@/app/lib/format";
 import { errorMessage } from "@/app/providers/ToastProvider";
+import { revisionOrdinal, revisionTitle } from "@/app/lib/revisions";
 import { useWorkspaceRevisions } from "@/app/services/queries";
 import type { WorkspaceRevision } from "@/app/types/api";
-
-/** How a revision is named once it is no longer the working tree. */
-const revisionTitle = (ordinal: number) => `Snapshot ${ordinal}`;
 
 function Row({
   title,
@@ -45,7 +43,9 @@ function Row({
       <span className="flex-1 min-w-0 flex flex-col">
         <span className="label-micro text-btn-secondary truncate">{title}</span>
         {subtitle ? (
-          <span className="label-micro text-basic-muted truncate">{subtitle}</span>
+          <span className="label-micro text-basic-muted truncate">
+            {subtitle}
+          </span>
         ) : null}
       </span>
       {trailing ? (
@@ -78,11 +78,12 @@ export function RevisionPicker({
   const { data, isLoading, error } = useWorkspaceRevisions(sessionId);
 
   const revisions = data ?? [];
-  // The list arrives newest first, so the oldest revision is number one.
-  const ordinalOf = (index: number) => revisions.length - index;
+  const ordinalOf = (index: number) => revisionOrdinal(index, revisions.length);
   const selectedIndex = revisions.findIndex((item) => item.id === selected);
   const label =
-    selectedIndex >= 0 ? revisionTitle(ordinalOf(selectedIndex)) : "Working tree";
+    selectedIndex >= 0
+      ? revisionTitle(ordinalOf(selectedIndex))
+      : "Working tree";
 
   const pick = (revision: number | null) => {
     onSelect(revision);
@@ -150,7 +151,9 @@ export function RevisionPicker({
         onClick={() => setOpen(!open)}
       >
         <Icon iconName={IconName.History} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate">{label}</span>
+        <span className="label-micro text-btn-secondary truncate max-w-[64px] xl:max-w-[128px]">
+          {label}
+        </span>
       </button>
     </Popover>
   );

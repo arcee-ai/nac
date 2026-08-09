@@ -1,5 +1,6 @@
 import type React from "react";
 
+import { cn } from "@/app/lib/cn";
 import {
   Button,
   ButtonContent,
@@ -44,8 +45,14 @@ function Divider() {
   return <div className="h-px w-full bg-divider-muted shrink-0" />;
 }
 
-function Section({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-col gap-4 px-4 py-6">{children}</div>;
+function Section({
+  children,
+  gap,
+}: {
+  children: React.ReactNode;
+  gap: string;
+}) {
+  return <div className={cn("flex flex-col px-4 py-6", gap)}>{children}</div>;
 }
 
 function FilterRow({
@@ -53,27 +60,45 @@ function FilterRow({
   items,
   value,
   onValueChange,
+  stacked,
 }: {
   label: string;
   items: SelectItem[];
   value: string;
   onValueChange: (id: string) => void;
+  /** Label above a full-width field, which is all a phone has room for. */
+  stacked: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="label-small text-basic-secondary shrink-0">{label}</div>
+    <div
+      className={cn(
+        stacked
+          ? "flex flex-col gap-1"
+          : "flex items-center justify-between gap-3",
+      )}
+    >
+      <div
+        className={cn(
+          stacked
+            ? "label-medium text-basic-primary"
+            : "label-small text-basic-secondary shrink-0",
+        )}
+      >
+        {label}
+      </div>
       <Select
         items={items}
         value={value}
         onValueChange={onValueChange}
-        size={ButtonSize.Small}
+        size={stacked ? ButtonSize.Large : ButtonSize.Small}
         variant={ButtonVariant.Secondary}
         // The rail is narrow, so the panel hangs from the trigger's right edge
         // and grows inwards. As a placement rather than a class: adding
         // `right-0` on top of the default leaves both edges pinned, which
         // squeezes the panel to the trigger's width and spills the labels out.
         placement={PopoverPlacement.BottomLeft}
-        className="min-w-0"
+        className={stacked ? "w-full" : "min-w-0"}
+        triggerClassName={stacked ? "w-full btn-field" : ""}
       />
     </div>
   );
@@ -86,6 +111,7 @@ function Chips<T extends string>({
   onToggle,
   emptyText,
   labelOf = (option: T) => option as string,
+  touch,
 }: {
   label: string;
   options: readonly T[];
@@ -93,10 +119,20 @@ function Chips<T extends string>({
   onToggle: (value: T) => void;
   emptyText?: string;
   labelOf?: (value: T) => string;
+  /** Taller chips and a heavier label, for the phone's filters dialog. */
+  touch: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <div className="label-small text-basic-secondary">{label}</div>
+      <div
+        className={cn(
+          touch
+            ? "label-medium text-basic-primary"
+            : "label-small text-basic-secondary",
+        )}
+      >
+        {label}
+      </div>
       {options.length === 0 ? (
         <div className="text-micro text-basic-muted">{emptyText}</div>
       ) : (
@@ -104,7 +140,8 @@ function Chips<T extends string>({
           {options.map((option) => (
             <Button
               key={option}
-              size={ButtonSize.Small}
+              // The 36px chip already carries the design's 16px padding.
+              size={touch ? ButtonSize.Medium : ButtonSize.Small}
               content={ButtonContent.Text}
               variant={
                 selected.includes(option)
@@ -113,7 +150,7 @@ function Chips<T extends string>({
               }
               onClick={() => onToggle(option)}
               aria-pressed={selected.includes(option)}
-              style={CHIP_PADDING}
+              style={touch ? undefined : CHIP_PADDING}
             >
               {labelOf(option)}
             </Button>
@@ -126,8 +163,17 @@ function Chips<T extends string>({
 
 export function SessionFilters({
   sessions,
+  showSearch = true,
+  mobile = false,
+  onChange,
 }: {
   sessions: ManagedSessionSummary[];
+  /** Off where the page already carries the search field, e.g. on a phone. */
+  showSearch?: boolean;
+  /** Stacked fields and touch-sized chips, for the phone's filters dialog. */
+  mobile?: boolean;
+  /** Runs after any filter moves. The phone's dialog closes on it. */
+  onChange?: () => void;
 }) {
   const query = useFilterQuery();
   const sort = useSort();
@@ -137,58 +183,78 @@ export function SessionFilters({
   const providers = useSelectedProviders();
   const providerOptions = useSessionProviders(sessions);
 
+  const commit =
+    <T,>(apply: (value: T) => void) =>
+    (value: T) => {
+      apply(value);
+      onChange?.();
+    };
+
   return (
     <div className="flex flex-col">
-      <Section>
-        <Input
-          inputSize={InputSize.Medium}
-          leading={InputLeading.Icon}
-          leadingIconName={IconName.Search}
-          placeholder="Search sessions"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Search sessions"
-        />
-      </Section>
-      <Divider />
-      <Section>
+      {showSearch ? (
+        <>
+          <Section gap="gap-4">
+            <Input
+              inputSize={InputSize.Medium}
+              leading={InputLeading.Icon}
+              leadingIconName={IconName.Search}
+              placeholder="Search sessions"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search sessions"
+            />
+          </Section>
+          <Divider />
+        </>
+      ) : null}
+      <Section gap={mobile ? "gap-6" : "gap-4"}>
         <FilterRow
           label="Sort by"
           items={SORT_ITEMS}
           value={sort}
-          onValueChange={(id) => setSort(id as SortId)}
+          onValueChange={commit((id: string) => setSort(id as SortId))}
+          stacked={mobile}
         />
         <FilterRow
           label="Creation date"
           items={RANGE_ITEMS}
           value={createdRange}
-          onValueChange={(id) => setCreatedRange(id as RangeId)}
+          onValueChange={commit((id: string) =>
+            setCreatedRange(id as RangeId),
+          )}
+          stacked={mobile}
         />
         <FilterRow
           label="Modification date"
           items={RANGE_ITEMS}
           value={modifiedRange}
-          onValueChange={(id) => setModifiedRange(id as RangeId)}
+          onValueChange={commit((id: string) =>
+            setModifiedRange(id as RangeId),
+          )}
+          stacked={mobile}
         />
       </Section>
       <Divider />
-      <Section>
+      <Section gap="gap-4">
         <Chips<SessionEnv>
           label="Environment"
           options={SESSION_ENVS}
           selected={envs}
-          onToggle={toggleEnv}
+          onToggle={commit(toggleEnv)}
+          touch={mobile}
         />
       </Section>
       <Divider />
-      <Section>
+      <Section gap="gap-4">
         <Chips
           label="Provider"
           options={providerOptions}
           selected={providers}
-          onToggle={toggleProvider}
+          onToggle={commit(toggleProvider)}
           emptyText="No providers yet"
           labelOf={providerLabel}
+          touch={mobile}
         />
       </Section>
     </div>

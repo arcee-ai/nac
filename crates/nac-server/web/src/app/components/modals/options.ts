@@ -10,6 +10,12 @@ export const BACKEND_OPTIONS: SelectItem[] = [
   ...PROVIDER_KINDS.map((kind) => ({ id: kind, label: providerLabel(kind) })),
 ];
 
+/** The providers themselves, for a row that has to name one. */
+export const PROTOCOL_ITEMS: SelectItem[] = PROVIDER_KINDS.map((kind) => ({
+  id: kind,
+  label: providerLabel(kind),
+}));
+
 /** Just the effort levels, one per ReasoningEffort variant. */
 export const EFFORT_LEVEL_OPTIONS: SelectItem[] = [
   { id: "none", label: "None" },

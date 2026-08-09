@@ -9,10 +9,14 @@ import {
   ButtonVariant,
   Icon,
   IconName,
+  Modal,
+  StickyButton,
+  StickyInput,
+  StickyInputVariant,
 } from "@/app/atoms";
 import { SessionCard } from "@/app/components/sessions/SessionCard";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
-import { useIsDesktop } from "@/app/hooks/useMediaQuery";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 import { errorMessage } from "@/app/providers/ToastProvider";
@@ -23,15 +27,33 @@ import {
   trackAttention,
   useAttention,
 } from "@/app/store/attentionStore";
-import { useVisibleSessions } from "@/app/store/sessionFiltersStore";
+import {
+  setQuery,
+  useFilterQuery,
+  useVisibleSessions,
+} from "@/app/store/sessionFiltersStore";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
 // Columns are 360px at minimum and stretch to fill the row, so the design's
 // 3-up layout falls out naturally at the 1520px reference width and wider
 // viewports gain columns instead of empty space.
-function CardGrid({ children }: { children: React.ReactNode }) {
+function CardGrid({
+  children,
+  single,
+}: {
+  children: React.ReactNode;
+  /** One card per row, which is all a phone has width for. */
+  single: boolean;
+}) {
   return (
-    <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]">
+    <div
+      className={cn(
+        "grid gap-2",
+        single
+          ? "grid-cols-1"
+          : "grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]",
+      )}
+    >
       {children}
     </div>
   );
@@ -64,8 +86,9 @@ function GridCard({
 
 export default function SessionsListPage() {
   const navigate = useNavigate();
-  const isDesktop = useIsDesktop();
+  const isMobile = useIsMobile();
   const actions = useSessionActions();
+  const query = useFilterQuery();
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const { data, isLoading, error } = useSessions();
@@ -104,6 +127,49 @@ export default function SessionsListPage() {
     </Button>
   );
 
+  // Pinned under the bar rather than scrolling with the cards, so search and
+  // filters stay in reach. The 144px of head room below clears it.
+  const searchBar = (
+    <div className="fixed inset-x-0 top-16 z-10 flex items-start gap-3 px-2 py-4">
+      <StickyInput
+        className="flex-1 min-w-0"
+        variant={StickyInputVariant.Search}
+        placeholder="Search sessions…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onClear={() => setQuery("")}
+        aria-label="Search sessions"
+      />
+      <StickyButton
+        variant={ButtonVariant.Secondary}
+        content={ButtonContent.Icon}
+        aria-label="Filters"
+        aria-expanded={filtersOpen}
+        onClick={() => setFiltersOpen(true)}
+      >
+        <Icon iconName={IconName.Controls} />
+      </StickyButton>
+    </div>
+  );
+
+  // The phone puts the filters behind the full-screen dialog and dismisses it
+  // as soon as one moves, so the results are visible without a second tap.
+  const filtersDialog = (
+    <Modal
+      open={filtersOpen}
+      onClose={() => setFiltersOpen(false)}
+      title="Filters"
+      bodyClassName="p-0"
+    >
+      <SessionFilters
+        sessions={all}
+        showSearch={false}
+        mobile
+        onChange={() => setFiltersOpen(false)}
+      />
+    </Modal>
+  );
+
   const rail = (
     <BoxSurface
       title={countLabel}
@@ -119,43 +185,24 @@ export default function SessionsListPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      {isDesktop ? (
+      {isMobile ? null : (
         <aside className="w-[360px] shrink-0 p-2 pt-16 min-h-0">{rail}</aside>
-      ) : null}
+      )}
+      {isMobile ? searchBar : null}
+      {isMobile ? filtersDialog : null}
 
-      <div className="flex-1 min-h-0 overflow-auto px-4">
-        <div className="pb-2 pt-16 flex flex-col gap-6 [&>*]:shrink-0">
-          {!isDesktop ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <div className="header-md text-basic-primary flex-1 min-w-0">
-                  {countLabel}
-                </div>
-                <Button
-                  variant={ButtonVariant.Secondary}
-                  size={ButtonSize.Medium}
-                  content={ButtonContent.IconRight}
-                  onClick={() => setFiltersOpen((v) => !v)}
-                >
-                  Filters
-                  <Icon
-                    iconName={IconName.Down}
-                    className={cn(
-                      "transition-transform",
-                      filtersOpen && "rotate-180",
-                    )}
-                  />
-                </Button>
-                {newButton}
-              </div>
-              {filtersOpen ? (
-                <BoxSurface>
-                  <SessionFilters sessions={all} />
-                </BoxSurface>
-              ) : null}
-            </div>
-          ) : null}
-
+      <div
+        className={cn(
+          "flex-1 min-h-0 overflow-auto",
+          isMobile ? "px-2" : "px-4",
+        )}
+      >
+        <div
+          className={cn(
+            "flex flex-col gap-6 [&>*]:shrink-0",
+            isMobile ? "pt-36 pb-8" : "pt-16 pb-2",
+          )}
+        >
           {error ? (
             <div className="label-small text-error-primary">
               {errorMessage(error)}
@@ -169,10 +216,10 @@ export default function SessionsListPage() {
           ) : null}
 
           {pinned.length > 0 ? (
-            <CardGrid>{pinned.map(renderCard)}</CardGrid>
+            <CardGrid single={isMobile}>{pinned.map(renderCard)}</CardGrid>
           ) : null}
           {unpinned.length > 0 ? (
-            <CardGrid>{unpinned.map(renderCard)}</CardGrid>
+            <CardGrid single={isMobile}>{unpinned.map(renderCard)}</CardGrid>
           ) : null}
         </div>
       </div>

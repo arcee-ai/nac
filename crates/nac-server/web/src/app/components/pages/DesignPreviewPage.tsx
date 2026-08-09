@@ -137,6 +137,8 @@ export default function DesignPreviewPage() {
               title="Pin session"
               description="Keeps the card at the top of the board."
               position={TooltipPosition.BottomCenter}
+              sticky
+              showTooltipOnMobile
             >
               <Icon iconName={IconName.Pin} />
             </Tooltip>

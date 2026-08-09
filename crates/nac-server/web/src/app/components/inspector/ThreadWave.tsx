@@ -1,5 +1,6 @@
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
 import { ThreadLogTail } from "@/app/components/inspector/ThreadLogTail";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import type { ThreadState, TranscriptThread } from "@/app/lib/transcript";
 
@@ -58,6 +59,7 @@ function worstState(threads: TranscriptThread[]): ThreadState {
 
 /** One dispatched thread: name, live state and the newest line it produced. */
 function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
+  const isMobile = useIsMobile();
   const running = thread.state === "running";
   const pending = thread.state === "pending";
   // Before the first command there is nothing to tail, so the card keeps
@@ -81,7 +83,8 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
     // has to live on a wrapper underneath it.
     <div
       className={cn(
-        "shrink-0 w-[220px] h-[84px] overflow-hidden rounded-[4px]",
+        "shrink-0 h-[84px] overflow-hidden rounded-[4px]",
+        isMobile ? "w-[172px]" : "w-[220px]",
         running || pending ? "bg-elevation-level-2" : "bg-elevation-level-1",
       )}
     >
@@ -151,8 +154,7 @@ function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
   return (
     <div
       className={cn(
-        "pl-4 py-3 w-full border-l-2 border-solid",
-        "overflow-x-auto hide-scrollbar",
+        "pl-4 py-3 w-full border-l-2 border-solid overflow-x-auto hide-scrollbar",
         // Fade the row out on the right so a wave reads as scrollable.
         "[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]",
         state === "error"
