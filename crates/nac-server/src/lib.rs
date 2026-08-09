@@ -338,25 +338,22 @@ impl<'de> Deserialize<'de> for HeadersRequest {
 pub struct MixedTierRequest {
     pub model: String,
     #[serde(default)]
-    pub backend: Option<String>,
+    pub backend: Option<BackendKind>,
     #[serde(default)]
     pub base_url: Option<String>,
     #[serde(default)]
     pub api_key_env: Option<String>,
     #[serde(default)]
-    pub reasoning_effort: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// Mixed-mode dispatch routing: the classification selects a user-configured
 /// worker model per tier.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum MixedModelsRequest {
-    Models {
-        easy: MixedTierRequest,
-        medium: MixedTierRequest,
-        hard: MixedTierRequest,
-    },
+pub struct MixedModelsRequest {
+    pub easy: MixedTierRequest,
+    pub medium: MixedTierRequest,
+    pub hard: MixedTierRequest,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -3306,50 +3303,26 @@ fn create_compaction_threshold_override(field: RequestField<u64>) -> Result<Opti
 }
 
 /// Validate and normalize one mixed tier from a request into the persisted
-/// form: the model is required and nonblank, backend and effort must parse,
-/// and a caller-supplied base URL is held to the same credential destination
-/// policy as the top-level model.
+/// form: the model and supplied base URL must be nonblank, and a custom URL is
+/// held to the same credential destination policy as the top-level model.
 fn mixed_tier_settings(
     tier: MixedTierRequest,
     label: &str,
     policy: &CredentialDestinationPolicy,
 ) -> Result<sessions::MixedTierSettings> {
     let model = nonblank_request_string(tier.model, &format!("mixed_models.{label}.model"))?;
-    let backend = tier
-        .backend
-        .map(|value| {
-            let value = nonblank_request_string(value, &format!("mixed_models.{label}.backend"))?;
-            parse_request_enum::<BackendKind>(&value, &format!("mixed_models.{label}.backend"))
-                .map(|kind: BackendKind| (value, kind))
-        })
-        .transpose()?;
-    let reasoning_effort = tier
-        .reasoning_effort
-        .map(|value| {
-            let value =
-                nonblank_request_string(value, &format!("mixed_models.{label}.reasoning_effort"))?;
-            parse_request_enum::<ReasoningEffort>(
-                &value,
-                &format!("mixed_models.{label}.reasoning_effort"),
-            )
-            .map(|_: ReasoningEffort| value)
-        })
-        .transpose()?;
     let base_url = tier
         .base_url
         .map(|value| nonblank_request_string(value, &format!("mixed_models.{label}.base_url")))
         .transpose()?;
-    let tier_backend = backend
-        .as_ref()
-        .map(|(_, kind)| *kind)
-        .or_else(|| provider_for_model(&model));
+    let tier_backend = tier.backend.or_else(|| provider_for_model(&model));
     enforce_trusted_base_url(tier_backend, base_url.as_deref(), policy)?;
     Ok(sessions::MixedTierSettings {
         model,
-        backend: backend.map(|(value, _)| value),
+        backend: tier.backend,
         base_url,
         api_key_env: tier.api_key_env,
-        reasoning_effort,
+        reasoning_effort: tier.reasoning_effort,
     })
 }
 
@@ -3357,14 +3330,11 @@ fn mixed_models_config(
     request: MixedModelsRequest,
     policy: &CredentialDestinationPolicy,
 ) -> Result<sessions::MixedModeConfig> {
-    let MixedModelsRequest::Models { easy, medium, hard } = request;
-    Ok(sessions::MixedModeConfig::Models(Box::new(
-        sessions::MixedTierModels {
-            easy: mixed_tier_settings(easy, "easy", policy)?,
-            medium: mixed_tier_settings(medium, "medium", policy)?,
-            hard: mixed_tier_settings(hard, "hard", policy)?,
-        },
-    )))
+    Ok(sessions::MixedModeConfig {
+        easy: mixed_tier_settings(request.easy, "easy", policy)?,
+        medium: mixed_tier_settings(request.medium, "medium", policy)?,
+        hard: mixed_tier_settings(request.hard, "hard", policy)?,
+    })
 }
 
 fn model_options(
@@ -5206,7 +5176,7 @@ mod tests {
             backend: None,
             base_url: None,
             api_key_env: None,
-            reasoning_effort: effort.map(str::to_string),
+            reasoning_effort: effort.map(|value| value.parse().unwrap()),
         };
         let mixed_patch = |mixed_models: RequestField<MixedModelsRequest>| UpdateConfigRequest {
             model: RequestField::Omitted,
@@ -5222,7 +5192,7 @@ mod tests {
         manager
             .update_session_config(
                 "session",
-                mixed_patch(RequestField::Value(MixedModelsRequest::Models {
+                mixed_patch(RequestField::Value(MixedModelsRequest {
                     easy: tier("gpt-5-mini", Some("low")),
                     medium: tier("gpt-5", None),
                     hard: tier("claude-fable-5", None),
@@ -5238,7 +5208,7 @@ mod tests {
         let error = manager
             .update_session_config(
                 "session",
-                mixed_patch(RequestField::Value(MixedModelsRequest::Models {
+                mixed_patch(RequestField::Value(MixedModelsRequest {
                     easy: tier("gpt-5-mini", None),
                     medium: tier("gpt-5", None),
                     hard: tier("claude-fable-5", Some("high")),
@@ -5247,13 +5217,15 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            error.to_string().contains("invalid hard tier model settings"),
+            error
+                .to_string()
+                .contains("invalid hard tier model settings"),
             "{error:#}"
         );
         let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
-        let Some(sessions::MixedModeConfig::Models(tiers)) = stored.mixed_models else {
-            panic!("stored mixed config should survive the failed patch");
-        };
+        let tiers = stored
+            .mixed_models
+            .expect("stored mixed config should survive the failed patch");
         assert_eq!(tiers.hard.reasoning_effort, None);
 
         // Null returns the session to single-model mode.
@@ -5263,6 +5235,83 @@ mod tests {
             .expect("clearing the mixed config should succeed");
         let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
         assert!(stored.mixed_models.is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn malformed_mixed_models_diagnostic_survives_and_patch_repairs_it() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("malformed_mixed_models_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+
+        let corrupt = || {
+            rusqlite::Connection::open(&store_path)
+                .unwrap()
+                .execute(
+                    "UPDATE sessions SET mixed_models_json = '{broken' WHERE session_id = 'session'",
+                    [],
+                )
+                .unwrap();
+        };
+        corrupt();
+
+        let raw = sessions::load_session_config(&store_path, "session").unwrap();
+        assert!(
+            raw.diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("malformed stored mixed models")),
+            "{:?}",
+            raw.diagnostics
+        );
+
+        let tier = |model: &str, effort| MixedTierRequest {
+            model: model.to_string(),
+            backend: None,
+            base_url: None,
+            api_key_env: None,
+            reasoning_effort: effort,
+        };
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    mixed_models: RequestField::Value(MixedModelsRequest {
+                        easy: tier("gpt-5-mini", Some(ReasoningEffort::Low)),
+                        medium: tier("gpt-5", None),
+                        hard: tier("gpt-5", None),
+                    }),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("a replacement PATCH should repair malformed mixed models");
+        let replaced = sessions::load_session_config(&store_path, "session").unwrap();
+        assert!(
+            replaced.diagnostics.is_empty(),
+            "{:?}",
+            replaced.diagnostics
+        );
+        assert!(replaced.mixed_models.is_some());
+
+        corrupt();
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    mixed_models: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("a null PATCH should clear malformed mixed models");
+        let cleared = sessions::load_session_config(&store_path, "session").unwrap();
+        assert!(cleared.diagnostics.is_empty(), "{:?}", cleared.diagnostics);
+        assert!(cleared.mixed_models.is_none());
 
         let _ = std::fs::remove_dir_all(&root);
     }

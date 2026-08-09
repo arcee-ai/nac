@@ -182,18 +182,25 @@ fn parse_mixed_complexity(
 
 /// Select the model client a dispatch runs with. Outside mixed mode this is
 /// the orchestrator client, unchanged. In mixed mode the parsed complexity
-/// picks the pre-resolved tier client.
+/// picks the pre-resolved tier client. A crossed routing state is an invariant
+/// error, never permission to run on the wrong model.
 pub(crate) fn select_dispatch_client(
     params: &ParsedDispatchParams,
     runtime: &ToolRuntime,
     orchestrator_client: &ModelClient,
-) -> ModelClient {
-    runtime
-        .mixed_clients
-        .as_deref()
-        .zip(params.complexity)
-        .map(|(mixed, complexity)| mixed.for_tier(complexity).clone())
-        .unwrap_or_else(|| orchestrator_client.clone())
+) -> Result<ModelClient, ToolResult> {
+    match (runtime.mixed_clients.as_deref(), params.complexity) {
+        (None, None) => Ok(orchestrator_client.clone()),
+        (Some(mixed), Some(complexity)) => Ok(mixed.for_tier(complexity).clone()),
+        (Some(_), None) => Err(ToolResult {
+            content: "Error: mixed-mode dispatch is missing its required complexity".to_string(),
+            is_error: true,
+        }),
+        (None, Some(_)) => Err(ToolResult {
+            content: "Error: single-model dispatch unexpectedly has a complexity".to_string(),
+            is_error: true,
+        }),
+    }
 }
 
 /// Execute a dispatch from already-parsed params.  Emits `ThreadStarted`,
@@ -327,7 +334,10 @@ pub async fn execute_dispatch(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let client = select_dispatch_client(&params, runtime, client);
+    let client = match select_dispatch_client(&params, runtime, client) {
+        Ok(client) => client,
+        Err(error) => return error,
+    };
     let thread_name = params.thread_name.clone();
     let dispatch_id = params.dispatch_id.clone();
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
@@ -828,7 +838,7 @@ mod tests {
         let runtime = test_runtime();
         let params =
             parse_dispatch_args(&json!({ "name": "t1", "action": "w" }), &runtime).unwrap();
-        let client = select_dispatch_client(&params, &runtime, &orchestrator);
+        let client = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
         assert_eq!(client.reasoning_effort(), orchestrator.reasoning_effort());
 
         // Mixed mode: the parsed complexity picks the tier client.
@@ -839,7 +849,7 @@ mod tests {
                 &runtime,
             )
             .unwrap();
-            let client = select_dispatch_client(&params, &runtime, &orchestrator);
+            let client = select_dispatch_client(&params, &runtime, &orchestrator).unwrap();
             let tier = runtime
                 .mixed_clients
                 .as_deref()
@@ -848,6 +858,27 @@ mod tests {
             assert_eq!(client.model, tier.model);
             assert_eq!(client.reasoning_effort(), tier.reasoning_effort());
         }
+    }
+
+    #[test]
+    fn select_dispatch_client_rejects_crossed_routing_state() {
+        let orchestrator = ModelClient::new_for_test();
+
+        let mixed = mixed_runtime();
+        let params =
+            parse_dispatch_args(&json!({ "name": "t1", "action": "w" }), &test_runtime()).unwrap();
+        let error = select_dispatch_client(&params, &mixed, &orchestrator).unwrap_err();
+        assert!(error.is_error);
+        assert!(error.content.contains("missing its required complexity"));
+
+        let params = parse_dispatch_args(
+            &json!({ "name": "t1", "action": "w", "complexity": "easy" }),
+            &mixed,
+        )
+        .unwrap();
+        let error = select_dispatch_client(&params, &test_runtime(), &orchestrator).unwrap_err();
+        assert!(error.is_error);
+        assert!(error.content.contains("unexpectedly has a complexity"));
     }
 
     #[test]

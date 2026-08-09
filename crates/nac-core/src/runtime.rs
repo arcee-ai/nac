@@ -709,33 +709,19 @@ pub fn effective_model_settings(
 /// explicit backend → catalog provider for the model id; explicit base_url →
 /// managed-if-explicit-backend → catalog defaults inside `from_optional`.
 fn resolve_mixed_tier_client(tier: &MixedTierSettings, label: &str) -> Result<ModelClient> {
-    let explicit_backend = tier
+    let backend = tier
         .backend
-        .as_deref()
-        .map(|raw| {
-            raw.parse::<BackendKind>()
-                .map_err(|error| anyhow::anyhow!("invalid {label} tier backend: {error}"))
-        })
-        .transpose()?;
-    let backend =
-        explicit_backend.or_else(|| crate::model::provider_for_model(tier.model.as_str()));
-    let selected_managed_base_url = explicit_backend
+        .or_else(|| crate::model::provider_for_model(tier.model.as_str()));
+    let selected_managed_base_url = tier
+        .backend
         .and_then(managed_backend_base_url)
         .map(str::to_string);
     let base_url = tier.base_url.clone().or(selected_managed_base_url);
-    let reasoning_effort = tier
-        .reasoning_effort
-        .as_deref()
-        .map(|raw| {
-            raw.parse::<ReasoningEffort>()
-                .map_err(|error| anyhow::anyhow!("invalid {label} tier reasoning effort: {error}"))
-        })
-        .transpose()?;
     let settings = EffectiveModelSettings::from_optional(
         backend,
         Some(tier.model.clone()),
         base_url,
-        reasoning_effort,
+        tier.reasoning_effort,
         tier.api_key_env.clone(),
         BTreeMap::new(),
     )
@@ -748,11 +734,10 @@ fn resolve_mixed_tier_client(tier: &MixedTierSettings, label: &str) -> Result<Mo
 /// launch and resume so a misconfigured tier fails loudly up front instead
 /// of at first dispatch.
 pub fn resolve_mixed_dispatch_clients(mixed: &MixedModeConfig) -> Result<MixedDispatchClients> {
-    let MixedModeConfig::Models(tiers) = mixed;
     Ok(MixedDispatchClients {
-        easy: resolve_mixed_tier_client(&tiers.easy, "easy")?,
-        medium: resolve_mixed_tier_client(&tiers.medium, "medium")?,
-        hard: resolve_mixed_tier_client(&tiers.hard, "hard")?,
+        easy: resolve_mixed_tier_client(&mixed.easy, "easy")?,
+        medium: resolve_mixed_tier_client(&mixed.medium, "medium")?,
+        hard: resolve_mixed_tier_client(&mixed.hard, "hard")?,
     })
 }
 
@@ -1818,7 +1803,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_models_variant_resolves_tiers_and_rejects_unsupported_tier_effort() {
+    fn mixed_models_resolve_tiers_and_reject_unsupported_tier_effort() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original_openai = std::env::var_os("OPENAI_API_KEY");
         let original_anthropic = std::env::var_os("ANTHROPIC_API_KEY");
@@ -1832,13 +1817,13 @@ mod tests {
             backend: None,
             base_url: None,
             api_key_env: None,
-            reasoning_effort: effort.map(str::to_string),
+            reasoning_effort: effort.map(|value| value.parse().unwrap()),
         };
-        let mixed = MixedModeConfig::Models(Box::new(sessions::MixedTierModels {
+        let mixed = MixedModeConfig {
             easy: tier("gpt-5-mini", Some("low")),
             medium: tier("gpt-5", None),
             hard: tier("claude-fable-5", None),
-        }));
+        };
         let clients = resolve_mixed_dispatch_clients(&mixed).unwrap();
         assert_eq!(clients.easy.model, "gpt-5-mini");
         assert_eq!(clients.easy.reasoning_effort(), Some(ReasoningEffort::Low));
@@ -1847,11 +1832,11 @@ mod tests {
         assert_eq!(clients.hard.backend(), BackendKind::AnthropicMessages);
 
         // A tier effort its model's catalog metadata rejects fails resolution.
-        let mixed = MixedModeConfig::Models(Box::new(sessions::MixedTierModels {
+        let mixed = MixedModeConfig {
             easy: tier("gpt-5-mini", None),
             medium: tier("gpt-5", None),
             hard: tier("claude-fable-5", Some("high")),
-        }));
+        };
         let error = resolve_mixed_dispatch_clients(&mixed)
             .map(|_| ())
             .unwrap_err()

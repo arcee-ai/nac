@@ -363,19 +363,6 @@ impl ModelClient {
         &self.extra_headers
     }
 
-    /// Clone this client with a different reasoning effort, preserving the
-    /// full credential, endpoint, header, cache, and catalog identity.
-    /// Returns `None` when the resolved model does not accept `effort`, so
-    /// an unsupported level is never sent to the provider.
-    pub fn with_reasoning_effort_override(&self, effort: ReasoningEffort) -> Option<Self> {
-        if !self.resolved_model.thinking_level_map.is_supported(effort) {
-            return None;
-        }
-        let mut client = self.clone();
-        client.reasoning_effort = Some(effort);
-        Some(client)
-    }
-
     /// Attach per-response cost computed from the resolved catalog metadata
     /// (S3). Anthropic 1-hour-TTL cache writes (orchestrator clients) bill at
     /// the metadata's 1h rate — 2x input when the catalog has no explicit

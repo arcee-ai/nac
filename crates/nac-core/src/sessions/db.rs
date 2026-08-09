@@ -349,11 +349,11 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     }
     config.orchestrator_compaction_threshold =
         validate_stored_compaction_threshold(config.orchestrator_compaction_threshold)?;
-    config.diagnostics = model_config_diagnostics(
+    config.diagnostics.extend(model_config_diagnostics(
         config.backend.as_deref(),
         config.reasoning_effort.as_deref(),
         config.extra_headers_json.as_deref(),
-    );
+    ));
     Ok(config)
 }
 

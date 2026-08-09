@@ -492,7 +492,26 @@ pub(crate) async fn execute_with_dag(
 
             // Spawn execute_parsed_dispatch.
             let runtime = runtime.clone();
-            let client = thread::select_dispatch_client(&dispatch.params, &runtime, &client);
+            let client = match thread::select_dispatch_client(&dispatch.params, &runtime, &client) {
+                Ok(client) => client,
+                Err(result) => {
+                    event_sink.emit(AgentEvent::ToolCallFinished {
+                        thread_name: agent_thread_name.clone(),
+                        call_id: dispatch.tool_call_id.clone(),
+                        name: "thread".to_string(),
+                        content_preview: preview_tool_result("thread", &result),
+                        is_error: true,
+                    });
+                    all_results.push((
+                        dispatch.original_index,
+                        dispatch.tool_call_id.clone(),
+                        "thread".to_string(),
+                        result,
+                    ));
+                    failed_indices.insert(dispatch_idx);
+                    continue;
+                }
+            };
             let params = dispatch.params.clone();
             let id = dispatch.tool_call_id.clone();
             let original_index = dispatch.original_index;

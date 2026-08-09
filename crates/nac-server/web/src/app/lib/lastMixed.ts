@@ -20,11 +20,16 @@ export function loadLastMixed(): MixedModels | null {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return null;
     const mixed = parsed as Record<string, unknown>;
-    if (mixed.kind !== "models") return null;
     if (!isTier(mixed.easy) || !isTier(mixed.medium) || !isTier(mixed.hard)) {
       return null;
     }
-    return parsed as MixedModels;
+    // Rebuild the value so legacy entries drop the old `kind: "models"`
+    // discriminator before they are sent to the server.
+    return {
+      easy: mixed.easy,
+      medium: mixed.medium,
+      hard: mixed.hard,
+    };
   } catch {
     return null;
   }

@@ -30,6 +30,7 @@ import type {
   MixedModels,
   MixedTierSettings,
   ModelCatalog,
+  ReasoningEffort,
 } from "@/app/types/api";
 
 export type MixedMode = "single" | "mixed";
@@ -66,7 +67,7 @@ const TIER_EFFORT_OPTIONS: SelectItem[] = [
 
 interface TierState {
   pick: CatalogPick | null;
-  effort: string;
+  effort: ReasoningEffort | "";
 }
 
 function tierStateFrom(settings: MixedTierSettings | undefined): TierState {
@@ -138,7 +139,12 @@ function TierModelRow({
           <Select
             items={efforts}
             value={state.effort}
-            onValueChange={(effort) => onChange({ ...state, effort })}
+            onValueChange={(effort) =>
+              onChange({
+                ...state,
+                effort: effort as ReasoningEffort | "",
+              })
+            }
             disabled={!state.pick}
             size={ButtonSize.Medium}
             variant={ButtonVariant.Ghost}
@@ -186,8 +192,7 @@ export function MixedModelsSection({
     const hard = tierSettings(tiers.hard);
     return {
       mode,
-      mixed:
-        easy && medium && hard ? { kind: "models", easy, medium, hard } : null,
+      mixed: easy && medium && hard ? { easy, medium, hard } : null,
     };
   }, [mode, tiers]);
 

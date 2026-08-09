@@ -33,28 +33,20 @@ pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunSt
 use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
 
-/// One tier's worker-model identity in mixed-models mode. Values are
-/// persisted verbatim, like the session's own model fields; resolution and
-/// validation happen at launch/resume through the catalog.
+/// One tier's worker-model identity in mixed-models mode. The model remains a
+/// catalog id; backend and reasoning effort are typed before entering the
+/// domain model.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MixedTierSettings {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backend: Option<String>,
+    pub backend: Option<BackendKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
-}
-
-/// The three tier models of the mixed-models variant.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MixedTierModels {
-    pub easy: MixedTierSettings,
-    pub medium: MixedTierSettings,
-    pub hard: MixedTierSettings,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// Mixed-mode dispatch routing: the orchestrator classifies every thread
@@ -62,10 +54,10 @@ pub struct MixedTierModels {
 /// user-configured worker model per tier. `Some` on a session means mixed
 /// mode is on; `None` keeps single-model behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum MixedModeConfig {
-    /// A user-configured worker model per difficulty tier.
-    Models(Box<MixedTierModels>),
+pub struct MixedModeConfig {
+    pub easy: MixedTierSettings,
+    pub medium: MixedTierSettings,
+    pub hard: MixedTierSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -381,13 +373,13 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("mixed_models_round_trip");
 
-        let mixed = MixedModeConfig::Models(Box::new(MixedTierModels {
+        let mixed = MixedModeConfig {
             easy: MixedTierSettings {
                 model: "small-model".to_string(),
-                backend: Some("openai-responses".to_string()),
+                backend: Some(BackendKind::OpenAiResponses),
                 base_url: Some("https://api.openai.com/v1".to_string()),
                 api_key_env: Some("OPENAI_API_KEY".to_string()),
-                reasoning_effort: Some("low".to_string()),
+                reasoning_effort: Some(ReasoningEffort::Low),
             },
             medium: MixedTierSettings {
                 model: "medium-model".to_string(),
@@ -398,12 +390,23 @@ mod tests {
             },
             hard: MixedTierSettings {
                 model: "large-model".to_string(),
-                backend: Some("anthropic-messages".to_string()),
+                backend: Some(BackendKind::AnthropicMessages),
                 base_url: None,
                 api_key_env: None,
-                reasoning_effort: Some("high".to_string()),
+                reasoning_effort: Some(ReasoningEffort::High),
             },
-        }));
+        };
+        let encoded = serde_json::to_value(&mixed).unwrap();
+        assert!(encoded.get("kind").is_none());
+        let mut legacy = encoded;
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .insert("kind".to_string(), serde_json::json!("models"));
+        assert_eq!(
+            serde_json::from_value::<MixedModeConfig>(legacy).unwrap(),
+            mixed
+        );
 
         let mut snapshot = test_snapshot(
             "mixed-session",

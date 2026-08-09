@@ -31,10 +31,10 @@ export type ReasoningEffort =
  */
 export interface MixedTierSettings {
   model: string;
-  backend?: string | null;
+  backend?: BackendKind | null;
   base_url?: string | null;
   api_key_env?: string | null;
-  reasoning_effort?: string | null;
+  reasoning_effort?: ReasoningEffort | null;
 }
 
 /**
@@ -42,7 +42,6 @@ export interface MixedTierSettings {
  * the classification selects a user-configured worker model per tier.
  */
 export interface MixedModels {
-  kind: "models";
   easy: MixedTierSettings;
   medium: MixedTierSettings;
   hard: MixedTierSettings;

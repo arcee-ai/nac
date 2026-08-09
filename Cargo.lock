@@ -1210,6 +1210,7 @@ dependencies = [
  "futures-core",
  "include_dir",
  "nac-core",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
