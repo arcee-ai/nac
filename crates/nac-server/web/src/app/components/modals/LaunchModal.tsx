@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -39,6 +39,7 @@ import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
+import { loadLastMixed, storeLastMixed } from "@/app/lib/lastMixed";
 import {
   CLEAR_EFFORT,
   csv,
@@ -202,10 +203,13 @@ function LaunchForm({
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
 
-  // A saved setup carrying mixed tiers reopens with them; the key remounts the
-  // section when a different setup (or none) is picked.
+  // A saved setup carrying mixed tiers reopens with them; without one, the
+  // last mixed setup a session launched with is offered again. The key
+  // remounts the section when the seed changes.
+  const lastMixed = useMemo(() => loadLastMixed(), []);
   const savedMixed =
-    selection?.kind === "resolved" ? selection.mixed_models : null;
+    (selection?.kind === "resolved" ? selection.mixed_models : null) ??
+    lastMixed;
   const savedMixedKey = JSON.stringify(savedMixed);
 
   /** Paths belong to whichever machine runs the session, so they do not carry over. */
@@ -345,6 +349,7 @@ function LaunchForm({
     try {
       const snapshot = await createSession.mutateAsync(body);
       const newId = snapshot.metadata.session_id;
+      storeLastMixed(mixed.mode === "mixed" ? mixed.mixed : null);
       toast.success("Session created");
 
       // A title is presentation state, so it is applied after creation.
