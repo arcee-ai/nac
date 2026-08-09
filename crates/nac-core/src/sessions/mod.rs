@@ -370,18 +370,6 @@ mod tests {
                 reasoning_effort: Some(ReasoningEffort::High),
             },
         };
-        let encoded = serde_json::to_value(&mixed).unwrap();
-        assert!(encoded.get("kind").is_none());
-        let mut legacy = encoded;
-        legacy
-            .as_object_mut()
-            .unwrap()
-            .insert("kind".to_string(), serde_json::json!("models"));
-        assert_eq!(
-            serde_json::from_value::<MixedModeConfig>(legacy).unwrap(),
-            mixed
-        );
-
         let mut snapshot = test_snapshot(
             "mixed-session",
             "2026-01-01 00:00:00.000000000",
@@ -401,6 +389,18 @@ mod tests {
         assert_eq!(reloaded.mixed_models, None);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn legacy_mixed_models_json_with_kind_still_deserializes() {
+        let mixed: MixedModeConfig = serde_json::from_str(
+            r#"{"kind":"models","easy":{"model":"easy"},"medium":{"model":"medium"},"hard":{"model":"hard"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(mixed.easy.model, "easy");
+        assert_eq!(mixed.medium.model, "medium");
+        assert_eq!(mixed.hard.model, "hard");
     }
 
     #[test]

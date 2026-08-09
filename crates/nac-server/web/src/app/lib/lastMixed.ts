@@ -23,8 +23,6 @@ export function loadLastMixed(): MixedModels | null {
     if (!isTier(mixed.easy) || !isTier(mixed.medium) || !isTier(mixed.hard)) {
       return null;
     }
-    // Rebuild the value so legacy entries drop the old `kind: "models"`
-    // discriminator before they are sent to the server.
     return {
       easy: mixed.easy,
       medium: mixed.medium,
