@@ -6736,13 +6736,32 @@ pub(super) mod tests {
                 .disposition,
             DispatchCancelDisposition::IdentityMismatch
         );
-        let first = parts
+        let transcript_before =
+            serde_json::to_value(parts.service.messages_snapshot().await.unwrap()).unwrap();
+        let first = parts.service.cancel_thread_dispatch(&key, 0).await.unwrap();
+        assert_eq!(first.disposition, DispatchCancelDisposition::Requested);
+        assert!(!first.terminal);
+        let repeated = parts.service.cancel_thread_dispatch(&key, 0).await.unwrap();
+        assert_eq!(
+            repeated.disposition,
+            DispatchCancelDisposition::AlreadyCancelling
+        );
+        assert!(!repeated.terminal);
+        let waited = parts
             .service
             .cancel_thread_dispatch(&key, 100)
             .await
             .unwrap();
-        assert_eq!(first.disposition, DispatchCancelDisposition::Requested);
-        assert!(first.terminal);
+        assert_eq!(
+            waited.disposition,
+            DispatchCancelDisposition::AlreadyCancelling
+        );
+        assert!(waited.terminal);
+        assert_eq!(
+            serde_json::to_value(parts.service.messages_snapshot().await.unwrap()).unwrap(),
+            transcript_before,
+            "an out-of-band cancellation must not become an orchestrator turn"
+        );
         let repeated = parts.service.cancel_thread_dispatch(&key, 0).await.unwrap();
         assert_eq!(
             repeated.disposition,

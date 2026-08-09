@@ -6490,6 +6490,279 @@ thread_timeout_secs = 7200
         })
     }
 
+    async fn point_session_at_dispatching_endpoint(
+        root: &std::path::Path,
+        session_id: &str,
+    ) -> tokio::task::JoinHandle<()> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut snapshot = sessions::load_session(&root.join("store.db"), session_id).unwrap();
+        snapshot.base_url = format!("http://{address}/v1");
+        sessions::update_session_config(&root.join("store.db"), &snapshot).unwrap();
+
+        tokio::spawn(async move {
+            let orchestrator_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let orchestrator_calls = Arc::clone(&orchestrator_calls);
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut buffer = [0_u8; 4096];
+                    let header_end = loop {
+                        let read = socket.read(&mut buffer).await.unwrap_or(0);
+                        if read == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&buffer[..read]);
+                        if let Some(end) =
+                            request.windows(4).position(|window| window == b"\r\n\r\n")
+                        {
+                            break end + 4;
+                        }
+                    };
+                    let headers = String::from_utf8_lossy(&request[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(str::trim)
+                                .map(str::to_string)
+                        })
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    while request.len() < header_end + content_length {
+                        let read = socket.read(&mut buffer).await.unwrap_or(0);
+                        if read == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&buffer[..read]);
+                    }
+                    let body = &request[header_end..header_end + content_length];
+                    let is_orchestrator = body
+                        .windows(b"\"name\":\"thread_cancel\"".len())
+                        .any(|window| window == b"\"name\":\"thread_cancel\"");
+                    if !is_orchestrator {
+                        std::future::pending::<()>().await;
+                    }
+                    let index =
+                        orchestrator_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let json = if index % 2 == 0 {
+                        serde_json::json!({
+                            "status": "completed",
+                            "output": [{
+                                "type": "function_call",
+                                "call_id": format!("call-dispatch-{}", index / 2 + 1),
+                                "name": "thread",
+                                "arguments": r#"{"name":"same/worker","action":"wait until cancelled"}"#
+                            }],
+                            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                        })
+                    } else {
+                        serde_json::json!({
+                            "status": "completed",
+                            "output": [{"type": "message", "content": [{"type": "output_text", "text": "dispatch started"}]}],
+                            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                        })
+                    };
+                    let body = json.to_string();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        })
+    }
+
+    async fn wait_for_dispatch(
+        service: &nac_core::session_service::SessionService,
+        prior_dispatch_id: Option<&str>,
+    ) -> nac_core::session_service::ActiveThreadDispatchFrontendSnapshot {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(dispatch) = service
+                    .active_thread_dispatches()
+                    .into_iter()
+                    .find(|dispatch| prior_dispatch_id != Some(dispatch.dispatch_id.as_str()))
+                {
+                    return dispatch;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("thread dispatch should become active")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn exact_cancel_route_preserves_identity_transcript_and_replacement() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("exact_cancel_route");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let mut snapshot = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        snapshot.cwd = std::env::current_dir().unwrap();
+        sessions::save_session(&root.join("store.db"), &snapshot).unwrap();
+        let endpoint = point_session_at_dispatching_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+        let service = manager.attach_session("session").await.unwrap();
+        let app = router(manager.clone());
+
+        let first_run = manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "dispatch the first worker".to_string(),
+                    client_message_id: None,
+                },
+            )
+            .await
+            .unwrap()
+            .run_id()
+            .unwrap()
+            .to_string();
+        let first = wait_for_dispatch(&service, None).await;
+        assert_eq!(first.run_id.as_str(), first_run);
+        assert_eq!(first.thread_name, "same/worker");
+        assert_eq!(first.tool_call_id, "call-dispatch-1");
+        let cancel_body = serde_json::json!({
+            "origin_run_id": first.run_id,
+            "thread_name": first.thread_name,
+            "originating_tool_call_id": first.tool_call_id,
+            "wait_ms": 0
+        });
+
+        let absent = post_json(
+            app.clone(),
+            "/sessions/session/thread-dispatches/absent/cancel",
+            cancel_body.clone(),
+        )
+        .await;
+        assert_eq!(absent.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response_json(absent).await,
+            serde_json::json!({"error":"dispatch was not found"})
+        );
+
+        let mut mismatch_body = cancel_body.clone();
+        mismatch_body["originating_tool_call_id"] = serde_json::json!("wrong-call");
+        let mismatch = post_json(
+            app.clone(),
+            &format!(
+                "/sessions/session/thread-dispatches/{}/cancel",
+                first.dispatch_id
+            ),
+            mismatch_body,
+        )
+        .await;
+        assert_eq!(mismatch.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response_json(mismatch).await,
+            serde_json::json!({"error":"dispatch identity mismatch"})
+        );
+
+        let uri = format!(
+            "/sessions/session/thread-dispatches/{}/cancel",
+            first.dispatch_id
+        );
+        let requested = post_json(app.clone(), &uri, cancel_body.clone()).await;
+        assert_eq!(requested.status(), StatusCode::ACCEPTED);
+        let requested = response_json(requested).await;
+        assert_eq!(requested["outcome"], "requested");
+        assert_eq!(requested["origin_run_id"], first.run_id.as_str());
+        assert_eq!(requested["thread_name"], "same/worker");
+        assert_eq!(requested["dispatch_id"], first.dispatch_id);
+        assert_eq!(requested["originating_tool_call_id"], "call-dispatch-1");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while service
+                .active_thread_dispatches()
+                .iter()
+                .any(|row| row.dispatch_id == first.dispatch_id)
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("cancelled dispatch should terminalize");
+        let terminal = post_json(app.clone(), &uri, cancel_body.clone()).await;
+        assert_eq!(terminal.status(), StatusCode::OK);
+        let terminal = response_json(terminal).await;
+        assert_eq!(terminal["outcome"], "already_terminal");
+        assert_eq!(terminal["terminal"], true);
+        assert_eq!(terminal["terminal_status"], "cancelled");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while service.active_run().is_some() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("first orchestrator run should finish");
+        let transcript_before_terminal_retry =
+            serde_json::to_value(service.messages_snapshot().await.unwrap()).unwrap();
+        let terminal_retry = post_json(app.clone(), &uri, cancel_body.clone()).await;
+        assert_eq!(terminal_retry.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(terminal_retry).await["outcome"],
+            "already_terminal"
+        );
+        assert_eq!(
+            serde_json::to_value(service.messages_snapshot().await.unwrap()).unwrap(),
+            transcript_before_terminal_retry,
+            "the cancellation API must not append an orchestrator turn"
+        );
+        manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "dispatch the replacement worker".to_string(),
+                    client_message_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let replacement = wait_for_dispatch(&service, Some(&first.dispatch_id)).await;
+        assert_eq!(replacement.thread_name, first.thread_name);
+        assert_ne!(replacement.run_id, first.run_id);
+        assert_eq!(replacement.tool_call_id, "call-dispatch-2");
+
+        let stale = post_json(app.clone(), &uri, cancel_body).await;
+        assert_eq!(stale.status(), StatusCode::OK);
+        assert_eq!(response_json(stale).await["outcome"], "already_terminal");
+        assert!(
+            service
+                .active_thread_dispatches()
+                .iter()
+                .any(|row| row.dispatch_id == replacement.dispatch_id)
+        );
+
+        let replacement_uri = format!(
+            "/sessions/session/thread-dispatches/{}/cancel",
+            replacement.dispatch_id
+        );
+        let replacement_body = serde_json::json!({
+            "origin_run_id": replacement.run_id,
+            "thread_name": replacement.thread_name,
+            "originating_tool_call_id": replacement.tool_call_id,
+            "wait_ms": 5000
+        });
+        let cancelled = post_json(app, &replacement_uri, replacement_body).await;
+        assert_eq!(cancelled.status(), StatusCode::ACCEPTED);
+        let cancelled = response_json(cancelled).await;
+        assert_eq!(cancelled["outcome"], "requested");
+        assert_eq!(cancelled["terminal"], true);
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
