@@ -95,6 +95,66 @@ impl OneShotModelServer {
     }
 }
 
+struct BlockedRejectingModelServer {
+    base_url: String,
+    request_count: Arc<AtomicUsize>,
+    release: Arc<(Mutex<bool>, Condvar)>,
+    handle: std::thread::JoinHandle<String>,
+}
+
+impl BlockedRejectingModelServer {
+    fn start() -> Self {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let task_count = Arc::clone(&request_count);
+        let task_release = Arc::clone(&release);
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept model request");
+            let request = read_model_request(&mut stream);
+            task_count.store(1, Ordering::SeqCst);
+            let (lock, ready) = &*task_release;
+            let mut released = lock.lock().unwrap();
+            while !*released {
+                released = ready.wait(released).unwrap();
+            }
+            write_model_response(
+                &mut stream,
+                "400 Bad Request",
+                r#"{"error":{"message":"intentional rejection","type":"invalid_request_error"}}"#,
+            );
+            request
+        });
+        Self {
+            base_url,
+            request_count,
+            release,
+            handle,
+        }
+    }
+
+    async fn wait_for_request(&self) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while self.request_count.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("model request was not observed");
+    }
+
+    fn release(&self) {
+        let (lock, ready) = &*self.release;
+        *lock.lock().unwrap() = true;
+        ready.notify_one();
+    }
+
+    fn finish(self) -> String {
+        self.handle.join().expect("model server thread")
+    }
+}
+
 struct BlockedTwoRequestModelServer {
     base_url: String,
     request_count: Arc<AtomicUsize>,
@@ -217,7 +277,7 @@ fn point_session_at_model_server(
 async fn compact_route_returns_success_without_run_or_snapshot_side_effects() {
     use nac_core::events::{AgentEvent, SessionEvent};
 
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let _lock = server_model_env_lock();
     let root = temp_root("compact_route_success");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-compact-key"));
@@ -309,7 +369,7 @@ async fn compact_route_returns_success_without_run_or_snapshot_side_effects() {
 
 #[tokio::test]
 async fn compact_route_accepts_no_body_and_empty_object_with_exact_safe_errors() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let _lock = server_model_env_lock();
     let root = temp_root("compact_route_contract");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-compact-key"));
@@ -352,7 +412,7 @@ async fn compact_route_accepts_no_body_and_empty_object_with_exact_safe_errors()
 
 #[tokio::test]
 async fn active_run_conflicts_with_compact_route() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let _lock = server_model_env_lock();
     let root = temp_root("run_blocks_compact_route");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-compact-key"));
@@ -384,7 +444,7 @@ async fn active_run_conflicts_with_compact_route() {
 
 #[tokio::test]
 async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let _lock = server_model_env_lock();
     let root = temp_root("compaction_coordination");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-compact-key"));
@@ -394,12 +454,14 @@ async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
         "2026-01-01 00:00:00.000000000",
         compactable_server_messages(),
     );
-    let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+    let endpoint = BlockedRejectingModelServer::start();
+    point_session_at_base_url(&root, "session", &endpoint.base_url);
     let manager = test_manager(&root);
     let independent = test_manager(&root);
     let service = manager.attach_session("session").await.unwrap();
     let compact_manager = manager.clone();
     let compact = tokio::spawn(async move { compact_manager.compact_session("session").await });
+    endpoint.wait_for_request().await;
     tokio::time::timeout(Duration::from_secs(2), async {
         while service.active_compaction().is_none() {
             tokio::task::yield_now().await;
@@ -473,21 +535,21 @@ async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
     assert_eq!(after.config_version, before.config_version);
     assert!(service.active_compaction().is_some());
 
-    endpoint.abort();
-    // The failed model request is retried up to 10 times with jittered
-    // 200ms*2^n backoff capped at 30s, so natural exhaustion can take ~90s.
-    let result = tokio::time::timeout(Duration::from_secs(120), compact)
+    endpoint.release();
+    let result = tokio::time::timeout(Duration::from_secs(5), compact)
         .await
-        .expect("failed model request should resolve compaction")
+        .expect("rejected model request should resolve compaction")
         .unwrap();
     assert_eq!(result, Err(CompactSessionError::Failed));
     assert!(!service.has_active_operation());
+    let request = endpoint.finish();
+    assert!(request.starts_with("POST /v1/responses "), "{request}");
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]
 async fn patch_and_delete_winners_are_observed_before_compaction_admission() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let _lock = server_model_env_lock();
     let nac_home_root = temp_root("compact_lifecycle_winners");
     let nac_home = nac_home_root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-compact-key"));
@@ -597,7 +659,7 @@ async fn operation_lease_store_failure_is_path_safe_for_compaction_api() {
 
 #[tokio::test]
 async fn current_service_attachment_rejects_a_wrong_operation_lease() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let _lock = server_model_env_lock();
     let root = temp_root("compact_wrong_lease");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-compact-key"));
@@ -628,7 +690,7 @@ async fn current_service_attachment_rejects_a_wrong_operation_lease() {
 
 #[tokio::test]
 async fn manager_attached_during_external_compaction_refreshes_before_next_run() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let _lock = server_model_env_lock();
     let root = temp_root("cross_manager_checkpoint_refresh");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-compact-key"));
