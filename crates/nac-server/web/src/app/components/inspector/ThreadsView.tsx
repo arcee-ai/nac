@@ -37,6 +37,7 @@ import {
   groupThreadLog,
   mergeThreadLog,
   persistedThreadLog,
+  threadIsThinking,
   type LogEntry,
   type ThreadLogLine,
   type ToolCallEntry,
@@ -249,6 +250,7 @@ function LogScroller({
   stuckRef,
   entries,
   running,
+  thinking,
   className,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
@@ -256,6 +258,8 @@ function LogScroller({
   stuckRef: RefObject<boolean>;
   entries: LogEntry[];
   running: boolean;
+  /** Model is between tool calls — show a live shimmer line under the log. */
+  thinking: boolean;
   className?: string;
 }) {
   return (
@@ -281,6 +285,12 @@ function LogScroller({
             entry={entry}
           />
         ))}
+        {thinking ? (
+          <p className="pt-1 code code-small">
+            <span className="text-info-primary">{"▸ "}</span>
+            <span className="text-shimmer-basic">Working…</span>
+          </p>
+        ) : null}
         {!entries.length && !running ? (
           <p className="pt-4 code code-small text-basic-muted">
             No commands recorded.
@@ -304,12 +314,16 @@ function LogPane({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stuckRef = useRef(true);
   const entries = useMemo(() => groupThreadLog(lines), [lines]);
+  const thinking = useMemo(
+    () => threadIsThinking(running, lines),
+    [running, lines],
+  );
 
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || !stuckRef.current) return;
     scrollToBottomInstantly(element);
-  }, [entries.length]);
+  }, [entries.length, thinking]);
 
   return (
     <LogScroller
@@ -317,6 +331,7 @@ function LogPane({
       stuckRef={stuckRef}
       entries={entries}
       running={running}
+      thinking={thinking}
       className={className}
     />
   );

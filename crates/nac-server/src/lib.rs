@@ -2100,10 +2100,27 @@ fn api_router(manager: SessionManager) -> Router {
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
+    serve_with(addr, manager, |_| {}).await
+}
+
+/// Bind, invoke `on_listening` with the actual local address, then serve.
+///
+/// Callers that open a browser must do so from `on_listening` so the socket is
+/// already accepting connections (printing "listening" before `bind` races the
+/// first page load against a still-closed port).
+pub async fn serve_with(
+    addr: SocketAddr,
+    manager: SessionManager,
+    on_listening: impl FnOnce(SocketAddr),
+) -> Result<()> {
     validate_bind_address(addr)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
+    let bound = listener
+        .local_addr()
+        .with_context(|| format!("failed to read bound address for {}", addr))?;
+    on_listening(bound);
     axum::serve(listener, router(manager))
         .await
         .context("server stopped unexpectedly")

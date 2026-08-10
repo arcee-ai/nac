@@ -17,15 +17,21 @@ const PROVIDER_LABELS: Record<BackendKind, string> = {
 
 /** Display order shared by every provider list in the UI. */
 export const PROVIDER_KINDS: BackendKind[] = [
+  "arcee-api",
+  "arcee-auth",
   "openai-responses",
   "chatgpt-codex-responses",
   "anthropic-messages",
   "deepseek-chat",
   "fireworks-chat",
   "together-chat",
-  "arcee-auth",
-  "arcee-api",
 ];
+
+/** Stable rank for sorting provider lists; unknown backends sink to the end. */
+export function providerOrder(backend: string): number {
+  const index = PROVIDER_KINDS.indexOf(backend as BackendKind);
+  return index === -1 ? PROVIDER_KINDS.length : index;
+}
 
 /**
  * Providers authenticated with a user-supplied key rather than a stored login.
