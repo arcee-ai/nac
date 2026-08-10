@@ -4886,6 +4886,7 @@ mod tests {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("removed_backend_create");
         let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
         let _env = ScopedModelEnv::isolated(&nac_home, None);
         let manager = test_manager(&root);
 

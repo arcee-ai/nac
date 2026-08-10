@@ -166,9 +166,15 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         request.headers.get("authorization").map(String::as_str),
         Some("Bearer stored-login-credential")
     );
-    assert!(
-        request.headers.get("x-arcee-client").is_none(),
-        "x-arcee-client header must no longer be sent"
+    assert_eq!(
+        request.headers.get("x-arcee-client").map(String::as_str),
+        Some("nac-cli"),
+        "arcee-api should send x-arcee-client header for logging"
+    );
+    assert_eq!(
+        request.headers.get("user-agent").map(String::as_str),
+        Some(concat!("nac/", env!("CARGO_PKG_VERSION"))),
+        "arcee-api should send user-agent header for logging"
     );
     assert_eq!(
         request.headers.get("content-type").map(String::as_str),

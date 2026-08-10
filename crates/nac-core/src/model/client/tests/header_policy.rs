@@ -139,3 +139,40 @@ async fn benign_extra_headers_pass_with_exactly_one_selected_provider_credential
         assert_provider_request_contract(backend, &requests[0]);
     }
 }
+
+#[tokio::test]
+async fn arcee_api_builtin_headers_defer_to_configured_extra_headers() {
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        json!({
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]
+        })
+        .to_string(),
+    )]);
+    let extra_headers = std::collections::BTreeMap::from([
+        ("User-Agent".to_string(), "custom-agent/9".to_string()),
+        ("X-Arcee-Client".to_string(), "custom-client".to_string()),
+    ]);
+    let client = test_model_client(BackendKind::ArceeApi, server.base_url.clone(), extra_headers);
+
+    client
+        .send_completions_chat(Vec::new(), Vec::new(), None)
+        .await
+        .expect("configured header override should succeed");
+    let requests = server.finish();
+
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    // Built-in defaults are skipped when overridden — exactly one line each,
+    // carrying the user's value rather than a duplicate.
+    assert_eq!(request.header_counts.get("user-agent"), Some(&1));
+    assert_eq!(request.header_counts.get("x-arcee-client"), Some(&1));
+    assert_eq!(
+        request.headers.get("user-agent").map(String::as_str),
+        Some("custom-agent/9")
+    );
+    assert_eq!(
+        request.headers.get("x-arcee-client").map(String::as_str),
+        Some("custom-client")
+    );
+}
