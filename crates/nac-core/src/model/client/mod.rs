@@ -442,29 +442,54 @@ impl ModelClient {
         reasoning_field: &str,
         on_delta: DeltaSink<'_>,
     ) -> Result<Value> {
-        let api_key = self.api_key.as_str();
         // Arcee-api uses Bearer auth but carries no client identity in the key,
         // so nac attributes itself to ArceeFM with User-Agent and X-Arcee-Client
         // for logging. arcee-auth already sends client metadata through the OAuth
         // token, so it skips these headers.
-        let apply_headers = if self.backend == BackendKind::ArceeApi {
-            let user_agent = format!("nac/{}", env!("CARGO_PKG_VERSION"));
-            let set_user_agent = !self.extra_headers_contains("user-agent");
-            let set_client = !self.extra_headers_contains("x-arcee-client");
-            move |mut req: reqwest::RequestBuilder| {
-                req = req.header("Authorization", format!("Bearer {}", api_key));
-                if set_user_agent {
-                    req = req.header("User-Agent", user_agent.as_str());
-                }
-                if set_client {
-                    req = req.header("X-Arcee-Client", "nac-cli");
-                }
-                req
+        if self.backend == BackendKind::ArceeApi {
+            return self.post_arcee_api_chat(url, request, reasoning_field, on_delta).await;
+        }
+
+        // Standard Bearer auth for other backends
+        if on_delta.is_none() {
+            return self.post_json_with_retry(url, &request).await;
+        }
+        request["stream"] = Value::Bool(true);
+        request["stream_options"] = json!({"include_usage": true});
+        let api_key = self.api_key.as_str();
+        self.post_sse_with_retry_headers(
+            url,
+            &request,
+            |request| request.header("Authorization", format!("Bearer {api_key}")),
+            ChatStreamFold::new(on_delta, reasoning_field),
+        )
+        .await
+    }
+
+    /// Sends an `arcee-api` (bring-your-own key) chat completions request.
+    /// Unlike `arcee-auth`, the API key carries no client identity, so nac
+    /// attributes itself to ArceeFM with `User-Agent` and `X-Arcee-Client`.
+    async fn post_arcee_api_chat(
+        &self,
+        url: &str,
+        mut request: Value,
+        reasoning_field: &str,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<Value> {
+        const USER_AGENT: &str = concat!("nac/", env!("CARGO_PKG_VERSION"));
+        let api_key = self.api_key.as_str();
+        let set_user_agent = !self.extra_headers_contains("user-agent");
+        let set_client = !self.extra_headers_contains("x-arcee-client");
+
+        let apply_headers = move |mut req: reqwest::RequestBuilder| {
+            req = req.header("Authorization", format!("Bearer {api_key}"));
+            if set_user_agent {
+                req = req.header("User-Agent", USER_AGENT);
             }
-        } else {
-            move |req: reqwest::RequestBuilder| {
-                req.header("Authorization", format!("Bearer {}", api_key))
+            if set_client {
+                req = req.header("X-Arcee-Client", "nac-cli");
             }
+            req
         };
 
         if on_delta.is_none() {
