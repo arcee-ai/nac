@@ -23,7 +23,12 @@ pub fn open_url(url: &str) {
         }
         #[cfg(target_os = "windows")]
         {
-            Command::new("cmd").args(["/c", "start", "", url]).spawn()
+            // `start` needs an empty window-title argument before the URL.
+            // Pass the whole line as one `/c` string so `&` in query strings is
+            // not treated as a cmd separator — `Command` only quotes args that
+            // contain whitespace, so a bare URL arg gets truncated.
+            let command = format!("start \"\" \"{}\"", url.replace('"', ""));
+            Command::new("cmd").args(["/c", &command]).spawn()
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {

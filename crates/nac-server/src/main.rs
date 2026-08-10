@@ -19,7 +19,7 @@ use nac_core::{
     },
     upgrade::{run_upgrade, UpgradeRequest},
 };
-use nac_server::{serve, ServerOptions, SessionManager};
+use nac_server::{serve_with, ServerOptions, SessionManager};
 
 #[derive(Parser)]
 #[command(name = "nac-web", about = "web dashboard for managing nac sessions")]
@@ -413,14 +413,21 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     // ETag-revalidated, never on picker/resume/validation paths).
     nac_core::model::spawn_overlay_refresh();
     let info = manager.store_info();
-    let url = dashboard_url(cli.bind);
-    eprintln!("nac-web listening on {url}");
-    eprintln!("store: {}", info.store_path.display());
-    if should_open_dashboard(cli.open, cli.no_open) {
-        eprintln!("opening the dashboard in your browser…");
-        nac_core::browser::open_url(&url);
-    }
-    serve(cli.bind, manager).await
+    let store_path = info.store_path.display().to_string();
+    let open = should_open_dashboard(cli.open, cli.no_open);
+    // Open the browser only after bind succeeds — otherwise the first load can
+    // hit connection-refused while the socket is still closed. Post-login
+    // dashboard launch goes through this same path.
+    serve_with(cli.bind, manager, |bound| {
+        let url = dashboard_url(bound);
+        eprintln!("nac-web listening on {url}");
+        eprintln!("store: {store_path}");
+        if open {
+            eprintln!("opening the dashboard in your browser…");
+            nac_core::browser::open_url(&url);
+        }
+    })
+    .await
 }
 
 /// Picks the project root: explicit `-C`, else confirm cwd (or type another path).
