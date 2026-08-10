@@ -448,6 +448,15 @@ impl ModelClient {
         reasoning_field: &str,
         on_delta: DeltaSink<'_>,
     ) -> Result<Value> {
+        // Arcee-api uses Bearer auth but carries no client identity in the key,
+        // so nac attributes itself to ArceeFM with User-Agent and X-Arcee-Client
+        // for logging. arcee-auth already sends client metadata through the OAuth
+        // token, so it skips these headers.
+        if self.backend == BackendKind::ArceeApi {
+            return self.post_arcee_api_chat(url, request, reasoning_field, on_delta).await;
+        }
+
+        // Standard Bearer auth for other backends
         if on_delta.is_none() {
             return self.post_json_with_retry(url, &request).await;
         }
@@ -457,7 +466,47 @@ impl ModelClient {
         self.post_sse_with_retry_headers(
             url,
             &request,
-            |request| request.header("Authorization", format!("Bearer {}", api_key)),
+            |request| request.header("Authorization", format!("Bearer {api_key}")),
+            ChatStreamFold::new(on_delta, reasoning_field),
+        )
+        .await
+    }
+
+    /// Sends an `arcee-api` (bring-your-own key) chat completions request.
+    /// Unlike `arcee-auth`, the API key carries no client identity, so nac
+    /// attributes itself to ArceeFM with `User-Agent` and `X-Arcee-Client`.
+    async fn post_arcee_api_chat(
+        &self,
+        url: &str,
+        mut request: Value,
+        reasoning_field: &str,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<Value> {
+        const USER_AGENT: &str = concat!("nac/", env!("CARGO_PKG_VERSION"));
+        let api_key = self.api_key.as_str();
+        let set_user_agent = !self.extra_headers_contains("user-agent");
+        let set_client = !self.extra_headers_contains("x-arcee-client");
+
+        let apply_headers = move |mut req: reqwest::RequestBuilder| {
+            req = req.header("Authorization", format!("Bearer {api_key}"));
+            if set_user_agent {
+                req = req.header("User-Agent", USER_AGENT);
+            }
+            if set_client {
+                req = req.header("X-Arcee-Client", "nac-cli");
+            }
+            req
+        };
+
+        if on_delta.is_none() {
+            return self.post_json_with_retry_headers(url, &request, apply_headers).await;
+        }
+        request["stream"] = Value::Bool(true);
+        request["stream_options"] = json!({"include_usage": true});
+        self.post_sse_with_retry_headers(
+            url,
+            &request,
+            apply_headers,
             ChatStreamFold::new(on_delta, reasoning_field),
         )
         .await
@@ -785,10 +834,17 @@ impl ModelClient {
         read_sse_response(url, response, fold).await
     }
 
-    fn extra_headers_override_content_type(&self) -> bool {
+    /// Whether the configured extra_headers already set `name` (case-insensitive).
+    /// Built-in defaults skip a header the user has overridden, because reqwest
+    /// appends headers — adding both would emit duplicate lines, not an override.
+    fn extra_headers_contains(&self, name: &str) -> bool {
         self.extra_headers
             .keys()
-            .any(|name| name.eq_ignore_ascii_case("content-type"))
+            .any(|key| key.eq_ignore_ascii_case(name))
+    }
+
+    fn extra_headers_override_content_type(&self) -> bool {
+        self.extra_headers_contains("content-type")
     }
 
     fn apply_extra_headers(

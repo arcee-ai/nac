@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 
@@ -27,13 +26,6 @@ import {
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
-import {
-  clampThreadLogRatio,
-  setThreadLogHeightRatio,
-  THREAD_LOG_MAX_RATIO,
-  THREAD_LOG_MIN_RATIO,
-  useThreadLogHeightRatio,
-} from "@/app/hooks/useThreadLogHeight";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
 import {
@@ -299,121 +291,7 @@ function LogScroller({
   );
 }
 
-/**
- * Everything the thread has run, oldest first. The view follows the bottom
- * edge the way `tail -f` does and lets go as soon as the user scrolls back to
- * read something.
- */
-function LogTail({
-  lines,
-  running,
-  paneRef,
-}: {
-  lines: ThreadLogLine[];
-  running: boolean;
-  /** Detail pane whose height the log is sized against. */
-  paneRef: RefObject<HTMLDivElement | null>;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // A ref rather than state: nothing renders differently for it, and the scroll
-  // handler has to see the current value without waiting for a re-render.
-  const stuckRef = useRef(true);
-  const dragging = useRef(false);
-  const ratio = useThreadLogHeightRatio();
-  const entries = useMemo(() => groupThreadLog(lines), [lines]);
-
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (!element || !stuckRef.current) return;
-    scrollToBottomInstantly(element);
-  }, [entries.length]);
-
-  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    const pane = paneRef.current;
-    if (!pane) return;
-    event.preventDefault();
-    dragging.current = true;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    document.body.style.cursor = "row-resize";
-    document.body.style.userSelect = "none";
-
-    const onMove = (moveEvent: PointerEvent) => {
-      if (!dragging.current) return;
-      const rect = pane.getBoundingClientRect();
-      if (rect.height <= 0) return;
-      // The log sits at the bottom of the pane; dragging its top edge sets
-      // height from the pointer down to the pane's bottom.
-      setThreadLogHeightRatio(
-        clampThreadLogRatio((rect.bottom - moveEvent.clientY) / rect.height),
-      );
-    };
-
-    const onUp = (upEvent: PointerEvent) => {
-      dragging.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      try {
-        event.currentTarget.releasePointerCapture(upEvent.pointerId);
-      } catch {
-        // Already released.
-      }
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-  };
-
-  return (
-    <div
-      className="relative flex flex-col shrink-0 min-h-0"
-      style={{ height: `${ratio * 100}%` }}
-    >
-      <div
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize command log"
-        aria-valuemin={Math.round(THREAD_LOG_MIN_RATIO * 100)}
-        aria-valuemax={Math.round(THREAD_LOG_MAX_RATIO * 100)}
-        aria-valuenow={Math.round(ratio * 100)}
-        tabIndex={0}
-        className="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize touch-none"
-        onPointerDown={onPointerDown}
-        onKeyDown={(event) => {
-          const step = event.shiftKey ? 0.05 : 0.02;
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            setThreadLogHeightRatio(ratio + step);
-          } else if (event.key === "ArrowDown") {
-            event.preventDefault();
-            setThreadLogHeightRatio(ratio - step);
-          }
-        }}
-      />
-      <div className="px-4 py-3 shrink-0 bg-elevation-level-1 border-t border-muted flex items-center gap-2">
-        <p className="tag-label text-basic-primary flex-1 min-w-0">
-          {`Command log`}
-        </p>
-        <span className="tag-label text-basic-tertiary shrink-0">
-          {`${entries.length} total`}
-        </span>
-      </div>
-      <LogScroller
-        scrollRef={scrollRef}
-        stuckRef={stuckRef}
-        entries={entries}
-        running={running}
-        className="border-t border-muted"
-      />
-    </div>
-  );
-}
-
-/** Log pane on its own, for a narrow panel that shows one view at a time. */
+/** Command log filling the detail pane. */
 function LogPane({
   lines,
   running,
@@ -480,7 +358,7 @@ function Episodes({
   );
 }
 
-/** Which half of a thread a narrow panel is showing. */
+/** Which half of a thread the detail pane is showing. */
 type ThreadDetailView = "log" | "overview";
 
 const VIEW_LABEL: Record<ThreadDetailView, string> = {
@@ -525,6 +403,38 @@ function ViewPills({
   );
 }
 
+/** Compact Command Log / Overview pills for the desktop detail header. */
+function ViewSwitcher({
+  view,
+  onChange,
+}: {
+  view: ThreadDetailView;
+  onChange: (view: ThreadDetailView) => void;
+}) {
+  return (
+    <div
+      className="flex items-center gap-2 shrink-0"
+      role="tablist"
+      aria-label="Thread detail view"
+    >
+      {THREAD_DETAIL_VIEWS.map((name) => (
+        <Button
+          key={name}
+          size={ButtonSize.Small}
+          variant={
+            view === name ? ButtonVariant.Primary : ButtonVariant.Secondary
+          }
+          className="!rounded-full"
+          aria-pressed={view === name}
+          onClick={() => onChange(name)}
+        >
+          {VIEW_LABEL[name]}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 /** Tablet form of the same switch, trailing the panel's own header row. */
 function ThreadViewSelect({
   view,
@@ -563,11 +473,9 @@ function Detail({
   /** The same commands as the stream reported them, plus whatever came after. */
   liveLog: ThreadLogLine[];
   running: boolean;
-  /** Which view a narrow panel shows; a wide one stacks both and ignores it. */
   view: ThreadDetailView;
   onViewChange: (view: ThreadDetailView) => void;
 }) {
-  const paneRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const log = useMemo(
@@ -575,56 +483,52 @@ function Detail({
     [events, liveLog],
   );
 
-  // Neither width fits the episodes above the log, so the two become views of
-  // their own and the switch above picks one.
+  const body =
+    view === "log" ? (
+      <LogPane
+        lines={log}
+        running={running}
+        className={isMobile ? "pt-14" : undefined}
+      />
+    ) : (
+      <Episodes
+        episodes={episodes}
+        className={isMobile ? "pt-14" : undefined}
+      />
+    );
+
+  // Phone: floating pills over the body. Tablet: switch lives in PanelSplit.
   if (isMobile || isTablet) {
     return (
       <div className="relative flex flex-col flex-1 min-h-0 min-w-0">
-        {view === "log" ? (
-          <LogPane
-            lines={log}
-            running={running}
-            className={isMobile ? "pt-14" : undefined}
-          />
-        ) : (
-          <Episodes
-            episodes={episodes}
-            className={isMobile ? "pt-14" : undefined}
-          />
-        )}
+        {body}
         {isMobile ? <ViewPills view={view} onChange={onViewChange} /> : null}
       </div>
     );
   }
 
   return (
-    <div ref={paneRef} className="flex flex-col flex-1 min-h-0 min-w-0">
-      <div className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
-        <div className="min-w-0 truncate">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0">
+      <div className="flex items-center gap-2 h-14 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
+        <div className="flex flex-col flex-1 min-w-0 justify-center">
           <span
             className={cn(
-              "label-small",
+              "label-small truncate",
               running ? "text-shimmer-basic" : "text-basic-primary",
             )}
           >
             {thread.name}
           </span>
+          <span className="code code-micro text-basic-muted truncate">
+            {thread.updated_at}
+          </span>
         </div>
-
-        <span className="flex-1 min-w-0 code code-small text-basic-muted truncate translate-y-[2px]">
-          {thread.updated_at}
-        </span>
-        <span className="shrink-0 code code-small text-basic-muted translate-y-[2px]">
+        <ViewSwitcher view={view} onChange={onViewChange} />
+        <span className="shrink-0 text-micro text-basic-muted">
           {thread.episode_count} ep
         </span>
       </div>
-
-      {episodes.length ? (
-        <Episodes episodes={episodes} className="border-t border-muted" />
-      ) : (
-        <div className="flex-1 min-h-0" />
-      )}
-      <LogTail lines={log} running={running} paneRef={paneRef} />
+      {body}
     </div>
   );
 }
@@ -645,7 +549,6 @@ export function ThreadsView({
   onSelect: (name: string) => void;
 }) {
   const liveThreads = useLiveThreads();
-  // Only a narrow panel reads this; the wide one shows both halves at once.
   const [view, setView] = useState<ThreadDetailView>("log");
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;

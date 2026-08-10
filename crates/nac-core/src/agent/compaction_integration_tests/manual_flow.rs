@@ -47,7 +47,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
         let usage_before = agent.last_usage.clone();
 
         let result = agent.compact().await.unwrap();
-        let CompactionResult::Compacted { compaction_id } = result else {
+        let CompactionResult::Compacted { compaction_id, .. } = result else {
             panic!("manual attempt should compact: {result:?}");
         };
         assert_eq!(

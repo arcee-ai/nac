@@ -33,12 +33,6 @@ fn full_summary_prompt_usage_aggregates_uncached_cache_read_and_cache_write_toke
 
 #[test]
 fn large_persistent_system_is_not_counted_as_reclaimed_summary_source() {
-    const SYSTEM_MESSAGE_BYTES: u64 = 84_030;
-    const FINAL_PROMPT_MESSAGE_BYTES: u64 = 2_880;
-    const CONTEXT_FRAMING_BYTES: u64 = 1_024;
-    const INSTALLED_WRAPPER_MESSAGE_BYTES: u64 = 86;
-    const EXPECTED_PROJECTED_CONTEXT: u64 = 208_520;
-
     let messages = vec![
         Message::System {
             content: "policy".repeat(14_000),
@@ -46,34 +40,6 @@ fn large_persistent_system_is_not_counted_as_reclaimed_summary_source() {
         user(&"aged source".repeat(10_000)),
         user("retained"),
     ];
-    let installed = installed_summary("short");
-
-    assert_eq!(
-        u64::try_from(serde_json::to_vec(&messages[0]).unwrap().len()).unwrap(),
-        SYSTEM_MESSAGE_BYTES
-    );
-    assert_eq!(
-        u64::try_from(
-            serde_json::to_vec(&Message::User {
-                content: NAC_COMPACTION_PROMPT.to_string(),
-            })
-            .unwrap()
-            .len()
-        )
-        .unwrap(),
-        FINAL_PROMPT_MESSAGE_BYTES
-    );
-    assert_eq!(
-        u64::try_from(
-            serde_json::to_vec(&Message::User {
-                content: HISTORICAL_CONTEXT_PREFIX.to_string(),
-            })
-            .unwrap()
-            .len()
-        )
-        .unwrap(),
-        INSTALLED_WRAPPER_MESSAGE_BYTES
-    );
 
     let summary_usage = TokenUsage {
         input_tokens: 60_000,
@@ -84,50 +50,29 @@ fn large_persistent_system_is_not_counted_as_reclaimed_summary_source() {
         orchestrator_context_tokens: 180_500,
         cost: crate::model::TokenCostMicros::default(),
     };
-    let prompt_tokens = full_summary_prompt_tokens(&summary_usage);
-    assert_eq!(prompt_tokens, Some(180_000));
+    let prompt_tokens = full_summary_prompt_tokens(&summary_usage).unwrap();
+    assert_eq!(prompt_tokens, 180_000);
 
-    let non_source_bytes =
-        SYSTEM_MESSAGE_BYTES + FINAL_PROMPT_MESSAGE_BYTES + CONTEXT_FRAMING_BYTES;
-    assert_eq!(non_source_bytes, 87_934);
-    assert_eq!(
-        300_000 - (180_000 - non_source_bytes) + 500 + INSTALLED_WRAPPER_MESSAGE_BYTES,
-        EXPECTED_PROJECTED_CONTEXT
-    );
-
-    let floor =
-        full_provider_byte_estimate(&provider_view_with_summary(&messages, 2, &installed), &[]);
-    assert!(EXPECTED_PROJECTED_CONTEXT > floor);
+    // non_source_tokens = (system_content_chars + compaction_prompt_chars) / 4
+    //   system content = "policy" * 14_000 = 84_000 chars
+    //   compaction prompt = 2_817 chars
+    //   non_source_tokens = (84_000 + 2_817) / 4 = 21_704
+    let non_source_tokens: u64 = ((84_000 + NAC_COMPACTION_PROMPT.len()) / 4) as u64;
+    assert_eq!(non_source_tokens, 21_704);
 
     let projected = state(PathBuf::from("unused"), Some(1)).projected_context_estimate(
         &messages,
-        &[],
-        2,
-        &installed,
         prompt_tokens,
-        Some(summary_usage.output_tokens),
+        summary_usage.output_tokens,
         300_000,
     );
-    assert_eq!(projected, EXPECTED_PROJECTED_CONTEXT);
-    assert!(projected > 300_000 - 180_000 + 500 + INSTALLED_WRAPPER_MESSAGE_BYTES);
-}
 
-#[test]
-fn projection_is_floored_by_serialized_compacted_view() {
-    let messages = vec![user(&"old".repeat(2_000)), user("recent"), user("current")];
-    let state = state(PathBuf::from("unused"), Some(1));
-    let projected = state.projected_context_estimate(
-        &messages,
-        &[],
-        1,
-        &installed_summary("short"),
-        Some(u64::MAX),
-        Some(1),
-        10,
-    );
-    let floor = full_provider_byte_estimate(
-        &provider_view_with_summary(&messages, 1, &installed_summary("short")),
-        &[],
-    );
-    assert_eq!(projected, floor);
+    // Without non_source_tokens, the projection would be 300_000 - 180_000 + 500 = 120_500.
+    // The non_source_tokens prevents the large system message from being fully
+    // reclaimed as source content.
+    let bare_projection = 300_000_u64.saturating_sub(180_000).saturating_add(500);
+    assert!(projected > bare_projection);
+
+    // Exact: 300_000 - (180_000 - 21_704) + 500 = 300_000 - 158_296 + 500 = 142_204
+    assert_eq!(projected, 142_204);
 }

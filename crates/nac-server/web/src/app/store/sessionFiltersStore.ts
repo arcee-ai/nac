@@ -13,21 +13,22 @@ import {
 import { providersFromBackends } from "@/app/lib/providers";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
-export const SORT_MANUAL = "manual";
+/** Backend `sort_order` within each pin group (API list order). */
+export const SORT_DEFAULT = "default";
 
 export type SortId =
+  | typeof SORT_DEFAULT
   | "created_desc"
   | "created_asc"
   | "updated_desc"
-  | "title_asc"
-  | typeof SORT_MANUAL;
+  | "title_asc";
 
 export const SORT_ITEMS: { id: SortId; label: string }[] = [
+  { id: SORT_DEFAULT, label: "Default" },
   { id: "created_desc", label: "Newest first" },
   { id: "created_asc", label: "Oldest first" },
   { id: "updated_desc", label: "Recently updated" },
   { id: "title_asc", label: "Title A–Z" },
-  { id: SORT_MANUAL, label: "Manual" },
 ];
 
 export const RANGE_ANY = "any";
@@ -60,7 +61,7 @@ interface FiltersState {
 
 export const sessionFiltersStore = createStore<FiltersState>({
   query: "",
-  sort: "created_desc",
+  sort: SORT_DEFAULT,
   createdRange: RANGE_ANY,
   modifiedRange: RANGE_ANY,
   envs: [],
@@ -136,6 +137,14 @@ type Comparator = (
 ) => number;
 
 const comparators: Partial<Record<SortId, Comparator>> = {
+  // Mirrors the API: pinned grouping is applied by the page; within a group
+  // `sort_order` is the custom index, then creation time as a stable tiebreak.
+  [SORT_DEFAULT]: (a, b) => {
+    const order =
+      (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+      Date.parse(b.created_at) - Date.parse(a.created_at);
+    return order;
+  },
   created_desc: (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
   created_asc: (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
   updated_desc: (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at),
@@ -177,7 +186,6 @@ export function useVisibleSessions(
     });
 
     const compare = comparators[filters.sort];
-    // Manual sort keeps whatever order the API returned.
     if (compare) visible.sort((a, b) => compare(a.summary, b.summary));
     return visible;
   }, [sessions, filters, now]);
@@ -199,4 +207,4 @@ export const useCreatedRange = () => useStore((s) => s.createdRange);
 export const useModifiedRange = () => useStore((s) => s.modifiedRange);
 export const useSelectedEnvs = () => useStore((s) => s.envs);
 export const useSelectedProviders = () => useStore((s) => s.providers);
-export const useIsManualSort = () => useStore((s) => s.sort === SORT_MANUAL);
+export const useIsDefaultSort = () => useStore((s) => s.sort === SORT_DEFAULT);

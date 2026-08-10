@@ -3582,9 +3582,6 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
 
 fn frontend_command_name(command: FrontendCommand) -> &'static str {
     match command {
-        FrontendCommand::Exit => "exit",
-        FrontendCommand::Sessions => "sessions",
-        FrontendCommand::Help => "help",
         FrontendCommand::Compact => "compact",
     }
 }
@@ -4990,6 +4987,7 @@ mod tests {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("removed_backend_create");
         let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
         let _env = ScopedModelEnv::isolated(&nac_home, None);
         let manager = test_manager(&root);
 
