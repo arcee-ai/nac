@@ -10,6 +10,7 @@
 
 use std::borrow::Cow;
 use std::io::Read;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process;
 use std::time::Duration;
@@ -357,11 +358,29 @@ impl NacError {
 /// Build the HTTP client used for all backend calls.
 ///
 /// Production timeouts are generous (60s total, 10s connect) so slow backends
-/// still work. Internally we delegate to [`build_client_with_timeouts`] so the
-/// test suite can construct a client with a short timeout to exercise the
-/// `NacError::Timeout` path.
-fn build_client() -> Result<Client, reqwest::Error> {
-    build_client_with_timeouts(Duration::from_secs(60), Duration::from_secs(10))
+/// still work. Redirects are disabled so POST bodies are never replayed to a
+/// redirect destination, and loopback endpoints bypass environment proxies.
+fn build_client(endpoint: &Url) -> Result<Client, reqwest::Error> {
+    build_client_with_timeouts(
+        Duration::from_secs(60),
+        Duration::from_secs(10),
+        endpoint_is_loopback(endpoint),
+    )
+}
+
+/// Return whether an endpoint is guaranteed to address the local machine.
+fn endpoint_is_loopback(endpoint: &Url) -> bool {
+    let Some(host) = endpoint.host_str() else {
+        return false;
+    };
+    let ip_host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    host.eq_ignore_ascii_case("localhost")
+        || ip_host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
 }
 
 /// Internal helper: build a reqwest client with explicit total and connect
@@ -369,11 +388,18 @@ fn build_client() -> Result<Client, reqwest::Error> {
 fn build_client_with_timeouts(
     timeout: Duration,
     connect_timeout: Duration,
+    bypass_proxy: bool,
 ) -> Result<Client, reqwest::Error> {
-    Client::builder()
+    let builder = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(timeout)
-        .connect_timeout(connect_timeout)
-        .build()
+        .connect_timeout(connect_timeout);
+    let builder = if bypass_proxy {
+        builder.no_proxy()
+    } else {
+        builder
+    };
+    builder.build()
 }
 
 /// Turn a `reqwest::Error` into a timeout or transport error.
@@ -729,7 +755,7 @@ async fn run(cli: Cli) -> Result<(), NacError> {
         );
     }
 
-    let client = build_client().map_err(|e| NacError::ConnectionFailed {
+    let client = build_client(&endpoint).map_err(|e| NacError::ConnectionFailed {
         endpoint: endpoint.to_string(),
         cause: format!("failed to build HTTP client: {e}"),
     })?;
@@ -880,6 +906,20 @@ mod tests {
     fn validate_endpoint_accepts_http_and_https() {
         assert!(validate_endpoint("http://127.0.0.1:3210").is_ok());
         assert!(validate_endpoint("https://example.com").is_ok());
+    }
+
+    #[test]
+    fn loopback_endpoint_detection_covers_names_and_ip_literals() {
+        for endpoint in [
+            "http://localhost:3210",
+            "http://127.0.0.1:3210",
+            "http://[::1]:3210",
+        ] {
+            assert!(endpoint_is_loopback(&Url::parse(endpoint).unwrap()));
+        }
+        assert!(!endpoint_is_loopback(
+            &Url::parse("https://example.com").unwrap()
+        ));
     }
 
     #[test]
@@ -1296,7 +1336,8 @@ mod tests {
             });
         });
         let client =
-            build_client_with_timeouts(Duration::from_millis(200), Duration::from_secs(1)).unwrap();
+            build_client_with_timeouts(Duration::from_millis(200), Duration::from_secs(1), true)
+                .unwrap();
         let endpoint = Url::parse(&format!("http://{addr}")).unwrap();
         let err = runtime
             .block_on(submit_prompt(&client, &endpoint, "sess1", "hello"))
@@ -1328,7 +1369,8 @@ mod tests {
 
         let (_, endpoint) = endpoint_for(Router::new().route("/sessions", post(slow_create_body)));
         let client =
-            build_client_with_timeouts(Duration::from_millis(100), Duration::from_secs(1)).unwrap();
+            build_client_with_timeouts(Duration::from_millis(100), Duration::from_secs(1), true)
+                .unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let error = runtime
             .block_on(super::create_session(&client, &endpoint, &json!({})))

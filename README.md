@@ -16,6 +16,21 @@ The installer places two binaries in `$HOME/.local/bin` by default:
 - `nac-web`: the web dashboard for managing multiple sessions, plus utility commands such as `codex-auth`, `arcee-auth`, and `upgrade`.
 - `nac`: the scriptable client for creating or reusing a session and posting one prompt.
 
+### Submit a prompt
+
+Create a session and submit one prompt to the local backend:
+
+```sh
+nac "write a haiku about smoke testing"
+```
+
+Reuse a session with `--session-id`, or pass `--stdin` to read the prompt from
+standard input. `--json` keeps stdout machine-readable for scripts and CI.
+
+`nac` exits with status `0` on success, `2` for usage or endpoint errors, `3`
+for connection, timeout, or HTTP errors, and `4` for malformed backend
+responses.
+
 ### Choose auth
 
 Pick one path before you start a session — each unlocks a different set of models:
