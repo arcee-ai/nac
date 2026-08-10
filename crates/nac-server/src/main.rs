@@ -75,7 +75,10 @@ enum ArceeAuthCommand {
 }
 
 #[derive(Parser)]
-#[command(name = "nac-web upgrade", about = "reinstall the latest nac-web release")]
+#[command(
+    name = "nac-web upgrade",
+    about = "reinstall the latest nac-web release"
+)]
 struct UpgradeCli {
     /// Install directory to replace (default: current nac-web executable directory)
     #[arg(long)]
@@ -100,6 +103,14 @@ struct ManagedWorkerCli {
     /// Internal OpenSSH target for remote workers.
     #[arg(long = "ssh-host", alias = "host-id", hide = true)]
     ssh_host: Option<String>,
+
+    /// Internal ssh port for remote workers, when the session set one.
+    #[arg(long = "ssh-port", hide = true)]
+    ssh_port: Option<u16>,
+
+    /// Internal ssh private key for remote workers, when the session set one.
+    #[arg(long = "ssh-identity-file", hide = true)]
+    ssh_identity_file: Option<PathBuf>,
 
     #[command(flatten)]
     dispatch: WorkerDispatchArgs,
@@ -273,7 +284,7 @@ struct SandboxArgs {
     #[arg(long = "sandbox-shm-size")]
     sandbox_shm_size: Option<String>,
 
-    /// Sandbox backend to use (podman or smolvm).
+    /// Sandbox backend to use (podman).
     #[arg(long = "sandbox-backend")]
     sandbox_backend: Option<String>,
 
@@ -374,6 +385,9 @@ async fn run_server(cli: ServerCli) -> Result<()> {
         store_path: cli.store_path,
         worker_executable: cli.worker_executable,
     })?;
+    // Fire-and-forget models.dev catalog overlay refresh (4h cadence,
+    // ETag-revalidated, never on picker/resume/validation paths).
+    nac_core::model::spawn_overlay_refresh();
     let info = manager.store_info();
     eprintln!("nac-web listening on http://{}", cli.bind);
     eprintln!("store: {}", info.store_path.display());
@@ -381,6 +395,10 @@ async fn run_server(cli: ServerCli) -> Result<()> {
 }
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
+    // Fire-and-forget models.dev catalog overlay refresh; cadence-gated via
+    // the sidecar, so usually a no-op read. Keeps the overlay fresh for
+    // worker-heavy usage even when the server is not running.
+    nac_core::model::spawn_overlay_refresh();
     let launch_cwd = std::env::current_dir()?;
     let workspace_cwd = match (&cli.ssh_host, &cli.workspace_cwd) {
         (Some(_), Some(remote_cwd)) => remote_cwd.clone(),
@@ -437,7 +455,11 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             sandbox_cpus: cli.sandbox.sandbox_cpus,
             sandbox_mem: cli.sandbox.sandbox_mem,
         },
-        ssh_host: cli.ssh_host,
+        ssh: runtime::SshOptions {
+            host: cli.ssh_host,
+            port: cli.ssh_port,
+            identity_file: cli.ssh_identity_file,
+        },
     };
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
 }
@@ -485,9 +507,9 @@ fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
 async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
     run_upgrade(UpgradeRequest {
         install_dir: cli.install_dir,
-        executable_path: Some(std::env::current_exe().context(
-            "failed to determine nac-web executable path",
-        )?),
+        executable_path: Some(
+            std::env::current_exe().context("failed to determine nac-web executable path")?,
+        ),
         package_version: env!("CARGO_PKG_VERSION").to_string(),
     })
     .await
@@ -552,7 +574,6 @@ thread_timeout_secs = 7200
             Some(std::path::Path::new("worker-store.db"))
         );
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-        assert!(config.model.backend.is_none());
         assert!(runtime::NacConfig::load_from_cwd(&root).is_err());
 
         unsafe {

@@ -8,23 +8,28 @@ use serde::{Deserialize, Serialize};
 
 mod backend;
 mod podman;
-mod smolvm;
 mod ssh;
+mod ssh_browse;
+pub(crate) mod ssh_command;
 
 #[cfg(test)]
 pub use backend::execution_backend_from_sandbox;
 pub use backend::{select_execution_backend, ExecutionBackend, FileIoMode};
 pub use ssh::SshBackend;
+pub use ssh_browse::{browse_remote_directory, RemoteBrowseError, RemoteEntry, RemoteListing};
+pub use ssh_command::SshConnection;
 
 pub const DEFAULT_SANDBOX_IMAGE: &str = "python:3.13-bookworm";
 pub const DEFAULT_SANDBOX_WORKDIR: &str = "/workspace";
 
 /// Identifies which sandbox backend implementation to use.
+///
+/// Kept as an enum (currently Podman-only) so a future sandbox rework has a
+/// natural home for additional backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SandboxBackendType {
     Podman,
-    SmolVm,
 }
 
 impl Default for SandboxBackendType {
@@ -37,16 +42,14 @@ impl SandboxBackendType {
     pub fn as_str(&self) -> &'static str {
         match self {
             SandboxBackendType::Podman => "podman",
-            SandboxBackendType::SmolVm => "smolvm",
         }
     }
 
     pub fn from_str(s: &str) -> Result<Self> {
         match s {
             "podman" => Ok(Self::Podman),
-            "smolvm" => Ok(Self::SmolVm),
             other => Err(anyhow!(
-                "invalid sandbox backend '{}': expected 'podman' or 'smolvm'",
+                "invalid sandbox backend '{}': expected 'podman'",
                 other
             )),
         }
@@ -57,6 +60,13 @@ impl SandboxBackendType {
 pub struct MountSpec {
     pub host: PathBuf,
     pub guest: PathBuf,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostMountPath {
+    pub root: PathBuf,
+    pub relative: PathBuf,
     pub read_only: bool,
 }
 
@@ -76,7 +86,6 @@ pub struct SandboxSpec {
 #[allow(private_interfaces)]
 pub enum SandboxSession {
     Podman(Arc<podman::PodmanSession>),
-    SmolVm(Arc<smolvm::SmolVmSession>),
 }
 
 impl SandboxSession {
@@ -86,11 +95,6 @@ impl SandboxSession {
                 let inner = Arc::new(podman::PodmanSession::new(spec, session_key, owner));
                 inner.ensure_ready().await?;
                 Self::Podman(inner)
-            }
-            SandboxBackendType::SmolVm => {
-                let inner = Arc::new(smolvm::SmolVmSession::new(spec, session_key, owner));
-                inner.ensure_ready().await?;
-                Self::SmolVm(inner)
             }
         };
         Ok(session)
@@ -111,7 +115,6 @@ impl SandboxSession {
     pub fn spec(&self) -> &SandboxSpec {
         match self {
             Self::Podman(inner) => inner.spec(),
-            Self::SmolVm(inner) => inner.spec(),
         }
     }
 
@@ -123,14 +126,12 @@ impl SandboxSession {
     pub async fn ensure_ready(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.ensure_ready().await,
-            Self::SmolVm(inner) => inner.ensure_ready().await,
         }
     }
 
     pub fn worker_cli_args(&self) -> Vec<OsString> {
         match self {
             Self::Podman(inner) => inner.worker_cli_args(),
-            Self::SmolVm(inner) => inner.worker_cli_args(),
         }
     }
 
@@ -171,15 +172,38 @@ impl SandboxSession {
         Ok(requested)
     }
 
+    pub(crate) fn host_path_for_guest(&self, guest_path: &Path) -> Option<HostMountPath> {
+        let guest_path = normalize_guest_path(guest_path)?;
+        let (mount, mount_guest) = self
+            .spec()
+            .mounts
+            .iter()
+            .filter_map(|mount| {
+                let normalized = normalize_guest_path(&mount.guest)?;
+                guest_path
+                    .starts_with(&normalized)
+                    .then_some((mount, normalized))
+            })
+            .max_by_key(|(_, guest)| guest.components().count())?;
+        let relative = guest_path.strip_prefix(&mount_guest).ok()?.to_path_buf();
+        if host_path_contains_symlink(&mount.host, &relative) {
+            return None;
+        }
+        Some(HostMountPath {
+            root: mount.host.clone(),
+            relative,
+            read_only: mount.read_only,
+        })
+    }
+
     pub async fn exec(
         &self,
         program: &str,
         args: &[String],
-        stdin: Option<Vec<u8>>,
+        stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         match self {
             Self::Podman(inner) => inner.exec(program, args, stdin).await,
-            Self::SmolVm(inner) => inner.exec(program, args, stdin).await,
         }
     }
 
@@ -191,7 +215,6 @@ impl SandboxSession {
     ) -> tokio::process::Command {
         match self {
             Self::Podman(inner) => inner.child_process_command(program, args, envs),
-            Self::SmolVm(inner) => inner.child_process_command(program, args, envs),
         }
     }
 
@@ -202,7 +225,6 @@ impl SandboxSession {
     ) -> (PtyCommandBuilder, String) {
         match self {
             Self::Podman(inner) => inner.terminal_pty_command(cwd, envs),
-            Self::SmolVm(inner) => inner.terminal_pty_command(cwd, envs),
         }
     }
 
@@ -214,14 +236,12 @@ impl SandboxSession {
     ) -> (tokio::process::Command, String) {
         match self {
             Self::Podman(inner) => inner.terminal_pipe_command(cmd, cwd, envs),
-            Self::SmolVm(inner) => inner.terminal_pipe_command(cmd, cwd, envs),
         }
     }
 
     pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.terminal_pipe_kill(pidfile).await,
-            Self::SmolVm(inner) => inner.terminal_pipe_kill(pidfile).await,
         }
     }
 
@@ -231,7 +251,6 @@ impl SandboxSession {
     pub async fn destroy(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.destroy().await,
-            Self::SmolVm(inner) => inner.destroy().await,
         }
     }
 
@@ -239,11 +258,6 @@ impl SandboxSession {
     pub(crate) fn new_for_test(spec: SandboxSpec) -> Self {
         match spec.backend {
             SandboxBackendType::Podman => Self::Podman(Arc::new(podman::PodmanSession::new(
-                spec,
-                "test-session".to_string(),
-                false,
-            ))),
-            SandboxBackendType::SmolVm => Self::SmolVm(Arc::new(smolvm::SmolVmSession::new(
                 spec,
                 "test-session".to_string(),
                 false,
@@ -345,6 +359,25 @@ fn join_host_path(base: &Path, suffix: &Path) -> PathBuf {
     join_path(base, suffix)
 }
 
+fn normalize_guest_path(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+
+    let mut normalized = PathBuf::from("/");
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::Prefix(_) => return None,
+        }
+    }
+    Some(normalized)
+}
+
 fn join_path(base: &Path, suffix: &Path) -> PathBuf {
     if suffix.as_os_str().is_empty() {
         return base.to_path_buf();
@@ -356,6 +389,23 @@ fn join_path(base: &Path, suffix: &Path) -> PathBuf {
         }
     }
     out
+}
+
+fn host_path_contains_symlink(root: &Path, relative: &Path) -> bool {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(part) = component else {
+            return true;
+        };
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return true,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+            Err(_) => return true,
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -402,5 +452,98 @@ mod tests {
                 .unwrap(),
             PathBuf::from("/workspace/Cargo.toml")
         );
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/workspace/src/lib.rs")),
+            Some(HostMountPath {
+                root: cwd.clone(),
+                relative: PathBuf::from("src/lib.rs"),
+                read_only: false,
+            })
+        );
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/tmp/unmounted")),
+            None
+        );
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/workspace/../workspace/src/lib.rs")),
+            Some(HostMountPath {
+                root: cwd,
+                relative: PathBuf::from("src/lib.rs"),
+                read_only: false,
+            })
+        );
+    }
+
+    #[test]
+    fn host_mapping_prefers_the_most_specific_mount_and_preserves_read_only() {
+        let session = SandboxSession::new_for_test(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![
+                MountSpec {
+                    host: PathBuf::from("/host/workspace"),
+                    guest: PathBuf::from("/workspace"),
+                    read_only: false,
+                },
+                MountSpec {
+                    host: PathBuf::from("/host/vendor"),
+                    guest: PathBuf::from("/workspace/vendor"),
+                    read_only: true,
+                },
+            ],
+            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+
+        assert_eq!(
+            session.host_path_for_guest(Path::new("/workspace/vendor/lib.rs")),
+            Some(HostMountPath {
+                root: PathBuf::from("/host/vendor"),
+                relative: PathBuf::from("lib.rs"),
+                read_only: true,
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_mapping_falls_back_for_symlinked_mount_paths() {
+        use std::os::unix::fs::symlink;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "nac_sandbox_symlink_mapping_{}_{unique}",
+            std::process::id()
+        ));
+        let mount_root = root.join("mount");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&mount_root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, mount_root.join("escape")).unwrap();
+
+        let session = SandboxSession::new_for_test(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![MountSpec {
+                host: mount_root,
+                guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                read_only: false,
+            }],
+            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+
+        let mapped = session.host_path_for_guest(Path::new("/workspace/escape/file.txt"));
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(mapped, None);
     }
 }

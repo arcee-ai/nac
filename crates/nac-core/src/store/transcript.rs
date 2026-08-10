@@ -85,13 +85,15 @@
 //! carried in) and the transcript lives here, appends-only forever. The
 //! run-end token/timing bookkeeping diffs store-backed visible-response
 //! counts (run start vs run end) and `sessions::save_session_run_state`
-//! UPDATEs only run-state columns. Session summaries (visible message
-//! count, last user prompt) are blob stats ++ the SQL log stats below —
-//! the blob alone is no longer the transcript. DOWNGRADE CAVEAT (accepted
-//! by the user): a build older than the transcript-log workset reads only
-//! `messages_json`, so it shows this store's history truncated to the
-//! head/legacy prefix — invisibility, not corruption; the log rows are
-//! untouched and a current build reads the full transcript again.
+//! UPDATEs only run-state columns. Session summaries (visible message count,
+//! last user prompt) are materialized on `sessions`: append updates them in
+//! the same transaction as the log rows, while tail truncation rebuilds them
+//! from blob ++ remaining log. The polling read path therefore never scans
+//! transcript history. DOWNGRADE CAVEAT (accepted by the user): a build older
+//! than the transcript-log workset reads only `messages_json`, so it shows
+//! this store's history truncated to the head/legacy prefix — invisibility,
+//! not corruption; the log rows are untouched and a current build reads the
+//! full transcript again.
 //!
 //! # Guards (landed with step 1)
 //!
@@ -194,21 +196,20 @@ pub fn decode_transcript_log_entry(event_json: &str) -> Option<TranscriptLogEntr
         .map(|payload| payload.nac_transcript_message)
 }
 
-/// Visible-message count over a session's transcript log, for session
-/// summaries (step 4, never-fold: the blob alone is no longer the
-/// transcript). The predicate is exactly `visible_message_count`
-/// (sessions/summary.rs) applied to log rows — User rows, plus Assistant
-/// rows with content and no tool calls — evaluated in SQL over the payload's
-/// kind tag and the canonical message bytes, so listing sessions never
-/// decodes `Message` values. Rows that are not transcript payloads (foreign
-/// rows under the reserved name) extract NULL kind and are not counted.
-/// Runs per session per list query: an indexed (session_id, thread_name)
-/// scan of that session's rows only, no row materialization.
-pub fn count_visible_transcript_log_messages(conn: &Connection, session_id: &str) -> Result<usize> {
+/// Visible-message count over one session's transcript-log tail beginning at
+/// `from_idx`; rows already covered by the snapshot blob are ignored.
+/// Session-summary migration and tail truncation use this to rebuild the
+/// materialized count; the polling read path never scans the log.
+pub fn count_visible_transcript_log_messages(
+    conn: &Connection,
+    session_id: &str,
+    from_idx: u64,
+) -> Result<usize> {
     let count = conn.query_row(
         "SELECT COUNT(*)
          FROM thread_events
          WHERE session_id = ?1 AND thread_name = ?2
+           AND json_extract(event_json, '$.nac_transcript_message.idx') >= ?3
            AND (
                json_extract(event_json, '$.nac_transcript_message.kind') = 'user'
                OR (
@@ -226,20 +227,18 @@ pub fn count_visible_transcript_log_messages(conn: &Connection, session_id: &str
                    ) = 0
                )
            )",
-        params![session_id, ORCHESTRATOR_STEERING_TARGET],
+        params![session_id, ORCHESTRATOR_STEERING_TARGET, from_idx],
         |row| row.get::<_, i64>(0),
     )?;
     usize::try_from(count).context("transcript log visible message count overflowed")
 }
 
-/// Most recent User message content in a session's transcript log, for
-/// session summaries (step 4). `None` when the log holds no User rows — the
-/// caller then falls back to the blob's last user prompt (pre-log sessions).
-/// Rowid order is append order under the module invariants, so the latest
-/// User row is a bounded backwards scan.
+/// Most recent User message content in one session's transcript-log tail
+/// beginning at `from_idx`; rows covered by the snapshot blob are ignored.
 pub fn last_transcript_log_user_prompt(
     conn: &Connection,
     session_id: &str,
+    from_idx: u64,
 ) -> Result<Option<String>> {
     conn.query_row(
         "SELECT json_extract(
@@ -249,9 +248,10 @@ pub fn last_transcript_log_user_prompt(
          FROM thread_events
          WHERE session_id = ?1 AND thread_name = ?2
            AND json_extract(event_json, '$.nac_transcript_message.kind') = 'user'
+           AND json_extract(event_json, '$.nac_transcript_message.idx') >= ?3
          ORDER BY id DESC
          LIMIT 1",
-        params![session_id, ORCHESTRATOR_STEERING_TARGET],
+        params![session_id, ORCHESTRATOR_STEERING_TARGET, from_idx],
         |row| row.get::<_, Option<String>>(0),
     )
     .optional()
@@ -267,6 +267,35 @@ pub fn last_transcript_log_user_prompt(
 /// `idx` contiguous and increasing per append.
 pub struct TranscriptLogWriter {
     connection: Mutex<Connection>,
+}
+
+/// Length of the log tail relative to a snapshot blob of `blob_len` messages,
+/// read from the newest row's `idx`. Callers hold the connection lock, so the
+/// extent cannot shift under a window read taken with it.
+fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Result<u64> {
+    let mut statement = connection.prepare(
+        "SELECT id, event_json
+         FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2
+         ORDER BY id DESC
+         LIMIT 1",
+    )?;
+    let last_row = statement
+        .query_row(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .optional()?;
+    match last_row {
+        None => Ok(0),
+        Some((id, event_json)) => {
+            let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                anyhow!(
+                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                )
+            })?;
+            Ok((entry.idx + 1).saturating_sub(blob_len))
+        }
+    }
 }
 
 impl TranscriptLogWriter {
@@ -296,6 +325,9 @@ impl TranscriptLogWriter {
         if messages.is_empty() {
             return Ok(());
         }
+        let visible_delta = i64::try_from(crate::sessions::visible_message_count(messages))
+            .context("transcript visible message count overflowed")?;
+        let last_user_prompt = crate::sessions::last_user_prompt(messages);
         let mut connection = self
             .connection
             .lock()
@@ -314,6 +346,18 @@ impl TranscriptLogWriter {
                     now_utc()
                 ],
             )?;
+        }
+        let updated = transaction.execute(
+            "UPDATE sessions
+             SET visible_message_count = visible_message_count + ?1,
+                 last_user_prompt = COALESCE(?2, last_user_prompt)
+             WHERE session_id = ?3",
+            params![visible_delta, last_user_prompt, session_id],
+        )?;
+        if updated != 1 {
+            return Err(anyhow!(
+                "transcript summary update expected one session row, updated {updated}"
+            ));
         }
         transaction.commit()?;
         Ok(())
@@ -355,31 +399,7 @@ impl TranscriptLogWriter {
             .connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let tail_len = {
-            let mut statement = connection.prepare(
-                "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
-                 ORDER BY id DESC
-                 LIMIT 1",
-            )?;
-            let last_row = statement
-                .query_row(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })
-                .optional()?;
-            match last_row {
-                None => 0,
-                Some((id, event_json)) => {
-                    let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
-                        anyhow!(
-                            "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
-                        )
-                    })?;
-                    (entry.idx + 1).saturating_sub(blob_len)
-                }
-            }
-        };
+        let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
             return Ok((tail_len, Vec::new()));
         }
@@ -427,6 +447,52 @@ impl TranscriptLogWriter {
             expected_idx += 1;
         }
         Ok((tail_len, entries))
+    }
+
+    /// Row creation times for the same window [`TranscriptLogWriter::read_tail_window`]
+    /// returns, aligned with it position by position.
+    ///
+    /// The canonical message bytes carry no timestamp — adding one would change
+    /// the digest the compaction planner hashes — so the closest thing to "when
+    /// this message entered the transcript" is the log row's own `created_at`.
+    /// Messages carried by the snapshot blob predate the log and have none.
+    pub fn read_tail_window_times(
+        &self,
+        session_id: &str,
+        blob_len: u64,
+        tail_start: u64,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tail_len = tail_len_of(&connection, session_id, blob_len)?;
+        if tail_start >= tail_len || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let end = tail_start.saturating_add(limit as u64).min(tail_len);
+        let count = end - tail_start;
+        let skip_from_end = tail_len - end;
+        let mut statement = connection.prepare(
+            "SELECT created_at
+             FROM thread_events
+             WHERE session_id = ?1 AND thread_name = ?2
+             ORDER BY id DESC
+             LIMIT ?3 OFFSET ?4",
+        )?;
+        let rows = statement.query_map(
+            params![
+                session_id,
+                ORCHESTRATOR_STEERING_TARGET,
+                count as i64,
+                skip_from_end as i64
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut times = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        times.reverse();
+        Ok(times)
     }
 
     /// Read committed entries with `idx >= from_idx`, in log (append) order.
@@ -506,9 +572,41 @@ impl TranscriptLogWriter {
         for id in &row_ids {
             transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
         }
+        if !row_ids.is_empty() {
+            refresh_session_summary(&transaction, session_id)?;
+        }
         transaction.commit()?;
         Ok(row_ids.len())
     }
+}
+
+fn refresh_session_summary(conn: &Connection, session_id: &str) -> Result<()> {
+    let messages_json: String = conn.query_row(
+        "SELECT messages_json FROM sessions WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get(0),
+    )?;
+    let messages: Vec<Message> =
+        serde_json::from_str(&messages_json).context("failed to parse stored session messages")?;
+    let blob_visible = crate::sessions::visible_message_count(&messages);
+    let log_from_idx =
+        u64::try_from(messages.len()).context("session transcript length overflowed")?;
+    let log_visible = count_visible_transcript_log_messages(conn, session_id, log_from_idx)?;
+    let visible_count = i64::try_from(
+        blob_visible
+            .checked_add(log_visible)
+            .context("session visible message count overflowed")?,
+    )
+    .context("session visible message count overflowed")?;
+    let last_user_prompt = last_transcript_log_user_prompt(conn, session_id, log_from_idx)?
+        .or_else(|| crate::sessions::last_user_prompt(&messages));
+    conn.execute(
+        "UPDATE sessions
+         SET visible_message_count = ?1, last_user_prompt = ?2
+         WHERE session_id = ?3",
+        params![visible_count, last_user_prompt, session_id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -549,6 +647,9 @@ mod tests {
                         arguments: "{\"path\":\"x\"}".to_string(),
                     },
                 }]),
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "call-1".to_string(),
@@ -580,6 +681,9 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 TranscriptMessageKind::Assistant,
                 "assistant",
@@ -701,6 +805,9 @@ mod tests {
         let tail = writer.read_from("session-a", 8).unwrap();
         assert_eq!(tail.len(), 1);
         assert_eq!(tail[0].0, 8);
+        let summary = crate::sessions::list_sessions(&path).unwrap().remove(0);
+        assert_eq!(summary.visible_message_count, 2);
+        assert_eq!(summary.last_user_prompt.as_deref(), Some("tail"));
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -723,6 +830,13 @@ mod tests {
         assert_eq!(remaining.len(), 2);
         assert_eq!(remaining[0].0, 0);
         assert_eq!(remaining[1].0, 1);
+        let summary = crate::sessions::list_sessions(&path)
+            .unwrap()
+            .into_iter()
+            .find(|summary| summary.session_id == "session-a")
+            .unwrap();
+        assert_eq!(summary.visible_message_count, 1);
+        assert_eq!(summary.last_user_prompt.as_deref(), Some("prompt"));
 
         // Beyond-the-end truncation is a no-op; other sessions are untouched.
         assert_eq!(writer.delete_from("session-a", 99).unwrap(), 0);
@@ -730,6 +844,108 @@ mod tests {
 
         assert_eq!(writer.delete_from("session-a", 0).unwrap(), 2);
         assert!(writer.read_from("session-a", 0).unwrap().is_empty());
+        let summary = crate::sessions::list_sessions(&path)
+            .unwrap()
+            .into_iter()
+            .find(|summary| summary.session_id == "session-a")
+            .unwrap();
+        assert_eq!(summary.visible_message_count, 0);
+        assert_eq!(summary.last_user_prompt, None);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn transcript_log_summary_refresh_ignores_blob_covered_rows() {
+        let path = temp_store_path("summary_covered_rows");
+        initialize(&path).unwrap();
+        let snapshot = crate::sessions::new_snapshot(
+            "session-a".to_string(),
+            PathBuf::from("/tmp/project"),
+            "test-model".to_string(),
+            "https://example.invalid".to_string(),
+            crate::model::BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            None,
+            std::collections::BTreeMap::new(),
+        );
+        crate::sessions::create_session(&path, &snapshot).unwrap();
+
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_batch(
+                "session-a",
+                0,
+                &[
+                    Message::User {
+                        content: "stale covered prompt".to_string(),
+                    },
+                    Message::Assistant {
+                        content: Some("stale covered answer".to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
+                    },
+                ],
+            )
+            .unwrap();
+
+        let mut snapshot = crate::sessions::load_session(&path, "session-a").unwrap();
+        snapshot.messages = vec![
+            Message::User {
+                content: "blob replacement prompt".to_string(),
+            },
+            Message::Assistant {
+                content: Some("blob replacement answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        ];
+        crate::sessions::save_session(&path, &snapshot).unwrap();
+
+        writer
+            .append_batch(
+                "session-a",
+                2,
+                &[
+                    Message::User {
+                        content: "live prompt".to_string(),
+                    },
+                    Message::Assistant {
+                        content: Some("live answer".to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
+                    },
+                ],
+            )
+            .unwrap();
+
+        assert_eq!(writer.delete_from("session-a", 3).unwrap(), 1);
+        let summary = crate::sessions::list_sessions(&path).unwrap().remove(0);
+        assert_eq!(summary.visible_message_count, 3);
+        assert_eq!(summary.last_user_prompt.as_deref(), Some("live prompt"));
+
+        assert_eq!(writer.delete_from("session-a", 2).unwrap(), 1);
+        let summary = crate::sessions::list_sessions(&path).unwrap().remove(0);
+        assert_eq!(summary.visible_message_count, 2);
+        assert_eq!(
+            summary.last_user_prompt.as_deref(),
+            Some("blob replacement prompt")
+        );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -903,6 +1119,9 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     // Assistant with tool calls: not visible even with content.
                     Message::Assistant {
@@ -910,6 +1129,9 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: Some(vec![tool_call.clone()]),
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),
@@ -921,6 +1143,9 @@ mod tests {
                         reasoning_text: Some("reasoning only".to_string()),
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     // Assistant with an empty tool-call list: visible.
                     Message::Assistant {
@@ -928,6 +1153,9 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: Some(Vec::new()),
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::User {
                         content: "latest prompt".to_string(),
@@ -947,12 +1175,12 @@ mod tests {
 
         let conn = open_connection(&path).unwrap();
         assert_eq!(
-            count_visible_transcript_log_messages(&conn, "session-a").unwrap(),
+            count_visible_transcript_log_messages(&conn, "session-a", 1).unwrap(),
             4,
             "user rows plus content-bearing, tool-call-free assistant rows"
         );
         assert_eq!(
-            last_transcript_log_user_prompt(&conn, "session-a")
+            last_transcript_log_user_prompt(&conn, "session-a", 1)
                 .unwrap()
                 .as_deref(),
             Some("latest prompt")
@@ -961,11 +1189,11 @@ mod tests {
         // A session with no log rows gets the empty stats (the caller falls
         // back to the blob's last user prompt).
         assert_eq!(
-            count_visible_transcript_log_messages(&conn, "session-b").unwrap(),
+            count_visible_transcript_log_messages(&conn, "session-b", 0).unwrap(),
             0
         );
         assert_eq!(
-            last_transcript_log_user_prompt(&conn, "session-b").unwrap(),
+            last_transcript_log_user_prompt(&conn, "session-b", 0).unwrap(),
             None
         );
 

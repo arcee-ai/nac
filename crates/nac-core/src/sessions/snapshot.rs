@@ -60,7 +60,7 @@ pub fn new_snapshot(
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
     sandbox_spec: Option<SandboxSpec>,
-    ssh_host: Option<String>,
+    ssh: Option<SshConnection>,
     messages: Vec<Message>,
     api_key_env: Option<String>,
     extra_headers: BTreeMap<String, String>,
@@ -74,7 +74,7 @@ pub fn new_snapshot(
         backend,
         reasoning_effort,
         sandbox_spec,
-        ssh_host,
+        ssh,
         api_key_env,
         extra_headers,
         orchestrator_compaction_threshold: None,
@@ -84,6 +84,7 @@ pub fn new_snapshot(
         previous_response_duration_ms: None,
         response_durations_ms: None,
         token_usages: Vec::new(),
+        unattributed_token_usage: None,
         created_at: now.clone(),
         updated_at: now,
     }
@@ -105,7 +106,7 @@ pub fn refresh_snapshot(
         backend: snapshot.backend,
         reasoning_effort: snapshot.reasoning_effort,
         sandbox_spec: snapshot.sandbox_spec.clone(),
-        ssh_host: snapshot.ssh_host.clone(),
+        ssh: snapshot.ssh.clone(),
         api_key_env: snapshot.api_key_env.clone(),
         extra_headers: snapshot.extra_headers.clone(),
         orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
@@ -115,6 +116,7 @@ pub fn refresh_snapshot(
         previous_response_duration_ms,
         response_durations_ms,
         token_usages,
+        unattributed_token_usage: snapshot.unattributed_token_usage.clone(),
         created_at: snapshot.created_at.clone(),
         updated_at: now_utc(),
     }
@@ -131,6 +133,7 @@ pub struct SessionRunState {
     pub previous_response_duration_ms: Option<u64>,
     pub response_durations_ms: Option<Vec<Option<u64>>>,
     pub token_usages: Vec<Option<crate::model::TokenUsage>>,
+    pub unattributed_token_usage: Option<crate::model::TokenUsage>,
 }
 
 /// The sparing run-end persistence update consumed by
@@ -141,7 +144,7 @@ pub struct SessionRunState {
 #[derive(Debug, Clone)]
 pub struct SessionRunStateUpdate {
     pub session_id: String,
-    pub ssh_host: Option<String>,
+    pub ssh: Option<SshConnection>,
     pub sandbox_spec: Option<SandboxSpec>,
     pub run_state: SessionRunState,
     pub updated_at: String,
@@ -157,10 +160,11 @@ impl SessionSnapshot {
         self.previous_response_duration_ms = run_state.previous_response_duration_ms;
         self.response_durations_ms = run_state.response_durations_ms.clone();
         self.token_usages = run_state.token_usages.clone();
+        self.unattributed_token_usage = run_state.unattributed_token_usage.clone();
         self.updated_at = now_utc();
         SessionRunStateUpdate {
             session_id: self.session_id.clone(),
-            ssh_host: self.ssh_host.clone(),
+            ssh: self.ssh.clone(),
             sandbox_spec: self.sandbox_spec.clone(),
             run_state,
             updated_at: self.updated_at.clone(),

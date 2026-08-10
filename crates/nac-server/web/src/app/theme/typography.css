@@ -1,0 +1,46 @@
+/* Typography from ArceeFM index.css, with @apply resolved to concrete values
+   (text-xs .75/1rem, text-sm .875/1.25, text-base 1/1.5, text-lg 1.125/1.75,
+   text-xl 1.25/1.75; medium 500, semibold 600, bold 700). Font: Inter. */
+
+.title { font-family: Inter; font-weight: 500; font-size: 28px; line-height: 2rem; }
+@media (min-width: 768px) { .title { font-size: 32px; line-height: 36px; } }
+.subtitle { font-family: Inter; font-weight: 500; font-size: 22px; line-height: 1.75rem; }
+@media (min-width: 768px) { .subtitle { font-size: 24px; line-height: 32px; } }
+
+/* Figma "Header/Header-md": semibold 16/24, unlike .header-small which is bold. */
+.header-md { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 600; }
+
+.header-big { font-family: Inter; font-size: 1.25rem; line-height: 1.75rem; font-weight: 700; }
+.header-medium { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; font-weight: 700; }
+.header-small { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
+.header-micro { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; font-weight: 700; }
+
+.label-big { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; font-weight: 500; }
+.label-medium { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 500; }
+.label-small { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; }
+.label-micro { font-family: Inter; font-size: 0.75rem; line-height: 1rem; font-weight: 500; }
+
+.text-big { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; }
+.text-medium { font-family: Inter; font-size: 1rem; line-height: 1.5rem; }
+.text-small { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; }
+.text-micro { font-family: Inter; font-size: 0.75rem; line-height: 1rem; }
+
+.paragraph-big { font-family: Inter; font-size: 1.125rem; line-height: 1.75rem; }
+.paragraph-medium { font-family: Inter; font-size: 1rem; line-height: 1.75rem; }
+.paragraph-small { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; }
+.paragraph-micro { font-family: Inter; font-size: 0.75rem; line-height: 1rem; }
+
+.tag-label {
+  font-family: Inter; font-size: 10px; line-height: 0.75rem;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+.code, code {
+  font-family: "IBMPlexMono", source-code-pro, Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  line-height: 1.5; letter-spacing: -0.01em;
+}
+.code-micro { font-size: 10px; line-height: 12px; font-weight: 500; letter-spacing: 0; }
+.code-small { font-size: 12px; }
+.code-medium { font-size: 13px; }
+.code-large { font-size: 14px; }

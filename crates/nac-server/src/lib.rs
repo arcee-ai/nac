@@ -1,6 +1,18 @@
 mod compaction;
+mod filesystem;
+mod managed_auth;
+mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
+pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
+pub use managed_auth::{
+    DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
+    ManagedAuthStatusResponse,
+};
+pub use revert::{
+    RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
+    RevertSessionResponse,
+};
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -16,33 +28,44 @@ use async_stream::stream;
 use axum::{
     extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
     http::{header, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse, Response,
+        IntoResponse, Response,
     },
-    routing::{get, post, put},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
+use include_dir::{include_dir, Dir};
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
-    events::{SessionEventEnvelope, SessionReplayGap},
-    model::{
-        managed_backend_base_url, resolve_model_base_url, validate_model_configuration,
-        BackendKind, EffectiveModelSettings, ModelConfigurationError, ReasoningEffort,
+    events::{
+        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
+    model::{
+        list_managed_provider_models, list_provider_models, list_stored_api_keys,
+        managed_backend_base_url, provider_default_base_url, provider_for_model,
+        provider_uses_api_key, remove_api_key, resolve_backend_api_key, resolve_model_base_url,
+        store_api_key, validate_caller_supplied_base_url, validate_model_configuration,
+        BackendKind, EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError,
+        ModelListing, ProviderModel, ReasoningEffort,
+    },
+    model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
+    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     runtime::{
-        self, ModelOptions, NacConfig, OptionalModelOption, RunOptions, SandboxOptions,
-        StoreOptions,
+        self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
+        RunOptions, SandboxOptions, StoreOptions,
     },
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
         MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
-        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
+        SessionSubmitError, ThreadEventPage,
     },
     sessions,
     types::Message,
     view::{self, SessionSummarySnapshot},
+    workspace::{self, GitTarget},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -60,6 +83,20 @@ const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
 const DEFAULT_THREAD_EVENT_PAGE_LIMIT: usize = 24;
 const MAX_THREAD_EVENT_PAGE_LIMIT: usize = 100;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
+/// A failed measurement is cached too, and for less time: an unreachable host
+/// must not be dialled once per session on every refresh of the list, but it
+/// must also start working again shortly after it comes back.
+const WORKSPACE_DIFF_ERROR_CACHE_TTL: Duration = Duration::from_secs(30);
+/// How long the session list is willing to wait for measurements it does not
+/// have cached. A remote checkout can be slow, and the list is worth more on
+/// time and incomplete than late and exact — the answer lands in the cache and
+/// shows up on the next refresh.
+const WORKSPACE_DIFF_MEASURE_BUDGET: Duration = Duration::from_secs(4);
+/// How long a working git target is taken on trust before it is checked again.
+const GIT_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
+/// A target that failed is rechecked sooner, so bringing a host back does not
+/// mean waiting out a long cache.
+const GIT_PROBE_ERROR_CACHE_TTL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
@@ -79,19 +116,91 @@ struct SessionManagerInner {
     worker_executable: PathBuf,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
-    workspace_diff_cache: RwLock<HashMap<PathBuf, WorkspaceDiffCacheEntry>>,
+    workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
+    git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
+    managed_logins: managed_auth::ManagedLoginRegistry,
+}
+
+/// Identifies a checkout across sessions. The connection has to be part of it:
+/// two sessions on the same path of different machines are different checkouts,
+/// and — the reason this is a pair rather than a path — two sessions on the same
+/// path of the *same* remote machine are the same one. The whole connection is
+/// what counts, not just the host name: the same name reached on another port or
+/// as another user is another machine as far as a checkout is concerned.
+type GitTargetKey = (Option<String>, PathBuf);
+
+fn git_target_key(target: &GitTarget) -> GitTargetKey {
+    (
+        target
+            .ssh_connection()
+            .map(|connection| connection.identity()),
+        target.root().to_path_buf(),
+    )
 }
 
 struct ResolvedLaunchLocation {
     workspace_cwd: PathBuf,
     config_cwd: PathBuf,
-    ssh_host: Option<String>,
+    ssh: runtime::SshOptions,
+}
+
+/// The ssh fields of a launch request as they arrive over HTTP, where a cleared
+/// form field is an empty string rather than an absent one.
+struct SshRequest {
+    host: Option<String>,
+    port: Option<u16>,
+    identity_file: Option<String>,
+}
+
+impl SshRequest {
+    fn into_options(self) -> runtime::SshOptions {
+        runtime::SshOptions {
+            host: self.host,
+            port: self.port,
+            identity_file: nonblank(self.identity_file).map(PathBuf::from),
+        }
+    }
+}
+
+fn nonblank(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[derive(Debug, Clone)]
 struct WorkspaceDiffCacheEntry {
     updated_at: Instant,
     totals: view::WorkspaceDiffTotals,
+}
+
+impl WorkspaceDiffCacheEntry {
+    fn is_fresh(&self, now: Instant) -> bool {
+        let ttl = if self.totals.error.is_some() {
+            WORKSPACE_DIFF_ERROR_CACHE_TTL
+        } else {
+            WORKSPACE_DIFF_CACHE_TTL
+        };
+        now.duration_since(self.updated_at) < ttl
+    }
+}
+
+#[derive(Debug, Clone)]
+struct GitProbeCacheEntry {
+    checked_at: Instant,
+    /// The message to report, or `None` when the target answered.
+    failure: Option<String>,
+}
+
+impl GitProbeCacheEntry {
+    fn is_fresh(&self, now: Instant) -> bool {
+        let ttl = if self.failure.is_some() {
+            GIT_PROBE_ERROR_CACHE_TTL
+        } else {
+            GIT_PROBE_CACHE_TTL
+        };
+        now.duration_since(self.checked_at) < ttl
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -107,14 +216,41 @@ pub struct LaunchModelDefaultsRequest {
     /// OpenSSH target for remote sessions; remote paths never select local config.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: Option<String>,
+}
+
+/// Where to look on an SSH host, for the remote half of the path picker.
+///
+/// The connection is described in the request rather than taken from a session,
+/// because this is what the launch form asks *before* there is a session.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SshBrowseRequest {
+    pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: Option<String>,
+    /// Absent or empty opens on the login home, which is where a fresh remote
+    /// session would start anyway.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Dot-prefixed names are hidden unless explicitly requested, as locally.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LaunchModelDefaults {
-    pub configured_model_backend: Option<BackendKind>,
-    /// Effective configured base URL after applying the managed-backend-only
-    /// fixed URL invariant. Other incomplete backends remain `None`.
-    pub configured_model_base_url: Option<String>,
+    /// Configured model id; lets the launch dialog render the inherited
+    /// "from config" selection resolved against the model catalog (the
+    /// frontend resolves the provider from the model id, exactly like
+    /// session creation does).
+    pub configured_model: Option<String>,
+    /// Configured reasoning effort, if any.
+    pub configured_reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -217,6 +353,14 @@ pub struct CreateSessionRequest {
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
+    /// Port and private key for the ssh target. Both are optional: omitted
+    /// leaves the choice to ssh, which is what a host configured in
+    /// `~/.ssh/config` wants. Supplying them is what lets a session reach a box
+    /// nac has no config for at all.
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: Option<String>,
     #[serde(default)]
     pub sandbox: SandboxRequest,
 }
@@ -240,6 +384,149 @@ pub struct SandboxRequest {
     pub backend: Option<String>,
     pub cpus: Option<u8>,
     pub memory_mib: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StoredCredentialSummary {
+    pub name: String,
+    /// Empty when the secret is too short for a suffix to be safe to show.
+    pub last_four: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StoredCredentialList {
+    pub credentials: Vec<StoredCredentialSummary>,
+}
+
+/// Marks credential names this server generated for a saved configuration, so
+/// deleting one never removes a key the operator manages themselves.
+const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateModelConfigurationRequest {
+    pub name: String,
+    pub backend: BackendKind,
+    pub model: String,
+    /// Defaults to the provider's canonical URL.
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub extra_headers: Option<BTreeMap<String, String>>,
+    /// Compaction budget sessions started from this setup inherit; absent or
+    /// zero leaves them on `[compaction].threshold_tokens`.
+    pub orchestrator_compaction_threshold: Option<u64>,
+    /// Message the launch modal pre-fills when this setup is chosen.
+    pub initial_prompt: Option<String>,
+}
+
+/// Edits a saved setup in place. Every field is tri-state: omit it to keep what
+/// is stored, send null to clear it, send a value to replace it.
+///
+/// `api_key` is the exception that cannot be read back — the secret lives in
+/// the credential store — so omitting it keeps the credential the row already
+/// points at, and sending one files a fresh credential in its place.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UpdateModelConfigurationRequest {
+    #[serde(default)]
+    pub name: RequestField<String>,
+    #[serde(default)]
+    pub backend: RequestField<BackendKind>,
+    #[serde(default)]
+    pub model: RequestField<String>,
+    #[serde(default)]
+    pub base_url: RequestField<String>,
+    #[serde(default)]
+    pub api_key: RequestField<String>,
+    #[serde(default)]
+    pub reasoning_effort: RequestField<ReasoningEffort>,
+    #[serde(default)]
+    pub extra_headers: RequestField<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub orchestrator_compaction_threshold: RequestField<u64>,
+    #[serde(default)]
+    pub initial_prompt: RequestField<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelConfigurationList {
+    pub configurations: Vec<ModelConfigurationRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateSshConfigurationRequest {
+    pub name: String,
+    pub ssh_host: String,
+    pub ssh_port: Option<u16>,
+    pub ssh_identity_file: Option<String>,
+}
+
+/// Edits a saved SSH setup in place. Every field is tri-state: omit it to keep
+/// what is stored, send null to clear it, send a value to replace it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UpdateSshConfigurationRequest {
+    #[serde(default)]
+    pub name: RequestField<String>,
+    #[serde(default)]
+    pub ssh_host: RequestField<String>,
+    #[serde(default)]
+    pub ssh_port: RequestField<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: RequestField<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SshConfigurationList {
+    pub configurations: Vec<SshConfigurationRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelConfigFromFileRequest {
+    pub path: String,
+}
+
+/// A configuration that has been checked end to end: the destination is
+/// approved, the credential resolves, and the provider answered with the
+/// models it allows.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedModelConfiguration {
+    pub backend: BackendKind,
+    pub model: Option<String>,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub models: Vec<ProviderModel>,
+    /// Why the list is empty, when a stored login could not be asked. An empty
+    /// list without this is a provider that simply offers no index.
+    pub models_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderModelsRequest {
+    pub backend: BackendKind,
+    pub api_key: Option<String>,
+    /// Names a key already held in the environment or in NAC home, for a caller
+    /// that has one on file and no copy of the secret to send.
+    pub api_key_env: Option<String>,
+    /// Overrides the provider's canonical URL, for a proxy or a custom gateway.
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderModelList {
+    /// The URL the models were actually read from, so the caller can persist
+    /// the same destination it validated against.
+    pub base_url: String,
+    pub models: Vec<ProviderModel>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StoreCredentialRequest {
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GeneratedCredential {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -300,6 +587,19 @@ pub struct ReorderSessionsResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SubmitPromptRequest {
     pub prompt: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SwitchBranchRequest {
+    pub name: String,
+    /// Make the branch first, off the current HEAD.
+    #[serde(default)]
+    pub create: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommitWorkspaceRequest {
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -432,6 +732,19 @@ pub struct WorkspaceDiffQuery {
     pub path: String,
     pub stage: Option<String>,
     pub context: Option<usize>,
+    /// Look at a captured revision instead of the working tree.
+    pub revision: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceFileQuery {
+    pub path: String,
+    pub revision: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct WorkspaceRevisionQuery {
+    pub revision: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -470,6 +783,8 @@ impl SessionManager {
                 active_sessions: RwLock::new(HashMap::new()),
                 lifecycle_gates: StdMutex::new(HashMap::new()),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
+                git_probe_cache: RwLock::new(HashMap::new()),
+                managed_logins: managed_auth::ManagedLoginRegistry::default(),
             }),
         })
     }
@@ -485,13 +800,10 @@ impl SessionManager {
     fn resolve_launch_location(
         &self,
         cwd: Option<PathBuf>,
-        ssh_host: Option<String>,
+        ssh: SshRequest,
     ) -> Result<ResolvedLaunchLocation> {
-        let ssh_host = ssh_host
-            .as_deref()
-            .map(str::trim)
-            .filter(|ssh_host| !ssh_host.is_empty())
-            .map(str::to_string);
+        let ssh = ssh.into_options();
+        let ssh_host = ssh.host();
         let (workspace_cwd, config_cwd) = if ssh_host.is_some() {
             let remote_cwd = cwd
                 .and_then(|cwd| {
@@ -514,7 +826,47 @@ impl SessionManager {
         Ok(ResolvedLaunchLocation {
             workspace_cwd,
             config_cwd,
-            ssh_host,
+            ssh,
+        })
+    }
+
+    /// Lists a directory on an SSH host, in the same shape as a local listing so
+    /// the picker navigates both the same way.
+    ///
+    /// Succeeding is also the evidence the launch form needs that the host, the
+    /// port and the key work together, and the connection it opens is reused by
+    /// the session created next.
+    async fn browse_ssh(
+        &self,
+        request: SshBrowseRequest,
+    ) -> std::result::Result<filesystem::BrowseListing, runtime::RemoteBrowseError> {
+        let options = SshRequest {
+            host: request.ssh_host,
+            port: request.ssh_port,
+            identity_file: request.ssh_identity_file,
+        }
+        .into_options();
+        let listing = runtime::browse_ssh_directory(
+            &options,
+            request.path.as_deref(),
+            request.hidden,
+            &self.inner.root_cwd,
+        )
+        .await?;
+        Ok(filesystem::BrowseListing {
+            path: listing.path,
+            parent: listing.parent,
+            home: listing.home,
+            entries: listing
+                .entries
+                .into_iter()
+                .map(|entry| filesystem::BrowseEntry {
+                    name: entry.name,
+                    path: entry.path,
+                    is_directory: entry.is_directory,
+                })
+                .collect(),
+            truncated: listing.truncated,
         })
     }
 
@@ -522,18 +874,18 @@ impl SessionManager {
         &self,
         request: LaunchModelDefaultsRequest,
     ) -> Result<LaunchModelDefaults> {
-        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
+        let location = self.resolve_launch_location(
+            request.cwd,
+            SshRequest {
+                host: request.ssh_host,
+                port: request.ssh_port,
+                identity_file: request.ssh_identity_file,
+            },
+        )?;
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
-        let configured_model_backend = config.model.backend;
-        let configured_model_base_url = match configured_model_backend {
-            Some(backend) if managed_backend_base_url(backend).is_some() => Some(
-                resolve_model_base_url(backend, config.model.base_url.clone())?,
-            ),
-            _ => config.model.base_url.clone(),
-        };
         Ok(LaunchModelDefaults {
-            configured_model_backend,
-            configured_model_base_url,
+            configured_model: config.model.model.clone(),
+            configured_reasoning_effort: config.model.reasoning_effort,
         })
     }
 
@@ -545,7 +897,10 @@ impl SessionManager {
             return Ok(Vec::new());
         }
 
-        let summaries = view::list_sessions(&self.inner.store_path)?;
+        let store_path = self.inner.store_path.clone();
+        let summaries = tokio::task::spawn_blocking(move || view::list_sessions(&store_path))
+            .await
+            .context("session list task failed")??;
         let mut sessions = {
             let active = self.inner.active_sessions.read().await;
             summaries
@@ -618,65 +973,101 @@ impl SessionManager {
         })?
     }
 
+    /// Attach "+n −m" to every row of the session list.
+    ///
+    /// Sessions sharing a checkout are measured once, and the answer is cached,
+    /// because this runs on every refresh of the list. Remote checkouts are the
+    /// reason for the rest of the care here: measuring one means talking to
+    /// another machine, so a host that is slow or gone must cost the list a
+    /// bounded wait once rather than a connect timeout per row.
     async fn populate_workspace_diff(&self, sessions: &mut [ManagedSessionSummary]) -> Result<()> {
-        let mut workspace_displays = HashMap::new();
+        let mut targets: HashMap<GitTargetKey, (GitTarget, String)> = HashMap::new();
+        let mut key_by_session: HashMap<String, GitTargetKey> = HashMap::new();
         for entry in sessions.iter() {
-            if let Some(path) = entry.summary.workspace_host_path.clone() {
-                workspace_displays
-                    .entry(path)
-                    .or_insert_with(|| entry.summary.cwd.display().to_string());
-            }
+            let Ok(target) = self.git_target(&entry.summary) else {
+                continue;
+            };
+            let key = git_target_key(&target);
+            key_by_session.insert(entry.summary.session_id.clone(), key.clone());
+            targets
+                .entry(key)
+                .or_insert_with(|| (target, entry.summary.cwd.display().to_string()));
         }
 
         let now = Instant::now();
-        let mut totals_by_path = HashMap::new();
-        let mut missing_paths = Vec::new();
+        let mut totals_by_key: HashMap<GitTargetKey, view::WorkspaceDiffTotals> = HashMap::new();
+        let mut pending = Vec::new();
         {
             let cache = self.inner.workspace_diff_cache.read().await;
-            for path in workspace_displays.keys() {
-                if let Some(entry) = cache.get(path) {
-                    if now.duration_since(entry.updated_at) < WORKSPACE_DIFF_CACHE_TTL {
-                        totals_by_path.insert(path.clone(), entry.totals.clone());
-                        continue;
+            for key in targets.keys() {
+                match cache.get(key) {
+                    Some(entry) if entry.is_fresh(now) => {
+                        totals_by_key.insert(key.clone(), entry.totals.clone());
                     }
+                    _ => pending.push(key.clone()),
                 }
-                missing_paths.push(path.clone());
             }
         }
 
         let mut tasks = Vec::new();
-        for path in missing_paths {
-            let display = workspace_displays
-                .get(&path)
-                .cloned()
-                .unwrap_or_else(|| path.display().to_string());
-            let task_path = path.clone();
+        for key in pending {
+            let Some((target, display)) = targets.get(&key).cloned() else {
+                continue;
+            };
+            // A host already known to be unreachable is not dialled again just
+            // to fill in a column.
+            if let Some(failure) = self.cached_git_failure(&key).await {
+                totals_by_key.insert(
+                    key.clone(),
+                    view::WorkspaceDiffTotals {
+                        total_additions: 0,
+                        total_deletions: 0,
+                        error: Some(failure),
+                    },
+                );
+                continue;
+            }
             tasks.push((
-                path,
+                key,
                 tokio::task::spawn_blocking(move || {
-                    view::workspace_diff_totals(&display, Some(&task_path))
+                    view::workspace_diff_totals(&display, Some(&target))
                 }),
             ));
         }
 
         let mut cache_updates = Vec::new();
-        for (path, task) in tasks {
-            let totals = task.await.context("workspace diff task failed")?;
-            totals_by_path.insert(path.clone(), totals.clone());
-            cache_updates.push((path, totals));
+        let deadline = tokio::time::Instant::now() + WORKSPACE_DIFF_MEASURE_BUDGET;
+        for (key, task) in tasks {
+            match tokio::time::timeout_at(deadline, task).await {
+                Ok(joined) => {
+                    let totals = joined.context("workspace diff task failed")?;
+                    totals_by_key.insert(key.clone(), totals.clone());
+                    cache_updates.push((key, totals));
+                }
+                Err(_) => {
+                    totals_by_key.insert(
+                        key,
+                        view::WorkspaceDiffTotals {
+                            total_additions: 0,
+                            total_deletions: 0,
+                            error: Some("workspace diff is still being measured".to_string()),
+                        },
+                    );
+                }
+            }
         }
 
         if !cache_updates.is_empty() {
             let updated_at = Instant::now();
             let mut cache = self.inner.workspace_diff_cache.write().await;
-            for (path, totals) in cache_updates {
-                cache.insert(path, WorkspaceDiffCacheEntry { updated_at, totals });
+            for (key, totals) in cache_updates {
+                cache.insert(key, WorkspaceDiffCacheEntry { updated_at, totals });
             }
         }
 
         for entry in sessions.iter_mut() {
-            entry.workspace_diff = match entry.summary.workspace_host_path.as_ref() {
-                Some(path) => totals_by_path.get(path).cloned(),
+            entry.workspace_diff = match key_by_session.get(&entry.summary.session_id) {
+                Some(key) => totals_by_key.get(key).cloned(),
                 None => Some(view::workspace_diff_totals(
                     &entry.summary.cwd.display().to_string(),
                     None,
@@ -687,12 +1078,97 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Where git runs for a session's checkout.
+    ///
+    /// An ssh session's files are on the machine it works on, so git runs there
+    /// too, over the connection the session already keeps open. What is left
+    /// without a target is a sandbox with no mounted working directory: those
+    /// files exist only inside a container that is removed with the session, so
+    /// there is nothing durable to inspect, commit or restore.
+    fn git_target(&self, summary: &SessionSummarySnapshot) -> Result<GitTarget> {
+        if let Some(host) = summary.ssh_host.as_deref() {
+            // The stored connection is used as recorded: the key path was
+            // resolved when the session was created, so it needs no second pass.
+            return Ok(GitTarget::ssh(
+                runtime::SshConnection {
+                    host: host.to_string(),
+                    port: summary.ssh_port,
+                    identity_file: summary.ssh_identity_file.as_deref().map(PathBuf::from),
+                },
+                summary.cwd.clone(),
+                &self.inner.root_cwd,
+            ));
+        }
+        summary
+            .workspace_host_path
+            .clone()
+            .map(GitTarget::local)
+            .ok_or_else(|| {
+                anyhow!(
+                    "workspace '{}' lives only inside the sandbox; mount a working directory to inspect it",
+                    summary.cwd.display()
+                )
+            })
+    }
+
+    /// The recorded reason a target could not be used, while it is still recent
+    /// enough to trust.
+    async fn cached_git_failure(&self, key: &GitTargetKey) -> Option<String> {
+        let now = Instant::now();
+        let cache = self.inner.git_probe_cache.read().await;
+        cache
+            .get(key)
+            .filter(|entry| entry.is_fresh(now))
+            .and_then(|entry| entry.failure.clone())
+    }
+
+    /// Establish that git can actually be run against this checkout, so the
+    /// caller gets one clear reason — host unreachable, no git over there, not a
+    /// repository — instead of the same failure repeated by every git command
+    /// the request would have made.
+    async fn ensure_git_ready(&self, target: &GitTarget) -> Result<()> {
+        let key = git_target_key(target);
+        let now = Instant::now();
+        {
+            let cache = self.inner.git_probe_cache.read().await;
+            if let Some(entry) = cache.get(&key).filter(|entry| entry.is_fresh(now)) {
+                return match &entry.failure {
+                    Some(failure) => Err(anyhow!("{failure}")),
+                    None => Ok(()),
+                };
+            }
+        }
+
+        let probed = {
+            let target = target.clone();
+            tokio::task::spawn_blocking(move || target.probe())
+                .await
+                .context("workspace probe task failed")?
+        };
+        let failure = probed.as_ref().err().map(|error| format!("{error:#}"));
+        self.inner.git_probe_cache.write().await.insert(
+            key,
+            GitProbeCacheEntry {
+                checked_at: Instant::now(),
+                failure,
+            },
+        );
+        probed
+    }
+
     pub async fn create_session(
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
-        let location = self.resolve_launch_location(request.cwd, request.ssh_host)?;
-        if location.ssh_host.is_some() && sandbox_requested(&request.sandbox) {
+        let location = self.resolve_launch_location(
+            request.cwd,
+            SshRequest {
+                host: request.ssh_host,
+                port: request.ssh_port,
+                identity_file: request.ssh_identity_file,
+            },
+        )?;
+        if location.ssh.host().is_some() && sandbox_requested(&request.sandbox) {
             return Err(anyhow!(
                 "invalid request: ssh_host and sandbox options cannot both be set"
             ));
@@ -708,6 +1184,20 @@ impl SessionManager {
             request.api_key_env,
             request.extra_headers,
         )?;
+        // Mirror the launch-time resolution so the destination is checked
+        // against the backend the session will actually use.
+        let launch_backend = model.backend.or_else(|| {
+            model
+                .api_model
+                .as_deref()
+                .or(config.model.model.as_deref())
+                .and_then(provider_for_model)
+        });
+        enforce_trusted_base_url(
+            launch_backend,
+            model.api_base_url.as_deref(),
+            &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
+        )?;
         let run_config = runtime::build_run_config(
             RunOptions {
                 workspace_cwd: location.workspace_cwd,
@@ -719,7 +1209,7 @@ impl SessionManager {
                 model,
                 orchestrator_compaction_threshold,
                 sandbox: sandbox_options(request.sandbox),
-                ssh_host: location.ssh_host,
+                ssh: location.ssh,
             },
             &config,
         )
@@ -889,6 +1379,55 @@ impl SessionManager {
         let stage = view::WorkspaceDiffStage::parse(query.stage.as_deref().unwrap_or("all"))?;
         let context = query.context.unwrap_or(3).min(100);
         let path = query.path;
+        let target = self.workspace_root(session_id).await?;
+
+        let revision = self.resolve_revision(session_id, query.revision)?;
+        tokio::task::spawn_blocking(move || match revision {
+            Some(revision) => view::revision_file_diff(
+                &target,
+                revision.base_sha.as_deref(),
+                &revision.commit_sha,
+                &path,
+                context,
+            ),
+            None => view::workspace_file_diff(&target, &path, stage, context),
+        })
+        .await
+        .context("workspace diff task failed")?
+    }
+
+    /// The checkout of a session, refusing when an agent could be working in
+    /// it. Several sessions may share one checkout, so every one of them has to
+    /// be quiet, not just this one — and "the same checkout" means the same
+    /// directory *on the same machine*, which is what keeps two sessions on one
+    /// remote path from moving each other's branch.
+    async fn idle_workspace_root(&self, session_id: &str) -> Result<GitTarget> {
+        let sessions = self.list_sessions(false).await?;
+        let summary = sessions
+            .iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let target = self.git_target(&summary.summary)?;
+        let key = git_target_key(&target);
+
+        if let Some(busy) = sessions.iter().find(|entry| {
+            entry.active_run.is_some()
+                && self
+                    .git_target(&entry.summary)
+                    .is_ok_and(|other| git_target_key(&other) == key)
+        }) {
+            return Err(anyhow!(
+                "workspace is busy: session '{}' has a run in flight",
+                busy.summary.session_id
+            ));
+        }
+
+        self.ensure_git_ready(&target).await?;
+        Ok(target)
+    }
+
+    /// The checkout of a session, for read-only inspection.
+    async fn workspace_root(&self, session_id: &str) -> Result<GitTarget> {
         let summary = self
             .list_sessions(false)
             .await?
@@ -896,15 +1435,127 @@ impl SessionManager {
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let host_root = summary.workspace_host_path.ok_or_else(|| {
-            anyhow!("workspace diff is not supported for remote/sandbox-only sessions")
-        })?;
+        let target = self.git_target(&summary)?;
+        self.ensure_git_ready(&target).await?;
+        Ok(target)
+    }
 
-        tokio::task::spawn_blocking(move || {
-            view::workspace_file_diff(&host_root, &path, stage, context)
+    pub async fn workspace_files(
+        &self,
+        session_id: &str,
+        revision: Option<i64>,
+    ) -> Result<view::WorkspaceFileList> {
+        let target = self.workspace_root(session_id).await?;
+        let revision = self.resolve_revision(session_id, revision)?;
+        tokio::task::spawn_blocking(move || match revision {
+            Some(revision) => view::list_revision_files(&target, &revision.commit_sha),
+            None => view::list_files(&target),
         })
         .await
-        .context("workspace diff task failed")?
+        .context("workspace file listing task failed")?
+    }
+
+    pub async fn workspace_file(
+        &self,
+        session_id: &str,
+        path: String,
+        revision: Option<i64>,
+    ) -> Result<view::WorkspaceFileContent> {
+        let target = self.workspace_root(session_id).await?;
+        let revision = self.resolve_revision(session_id, revision)?;
+        tokio::task::spawn_blocking(move || match revision {
+            Some(revision) => view::read_revision_file(&target, &revision.commit_sha, &path),
+            None => view::read_file(&target, &path),
+        })
+        .await
+        .context("workspace file read task failed")?
+    }
+
+    pub fn workspace_revisions(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<view::WorkspaceRevisionRecord>> {
+        view::list_workspace_revisions(&self.inner.store_path, session_id)
+    }
+
+    /// What the run behind a revision changed, in the shape the live workspace
+    /// reports, so the files panel can render either one the same way.
+    pub async fn workspace_revision_changes(
+        &self,
+        session_id: &str,
+        revision_id: i64,
+    ) -> Result<view::WorkspaceRevisionChanges> {
+        let target = self.workspace_root(session_id).await?;
+        let revision = self
+            .resolve_revision(session_id, Some(revision_id))?
+            .ok_or_else(|| anyhow!("revision '{}' was not found", revision_id))?;
+
+        tokio::task::spawn_blocking(move || {
+            view::revision_changes(&target, revision.base_sha.as_deref(), &revision.commit_sha)
+        })
+        .await
+        .context("workspace revision task failed")
+    }
+
+    /// Revisions are addressed by their store id rather than by commit, so a
+    /// request can only ever reach an object this session actually recorded.
+    fn resolve_revision(
+        &self,
+        session_id: &str,
+        revision: Option<i64>,
+    ) -> Result<Option<view::WorkspaceRevisionRecord>> {
+        let Some(revision) = revision else {
+            return Ok(None);
+        };
+        view::read_workspace_revision(&self.inner.store_path, session_id, revision)?
+            .ok_or_else(|| anyhow!("revision '{}' was not found", revision))
+            .map(Some)
+    }
+
+    pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
+        let target = self.workspace_root(session_id).await?;
+        tokio::task::spawn_blocking(move || workspace::list_branches(&target))
+            .await
+            .context("branch listing task failed")?
+    }
+
+    pub async fn switch_workspace_branch(
+        &self,
+        session_id: &str,
+        request: SwitchBranchRequest,
+    ) -> Result<workspace::BranchList> {
+        let target = self.idle_workspace_root(session_id).await?;
+
+        tokio::task::spawn_blocking(move || {
+            if request.create {
+                // A new branch takes the uncommitted work with it, which is
+                // usually the point of making one, so a dirty tree is fine.
+                return workspace::create_branch(&target, &request.name);
+            }
+            if workspace::list_branches(&target)?.dirty {
+                return Err(anyhow!(
+                    "workspace has uncommitted changes; commit or stash them before switching"
+                ));
+            }
+            workspace::switch_branch(&target, &request.name)
+        })
+        .await
+        .context("branch switch task failed")?
+    }
+
+    /// Commit the whole checkout on the user's behalf. Guarded like a branch
+    /// switch: an agent writing files underneath a `git add` would commit a
+    /// half-finished tree.
+    pub async fn commit_workspace(
+        &self,
+        session_id: &str,
+        request: CommitWorkspaceRequest,
+    ) -> Result<workspace::CommitOutcome> {
+        let target = self.idle_workspace_root(session_id).await?;
+
+        tokio::task::spawn_blocking(move || workspace::commit_all(&target, &request.message))
+            .await
+            .context("commit task failed")?
     }
 
     pub async fn submit_prompt(
@@ -996,6 +1647,7 @@ impl SessionManager {
         Option<SessionReplayGap>,
         Vec<SessionEventEnvelope>,
         SessionEventReceiver,
+        AssistantStreamDeltaReceiver,
     )> {
         let service = self.attach_session(session_id).await?;
         let subscription = service
@@ -1007,6 +1659,7 @@ impl SessionManager {
             subscription.replay_gap,
             subscription.replayed_events,
             subscription.receiver,
+            subscription.assistant_deltas,
         ))
     }
 
@@ -1064,6 +1717,14 @@ impl SessionManager {
         if let Some(service) = service {
             // Explicitly destroy the sandbox even if SSE handlers retain the service.
             service.destroy_sandbox().await;
+        }
+
+        // The revision rows cascade with the session, but the git objects they
+        // pinned only become collectable once the ref is gone.
+        if let Ok(target) = self.workspace_root(session_id).await {
+            if let Err(error) = workspace::forget(&target, session_id) {
+                eprintln!("nac: failed to drop workspace revisions: {error:#}");
+            }
         }
 
         // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
@@ -1144,6 +1805,16 @@ impl SessionManager {
             api_key_env_omitted,
         )?;
 
+        // An untouched destination carries no new risk, so only a patch that
+        // moves the endpoint or switches the credential type is authorized.
+        if !base_url_omitted || backend_selected {
+            enforce_trusted_base_url(
+                Some(backend),
+                Some(prospective.base_url.as_str()),
+                &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
+            )?;
+        }
+
         let _settings = EffectiveModelSettings::new(
             backend,
             prospective.model.clone(),
@@ -1160,7 +1831,6 @@ impl SessionManager {
             prospective.api_key_env.as_deref(),
             &extra_headers,
         )?;
-
         // Persist only revisioned session-configuration columns after all
         // caller-controlled model configuration and credential checks succeed.
         // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.
@@ -1211,29 +1881,159 @@ fn validate_bind_address(addr: SocketAddr) -> Result<()> {
     Ok(())
 }
 
+/// Extra names this server answers to, as a comma-separated list.
+///
+/// A tunnel or reverse proxy forwards its own public name in `Host`, which the
+/// rebinding guard below would otherwise refuse. Naming it here is the
+/// operator's statement that whatever fronts the server authenticates callers
+/// before traffic reaches it. `*` disables the guard entirely.
+const ALLOWED_HOSTS_ENV: &str = "NAC_ALLOWED_HOSTS";
+
+fn configured_allowed_hosts() -> Vec<String> {
+    std::env::var(ALLOWED_HOSTS_ENV)
+        .unwrap_or_default()
+        .split(',')
+        .map(|entry| entry.trim().to_ascii_lowercase())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+/// The host name inside a `Host` header, without its port.
+fn bare_host(host: &str) -> Option<&str> {
+    let host = host.trim();
+    match host.strip_prefix('[') {
+        // IPv6 literals are bracketed, so the port separator is the colon that
+        // follows the closing bracket rather than the last colon in the string.
+        Some(rest) => rest.split_once(']').map(|(address, _port)| address),
+        None => host.split(':').next().filter(|bare| !bare.is_empty()),
+    }
+}
+
+/// Whether a `Host` header names this loopback server.
+///
+/// Binding to loopback does not keep a hostile page out: an attacker can point
+/// their own domain at 127.0.0.1 (DNS rebinding) and drive this unauthenticated
+/// API from the victim's browser. A browser always sends the name it dialled,
+/// and it cannot forge that name, so refusing every host but the loopback ones
+/// closes the hole.
+fn is_loopback_host(host: &str) -> bool {
+    let Some(bare) = bare_host(host) else {
+        return false;
+    };
+    bare.eq_ignore_ascii_case("localhost")
+        || bare
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+fn host_is_allowed(host: &str, allowed: &[String]) -> bool {
+    if is_loopback_host(host) {
+        return true;
+    }
+    let host = host.trim().to_ascii_lowercase();
+    let bare = bare_host(&host).unwrap_or_default().to_string();
+    allowed
+        .iter()
+        .any(|entry| entry == "*" || *entry == host || *entry == bare)
+}
+
+async fn reject_foreign_host(
+    State(allowed): State<Arc<Vec<String>>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .map(|value| value.to_str().unwrap_or_default())
+        // HTTP/2 carries the authority in the pseudo-header instead.
+        .or_else(|| request.uri().host());
+    match host {
+        // An absent header is accepted because HTTP/1.1 clients that omit it
+        // are never browsers.
+        Some(host) if !host_is_allowed(host, &allowed) => (
+            StatusCode::FORBIDDEN,
+            format!(
+                "refusing request for host '{host}'; set {ALLOWED_HOSTS_ENV} to serve it through \
+                 an authenticating proxy"
+            ),
+        )
+            .into_response(),
+        _ => next.run(request).await,
+    }
+}
+
 pub fn router(manager: SessionManager) -> Router {
+    api_router(manager)
+        .merge(embedded_frontend_router())
+        .layer(response_compression_layer())
+        .layer(middleware::from_fn_with_state(
+            Arc::new(configured_allowed_hosts()),
+            reject_foreign_host,
+        ))
+}
+
+fn embedded_frontend_router() -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
-        .route("/assets/redesign.css", get(redesign_css))
-        .route("/assets/app.css", get(redesign_css))
-        .route("/assets/app.js", get(app_js))
-        .route(
-            "/assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2",
-            get(doto_rounded_extra_bold_font),
-        )
-        .route("/assets/fonts/doto/OFL.txt", get(doto_font_license))
-        .route("/assets/vendor/purify.min.js", get(vendor_purify_js))
-        .route(
-            "/assets/vendor/markdown-it.min.js",
-            get(vendor_markdown_it_js),
-        )
+        .route("/assets/{*path}", get(serve_asset))
+}
+
+fn api_router(manager: SessionManager) -> Router {
+    Router::new()
         .route("/health", get(health))
         .route("/store", get(store_info))
+        .route("/fs/browse", get(browse_filesystem_handler))
+        .route("/ssh/browse", post(browse_ssh_handler))
+        .route("/providers/models", post(provider_models_handler))
+        .route(
+            "/model-configs",
+            get(list_model_configs_handler).post(create_model_config_handler),
+        )
+        .route(
+            "/model-configs/from-file",
+            post(model_config_from_file_handler),
+        )
+        .route(
+            "/model-configs/{config_id}",
+            patch(update_model_config_handler).delete(delete_model_config_handler),
+        )
+        .route(
+            "/model-configs/{config_id}/models",
+            post(saved_model_config_models_handler),
+        )
+        .route(
+            "/ssh-configs",
+            get(list_ssh_configs_handler).post(create_ssh_config_handler),
+        )
+        .route(
+            "/ssh-configs/{config_id}",
+            patch(update_ssh_config_handler).delete(delete_ssh_config_handler),
+        )
+        .route("/auth", get(managed_auth::list_handler))
+        .route("/auth/{provider}", delete(managed_auth::logout_handler))
+        .route(
+            "/auth/{provider}/login",
+            post(managed_auth::start_login_handler),
+        )
+        .route(
+            "/auth/{provider}/login/{login_id}",
+            get(managed_auth::poll_login_handler).delete(managed_auth::cancel_login_handler),
+        )
+        .route(
+            "/credentials",
+            get(list_credentials_handler).post(store_generated_credential_handler),
+        )
+        .route(
+            "/credentials/{name}",
+            put(store_credential_handler).delete(delete_credential_handler),
+        )
         .route(
             "/sessions/launch-defaults",
             post(launch_model_defaults_handler),
         )
+        .route("/models", get(models_handler))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/order", put(reorder_sessions_handler))
         .route(
@@ -1247,6 +2047,27 @@ pub fn router(manager: SessionManager) -> Router {
         )
         .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
         .route(
+            "/sessions/{session_id}/workspace/files",
+            get(workspace_files),
+        )
+        .route("/sessions/{session_id}/workspace/file", get(workspace_file))
+        .route(
+            "/sessions/{session_id}/workspace/branches",
+            get(workspace_branches).post(switch_workspace_branch),
+        )
+        .route(
+            "/sessions/{session_id}/workspace/commit",
+            post(commit_workspace),
+        )
+        .route(
+            "/sessions/{session_id}/workspace/revisions",
+            get(workspace_revisions),
+        )
+        .route(
+            "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
+            get(workspace_revision_changes),
+        )
+        .route(
             "/sessions/{session_id}",
             get(session_snapshot).delete(delete_session_handler),
         )
@@ -1256,6 +2077,11 @@ pub fn router(manager: SessionManager) -> Router {
         )
         .route("/sessions/{session_id}/runs", post(submit_prompt))
         .route("/sessions/{session_id}/compact", post(compaction::handler))
+        .route("/sessions/{session_id}/revert", post(revert::handler))
+        .route(
+            "/sessions/{session_id}/regenerate",
+            post(revert::regenerate_handler),
+        )
         .route(
             "/sessions/{session_id}/steering",
             post(queue_orchestrator_steering_handler),
@@ -1270,7 +2096,6 @@ pub fn router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
-        .layer(response_compression_layer())
         .with_state(manager)
 }
 
@@ -1288,63 +2113,704 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
-async fn index_html() -> Html<&'static str> {
-    Html(include_str!("../assets/index.html"))
-}
+// The frontend is a Vite/React app built from `web/` into `assets/dist/`. That
+// output is committed, so building this crate never needs Node, and the whole
+// `assets/` tree is embedded at compile time to keep `nac-web` a single
+// self-contained executable with no runtime filesystem dependency.
+static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
-async fn redesign_css() -> impl IntoResponse {
+async fn index_html() -> impl IntoResponse {
     (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../assets/redesign.css"),
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            // The entry document names the hashed bundles, so it must never be
+            // cached or a client would keep loading a stale build forever.
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("../assets/dist/index.html"),
     )
 }
 
-async fn app_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/app.js"),
-    )
+pub(crate) fn asset_content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json") | Some("map") => "application/json; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("ttf") => "font/ttf",
+        Some("png") => "image/png",
+        Some("txt") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
 }
 
-async fn doto_rounded_extra_bold_font() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "font/woff2")],
-        include_bytes!("../assets/fonts/doto/Doto-RoundedExtraBold-latin.woff2").as_slice(),
-    )
+// Everything Vite emits under `dist/assets/` carries a content hash in its
+// filename, so those responses can be cached indefinitely.
+pub(crate) fn asset_cache_control(path: &str) -> &'static str {
+    if path.starts_with("dist/assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
 }
 
-async fn doto_font_license() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-        include_str!("../assets/fonts/doto/OFL.txt"),
-    )
-}
-
-async fn vendor_purify_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/purify.min.js"),
-    )
-}
-
-async fn vendor_markdown_it_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        include_str!("../assets/vendor/markdown-it.min.js"),
-    )
+// Serve any embedded asset by its path relative to the `assets/` root (the
+// `/assets/` prefix is stripped by the route). Returns 404 for unknown paths.
+async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
+    match ASSETS.get_file(&path) {
+        Some(file) => (
+            [
+                (header::CONTENT_TYPE, asset_content_type(&path)),
+                (header::CACHE_CONTROL, asset_cache_control(&path)),
+            ],
+            file.contents(),
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "asset not found").into_response(),
+    }
 }
 
 async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {
     Json(manager.store_info())
+}
+
+/// The picker starts wherever the caller last was; with no path yet it opens on
+/// the server root the session would default to anyway.
+async fn browse_filesystem_handler(
+    State(manager): State<SessionManager>,
+    Query(query): Query<filesystem::BrowseQuery>,
+) -> std::result::Result<Json<filesystem::BrowseListing>, ApiError> {
+    let listing = filesystem::browse(&query, &manager.inner.root_cwd)?;
+    Ok(Json(listing))
+}
+
+/// The same listing for a directory on an SSH host, which is also how the launch
+/// form tests the connection before it offers the rest of the form.
+async fn browse_ssh_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<SshBrowseRequest>, JsonRejection>,
+) -> std::result::Result<Json<filesystem::BrowseListing>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let listing = manager.browse_ssh(request).await?;
+    Ok(Json(listing))
+}
+
+/// Validate a credential by asking its provider which models it may use.
+///
+/// A key arrives in the request body and is forwarded once; it is never stored
+/// by this route, and the destination goes through the same credential trust
+/// check as a session launch. A provider signed in through the browser has no
+/// key to send, so the stored login answers instead — and its answer is the
+/// same evidence the launch UI needs that the login still works.
+async fn provider_models_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<ProviderModelsRequest>, JsonRejection>,
+) -> std::result::Result<Json<ProviderModelList>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let backend = request.backend;
+
+    let api_key = request.api_key.unwrap_or_default();
+    let api_key_env = request
+        .api_key_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(provider) = ManagedAuthProvider::for_backend(backend) {
+        if !api_key.trim().is_empty() || api_key_env.is_some() {
+            return Err(ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: format!(
+                    "backend '{backend}' authenticates with a stored login and accepts no API key"
+                ),
+            });
+        }
+        let models = list_managed_provider_models(provider)
+            .await
+            .map_err(|error| ApiError {
+                status: StatusCode::BAD_GATEWAY,
+                message: error.to_string(),
+            })?;
+        // The endpoint belongs to the login rather than to the caller, so it is
+        // reported back the same way a validated key's is.
+        let base_url = provider_default_base_url(backend)
+            .map(str::to_string)
+            .unwrap_or_default();
+        return Ok(Json(ProviderModelList { base_url, models }));
+    }
+    // A key already filed away is named rather than sent, so a setup that is
+    // only being reviewed never has to hand its secret back to the page first.
+    let api_key = match api_key_env {
+        Some(name) if api_key.trim().is_empty() => resolve_backend_api_key(backend, Some(name))
+            .map_err(|error| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: error.to_string(),
+            })?,
+        _ => api_key,
+    };
+    if api_key.trim().is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' requires a nonblank API key"),
+        });
+    }
+
+    let base_url = request
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
+
+    let models = list_provider_models(backend, &base_url, &api_key)
+        .await
+        .map_err(|error| ApiError {
+            // A rejected key is the caller's problem, not a server fault.
+            status: StatusCode::BAD_GATEWAY,
+            message: error.to_string(),
+        })?;
+    Ok(Json(ProviderModelList { base_url, models }))
+}
+
+async fn list_model_configs_handler(
+    State(manager): State<SessionManager>,
+) -> std::result::Result<Json<ModelConfigurationList>, ApiError> {
+    let configurations =
+        model_configurations::list_model_configurations(&manager.inner.store_path)?;
+    Ok(Json(ModelConfigurationList { configurations }))
+}
+
+/// Save a validated provider setup under a name.
+///
+/// The key is filed in the credential store under a generated name that the
+/// row then points at, so the secret stays out of the database and a launched
+/// session resolves it through the ordinary `api_key_env` path.
+async fn create_model_config_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<CreateModelConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ModelConfigurationRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let backend = request.backend;
+
+    let base_url = settle_configuration_base_url(&manager, backend, request.base_url.as_deref())?;
+
+    let api_key = request
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    let expects_key = provider_uses_api_key(backend);
+    if expects_key && api_key.is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' requires an API key"),
+        });
+    }
+    if !expects_key && !api_key.is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!(
+                "backend '{backend}' authenticates with a stored login and accepts no API key"
+            ),
+        });
+    }
+
+    let id = uuid::Uuid::new_v4();
+    let credential_name =
+        expects_key.then(|| format!("{GENERATED_CREDENTIAL_PREFIX}{}", id.simple()));
+    if let Some(name) = credential_name.as_deref() {
+        store_api_key(name, api_key)?;
+    }
+
+    let configuration = model_configurations::NewModelConfiguration {
+        name: request.name,
+        backend: backend.to_string(),
+        model: request.model,
+        base_url,
+        api_key_env: credential_name.clone(),
+        reasoning_effort: request
+            .reasoning_effort
+            .map(|effort| effort.as_str().to_string()),
+        extra_headers: request.extra_headers.unwrap_or_default(),
+        orchestrator_compaction_threshold: request.orchestrator_compaction_threshold,
+        initial_prompt: request.initial_prompt,
+    };
+    let record = model_configurations::insert_model_configuration(
+        &manager.inner.store_path,
+        &id.to_string(),
+        configuration,
+    );
+
+    match record {
+        Ok(record) => Ok((StatusCode::CREATED, Json(record))),
+        Err(error) => {
+            // The row is what makes the credential reachable, so a failed
+            // insert must not leave the secret behind.
+            if let Some(name) = credential_name.as_deref() {
+                let _ = remove_api_key(name);
+            }
+            Err(error.into())
+        }
+    }
+}
+
+/// Settles where a configuration sends its requests: the caller's URL when
+/// there is one, the provider's canonical URL otherwise, checked against the
+/// credential destination policy either way.
+fn settle_configuration_base_url(
+    manager: &SessionManager,
+    backend: BackendKind,
+    requested: Option<&str>,
+) -> std::result::Result<String, ApiError> {
+    let base_url = requested
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    let base_url = resolve_model_base_url(backend, Some(base_url))?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
+    Ok(base_url)
+}
+
+/// Edit a saved provider setup, keeping whatever the request leaves out.
+///
+/// A new key is filed under a fresh generated name and the row is pointed at
+/// it; the credential it replaces is dropped only once the row has actually
+/// moved, so a failed edit never leaves the configuration pointing at a secret
+/// that is gone.
+async fn update_model_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdateModelConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<Json<ModelConfigurationRecord>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let existing =
+        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
+    let stored_backend: BackendKind =
+        existing
+            .backend
+            .parse()
+            .map_err(|message: String| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message,
+            })?;
+
+    let backend = match request.backend {
+        RequestField::Value(kind) => kind,
+        RequestField::Omitted | RequestField::Null => stored_backend,
+    };
+    // Switching provider retires a URL that was only the old provider's
+    // default, so an unmentioned URL follows the new backend instead.
+    let requested_base_url = match request.base_url {
+        RequestField::Value(url) => Some(url),
+        RequestField::Null => None,
+        RequestField::Omitted => (backend == stored_backend).then(|| existing.base_url.clone()),
+    };
+    let base_url = settle_configuration_base_url(&manager, backend, requested_base_url.as_deref())?;
+
+    let expects_key = provider_uses_api_key(backend);
+    let supplied_key = match &request.api_key {
+        RequestField::Value(key) => Some(key.trim().to_string()),
+        _ => None,
+    };
+    if !expects_key && supplied_key.as_deref().is_some_and(|key| !key.is_empty()) {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!(
+                "backend '{backend}' authenticates with a stored login and accepts no API key"
+            ),
+        });
+    }
+
+    // The credential the row ends up pointing at, and the one it is leaving
+    // behind — exactly one of the two survives this request.
+    let (api_key_env, superseded) = if !expects_key {
+        (None, existing.api_key_env.clone())
+    } else if let Some(key) = supplied_key.filter(|key| !key.is_empty()) {
+        let name = format!(
+            "{GENERATED_CREDENTIAL_PREFIX}{}",
+            uuid::Uuid::new_v4().simple()
+        );
+        store_api_key(&name, &key)?;
+        (Some(name), existing.api_key_env.clone())
+    } else if matches!(request.api_key, RequestField::Null) || existing.api_key_env.is_none() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' requires an API key"),
+        });
+    } else {
+        (existing.api_key_env.clone(), None)
+    };
+
+    let configuration = model_configurations::NewModelConfiguration {
+        name: replaceable_text(request.name, &existing.name),
+        backend: backend.to_string(),
+        model: replaceable_text(request.model, &existing.model),
+        base_url,
+        api_key_env: api_key_env.clone(),
+        reasoning_effort: match request.reasoning_effort {
+            RequestField::Value(effort) => Some(effort.as_str().to_string()),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.reasoning_effort.clone(),
+        },
+        extra_headers: match request.extra_headers {
+            RequestField::Value(headers) => headers,
+            RequestField::Null => BTreeMap::new(),
+            RequestField::Omitted => existing.extra_headers.clone(),
+        },
+        orchestrator_compaction_threshold: match request.orchestrator_compaction_threshold {
+            RequestField::Value(threshold) => (threshold != 0).then_some(threshold),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.orchestrator_compaction_threshold,
+        },
+        initial_prompt: match request.initial_prompt {
+            RequestField::Value(prompt) => Some(prompt),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.initial_prompt.clone(),
+        },
+    };
+
+    match model_configurations::update_model_configuration(
+        &manager.inner.store_path,
+        &config_id,
+        configuration,
+    ) {
+        Ok(record) => {
+            if let Some(name) = superseded
+                .as_deref()
+                .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
+            {
+                let _ = remove_api_key(name);
+            }
+            Ok(Json(record))
+        }
+        Err(error) => {
+            if api_key_env != existing.api_key_env {
+                if let Some(name) = api_key_env.as_deref() {
+                    let _ = remove_api_key(name);
+                }
+            }
+            Err(error.into())
+        }
+    }
+}
+
+/// A tri-state text field applied to what is stored: null blanks the value so
+/// the store rejects it by name, rather than silently keeping the old one.
+fn replaceable_text(field: RequestField<String>, current: &str) -> String {
+    match field {
+        RequestField::Value(value) => value,
+        RequestField::Null => String::new(),
+        RequestField::Omitted => current.to_string(),
+    }
+}
+
+/// Read a configuration the user picked from disk and check it can actually run.
+///
+/// The key is never sent by the client here: the file names an environment
+/// variable or stored credential, and the server resolves it the same way a
+/// session would.
+async fn model_config_from_file_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<ModelConfigFromFileRequest>, JsonRejection>,
+) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let path = PathBuf::from(request.path.trim());
+    if path.as_os_str().is_empty() {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "a configuration file path is required".to_string(),
+        });
+    }
+
+    let config = NacConfig::load_from_file(&path).map_err(|error| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message: error.to_string(),
+    })?;
+    // A file written against the current schema names only a model, whose
+    // provider the catalog resolves; an older one states the provider
+    // outright and is taken at its word.
+    let identity = NacConfig::load_model_identity_from_file(&path).map_err(|error| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message: error.to_string(),
+    })?;
+    let backend = identity
+        .backend
+        .or_else(|| config.model.model.as_deref().and_then(provider_for_model))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!(
+                "{} names no model the catalog recognizes, so it cannot describe a provider",
+                path.display()
+            ),
+        })?;
+
+    resolve_configuration(
+        &manager,
+        backend,
+        config.model.model,
+        identity.base_url,
+        identity.api_key_env,
+        config.model.reasoning_effort,
+    )
+    .await
+}
+
+async fn saved_model_config_models_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
+    let record =
+        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
+    let backend: BackendKind = record.backend.parse().map_err(|message: String| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message,
+    })?;
+    let reasoning_effort = record
+        .reasoning_effort
+        .as_deref()
+        .map(|raw| parse_request_enum::<ReasoningEffort>(raw, "reasoning_effort"))
+        .transpose()?;
+
+    resolve_configuration(
+        &manager,
+        backend,
+        Some(record.model),
+        Some(record.base_url),
+        record.api_key_env,
+        reasoning_effort,
+    )
+    .await
+}
+
+/// Shared tail of the saved-configuration and config-file paths: settle the
+/// destination, resolve the credential, and confirm both by listing models.
+async fn resolve_configuration(
+    manager: &SessionManager,
+    backend: BackendKind,
+    model: Option<String>,
+    base_url: Option<String>,
+    api_key_env: Option<String>,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
+    let base_url = base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    let base_url = resolve_model_base_url(backend, Some(base_url))?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
+
+    let mut models_error = None;
+    let models = match ManagedAuthProvider::for_backend(backend) {
+        // A stored login has no key to check, but it does reach a model index,
+        // so a saved setup offers the same choice a fresh one does. Being
+        // signed out is not fatal here: the configuration still names a model.
+        // The reason for an empty list travels with it, so the caller can tell a
+        // provider with nothing to offer from a login that stopped working.
+        Some(provider) => match list_managed_provider_models(provider).await {
+            Ok(models) => models,
+            Err(error) => {
+                models_error = Some(error.to_string());
+                Vec::new()
+            }
+        },
+        None => {
+            let api_key =
+                resolve_backend_api_key(backend, api_key_env.as_deref()).map_err(|error| {
+                    ApiError {
+                        status: StatusCode::BAD_REQUEST,
+                        message: error.to_string(),
+                    }
+                })?;
+            list_provider_models(backend, &base_url, &api_key)
+                .await
+                .map_err(|error| ApiError {
+                    status: StatusCode::BAD_GATEWAY,
+                    message: error.to_string(),
+                })?
+        }
+    };
+
+    Ok(Json(ResolvedModelConfiguration {
+        backend,
+        model,
+        base_url,
+        api_key_env,
+        reasoning_effort,
+        models,
+        models_error,
+    }))
+}
+
+async fn delete_model_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    let record =
+        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
+    model_configurations::delete_model_configuration(&manager.inner.store_path, &config_id)?;
+
+    // Only a key this server filed away is ours to drop; a hand-configured
+    // environment variable name belongs to the operator.
+    if let Some(name) = record
+        .api_key_env
+        .as_deref()
+        .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
+    {
+        let _ = remove_api_key(name);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_ssh_configs_handler(
+    State(manager): State<SessionManager>,
+) -> std::result::Result<Json<SshConfigurationList>, ApiError> {
+    let configurations = ssh_configurations::list_ssh_configurations(&manager.inner.store_path)?;
+    Ok(Json(SshConfigurationList { configurations }))
+}
+
+/// Save a named SSH connection under a reusable setup.
+async fn create_ssh_config_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<CreateSshConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<SshConfigurationRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let id = uuid::Uuid::new_v4();
+    let configuration = ssh_configurations::NewSshConfiguration {
+        name: request.name,
+        ssh_host: request.ssh_host,
+        ssh_port: request.ssh_port,
+        ssh_identity_file: request.ssh_identity_file,
+    };
+    let record = ssh_configurations::insert_ssh_configuration(
+        &manager.inner.store_path,
+        &id.to_string(),
+        configuration,
+    )?;
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+/// Edit a saved SSH setup, keeping whatever the request leaves out.
+async fn update_ssh_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdateSshConfigurationRequest>, JsonRejection>,
+) -> std::result::Result<Json<SshConfigurationRecord>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let existing =
+        ssh_configurations::load_ssh_configuration(&manager.inner.store_path, &config_id)?;
+
+    let configuration = ssh_configurations::NewSshConfiguration {
+        name: replaceable_text(request.name, &existing.name),
+        ssh_host: replaceable_text(request.ssh_host, &existing.ssh_host),
+        ssh_port: match request.ssh_port {
+            RequestField::Value(port) => Some(port),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.ssh_port,
+        },
+        ssh_identity_file: match request.ssh_identity_file {
+            RequestField::Value(path) => Some(path),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.ssh_identity_file.clone(),
+        },
+    };
+
+    let record = ssh_configurations::update_ssh_configuration(
+        &manager.inner.store_path,
+        &config_id,
+        configuration,
+    )?;
+    Ok(Json(record))
+}
+
+async fn delete_ssh_config_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    ssh_configurations::load_ssh_configuration(&manager.inner.store_path, &config_id)?;
+    ssh_configurations::delete_ssh_configuration(&manager.inner.store_path, &config_id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Stored credentials are write-only over HTTP: a caller may add, replace or
+/// drop a key, but the value is never echoed back. Only enough of a suffix to
+/// tell two keys apart leaves the process.
+async fn list_credentials_handler() -> std::result::Result<Json<StoredCredentialList>, ApiError> {
+    let credentials = list_stored_api_keys()?
+        .into_iter()
+        .map(|entry| StoredCredentialSummary {
+            name: entry.name,
+            last_four: entry.last_four,
+        })
+        .collect();
+    Ok(Json(StoredCredentialList { credentials }))
+}
+
+async fn store_credential_handler(
+    AxumPath(name): AxumPath<String>,
+    payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
+) -> std::result::Result<StatusCode, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    store_api_key(&name, &request.value)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Files a key away without the caller having to name it. The generated name is
+/// what a session stores in place of the secret, and its prefix marks the key as
+/// this server's to clean up rather than one the operator manages by hand.
+async fn store_generated_credential_handler(
+    payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
+) -> std::result::Result<Json<GeneratedCredential>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let name = format!(
+        "{GENERATED_CREDENTIAL_PREFIX}{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    store_api_key(&name, &request.value)?;
+    Ok(Json(GeneratedCredential { name }))
+}
+
+async fn delete_credential_handler(
+    AxumPath(name): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    if remove_api_key(&name)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: format!("no stored credential named '{name}' was found"),
+        })
+    }
 }
 
 async fn launch_model_defaults_handler(
@@ -1353,6 +2819,16 @@ async fn launch_model_defaults_handler(
 ) -> std::result::Result<Json<LaunchModelDefaults>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
     Ok(Json(manager.launch_model_defaults(request)?))
+}
+
+/// The model catalog listing for the frontend picker: every provider with
+/// auth requirements, managed base URL, catalog endpoint default,
+/// `_default` limits and real entries. Reads the process-global catalog;
+/// synchronous, local-only, never fails. `auth_status`/`auth_hint` are
+/// computed per request from the process environment and the managed
+/// credential files.
+async fn models_handler() -> Json<ModelListing> {
+    Json(nac_core::model::api_listing())
 }
 
 async fn list_sessions(
@@ -1475,13 +2951,81 @@ async fn thread_events(
     ))
 }
 
-
 async fn workspace_diff(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<WorkspaceDiffQuery>,
 ) -> std::result::Result<Json<view::WorkspaceFileDiff>, ApiError> {
     Ok(Json(manager.workspace_file_diff(&session_id, query).await?))
+}
+
+async fn workspace_files(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<WorkspaceRevisionQuery>,
+) -> std::result::Result<Json<view::WorkspaceFileList>, ApiError> {
+    Ok(Json(
+        manager.workspace_files(&session_id, query.revision).await?,
+    ))
+}
+
+async fn workspace_file(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<WorkspaceFileQuery>,
+) -> std::result::Result<Json<view::WorkspaceFileContent>, ApiError> {
+    Ok(Json(
+        manager
+            .workspace_file(&session_id, query.path, query.revision)
+            .await?,
+    ))
+}
+
+async fn workspace_revisions(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Vec<view::WorkspaceRevisionRecord>>, ApiError> {
+    Ok(Json(manager.workspace_revisions(&session_id)?))
+}
+
+async fn workspace_revision_changes(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, revision_id)): AxumPath<(String, i64)>,
+) -> std::result::Result<Json<view::WorkspaceRevisionChanges>, ApiError> {
+    Ok(Json(
+        manager
+            .workspace_revision_changes(&session_id, revision_id)
+            .await?,
+    ))
+}
+
+async fn workspace_branches(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<workspace::BranchList>, ApiError> {
+    Ok(Json(manager.workspace_branches(&session_id).await?))
+}
+
+async fn switch_workspace_branch(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<SwitchBranchRequest>, JsonRejection>,
+) -> std::result::Result<Json<workspace::BranchList>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .switch_workspace_branch(&session_id, request)
+            .await?,
+    ))
+}
+
+async fn commit_workspace(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<CommitWorkspaceRequest>, JsonRejection>,
+) -> std::result::Result<Json<workspace::CommitOutcome>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(manager.commit_workspace(&session_id, request).await?))
 }
 
 async fn submit_prompt(
@@ -1552,7 +3096,14 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
-    let (epoch_id, replay_boundary_sequence_id, replay_gap, replayed_events, receiver) = manager
+    let (
+        epoch_id,
+        replay_boundary_sequence_id,
+        replay_gap,
+        replayed_events,
+        receiver,
+        assistant_deltas,
+    ) = manager
         .subscribe_events(
             &session_id,
             query.after_sequence_id,
@@ -1565,6 +3116,7 @@ async fn stream_events(
         replay_gap,
         replayed_events,
         receiver,
+        assistant_deltas,
     );
 
     Ok(Sse::new(event_stream).keep_alive(
@@ -1712,6 +3264,25 @@ fn model_options(
         api_key_env,
         extra_headers,
     })
+}
+
+/// Reject a credential destination that only the HTTP request asked for.
+///
+/// `config.toml` is hand-edited and therefore authoritative; a request body
+/// reaching the unauthenticated loopback API is not, so it may only name a
+/// known provider origin, a local address, or a pre-approved host.
+fn enforce_trusted_base_url(
+    backend: Option<BackendKind>,
+    base_url: Option<&str>,
+    policy: &CredentialDestinationPolicy,
+) -> Result<()> {
+    let (Some(backend), Some(base_url)) = (backend, base_url) else {
+        return Ok(());
+    };
+    if policy.configured_base_url.as_deref() == Some(base_url) {
+        return Ok(());
+    }
+    validate_caller_supplied_base_url(backend, base_url, &policy.trusted_hosts)
 }
 
 fn apply_raw_config_patch(
@@ -1911,9 +3482,6 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
 
 fn frontend_command_name(command: FrontendCommand) -> &'static str {
     match command {
-        FrontendCommand::Exit => "exit",
-        FrontendCommand::Sessions => "sessions",
-        FrontendCommand::Help => "help",
         FrontendCommand::Compact => "compact",
     }
 }
@@ -1924,6 +3492,7 @@ fn session_event_stream(
     replay_gap: Option<SessionReplayGap>,
     replayed_events: Vec<SessionEventEnvelope>,
     mut receiver: SessionEventReceiver,
+    mut assistant_deltas: AssistantStreamDeltaReceiver,
 ) -> impl futures_core::Stream<Item = std::result::Result<Event, Infallible>> {
     let mut replayed_events = VecDeque::from(replayed_events);
     stream! {
@@ -1944,17 +3513,39 @@ fn session_event_stream(
             yield Ok(sse_envelope_event(&envelope));
         }
 
+        // Deltas share the connection but not the sequence: they carry no SSE
+        // id, so a reconnect still resumes from the last session event.
+        let mut deltas_open = true;
         loop {
-            match receiver.recv().await {
-                Ok(envelope) => yield Ok(sse_envelope_event(&envelope)),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+            let next = tokio::select! {
+                envelope = receiver.recv() => StreamItem::Session(envelope),
+                delta = assistant_deltas.recv(), if deltas_open => StreamItem::Delta(delta),
+            };
+            match next {
+                StreamItem::Session(Ok(envelope)) => yield Ok(sse_envelope_event(&envelope)),
+                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
                     let payload = serde_json::json!({ "missed": count });
                     yield Ok(sse_json_event("lagged", None, &payload));
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
+                StreamItem::Delta(Ok(delta)) => {
+                    yield Ok(sse_json_event("assistant_delta", None, &delta));
+                }
+                // Falling behind on deltas costs the client nothing it will not
+                // get again from the assistant message.
+                StreamItem::Delta(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                StreamItem::Delta(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                    deltas_open = false;
+                }
             }
         }
     }
+}
+
+/// Whichever of the two channels behind the event stream woke up first.
+enum StreamItem {
+    Session(std::result::Result<SessionEventEnvelope, tokio::sync::broadcast::error::RecvError>),
+    Delta(std::result::Result<AssistantStreamDelta, tokio::sync::broadcast::error::RecvError>),
 }
 
 fn sse_envelope_event(envelope: &SessionEventEnvelope) -> Event {
@@ -2037,6 +3628,69 @@ impl From<sessions::SessionConfigUpdateError> for ApiError {
     }
 }
 
+impl From<ModelConfigurationStoreError> for ApiError {
+    fn from(error: ModelConfigurationStoreError) -> Self {
+        let status = match &error {
+            ModelConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            ModelConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
+            ModelConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            ModelConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<SshConfigurationStoreError> for ApiError {
+    fn from(error: SshConfigurationStoreError) -> Self {
+        let status = match &error {
+            SshConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            SshConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
+            SshConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            SshConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<filesystem::BrowseError> for ApiError {
+    fn from(error: filesystem::BrowseError) -> Self {
+        let status = match &error {
+            filesystem::BrowseError::NotFound(_) => StatusCode::NOT_FOUND,
+            filesystem::BrowseError::NotADirectory(_) => StatusCode::BAD_REQUEST,
+            filesystem::BrowseError::Unreadable { .. } => StatusCode::FORBIDDEN,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<runtime::RemoteBrowseError> for ApiError {
+    fn from(error: runtime::RemoteBrowseError) -> Self {
+        let status = match &error {
+            runtime::RemoteBrowseError::Invalid(_) => StatusCode::BAD_REQUEST,
+            runtime::RemoteBrowseError::NotFound(_) => StatusCode::NOT_FOUND,
+            runtime::RemoteBrowseError::NotADirectory(_) => StatusCode::BAD_REQUEST,
+            runtime::RemoteBrowseError::Unreadable { .. } => StatusCode::FORBIDDEN,
+            // The host, not this server, is what failed, and the caller can
+            // retry once it is fixed.
+            runtime::RemoteBrowseError::Unreachable { .. }
+            | runtime::RemoteBrowseError::Remote(_) => StatusCode::BAD_GATEWAY,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<RequestConfigurationError> for ApiError {
     fn from(error: RequestConfigurationError) -> Self {
         Self {
@@ -2084,6 +3738,7 @@ impl From<anyhow::Error> for ApiError {
         {
             StatusCode::NOT_FOUND
         } else if message.contains("busy")
+            || message.contains("uncommitted changes")
             || message.contains("no active run")
             || message.contains("not active")
             || message.contains("active run is finishing")
@@ -2174,14 +3829,6 @@ mod tests {
 
     #[test]
     fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() {
-        let mut config = NacConfig::default();
-        config.model.reasoning_effort = Some(ReasoningEffort::Medium);
-        config.model.api_key_env = Some("CONFIG_KEY".to_string());
-        config
-            .model
-            .extra_headers
-            .insert("X-Config".to_string(), "yes".to_string());
-
         let inherited = model_options(
             RequestField::Omitted,
             RequestField::Omitted,
@@ -2194,7 +3841,6 @@ mod tests {
         assert_eq!(inherited.reasoning_effort, OptionalModelOption::Inherit);
         assert_eq!(inherited.api_key_env, OptionalModelOption::Inherit);
         assert_eq!(inherited.extra_headers, None);
-        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
 
         let explicit = model_options(
             RequestField::Value(" model-a ".to_string()),
@@ -2217,7 +3863,6 @@ mod tests {
         );
         assert_eq!(explicit.api_key_env, OptionalModelOption::Clear);
         assert_eq!(explicit.extra_headers, Some(BTreeMap::new()));
-        assert_eq!(config.model.api_key_env.as_deref(), Some("CONFIG_KEY"));
 
         let raw_selector = " SELECTED_KEY ";
         let selected = model_options(
@@ -2271,23 +3916,47 @@ mod tests {
         }
     }
 
+    // The committed Vite build is what every release serves, so a stale or
+    // partial `assets/dist` has to fail here rather than in a browser.
     #[test]
-    fn production_asset_routes_and_privacy_smoke_contract() {
-        const HTML: &str = include_str!("../assets/index.html");
-        const CSS: &str = include_str!("../assets/redesign.css");
-        const APP: &str = include_str!("../assets/app.js");
+    fn committed_frontend_build_is_embedded_and_self_consistent() {
+        const HTML: &str = include_str!("../assets/dist/index.html");
 
-        for asset in ["/assets/redesign.css", "/assets/app.js"] {
-            assert!(HTML.contains(asset), "missing production asset {asset}");
-        }
-        assert!(!HTML.contains("/assets/app.css"));
-        assert!(!HTML.to_ascii_lowercase().contains("prototype"));
-        assert!(!CSS.trim().is_empty());
-        assert!(!APP.trim().is_empty());
+        let referenced: Vec<&str> = HTML
+            .match_indices("/assets/dist/assets/")
+            .map(|(start, _)| {
+                let tail = &HTML[start + 1..];
+                let end = tail
+                    .find(['"', '\''])
+                    .expect("asset reference must be quoted");
+                &tail[..end]
+            })
+            .collect();
         assert!(
-            !APP.contains("include_system"),
-            "production frontend must not opt into system messages"
+            referenced.iter().any(|path| path.ends_with(".js")),
+            "the entry document must load a bundled script"
         );
+        assert!(
+            referenced.iter().any(|path| path.ends_with(".css")),
+            "the entry document must load a bundled stylesheet"
+        );
+
+        for path in referenced {
+            let embedded = path
+                .strip_prefix("assets/")
+                .expect("references are rooted at the asset directory");
+            let file = ASSETS
+                .get_file(embedded)
+                .unwrap_or_else(|| panic!("{path} is referenced but not embedded"));
+            assert!(!file.contents().is_empty(), "{path} is empty");
+            assert_eq!(
+                asset_cache_control(embedded),
+                "public, max-age=31536000, immutable",
+                "hashed bundles must be cacheable forever"
+            );
+        }
+
+        assert!(!HTML.to_ascii_lowercase().contains("prototype"));
     }
 
     #[tokio::test]
@@ -2296,6 +3965,8 @@ mod tests {
         let root = temp_root("public_proxy_headers");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        // The proxy's public name is only served once the operator names it.
+        unsafe { std::env::set_var(ALLOWED_HOSTS_ENV, "preview-1234.ngrok-free.app") };
         seed_editable_session(&root, "session");
         let app = router(test_manager(&root));
 
@@ -2366,6 +4037,140 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[tokio::test]
+    async fn a_foreign_host_is_refused_until_the_operator_names_it() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("foreign_host");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+
+        let health = |app: Router, host: &'static str| async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .header(header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        };
+
+        // Rebinding turns an attacker-controlled name into a request for this
+        // very server, so the name is what has to be refused.
+        let guarded = router(test_manager(&root));
+        assert_eq!(
+            health(guarded.clone(), "rebound.example").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            health(guarded.clone(), "127.0.0.1.rebound.example").await,
+            StatusCode::FORBIDDEN
+        );
+        for host in [
+            "127.0.0.1:3210",
+            "localhost:3210",
+            "[::1]:3210",
+            "LOCALHOST",
+        ] {
+            assert_eq!(
+                health(guarded.clone(), host).await,
+                StatusCode::OK,
+                "{host} names this server"
+            );
+        }
+
+        unsafe { std::env::set_var(ALLOWED_HOSTS_ENV, "nac.internal, preview.example") };
+        let allowlisted = router(test_manager(&root));
+        assert_eq!(
+            health(allowlisted.clone(), "preview.example").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            health(allowlisted.clone(), "preview.example:8443").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            health(allowlisted.clone(), "other.example").await,
+            StatusCode::FORBIDDEN
+        );
+
+        unsafe { std::env::set_var(ALLOWED_HOSTS_ENV, "*") };
+        let unguarded = router(test_manager(&root));
+        assert_eq!(
+            health(unguarded.clone(), "anything.example").await,
+            StatusCode::OK
+        );
+
+        drop((guarded, allowlisted, unguarded));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn a_request_without_a_host_header_is_served() {
+        let root = temp_root("hostless_request");
+        let app = router(test_manager(&root));
+
+        // HTTP/1.0 clients and probes omit the header; browsers never do.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        drop(app);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn host_headers_are_split_from_their_port_before_they_are_judged() {
+        assert_eq!(bare_host("example.com:8443"), Some("example.com"));
+        assert_eq!(bare_host("[::1]:3210"), Some("::1"));
+        assert_eq!(bare_host("  example.com  "), Some("example.com"));
+        assert_eq!(bare_host(":3210"), None);
+        // An unterminated IPv6 literal is malformed, not a host.
+        assert_eq!(bare_host("[::1"), None);
+
+        for host in [
+            "127.0.0.1",
+            "127.9.9.9:80",
+            "[::1]",
+            "localhost",
+            "LocalHost:1",
+        ] {
+            assert!(is_loopback_host(host), "{host} should be loopback");
+        }
+        for host in [
+            "example.com",
+            "127.0.0.1.example.com",
+            "[::1",
+            "",
+            "10.0.0.1",
+        ] {
+            assert!(!is_loopback_host(host), "{host} should not be loopback");
+        }
+    }
+
+    #[test]
+    fn the_allowlist_is_parsed_leniently_and_matched_exactly() {
+        let allowed = vec!["nac.internal".to_string(), "preview.example".to_string()];
+
+        assert!(host_is_allowed("NAC.Internal:8080", &allowed));
+        assert!(host_is_allowed("preview.example", &allowed));
+        assert!(!host_is_allowed("evil-preview.example", &allowed));
+        assert!(!host_is_allowed("preview.example.evil.com", &allowed));
+        // Loopback needs no entry at all.
+        assert!(host_is_allowed("localhost:3210", &[]));
+    }
+
     #[test]
     fn bind_address_must_be_ipv4_or_ipv6_loopback() {
         for address in ["127.0.0.1:0", "[::1]:0"] {
@@ -2376,34 +4181,31 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn legacy_css_route_is_an_exact_alias() {
-        let root = temp_root("css_alias");
-        let app = router(test_manager(&root));
-        let canonical = get_response(app.clone(), "/assets/redesign.css", None).await;
-        let alias = get_response(app, "/assets/app.css", None).await;
-        assert_eq!(canonical.status(), StatusCode::OK);
-        assert_eq!(alias.status(), StatusCode::OK);
-        assert_eq!(
-            canonical.headers().get(header::CONTENT_TYPE),
-            alias.headers().get(header::CONTENT_TYPE)
-        );
-        assert_eq!(response_body(canonical).await, response_body(alias).await);
-        let _ = std::fs::remove_dir_all(root);
+    /// Path of a bundled script, whose name carries a content hash that changes
+    /// on every build.
+    fn bundled_script_path() -> String {
+        let file = ASSETS
+            .get_dir("dist/assets")
+            .expect("the committed build must be embedded")
+            .files()
+            .find(|file| file.path().extension().is_some_and(|ext| ext == "js"))
+            .expect("the build must emit at least one script");
+        format!("/assets/{}", file.path().to_string_lossy())
     }
 
     #[tokio::test]
     async fn finite_static_and_json_routes_gzip_without_changing_identity_bodies() {
         let root = temp_root("route_compression");
         let app = router(test_manager(&root));
+        let script = bundled_script_path();
 
-        let identity = get_response(app.clone(), "/assets/app.js", None).await;
+        let identity = get_response(app.clone(), &script, None).await;
         assert_eq!(identity.status(), StatusCode::OK);
         assert!(identity.headers().get(header::CONTENT_ENCODING).is_none());
         let identity_body = response_body(identity).await;
-        assert_eq!(identity_body.as_ref(), include_bytes!("../assets/app.js"));
+        assert!(!identity_body.is_empty());
 
-        let compressed = get_response(app.clone(), "/assets/app.js", Some("gzip")).await;
+        let compressed = get_response(app.clone(), &script, Some("gzip")).await;
         assert_eq!(compressed.status(), StatusCode::OK);
         assert_eq!(
             compressed.headers().get(header::CONTENT_ENCODING),
@@ -2481,8 +4283,14 @@ mod tests {
                 "XDG_CONFIG_HOME",
                 "HOME",
                 "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "FIREWORKS_API_KEY",
+                "TOGETHER_API_KEY",
+                "ARCEE_API_KEY",
                 "OPENAI_BASE_URL",
                 "SECOND_API_KEY",
+                ALLOWED_HOSTS_ENV,
             ];
             let original = names
                 .into_iter()
@@ -2503,8 +4311,17 @@ mod tests {
                     Some(value) => std::env::set_var("OPENAI_API_KEY", value),
                     None => std::env::remove_var("OPENAI_API_KEY"),
                 }
+                std::env::remove_var("ANTHROPIC_API_KEY");
+                // The remaining conventional credential vars stay cleared so
+                // conventional-var auto-selection never leaks machine state
+                // into a test.
+                std::env::remove_var("DEEPSEEK_API_KEY");
+                std::env::remove_var("FIREWORKS_API_KEY");
+                std::env::remove_var("TOGETHER_API_KEY");
+                std::env::remove_var("ARCEE_API_KEY");
                 std::env::remove_var("OPENAI_BASE_URL");
                 std::env::remove_var("SECOND_API_KEY");
+                std::env::remove_var(ALLOWED_HOSTS_ENV);
             }
             Self { original }
         }
@@ -2626,50 +4443,39 @@ mod tests {
         let request = || LaunchModelDefaultsRequest {
             cwd: Some(root.clone()),
             ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
         };
 
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"arcee-auth\"\n",
+            "[model]\nmodel = \"trinity-large-thinking\"\n",
         )
         .unwrap();
         let arcee_defaults = manager.launch_model_defaults(request()).unwrap();
         assert_eq!(
-            arcee_defaults.configured_model_backend,
-            Some(BackendKind::ArceeAuth)
-        );
-        assert_eq!(
-            arcee_defaults.configured_model_base_url.as_deref(),
-            Some(nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL)
+            arcee_defaults.configured_model.as_deref(),
+            Some("trinity-large-thinking")
         );
 
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"chatgpt-codex-responses\"\n",
+            "[model]\nmodel = \"gpt-5.6-sol\"\nreasoning_effort = \"high\"\n",
         )
         .unwrap();
         let defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(defaults.configured_model.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(
-            defaults.configured_model_backend,
-            Some(BackendKind::ChatGptCodexResponses)
-        );
-        assert_eq!(
-            defaults.configured_model_base_url.as_deref(),
-            Some(nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL)
+            defaults.configured_reasoning_effort,
+            Some(ReasoningEffort::High)
         );
         let serialized_defaults = serde_json::to_value(defaults).unwrap();
-        assert_eq!(
-            serialized_defaults["configured_model_backend"],
-            "chatgpt-codex-responses"
-        );
-        assert_eq!(
-            serialized_defaults["configured_model_base_url"],
-            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
-        );
+        assert_eq!(serialized_defaults["configured_model"], "gpt-5.6-sol");
+        assert_eq!(serialized_defaults["configured_reasoning_effort"], "high");
         assert!(
             serde_json::to_value(manager.store_info())
                 .unwrap()
-                .get("configured_model_backend")
+                .get("configured_model")
                 .is_none(),
             "root-only launch metadata must not remain on /store"
         );
@@ -2703,16 +4509,16 @@ mod tests {
                 "HOME" => cwd.join(relative_home).join(".config").join("nac"),
                 _ => unreachable!(),
             };
-            for (cwd, backend) in [
-                (&root, "openai-responses"),
-                (&workspace_a, "arcee-auth"),
-                (&workspace_b, "chatgpt-codex-responses"),
+            for (cwd, model) in [
+                (&root, "gpt-5.2"),
+                (&workspace_a, "trinity-large-thinking"),
+                (&workspace_b, "gpt-5.6-sol"),
             ] {
                 let dir = config_dir(cwd);
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     dir.join("config.toml"),
-                    format!("[model]\nbackend = \"{backend}\"\n"),
+                    format!("[model]\nmodel = \"{model}\"\n"),
                 )
                 .unwrap();
             }
@@ -2723,10 +4529,13 @@ mod tests {
                     .launch_model_defaults(LaunchModelDefaultsRequest {
                         cwd: Some(workspace_a.clone()),
                         ssh_host: None,
+                        ssh_port: None,
+                        ssh_identity_file: None,
                     })
                     .unwrap()
-                    .configured_model_backend,
-                Some(BackendKind::ArceeAuth),
+                    .configured_model
+                    .as_deref(),
+                Some("trinity-large-thinking"),
                 "{config_home_kind} local workspace A"
             );
             assert_eq!(
@@ -2734,10 +4543,13 @@ mod tests {
                     .launch_model_defaults(LaunchModelDefaultsRequest {
                         cwd: Some(workspace_b.clone()),
                         ssh_host: None,
+                        ssh_port: None,
+                        ssh_identity_file: None,
                     })
                     .unwrap()
-                    .configured_model_backend,
-                Some(BackendKind::ChatGptCodexResponses),
+                    .configured_model
+                    .as_deref(),
+                Some("gpt-5.6-sol"),
                 "{config_home_kind} local workspace B"
             );
             assert_eq!(
@@ -2745,15 +4557,264 @@ mod tests {
                     .launch_model_defaults(LaunchModelDefaultsRequest {
                         cwd: Some(std::path::PathBuf::from("remote/project")),
                         ssh_host: Some(" build-box ".to_string()),
+                        ssh_port: None,
+                        ssh_identity_file: None,
                     })
                     .unwrap()
-                    .configured_model_backend,
-                Some(BackendKind::OpenAiResponses),
+                    .configured_model
+                    .as_deref(),
+                Some("gpt-5.2"),
                 "{config_home_kind} SSH must use the server root"
             );
 
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    #[test]
+    fn launch_defaults_carry_the_configured_model_and_effort() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("launch_defaults_model_effort");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let request = || LaunchModelDefaultsRequest {
+            cwd: Some(root.clone()),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+        };
+
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nmodel = \"gpt-5.2\"\nreasoning_effort = \"high\"\n",
+        )
+        .unwrap();
+        let defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(defaults.configured_model.as_deref(), Some("gpt-5.2"));
+        assert_eq!(
+            defaults.configured_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+        let serialized = serde_json::to_value(defaults).unwrap();
+        assert_eq!(serialized["configured_model"], "gpt-5.2");
+        assert_eq!(serialized["configured_reasoning_effort"], "high");
+
+        // Without a configured model/effort the fields serialize as null
+        // (older frontends ignore them either way).
+        std::fs::write(nac_home.join("config.toml"), "[model]\n").unwrap();
+        let defaults = manager.launch_model_defaults(request()).unwrap();
+        assert_eq!(defaults.configured_model, None);
+        assert_eq!(defaults.configured_reasoning_effort, None);
+        let serialized = serde_json::to_value(defaults).unwrap();
+        assert!(serialized["configured_model"].is_null());
+        assert!(serialized["configured_reasoning_effort"].is_null());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn models_endpoint_serves_the_catalog_listing() {
+        let root = temp_root("models_endpoint");
+        let app = router(test_manager(&root));
+        let response = get_response(app, "/models", None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+
+        assert!(body["catalog_version"].as_u64().unwrap() >= 1);
+        let providers = body["providers"].as_array().unwrap();
+        assert_eq!(providers.len(), 8);
+        let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
+
+        // Auth requirements and managed base URLs derive from the backend
+        // kind, so they are exact regardless of the machine's catalog layers.
+        assert_eq!(by_id("anthropic-messages")["auth"], "api_key_env");
+        assert!(by_id("anthropic-messages")["managed_base_url"].is_null());
+        assert_eq!(by_id("arcee-api")["auth"], "api_key_env");
+        assert_eq!(by_id("arcee-auth")["auth"], "managed_arcee");
+        assert_eq!(
+            by_id("arcee-auth")["managed_base_url"],
+            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
+        );
+        assert_eq!(by_id("chatgpt-codex-responses")["auth"], "codex_oauth");
+
+        // Catalog endpoint defaults: present for the five models.dev
+        // providers and the hand-seeded arcee-api (exact values are pinned
+        // hermetically in nac-core; a machine overlay could carry a
+        // refreshed models.dev `api`), absent for the managed providers.
+        for id in [
+            "anthropic-messages",
+            "deepseek-chat",
+            "fireworks-chat",
+            "openai-responses",
+            "together-chat",
+            "arcee-api",
+        ] {
+            assert!(
+                by_id(id)["default_base_url"].is_string(),
+                "{id} must serve a catalog default_base_url"
+            );
+        }
+        for id in ["arcee-auth", "chatgpt-codex-responses"] {
+            assert!(
+                by_id(id)["default_base_url"].is_null(),
+                "{id} must not serve a catalog default_base_url"
+            );
+        }
+        assert_eq!(
+            by_id("chatgpt-codex-responses")["managed_base_url"],
+            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
+        );
+        // Managed providers without a stored credential hint their login
+        // command (a code constant, independent of machine catalog layers).
+        for (id, command) in [
+            ("arcee-auth", "nac-web arcee-auth login"),
+            ("chatgpt-codex-responses", "nac-web codex-auth login"),
+        ] {
+            if by_id(id)["auth_status"] == "no_credential" {
+                assert_eq!(by_id(id)["auth_hint"], command, "{id}");
+            }
+        }
+
+        // Every provider carries `_default` limits and real entries only
+        // (never the `_default` id or a synthesis-product source). Values
+        // stay unpinned here: the prod nac-core build layers the machine's
+        // overlay/models.json, which may patch them — exact values are
+        // pinned hermetically by the nac-core catalog tests.
+        for provider in providers {
+            // Auth status is computed per request from the machine's env
+            // and credential files, so only the value domain and the
+            // hint/status invariants are machine-independent here.
+            let status = provider["auth_status"].as_str().unwrap();
+            assert!(
+                ["ready", "no_credential"].contains(&status),
+                "unexpected auth_status: {status}"
+            );
+            let hint = &provider["auth_hint"];
+            if status == "ready" {
+                assert!(hint.is_null(), "ready providers carry no hint: {provider}");
+            } else if provider["auth"] == "api_key_env" {
+                assert!(
+                    hint.as_str().is_some_and(|hint| !hint.is_empty()),
+                    "no_credential API-key providers hint the conventional var: {provider}"
+                );
+            }
+            let limits = &provider["default_limits"];
+            assert!(limits["context_window"].as_u64().unwrap() > 0);
+            assert!(limits["max_tokens"].as_u64().unwrap() > 0);
+            assert!(limits["supported_efforts"].is_array());
+            for model in provider["models"].as_array().unwrap() {
+                assert_ne!(model["id"], "_default");
+                assert!(
+                    ["baseline", "overlay", "user_override"]
+                        .contains(&model["source"].as_str().unwrap()),
+                    "unexpected model source: {}",
+                    model["source"]
+                );
+                assert!(model["context_window"].as_u64().unwrap() > 0);
+                assert!(model["max_tokens"].as_u64().unwrap() > 0);
+            }
+        }
+
+        // Baseline entries are always present: the overlay/user layers patch
+        // or add, never remove.
+        let anthropic_models = by_id("anthropic-messages")["models"].as_array().unwrap();
+        let opus = anthropic_models
+            .iter()
+            .find(|m| m["id"] == "claude-opus-4-6")
+            .expect("the embedded baseline's claude-opus-4-6 entry");
+        assert!(opus["supported_efforts"].is_array());
+        assert_eq!(opus["reasoning"], true);
+
+        // The hand-seeded providers serve their maintained entries too.
+        for (provider, model_id) in [
+            ("arcee-auth", "trinity-large-thinking"),
+            ("arcee-api", "trinity-large-thinking"),
+            ("chatgpt-codex-responses", "gpt-5.6-sol"),
+        ] {
+            assert!(
+                by_id(provider)["models"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m["id"] == model_id),
+                "the seed's {model_id} entry must reach the {provider} listing"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn models_endpoint_computes_auth_status_from_the_environment() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("models_endpoint_status");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        // Isolated: no credential files, no config, OPENAI_API_KEY cleared.
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let body = response_json(get_response(app.clone(), "/models", None).await).await;
+        let providers = body["providers"].as_array().unwrap();
+        let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
+
+        // Conventional var unset + no configured selector: no_credential
+        // with the conventional name as the hint.
+        assert_eq!(by_id("openai-responses")["auth_status"], "no_credential");
+        assert_eq!(by_id("openai-responses")["auth_hint"], "OPENAI_API_KEY");
+        // Managed providers without stored credentials hint the login
+        // commands.
+        assert_eq!(by_id("arcee-auth")["auth_status"], "no_credential");
+        assert_eq!(by_id("arcee-auth")["auth_hint"], "nac-web arcee-auth login");
+        assert_eq!(
+            by_id("chatgpt-codex-responses")["auth_status"],
+            "no_credential"
+        );
+        assert_eq!(
+            by_id("chatgpt-codex-responses")["auth_hint"],
+            "nac-web codex-auth login"
+        );
+
+        // The conventional variable naming a set value reads ready — the
+        // same variable session resolution auto-selects. Unrelated
+        // providers still report only their conventional credential hint.
+        unsafe { std::env::set_var("OPENAI_API_KEY", "server-test-key") };
+        let body = response_json(get_response(app.clone(), "/models", None).await).await;
+        let providers = body["providers"].as_array().unwrap();
+        let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
+        assert_eq!(by_id("openai-responses")["auth_status"], "ready");
+        assert!(by_id("openai-responses")["auth_hint"].is_null());
+        assert_eq!(by_id("anthropic-messages")["auth_status"], "no_credential");
+        assert_eq!(
+            by_id("anthropic-messages")["auth_hint"],
+            "ANTHROPIC_API_KEY"
+        );
+
+        // A parseable stored credential flips its managed provider.
+        std::fs::write(
+            nac_home.join("auth.json"),
+            r#"{"type":"chatgpt-codex","access":"access-test","refresh":"refresh-test","expires_at_ms":18446744073709551615,"account_id":"account-test"}"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                nac_home.join("auth.json"),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+        }
+        let body = response_json(get_response(app, "/models", None).await).await;
+        let providers = body["providers"].as_array().unwrap();
+        let codex = providers
+            .iter()
+            .find(|p| p["id"] == "chatgpt-codex-responses")
+            .unwrap();
+        assert_eq!(codex["auth_status"], "ready");
+        assert!(codex["auth_hint"].is_null());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2806,6 +4867,8 @@ mod tests {
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
+            ssh_port: None,
+            ssh_identity_file: None,
             sandbox: SandboxRequest {
                 enabled: true,
                 ..SandboxRequest::default()
@@ -2823,6 +4886,7 @@ mod tests {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("removed_backend_create");
         let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
         let _env = ScopedModelEnv::isolated(&nac_home, None);
         let manager = test_manager(&root);
 
@@ -2838,6 +4902,8 @@ mod tests {
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
                     ssh_host: None,
+                    ssh_port: None,
+                    ssh_identity_file: None,
                     sandbox: SandboxRequest::default(),
                 })
                 .await
@@ -2873,7 +4939,7 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: RequestField::Omitted,
+                        model: RequestField::Value("trinity-large-thinking".to_string()),
                         base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                         backend: RequestField::Value("arcee-auth".to_string()),
                         reasoning_effort: RequestField::Omitted,
@@ -2915,7 +4981,7 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: RequestField::Omitted,
+                        model: RequestField::Value("trinity-large-thinking".to_string()),
                         base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                         backend: RequestField::Value("arcee-auth".to_string()),
                         reasoning_effort: RequestField::Omitted,
@@ -2950,7 +5016,7 @@ mod tests {
                 .update_session_config(
                     "session",
                     UpdateConfigRequest {
-                        model: RequestField::Omitted,
+                        model: RequestField::Value("trinity-large-thinking".to_string()),
                         base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                         backend: RequestField::Value("arcee-auth".to_string()),
                         reasoning_effort: RequestField::Omitted,
@@ -3005,6 +5071,9 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::User {
                 content: "current cycle".to_string(),
@@ -3014,6 +5083,9 @@ mod tests {
                 reasoning_text: Some("thinking".to_string()),
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Assistant {
                 content: None,
@@ -3027,6 +5099,9 @@ mod tests {
                         arguments: r#"{"name":"current/research"}"#.to_string(),
                     },
                 }]),
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::System {
                 content: "hidden tail".to_string(),
@@ -3036,6 +5111,9 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
         ]
     }
@@ -3198,6 +5276,14 @@ thread_timeout_secs = 7200
 
         seed_editable_session(&root, "complete");
         seed_session(&root, "missing-selector", "2026-01-02 00:00:00.000000000");
+        // A missing selector stays incomplete only when conventional-var
+        // auto-selection cannot repair it: deepseek's conventional variable
+        // is cleared in this environment (openai's is set and would
+        // auto-select).
+        let mut missing_selector = sessions::load_session(&store_path, "missing-selector").unwrap();
+        missing_selector.backend = BackendKind::DeepSeekChat;
+        missing_selector.base_url = "https://api.deepseek.com".to_string();
+        sessions::update_session_config(&store_path, &missing_selector).unwrap();
         seed_session(
             &root,
             "missing-environment-value",
@@ -3251,10 +5337,7 @@ thread_timeout_secs = 7200
         }
 
         let missing_selector = manager.session_config("missing-selector").unwrap();
-        assert_eq!(
-            missing_selector.backend.as_deref(),
-            Some("openai-responses")
-        );
+        assert_eq!(missing_selector.backend.as_deref(), Some("deepseek-chat"));
         assert_eq!(missing_selector.api_key_env, None);
         let missing_environment = manager.session_config("missing-environment-value").unwrap();
         assert_eq!(
@@ -3304,6 +5387,7 @@ thread_timeout_secs = 7200
             .update_session_config(
                 "unavailable-managed-auth",
                 UpdateConfigRequest {
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
                     backend: RequestField::Value("arcee-api".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
@@ -3423,6 +5507,9 @@ thread_timeout_secs = 7200
                     id,
                     UpdateConfigRequest {
                         backend: RequestField::Value("openai-responses".to_string()),
+                        model: RequestField::Value("replacement-model".to_string()),
+                        base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+                        api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                         ..UpdateConfigRequest::default()
                     },
                 )
@@ -4027,11 +6114,8 @@ thread_timeout_secs = 7200
         std::fs::write(
             nac_home.join("config.toml"),
             r#"[model]
-backend = "openai-responses"
-model = "config-model"
-base_url = "https://api.openai.com/v1"
+model = "gpt-5.2"
 reasoning_effort = "medium"
-api_key_env = "OPENAI_API_KEY"
 extra_headers = { X-Config = "yes" }
 
 [compaction]
@@ -4051,7 +6135,8 @@ threshold_tokens = 64000
         let inherited_id = inherited.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
         assert_eq!(stored.backend, BackendKind::OpenAiResponses);
-        assert_eq!(stored.model, "config-model");
+        assert_eq!(stored.model, "gpt-5.2");
+        assert_eq!(stored.base_url, "https://api.openai.com/v1");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
@@ -4078,7 +6163,7 @@ threshold_tokens = 64000
 
         let cleared = manager
             .create_session(CreateSessionRequest {
-                model: RequestField::Value("explicit-model".to_string()),
+                model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                 backend: RequestField::Value("arcee-auth".to_string()),
                 reasoning_effort: RequestField::Null,
@@ -4092,7 +6177,7 @@ threshold_tokens = 64000
         let cleared_id = cleared.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &cleared_id).unwrap();
         assert_eq!(stored.backend, BackendKind::ArceeAuth);
-        assert_eq!(stored.model, "explicit-model");
+        assert_eq!(stored.model, "trinity-large-thinking");
         assert_eq!(stored.reasoning_effort, None);
         assert_eq!(stored.api_key_env, None);
         assert!(stored.extra_headers.is_empty());
@@ -4100,7 +6185,7 @@ threshold_tokens = 64000
 
         let zero_disabled = manager
             .create_session(CreateSessionRequest {
-                model: RequestField::Value("zero-disabled-model".to_string()),
+                model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                 backend: RequestField::Value("arcee-auth".to_string()),
                 reasoning_effort: RequestField::Null,
@@ -4123,6 +6208,63 @@ threshold_tokens = 64000
     }
 
     #[tokio::test]
+    async fn arcee_auth_rejects_non_thinking_model_on_create_and_update() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("arcee_auth_model_contract");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nmodel = \"gpt-5.2\"\n",
+        )
+        .unwrap();
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        let create_error = manager
+            .create_session(CreateSessionRequest {
+                backend: RequestField::Value("arcee-auth".to_string()),
+                model: RequestField::Value("trinity-mini".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect_err("create must enforce the managed Arcee model contract");
+        assert!(
+            create_error.to_string().contains("trinity-large-thinking"),
+            "{create_error:#}"
+        );
+        assert!(!store_path.exists(), "invalid create must not persist");
+
+        let created = manager
+            .create_session(CreateSessionRequest::default())
+            .await
+            .expect("configured API-key provider should create");
+        let session_id = created.metadata.session_id.unwrap();
+        let before = sessions::load_session(&store_path, &session_id).unwrap();
+        let update_error = manager
+            .update_session_config(
+                &session_id,
+                UpdateConfigRequest {
+                    backend: RequestField::Value("arcee-auth".to_string()),
+                    model: RequestField::Value("trinity-mini".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("update must enforce the managed Arcee model contract");
+        assert!(
+            update_error.to_string().contains("trinity-large-thinking"),
+            "{update_error:#}"
+        );
+        let after = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(after.backend, before.backend);
+        assert_eq!(after.model, before.model);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn openai_config_launch_switch_to_arcee_normalizes_the_managed_tuple() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("openai_to_arcee_launch");
@@ -4131,10 +6273,7 @@ threshold_tokens = 64000
         std::fs::write(
             nac_home.join("config.toml"),
             r#"[model]
-backend = "openai-responses"
-model = "openai-model"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
+model = "gpt-5.2"
 "#,
         )
         .unwrap();
@@ -4144,12 +6283,12 @@ api_key_env = "OPENAI_API_KEY"
 
         let created = manager
             .create_session(CreateSessionRequest {
-                model: RequestField::Value("arcee-model".to_string()),
+                model: RequestField::Value("trinity-large-thinking".to_string()),
                 backend: RequestField::Value("arcee-auth".to_string()),
                 ..CreateSessionRequest::default()
             })
             .await
-            .expect("managed launch must not inherit the OpenAI URL or selector");
+            .expect("an explicit managed launch materializes its canonical tuple");
         assert_eq!(
             created.metadata.base_url,
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
@@ -4180,48 +6319,74 @@ api_key_env = "OPENAI_API_KEY"
         let manager = test_manager(&root);
         let store_path = root.join("store.db");
 
-        for (backend, expected_base) in [
+        // The full auto-resolution chain end-to-end: a bare configured
+        // model resolves its provider through the catalog (gpt-5.2 is
+        // unique to openai-responses), the base URL materializes from the
+        // catalog endpoint default, and the credential auto-selects the
+        // conventional env var — persisted into the session.
+        std::fs::write(
+            nac_home.join("config.toml"),
+            "[model]\nmodel = \"gpt-5.2\"\n",
+        )
+        .unwrap();
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: Some(root.clone()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("a configured catalog-known model auto-resolves the full tuple");
+        assert_eq!(created.metadata.backend, "openai-responses");
+        assert_eq!(created.metadata.base_url, "https://api.openai.com/v1");
+        assert_eq!(
+            created.metadata.api_key_env.as_deref(),
+            Some("OPENAI_API_KEY")
+        );
+        let session_id = created.metadata.session_id.unwrap();
+        let stored = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+        assert_eq!(stored.base_url, "https://api.openai.com/v1");
+        assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+
+        // Force a real persisted-snapshot attach instead of returning the
+        // service left in memory by create.
+        manager
+            .inner
+            .active_sessions
+            .write()
+            .await
+            .remove(&session_id);
+        let resumed = manager.snapshot(&session_id).await.unwrap();
+        assert_eq!(resumed.metadata.base_url, "https://api.openai.com/v1");
+
+        // Managed backends are only reachable through an explicit request
+        // backend: every managed model id collides with a non-managed
+        // provider's entry (the Trinity ids with arcee-api, the codex seed
+        // ids with the openai baseline) and the collision rule prefers the
+        // non-managed provider.
+        for (backend, model, expected_base) in [
+            (
+                "arcee-auth",
+                "trinity-large-thinking",
+                nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+            ),
             (
                 "chatgpt-codex-responses",
+                "gpt-5.3-codex-spark",
                 nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
             ),
-            ("arcee-auth", nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL),
         ] {
-            std::fs::write(
-                nac_home.join("config.toml"),
-                format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\napi_key_env = \"STALE_CONFIG_KEY\"\n"
-                ),
-            )
-            .unwrap();
-
-            let defaults = manager
-                .launch_model_defaults(LaunchModelDefaultsRequest {
-                    cwd: Some(root.clone()),
-                    ssh_host: None,
-                })
-                .unwrap();
-            assert_eq!(
-                defaults.configured_model_base_url.as_deref(),
-                Some(expected_base),
-                "launch metadata must expose the same materialized URL"
-            );
-
-            // This is the inherited shape emitted by the launch UI: the locked
-            // backend/base remain omitted, while null clears a stale configured selector.
-            let inherited: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+            let explicit: CreateSessionRequest = serde_json::from_value(serde_json::json!({
                 "cwd": root,
-                "ssh_host": null,
+                "backend": backend,
+                "model": model,
                 "api_key_env": null
             }))
             .unwrap();
-            assert!(matches!(inherited.backend, RequestField::Omitted));
-            assert!(matches!(inherited.base_url, RequestField::Omitted));
-            assert_eq!(inherited.api_key_env, RequestField::Null);
             let created = manager
-                .create_session(inherited)
+                .create_session(explicit)
                 .await
-                .unwrap_or_else(|error| panic!("inherited {backend} launch failed: {error:#}"));
+                .unwrap_or_else(|error| panic!("explicit {backend} launch failed: {error:#}"));
             assert_eq!(created.metadata.base_url, expected_base);
             assert_eq!(created.metadata.api_key_env, None);
             let session_id = created.metadata.session_id.unwrap();
@@ -4229,46 +6394,20 @@ api_key_env = "OPENAI_API_KEY"
             assert_eq!(stored.base_url, expected_base);
             assert_eq!(stored.api_key_env, None);
 
-            // Force a real persisted-snapshot attach instead of returning the
-            // service left in memory by create.
-            manager
-                .inner
-                .active_sessions
-                .write()
-                .await
-                .remove(&session_id);
-            let resumed = manager.snapshot(&session_id).await.unwrap();
-            assert_eq!(resumed.metadata.base_url, expected_base);
-
-            std::fs::write(
-                nac_home.join("config.toml"),
-                format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"configured-model\"\nbase_url = \"{expected_base}\"\n"
-                ),
-            )
-            .unwrap();
-            let configured = manager
-                .create_session(CreateSessionRequest {
-                    cwd: Some(root.clone()),
-                    ..CreateSessionRequest::default()
-                })
-                .await
-                .expect("an explicitly configured canonical base URL must remain accepted");
-            assert_eq!(configured.metadata.base_url, expected_base);
-
-            let explicit: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+            // An explicit canonical managed base URL remains accepted.
+            let canonical: CreateSessionRequest = serde_json::from_value(serde_json::json!({
                 "cwd": root,
                 "backend": backend,
-                "model": "explicit-model",
+                "model": model,
                 "base_url": expected_base,
                 "api_key_env": null
             }))
             .unwrap();
-            let explicit = manager
-                .create_session(explicit)
+            let created = manager
+                .create_session(canonical)
                 .await
                 .expect("an explicit canonical managed base URL must remain accepted");
-            assert_eq!(explicit.metadata.base_url, expected_base);
+            assert_eq!(created.metadata.base_url, expected_base);
         }
 
         let before_controls = sessions::list_sessions(&store_path).unwrap().len();
@@ -4284,26 +6423,31 @@ api_key_env = "OPENAI_API_KEY"
                 "does not match the stored credential origin",
             ),
         ] {
-            std::fs::write(
-                nac_home.join("config.toml"),
-                format!(
-                    "[model]\nbackend = \"{backend}\"\nmodel = \"managed-model\"\nbase_url = \"{invalid_base}\"\n"
-                ),
-            )
+            let model = if backend == "arcee-auth" {
+                "trinity-large-thinking"
+            } else {
+                "gpt-5.3-codex-spark"
+            };
+            let invalid: CreateSessionRequest = serde_json::from_value(serde_json::json!({
+                "cwd": root,
+                "backend": backend,
+                "model": model,
+                "base_url": invalid_base
+            }))
             .unwrap();
             let error = manager
-                .create_session(CreateSessionRequest {
-                    cwd: Some(root.clone()),
-                    ..CreateSessionRequest::default()
-                })
+                .create_session(invalid)
                 .await
                 .expect_err("a present non-managed origin must not be overwritten by the default");
             assert!(error.to_string().contains(expected_error), "{error:#}");
         }
 
+        // An unknown configured model resolves no provider: the guided
+        // missing-backend error surfaces (the frontend renders the
+        // from-config selection as unrecognized).
         std::fs::write(
             nac_home.join("config.toml"),
-            "[model]\nbackend = \"openai-responses\"\nmodel = \"api-model\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+            "[model]\nmodel = \"api-model\"\n",
         )
         .unwrap();
         let error = manager
@@ -4312,12 +6456,12 @@ api_key_env = "OPENAI_API_KEY"
                 ..CreateSessionRequest::default()
             })
             .await
-            .expect_err("non-managed backends must still require base_url");
-        assert!(error.to_string().contains("base_url"), "{error:#}");
+            .expect_err("an unknown configured model must not resolve a backend");
+        assert!(error.to_string().contains("backend"), "{error:#}");
         assert_eq!(
             sessions::list_sessions(&store_path).unwrap().len(),
             before_controls,
-            "mismatch and non-managed failures must not persist sessions"
+            "mismatch and unresolved failures must not persist sessions"
         );
 
         let _ = std::fs::remove_dir_all(root);
@@ -4349,6 +6493,9 @@ api_key_env = "OPENAI_API_KEY"
             seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
             let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
             incomplete.backend = backend;
+            if backend == BackendKind::ArceeAuth {
+                incomplete.model = "trinity-large-thinking".to_string();
+            }
             incomplete.base_url.clear();
             incomplete.api_key_env = Some("STALE_API_KEY".to_string());
             sessions::update_session_config(&store_path, &incomplete).unwrap();
@@ -4371,7 +6518,8 @@ api_key_env = "OPENAI_API_KEY"
     }
 
     #[tokio::test]
-    async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_fields() {
+    async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_endpoint_and_credentials()
+    {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("api_key_to_arcee_patch");
         let nac_home = root.join("nac-home");
@@ -4389,11 +6537,12 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-auth".to_string()),
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     ..UpdateConfigRequest::default()
                 },
             )
             .await
-            .expect("backend-only PATCH must select the complete managed tuple");
+            .expect("managed PATCH must normalize its omitted endpoint and credential fields");
 
         let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(stored.backend, BackendKind::ArceeAuth);
@@ -4838,6 +6987,7 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-auth".to_string()),
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     reasoning_effort: RequestField::Null,
                     api_key_env: RequestField::Null,
@@ -4860,6 +7010,8 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-api".to_string()),
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
+                    base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     orchestrator_compaction_threshold: RequestField::Value(32_000),
                     ..UpdateConfigRequest::default()
@@ -4876,6 +7028,7 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("chatgpt-codex-responses".to_string()),
+                    model: RequestField::Value("gpt-5.2-codex".to_string()),
                     base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                     api_key_env: RequestField::Null,
                     orchestrator_compaction_threshold: RequestField::Value(0),
@@ -4894,6 +7047,7 @@ api_key_env = "OPENAI_API_KEY"
                 "session",
                 UpdateConfigRequest {
                     backend: RequestField::Value("openai-responses".to_string()),
+                    model: RequestField::Value("gpt-5.2".to_string()),
                     base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(BTreeMap::new())),
@@ -4921,7 +7075,7 @@ api_key_env = "OPENAI_API_KEY"
 
         manager.attach_session("session").await.unwrap();
         let rebuilt = manager.snapshot("session").await.unwrap();
-        assert_eq!(rebuilt.metadata.model, "replacement-model");
+        assert_eq!(rebuilt.metadata.model, "gpt-5.2");
         assert_eq!(rebuilt.metadata.backend, "openai-responses");
 
         let _ = std::fs::remove_dir_all(&root);
@@ -4957,6 +7111,12 @@ api_key_env = "OPENAI_API_KEY"
                 ..UpdateConfigRequest::default()
             },
             UpdateConfigRequest {
+                // Clearing the selector fails only when conventional-var
+                // auto-selection cannot repair it: deepseek's conventional
+                // variable is cleared in this environment (the session's
+                // own openai conventional variable is set and would
+                // auto-select, so clearing stays valid there).
+                backend: RequestField::Value("deepseek-chat".to_string()),
                 api_key_env: RequestField::Null,
                 ..UpdateConfigRequest::default()
             },
@@ -5123,6 +7283,8 @@ api_key_env = "OPENAI_API_KEY"
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
                 sandbox: SandboxRequest::default(),
             })
             .await
@@ -5145,9 +7307,15 @@ api_key_env = "OPENAI_API_KEY"
             Ok(_) => panic!("arcee-api attach without api_key_env must fail"),
             Err(error) => error,
         };
-        assert!(attach_error
-            .to_string()
-            .contains("requires a nonblank api_key_env"));
+        // The guided error names the provider's conventional variable
+        // (ScopedModelEnv keeps ARCEE_API_KEY cleared, so auto-selection
+        // cannot adopt it).
+        assert!(
+            attach_error
+                .to_string()
+                .contains("set the ARCEE_API_KEY environment variable"),
+            "{attach_error:#}"
+        );
         assert!(attach_error
             .downcast_ref::<ModelConfigurationError>()
             .is_some());
@@ -5187,7 +7355,7 @@ api_key_env = "OPENAI_API_KEY"
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
-                    model: RequestField::Omitted,
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
                     backend: RequestField::Value("arcee-auth".to_string()),
                     reasoning_effort: RequestField::Omitted,
@@ -5207,7 +7375,7 @@ api_key_env = "OPENAI_API_KEY"
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
-                    model: RequestField::Omitted,
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
                     backend: RequestField::Value("arcee-api".to_string()),
                     reasoning_effort: RequestField::Omitted,
@@ -5233,6 +7401,8 @@ api_key_env = "OPENAI_API_KEY"
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
                 ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
                 sandbox: SandboxRequest::default(),
             })
             .await
@@ -5269,7 +7439,7 @@ api_key_env = "OPENAI_API_KEY"
             .update_session_config(
                 "legacy-arcee",
                 UpdateConfigRequest {
-                    model: RequestField::Omitted,
+                    model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Omitted,
                     backend: RequestField::Omitted,
                     reasoning_effort: RequestField::Omitted,
@@ -5283,6 +7453,7 @@ api_key_env = "OPENAI_API_KEY"
 
         let stored = sessions::load_session(&root.join("store.db"), "legacy-arcee").unwrap();
         assert_eq!(stored.backend, BackendKind::ArceeAuth);
+        assert_eq!(stored.model, "trinity-large-thinking");
         assert_eq!(stored.api_key_env, None);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -5625,6 +7796,8 @@ api_key_env = "OPENAI_API_KEY"
             let (sender, receiver) = tokio::sync::broadcast::channel(4);
             sender.send(live).unwrap();
             drop(sender);
+            let (delta_sender, assistant_deltas) = tokio::sync::broadcast::channel(4);
+            drop(delta_sender);
 
             Sse::new(session_event_stream(
                 "test-epoch".to_string(),
@@ -5635,6 +7808,7 @@ api_key_env = "OPENAI_API_KEY"
                 }),
                 replayed,
                 receiver,
+                assistant_deltas,
             ))
         }
 
@@ -5662,5 +7836,163 @@ api_key_env = "OPENAI_API_KEY"
 
         let boundary_frame = body.split("\n\n").next().unwrap();
         assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));
+    }
+
+    async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> Response {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    /// One-shot stand-in for a provider's model index, answering the first
+    /// request with `body` and reporting the `Authorization` header it saw — so
+    /// a test can tell which credential actually went out on the wire.
+    fn scripted_model_index(body: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind model index");
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept model index request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match socket.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => request.extend_from_slice(&buffer[..read]),
+                }
+            }
+            let authorization = String::from_utf8_lossy(&request)
+                .lines()
+                .find(|line| line.to_ascii_lowercase().starts_with("authorization:"))
+                .map(|line| line[line.find(':').unwrap() + 1..].trim().to_string())
+                .unwrap_or_default();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes());
+            let _ = socket.flush();
+            let _ = sender.send(authorization);
+        });
+        (base_url, receiver)
+    }
+
+    /// A key the UI supplies is filed away under a name the server picks, and
+    /// from then on that name stands in for the secret: the value never comes
+    /// back out, and the caller reaches the provider by naming it instead.
+    #[tokio::test]
+    async fn a_supplied_key_is_filed_under_a_generated_name_and_answers_by_it() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("generated_credential");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).expect("create NAC home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let stored = post_json(
+            app.clone(),
+            "/credentials",
+            serde_json::json!({ "value": "sk-server-test-key" }),
+        )
+        .await;
+        assert_eq!(stored.status(), StatusCode::OK);
+        let name = response_json(stored).await["name"]
+            .as_str()
+            .expect("generated credential name")
+            .to_string();
+        assert!(name.starts_with(GENERATED_CREDENTIAL_PREFIX));
+
+        let listed = get_response(app.clone(), "/credentials", None).await;
+        let listed = String::from_utf8(response_body(listed).await.to_vec()).unwrap();
+        assert!(listed.contains(&name));
+        assert!(
+            !listed.contains("sk-server-test-key"),
+            "a stored key must never be readable back: {listed}"
+        );
+
+        let (base_url, authorization) = scripted_model_index(r#"{"data":[{"id":"model-a"}]}"#);
+        let models = post_json(
+            app,
+            "/providers/models",
+            serde_json::json!({
+                "backend": "openai-responses",
+                "api_key_env": name,
+                "base_url": base_url,
+            }),
+        )
+        .await;
+        assert_eq!(models.status(), StatusCode::OK);
+        let models = response_json(models).await;
+        assert_eq!(models["models"][0]["id"], "model-a");
+        assert_eq!(
+            authorization
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the model index was asked"),
+            "Bearer sk-server-test-key"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Naming a credential is not a way to probe for one: a name with nothing
+    /// behind it is refused before any request goes out, and a provider that
+    /// signs in through the browser takes no name at all.
+    #[tokio::test]
+    async fn the_model_index_refuses_an_unresolvable_name_and_a_login_backend() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("model_index_by_name");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).expect("create NAC home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let unresolvable = post_json(
+            app.clone(),
+            "/providers/models",
+            serde_json::json!({
+                "backend": "openai-responses",
+                "api_key_env": "NAC_CONFIG_absent",
+            }),
+        )
+        .await;
+        assert_eq!(unresolvable.status(), StatusCode::BAD_REQUEST);
+        let message = response_json(unresolvable).await["error"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            message.contains("NAC_CONFIG_absent"),
+            "the refusal names what could not be resolved: {message}"
+        );
+
+        let managed = post_json(
+            app,
+            "/providers/models",
+            serde_json::json!({
+                "backend": "chatgpt-codex-responses",
+                "api_key_env": "NAC_CONFIG_absent",
+            }),
+        )
+        .await;
+        assert_eq!(managed.status(), StatusCode::BAD_REQUEST);
+        let message = response_json(managed).await["error"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            message.contains("stored login"),
+            "a login backend explains that it takes no key: {message}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

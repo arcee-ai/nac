@@ -107,7 +107,7 @@ impl SessionManager {
         };
 
         match handle.wait().await {
-            Ok(SessionCompactionResult::Compacted { compaction_id }) => {
+            Ok(SessionCompactionResult::Compacted { compaction_id, .. }) => {
                 Ok(CompactSessionResponse::Compacted {
                     compaction_id: compaction_id.to_string(),
                 })

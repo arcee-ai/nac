@@ -4,26 +4,38 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod render;
 mod schema;
+mod ssh_configurations;
 mod steering;
 mod thread_events;
 mod threads;
 mod time;
 mod transcript;
 mod worksets;
+mod workspace_revisions;
 
+pub use model_configurations::*;
 pub use render::*;
 pub use schema::{default_store_path, initialize};
+pub use ssh_configurations::*;
 pub use steering::*;
 pub use thread_events::*;
 pub use threads::*;
 pub use transcript::*;
 pub use worksets::*;
+pub use workspace_revisions::*;
 
 pub(crate) use schema::{open_connection, open_runtime_connection};
+#[cfg(test)]
+pub(crate) use schema::{track_connection_opens, tracked_connection_opens};
+pub(crate) use steering::list_thread_steering_with_connection;
+pub(crate) use thread_events::load_all_thread_events_with_connection;
+pub(crate) use threads::{list_threads_with_connection, load_all_episodes_with_connection};
 use time::now_utc;
+pub(crate) use worksets::{list_worksets_with_connection, read_workset_with_connection};
 
 #[cfg(test)]
 pub(crate) fn insert_test_session(path: &Path, session_id: &str) {
@@ -306,6 +318,9 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             )
             .unwrap();

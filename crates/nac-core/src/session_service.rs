@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +28,7 @@ use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
     WorksetSummarySnapshot, WorksetsSnapshot, WorkspaceSnapshot,
 };
+use crate::workspace::GitTarget;
 
 mod manual_compaction;
 
@@ -68,6 +69,9 @@ pub struct ResponseTimingSnapshot {
     pub token_usages: Option<Vec<Option<crate::model::TokenUsage>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_token_usage: Option<crate::model::TokenUsage>,
+    /// Cumulative usage from runs that produced no visible response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unattributed_token_usage: Option<crate::model::TokenUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cumulative_token_usage: Option<crate::model::TokenUsage>,
 }
@@ -92,7 +96,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
                 .iter()
                 .filter_map(|tu| tu.as_ref())
                 .collect();
-            if non_none.is_empty() {
+            if non_none.is_empty() && snapshot.unattributed_token_usage.is_none() {
                 None
             } else {
                 let mut cumulative = crate::model::TokenUsage::default();
@@ -103,6 +107,12 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
                     .last()
                     .map(|u| u.orchestrator_context_tokens)
                     .unwrap_or(0);
+                if let Some(unattributed) = &snapshot.unattributed_token_usage {
+                    cumulative.add_cost_saturating(unattributed);
+                    if unattributed.orchestrator_context_tokens != 0 {
+                        cumulative.replace_context(unattributed.orchestrator_context_tokens);
+                    }
+                }
                 Some(cumulative)
             }
         };
@@ -113,6 +123,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
             response_durations_ms: snapshot.response_durations_ms.clone(),
             token_usages: Some(snapshot.token_usages.clone()),
             last_token_usage,
+            unattributed_token_usage: snapshot.unattributed_token_usage.clone(),
             cumulative_token_usage,
         }
     }
@@ -159,6 +170,11 @@ pub struct SessionServiceInit {
 pub struct SessionFrontendSnapshot {
     pub metadata: SessionMetadata,
     pub messages: Vec<Message>,
+    /// When each message was written to the transcript log, aligned with
+    /// `messages`. `None` for messages carried by the snapshot blob, which
+    /// predates the log and stores no per-message time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub message_created_at: Vec<Option<String>>,
     pub response_timing: ResponseTimingSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ActiveRunSnapshot>,
@@ -237,6 +253,10 @@ pub struct MessageCycleMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesPageSnapshot {
     pub messages: Vec<Message>,
+    /// Transcript-log row times, one per message. `None` where the message
+    /// predates the log (the snapshot blob carries no per-message time).
+    #[serde(default)]
+    pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
@@ -281,6 +301,17 @@ const MAX_THREAD_EVENT_DIAGNOSTICS: usize = 64;
 struct DecodedThreadEvents {
     events: HashMap<String, Vec<AgentEvent>>,
     diagnostics: Vec<ThreadEventDecodeDiagnostic>,
+}
+
+struct FrontendSnapshotBlockingLoad {
+    sessions: Vec<SessionSummarySnapshot>,
+    threads: Vec<ThreadSnapshot>,
+    thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
+    thread_events: DecodedThreadEvents,
+    thread_event_boundary: SessionEventBoundary,
+    thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    worksets: WorksetsSnapshot,
+    workspace: WorkspaceSnapshot,
 }
 
 pub struct SessionServiceParts {
@@ -427,10 +458,33 @@ impl SessionClientHandle {
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct FrontendSnapshotAfterWorkspaceGate {
+    reached: std::sync::atomic::AtomicBool,
+    resume: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl FrontendSnapshotAfterWorkspaceGate {
+    fn pause(&self) {
+        self.reached
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        while !self.resume.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
     metadata: Arc<SessionMetadata>,
+    /// Where git runs for this session's checkout — locally, or on the ssh host
+    /// the session is working on. `None` for a sandbox with no mounted working
+    /// directory, which is why such a session gets no revisions: its files do
+    /// not outlive the container.
+    workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
@@ -445,6 +499,8 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    #[cfg(test)]
+    frontend_snapshot_after_workspace_gate: Option<Arc<FrontendSnapshotAfterWorkspaceGate>>,
 }
 
 enum ActiveSessionOperation {
@@ -580,9 +636,13 @@ impl SessionService {
             .agent
             .set_event_sink(EventSink::bus(event_bus.clone()));
 
+        let workspace_git = run_config.workspace_git;
         let metadata = SessionMetadata {
             cwd: run_config.workspace_display,
-            workspace_host_path: run_config.workspace_host_path,
+            workspace_host_path: workspace_git
+                .as_ref()
+                .and_then(|target| target.local_path())
+                .map(Path::to_path_buf),
             store_path,
             model: run_config.client.model.clone(),
             backend: run_config.client.backend().as_str().to_string(),
@@ -611,6 +671,7 @@ impl SessionService {
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             metadata: Arc::new(metadata.clone()),
+            workspace_git,
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
             transcript_log,
@@ -618,6 +679,8 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            #[cfg(test)]
+            frontend_snapshot_after_workspace_gate: None,
         };
         let init = SessionServiceInit {
             metadata,
@@ -856,8 +919,9 @@ impl SessionService {
         )
     }
 
-    fn load_all_thread_events_with_limit(
+    fn load_all_thread_events_with_connection(
         &self,
+        conn: &rusqlite::Connection,
         per_thread_limit: usize,
     ) -> Result<DecodedThreadEvents> {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
@@ -866,28 +930,101 @@ impl SessionService {
                 diagnostics: Vec::new(),
             });
         };
-        let records = crate::store::load_all_thread_events(
-            &self.metadata.store_path,
+        let records = crate::store::load_all_thread_events_with_connection(
+            conn,
             session_id,
             per_thread_limit,
         )?;
-        let mut events = HashMap::new();
-        let mut diagnostics = Vec::new();
-        for (thread_name, records) in records {
-            let decoded = records
-                .into_iter()
-                .filter_map(|record| decode_thread_event(record, &mut diagnostics))
-                .collect::<Vec<_>>();
-            if !decoded.is_empty() {
-                events.insert(thread_name, decoded);
-            }
-        }
-        Ok(DecodedThreadEvents {
-            events,
-            diagnostics,
-        })
+        Ok(decode_thread_events(records))
     }
 
+    fn load_frontend_snapshot_blocking(
+        &self,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<FrontendSnapshotBlockingLoad> {
+        let workspace = self.workspace_snapshot();
+        #[cfg(test)]
+        if let Some(gate) = &self.frontend_snapshot_after_workspace_gate {
+            gate.pause();
+        }
+
+        let (
+            sessions,
+            threads,
+            thread_episodes,
+            thread_events,
+            thread_event_boundary,
+            thread_steering,
+            worksets,
+        ) = {
+            let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
+            let session_id = self.metadata.session_id.as_deref();
+            let sessions = if options.include_sessions {
+                view::list_sessions_with_connection(&conn)?
+            } else {
+                Vec::new()
+            };
+            let threads = view::list_threads_with_connection(&conn, session_id)?;
+            let thread_episodes =
+                view::load_all_thread_episodes_with_connection(&conn, session_id)?;
+            let (thread_event_boundary, thread_events) =
+                self.event_bus.thread_event_boundary(|| {
+                    self.load_all_thread_events_with_connection(&conn, options.thread_event_limit)
+                })?;
+            let worksets = view::worksets_snapshot_with_connection(&conn, session_id);
+            // Keep this final storage read adjacent to the transcript scan so
+            // a delivery committed during slower workspace inspection has the
+            // current status needed to cover its canonical message.
+            let thread_steering = session_id
+                .map(|session_id| {
+                    crate::store::list_thread_steering_with_connection(&conn, session_id)
+                })
+                .transpose()?
+                .unwrap_or_default();
+            (
+                sessions,
+                threads,
+                thread_episodes,
+                thread_events,
+                thread_event_boundary,
+                thread_steering,
+                worksets,
+            )
+        };
+        Ok(FrontendSnapshotBlockingLoad {
+            sessions,
+            threads,
+            thread_episodes,
+            thread_events,
+            thread_event_boundary,
+            thread_steering,
+            worksets,
+            workspace,
+        })
+    }
+}
+
+fn decode_thread_events(
+    records: HashMap<String, Vec<crate::store::ThreadEventRecord>>,
+) -> DecodedThreadEvents {
+    let mut events = HashMap::new();
+    let mut diagnostics = Vec::new();
+    for (thread_name, records) in records {
+        let decoded = records
+            .into_iter()
+            .filter_map(|record| decode_thread_event(record, &mut diagnostics))
+            .collect::<Vec<_>>();
+        if !decoded.is_empty() {
+            events.insert(thread_name, decoded);
+        }
+    }
+    DecodedThreadEvents {
+        events,
+        diagnostics,
+    }
+}
+
+impl SessionService {
     pub fn thread_events_page(
         &self,
         thread_name: &str,
@@ -960,10 +1097,7 @@ impl SessionService {
     }
 
     pub fn workspace_snapshot(&self) -> WorkspaceSnapshot {
-        view::workspace_snapshot(
-            &self.metadata.cwd,
-            self.metadata.workspace_host_path.as_deref(),
-        )
+        view::workspace_snapshot(&self.metadata.cwd, self.workspace_git.as_ref())
     }
 
     pub async fn frontend_snapshot(&self) -> Result<SessionFrontendSnapshot> {
@@ -990,72 +1124,75 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<SessionFrontendSnapshotLoad> {
-        let thread_steering = self
-            .metadata
-            .session_id
-            .as_deref()
-            .map(|session_id| {
-                crate::store::list_thread_steering(&self.metadata.store_path, session_id)
-            })
-            .transpose()?
-            .unwrap_or_default();
+        // SQLite and git are synchronous. Keep all dashboard storage reads on
+        // one connection and move that connection plus git subprocesses off
+        // the async runtime workers. Load steering before the transcript so a
+        // concurrently delivered record is either absent here or coverable by
+        // the subsequent transcript scan, never rendered twice.
+        let blocking_service = self.clone();
+        let blocking_task = tokio::task::spawn_blocking(move || {
+            blocking_service.load_frontend_snapshot_blocking(options)
+        });
+        let (active_threads, blocking) = tokio::join!(self.active_thread_names(), blocking_task);
+        let blocking = blocking
+            .map_err(|error| anyhow::anyhow!("frontend snapshot load task failed: {error}"))??;
+
         // Store-backed transcript reads (step 3): the snapshot blob (legacy
         // prefix) ++ the transcript log tail, ALWAYS. The agent-or-persisted
         // duality and the stale-during-run fallback are gone — mid-run
         // appends are visible as they commit to the log.
         self.update_transcript_scan().await?;
-        let covered_orchestrator_steering_ids = {
-            let scan = self.lock_transcript_scan();
-            covered_ids_from_scan(&thread_steering, &scan)
-        };
         let response_timing = {
             let snapshot = self.session_snapshot.lock().await;
             ResponseTimingSnapshot::from_session_snapshot(snapshot.as_ref())
         };
         let loaded_messages = match options.messages {
-            FrontendSnapshotMessages::All => LoadedFrontendMessages {
-                messages: self.store_backed_transcript().await?,
-                page: None,
-                cycle: None,
-            },
+            FrontendSnapshotMessages::All => {
+                let messages = self.store_backed_transcript().await?;
+                let created_at = self.store_backed_transcript_times(messages.len()).await?;
+                LoadedFrontendMessages {
+                    messages,
+                    created_at,
+                    page: None,
+                    cycle: None,
+                }
+            }
             FrontendSnapshotMessages::Page(request) => {
                 let page = self.page_store_transcript(request).await?;
                 let cycle = self.message_cycle_from_store().await?;
                 LoadedFrontendMessages {
                     messages: page.messages,
+                    created_at: page.created_at,
                     page: Some(page.page),
                     cycle: Some(cycle),
                 }
             }
         };
 
-        let (thread_event_boundary, decoded_thread_events) =
-            self.event_bus.thread_event_boundary(|| {
-                self.load_all_thread_events_with_limit(options.thread_event_limit)
-            })?;
+        let covered_orchestrator_steering_ids = {
+            let scan = self.lock_transcript_scan();
+            covered_ids_from_scan(&blocking.thread_steering, &scan)
+        };
         let mut metadata = self.metadata();
         metadata.extra_headers.clear();
         let snapshot = SessionFrontendSnapshot {
             metadata,
             messages: loaded_messages.messages,
+            message_created_at: loaded_messages.created_at,
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
-            sessions: if options.include_sessions {
-                self.list_sessions()?
-            } else {
-                Vec::new()
-            },
-            active_threads: self.active_thread_names().await,
-            threads: self.list_threads()?,
-            thread_episodes: self.all_thread_episodes()?,
-            thread_events: decoded_thread_events.events,
-            thread_event_boundary,
-            thread_event_diagnostics: decoded_thread_events.diagnostics,
-            thread_steering,
+            sessions: blocking.sessions,
+            active_threads,
+            threads: blocking.threads,
+            thread_episodes: blocking.thread_episodes,
+            thread_events: blocking.thread_events.events,
+            thread_event_boundary: blocking.thread_event_boundary,
+            thread_event_diagnostics: blocking.thread_events.diagnostics,
+            thread_steering: blocking.thread_steering,
             covered_orchestrator_steering_ids,
-            worksets: self.worksets_snapshot(),
-            workspace: self.workspace_snapshot(),
+            worksets: blocking.worksets,
+            workspace: blocking.workspace,
         };
         Ok(SessionFrontendSnapshotLoad {
             snapshot,
@@ -1092,6 +1229,27 @@ impl SessionService {
         .await
         .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
         .map(|(tail_len, rows)| (tail_len as usize, rows))
+    }
+
+    /// Row creation times for the window [`Self::read_log_tail_window`]
+    /// returns. Empty for services without a transcript log (pickers).
+    async fn read_log_tail_window_times(
+        &self,
+        blob_len: usize,
+        tail_start: usize,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok(Vec::new());
+        };
+        tokio::task::spawn_blocking(move || {
+            writer.read_tail_window_times(&session_id, blob_len as u64, tail_start as u64, limit)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("transcript log tail time read task failed: {error}"))?
     }
 
     /// Read the full transcript log tail relative to a snapshot blob of
@@ -1171,19 +1329,30 @@ impl SessionService {
         } else {
             Vec::new()
         };
-        let log_part: Vec<Message> = if end > blob_visible {
+        let (log_part, log_times): (Vec<Message>, Vec<String>) = if end > blob_visible {
             let tail_start = start.saturating_sub(blob_visible);
+            let count = end - blob_visible - tail_start;
             let (_, rows) = self
-                .read_log_tail_window(blob_len, tail_start, end - blob_visible - tail_start)
+                .read_log_tail_window(blob_len, tail_start, count)
                 .await?;
-            rows.into_iter().map(|(_, message)| message).collect()
+            let times = self
+                .read_log_tail_window_times(blob_len, tail_start, count)
+                .await?;
+            (
+                rows.into_iter().map(|(_, message)| message).collect(),
+                times,
+            )
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
+        let mut created_at: Vec<Option<String>> = vec![None; blob_part.len()];
+        created_at.extend(log_times.into_iter().map(Some));
         let mut messages = blob_part;
         messages.extend(log_part);
+        created_at.resize(messages.len(), None);
         Ok(MessagesPageSnapshot {
             messages,
+            created_at,
             page: MessagePageMetadata {
                 start,
                 end,
@@ -1191,6 +1360,260 @@ impl SessionService {
                 has_older: start > 0,
             },
         })
+    }
+
+    /// Length of the merged store transcript without decoding any of it.
+    async fn transcript_len(&self) -> Result<u64> {
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        };
+        let (tail_len, _) = self.read_log_tail_window(blob_len, 0, 0).await?;
+        Ok((blob_len + tail_len) as u64)
+    }
+
+    /// What the user typed to produce the message at `message_idx`, rather
+    /// than the expanded prompt the agent was handed: sending it again has to
+    /// go back through the same expansion, or a `/plan` would reach the model
+    /// as its own instruction sheet.
+    pub async fn user_input_at(&self, message_idx: usize) -> Result<String> {
+        let messages = self.store_backed_transcript().await?;
+        match messages.get(message_idx) {
+            Some(Message::User { content }) => Ok(commands::display_prompt_from_message(content)),
+            Some(_) => Err(anyhow::anyhow!(
+                "message {message_idx} is not a user message, and only a user message can be sent again"
+            )),
+            None => Err(anyhow::anyhow!(
+                "message {message_idx} is not in this session's transcript"
+            )),
+        }
+    }
+
+    /// Take the session back to just before the user message at `message_idx`:
+    /// that message and everything after it leave the transcript, and the
+    /// checkout returns to the revision that was current when it was sent.
+    ///
+    /// Order matters. The checkout is restored first, because a git failure
+    /// there is recoverable — nothing has been forgotten yet — whereas a
+    /// transcript truncated against a checkout that then refuses to move would
+    /// leave the two describing different moments with no way back. Everything
+    /// after the truncation is bookkeeping that follows from it.
+    ///
+    /// This is destructive by design and has no undo: the callers above it are
+    /// responsible for holding the session's operation lease, so that no run is
+    /// writing to the transcript or the checkout while it happens.
+    pub async fn revert_to_message(&self, message_idx: usize) -> Result<RevertOutcome> {
+        let session_id =
+            self.metadata.session_id.clone().ok_or_else(|| {
+                anyhow::anyhow!("this session is not persisted, so it cannot revert")
+            })?;
+        let writer = self
+            .transcript_log
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| anyhow::anyhow!("this session has no transcript log to revert"))?;
+
+        let messages = self.store_backed_transcript().await?;
+        let target = messages.get(message_idx).ok_or_else(|| {
+            anyhow::anyhow!("message {message_idx} is not in this session's transcript")
+        })?;
+        if !matches!(target, Message::User { .. }) {
+            return Err(anyhow::anyhow!(
+                "message {message_idx} is not a user message, and only a user message marks a point to revert to"
+            ));
+        }
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        };
+        if message_idx < blob_len {
+            return Err(anyhow::anyhow!(
+                "message {message_idx} predates this session's transcript log and cannot be reverted to"
+            ));
+        }
+
+        let store_path = self.metadata.store_path.clone();
+        let workspace_git = self.workspace_git.clone();
+        let revision = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::store::workspace_revision_at_transcript_len(
+                    &store_path,
+                    &session_id,
+                    message_idx as u64,
+                )
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("workspace revision lookup task failed: {error}"))??
+        };
+
+        let workspace_restored = match (&workspace_git, &revision) {
+            (Some(target), Some(revision)) => {
+                let target = target.clone();
+                let session_id = session_id.clone();
+                let commit = revision.commit_sha.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::workspace::restore(&target, &session_id, &commit)?;
+                    crate::workspace::rewind_ref(&target, &session_id, &commit)
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("workspace restore task failed: {error}"))??;
+                true
+            }
+            _ => false,
+        };
+
+        {
+            let writer = Arc::clone(&writer);
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                writer.delete_from(&session_id, message_idx as u64)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("transcript truncation task failed: {error}"))??;
+        }
+
+        let kept = &messages[..message_idx];
+        {
+            let mut agent = self.agent.lock().await;
+            agent.messages.truncate(message_idx);
+        }
+        {
+            let mut scan = self
+                .transcript_scan
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *scan = TranscriptScanCache::from_transcript(kept);
+        }
+
+        // The timing history is indexed by visible response, so it has to lose
+        // exactly the responses the transcript just lost, or every later run
+        // would attribute its duration to the wrong message.
+        let kept_responses = kept
+            .iter()
+            .filter(|message| is_visible_response(message))
+            .count();
+        let run_state_update = {
+            let mut snapshot = self.session_snapshot.lock().await;
+            snapshot.as_mut().map(|snapshot| {
+                let mut durations =
+                    response_duration_history_from_snapshot(snapshot, kept_responses);
+                durations.truncate(kept_responses);
+                let mut token_usages = snapshot.token_usages.clone();
+                token_usages.truncate(kept_responses);
+                // Not response-indexed, so a truncation has nothing to drop
+                // from it: the failed runs it accounts for stay accounted for.
+                let unattributed_token_usage = snapshot.unattributed_token_usage.clone();
+                let last = durations.last().copied().flatten();
+                let previous = durations
+                    .len()
+                    .checked_sub(2)
+                    .and_then(|idx| durations.get(idx).copied().flatten());
+                snapshot.apply_run_state(sessions::SessionRunState {
+                    last_response_duration_ms: last,
+                    previous_response_duration_ms: previous,
+                    response_durations_ms: Some(durations),
+                    token_usages,
+                    unattributed_token_usage,
+                })
+            })
+        };
+        if let Some(update) = run_state_update {
+            let store_path = store_path.clone();
+            tokio::task::spawn_blocking(move || {
+                sessions::save_session_run_state(&store_path, &update)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("session run state task failed: {error}"))??;
+        }
+
+        let revisions_removed = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            let keep_through_id = revision.as_ref().map(|revision| revision.id);
+            tokio::task::spawn_blocking(move || {
+                crate::store::delete_workspace_revisions_after(
+                    &store_path,
+                    &session_id,
+                    keep_through_id,
+                )
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("workspace revision prune task failed: {error}"))??
+        };
+
+        // Threads the discarded messages dispatched are work nothing can reach
+        // any more: the tool calls that named them are gone. A name the kept
+        // messages also dispatched stays whole, because the same rows carry the
+        // episodes of those earlier dispatches, which the transcript still
+        // refers to.
+        let orphaned_threads: Vec<String> = {
+            let kept_names = thread_tool_call_names(kept);
+            thread_tool_call_names(&messages[message_idx..])
+                .into_iter()
+                .filter(|name| {
+                    name != crate::store::ORCHESTRATOR_STEERING_TARGET && !kept_names.contains(name)
+                })
+                .collect()
+        };
+        let threads_removed = {
+            let store_path = store_path.clone();
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut removed = 0usize;
+                for name in orphaned_threads {
+                    if crate::store::delete_thread(&store_path, &session_id, &name)? {
+                        removed += 1;
+                    }
+                }
+                anyhow::Ok(removed)
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("thread prune task failed: {error}"))??
+        };
+
+        self.event_bus.emit(SessionEvent::TranscriptReverted {
+            transcript_len: message_idx as u64,
+        });
+
+        Ok(RevertOutcome {
+            transcript_len: message_idx,
+            messages_removed: messages.len() - message_idx,
+            workspace_restored,
+            revisions_removed,
+            threads_removed,
+        })
+    }
+
+    /// Per-message creation times aligned with [`Self::store_backed_transcript`],
+    /// which is why the caller passes the transcript length it already read:
+    /// an append landing between the two reads must not shift the alignment.
+    /// Blob messages predate the log and report `None`.
+    async fn store_backed_transcript_times(&self, total: usize) -> Result<Vec<Option<String>>> {
+        let blob_len = {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.len())
+                .unwrap_or_default()
+        }
+        .min(total);
+        let mut times: Vec<Option<String>> = vec![None; blob_len];
+        if total > blob_len {
+            let tail = self
+                .read_log_tail_window_times(blob_len, 0, total - blob_len)
+                .await?;
+            times.extend(tail.into_iter().map(Some));
+        }
+        times.resize(total, None);
+        Ok(times)
     }
 
     /// Advance the incremental transcript scan over newly appended rows.
@@ -1431,16 +1854,30 @@ impl SessionService {
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
         self.close_active_thread_dispatches();
 
+        // A cancellation marker is itself a visible response. If the run task
+        // was cancelled before capturing its baseline, record the count before
+        // appending that marker so partial cancellation usage still lands on it.
+        let transcript_baseline = match cancelling_run.transcript_baseline {
+            Some(baseline) => Some(baseline),
+            None => {
+                if let Err(error) = self.update_transcript_scan().await {
+                    eprintln!(
+                        "nac: failed to capture transcript baseline for cancellation: {error:#}"
+                    );
+                }
+                Some(self.lock_transcript_scan().visible_response_count)
+            }
+        };
+
         // Capture partial token usage from the cancelled run, including a
         // committed compaction projection when cancellation happened before
         // the following ordinary call completed.
         let cancel_usage = self.append_cancellation_message().await;
 
-        let message = "run cancelled by user".to_string();
         let persistence_error = match self
             .persist_run_snapshot(
                 &cancelling_run.snapshot,
-                cancelling_run.transcript_baseline,
+                transcript_baseline,
                 None,
                 cancel_usage,
             )
@@ -1456,16 +1893,19 @@ impl SessionService {
             }
         };
 
-        let terminal_message = match persistence_error {
-            Some(error) => {
-                format!("{message}\nAdditionally, failed to persist session snapshot: {error}")
-            }
-            None => message,
+        // Cancellation is not a failure, so it gets its own terminal event and
+        // the UI keeps the "stopped by user" story it already told. A snapshot
+        // that could not be persisted is a real fault and still says so.
+        let terminal_event = match persistence_error {
+            Some(error) => SessionEvent::RunFailed {
+                message: format!(
+                    "run cancelled by user\nAdditionally, failed to persist session snapshot: {error}"
+                ),
+            },
+            None => SessionEvent::RunCancelled,
         };
         self.event_bus.emit_with_context(
-            SessionEvent::RunFailed {
-                message: terminal_message,
-            },
+            terminal_event,
             Some(cancelling_run.snapshot.run_id.clone()),
             cancelling_run.snapshot.client_id.clone(),
         );
@@ -1526,6 +1966,10 @@ impl SessionService {
                         .await;
                 }
                 Err(message) => {
+                    // The published event is deliberately reduced to "run
+                    // failed", so the operator's log is the only place the real
+                    // reason can be read.
+                    eprintln!("nac: run failed: {message}");
                     service
                         .finish_run_once(&task_run_id, RunOutcome::Failed(message, usage))
                         .await;
@@ -1652,6 +2096,13 @@ impl SessionService {
         }));
         drop(guard);
 
+        if let Some(session_id) = self.metadata.session_id.as_deref() {
+            if let Err(error) = sessions::increment_run_count(&self.metadata.store_path, session_id)
+            {
+                eprintln!("nac: failed to record run count: {error:#}");
+            }
+        }
+
         self.event_bus.emit_with_context(
             SessionEvent::RunStarted {
                 prompt_preview: active_run.prompt_preview.clone(),
@@ -1696,6 +2147,9 @@ impl SessionService {
             }
         };
 
+        self.capture_workspace_revision(&finishing_run.snapshot)
+            .await;
+
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
         let terminal_event = match (outcome, persistence_error) {
@@ -1717,6 +2171,59 @@ impl SessionService {
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
         true
+    }
+
+    /// Freeze the checkout as it stands now, so the run can be revisited later.
+    ///
+    /// A revision is a convenience, never a precondition for anything, so every
+    /// failure here is reported and swallowed: a repository nac cannot capture
+    /// still gets its run finished normally.
+    async fn capture_workspace_revision(&self, run: &ActiveRunSnapshot) {
+        let (Some(session_id), Some(target)) =
+            (self.metadata.session_id.clone(), self.workspace_git.clone())
+        else {
+            return;
+        };
+        let store_path = self.metadata.store_path.clone();
+        let run_id = run.run_id.to_string();
+        let label = run.prompt_preview.clone();
+        // Recorded now rather than derived later: this is the only moment we
+        // can say for certain which transcript prefix the captured files go
+        // with, and a revert has nothing else to key off.
+        let transcript_len = self.transcript_len().await.ok();
+
+        let outcome = tokio::task::spawn_blocking(move || -> Result<()> {
+            let previous = crate::store::latest_workspace_revision(&store_path, &session_id)?
+                .map(|revision| revision.commit_sha);
+            let captured = crate::workspace::capture(&target, &session_id, previous.as_deref())?;
+            crate::store::append_workspace_revision(
+                &store_path,
+                &session_id,
+                crate::store::NewWorkspaceRevision {
+                    run_id,
+                    commit_sha: captured.commit,
+                    base_sha: captured.base,
+                    branch: captured.branch,
+                    label,
+                    additions: captured.additions,
+                    deletions: captured.deletions,
+                    changed_files: captured.changed_files,
+                    transcript_len,
+                },
+            )?;
+            Ok(())
+        })
+        .await;
+
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("nac: failed to capture workspace revision: {error:#}");
+            }
+            Err(error) => {
+                eprintln!("nac: workspace revision task failed: {error}");
+            }
+        }
     }
 
     /// Run-failure transcript normalization: a run that fails at the
@@ -1918,6 +2425,11 @@ impl SessionService {
                 &snapshot.token_usages,
                 previous_response_count,
                 current_response_count,
+                completed_usage.clone(),
+            );
+            let unattributed_token_usage = unattributed_usage_after_run(
+                snapshot.unattributed_token_usage.clone(),
+                current_response_count > previous_response_count,
                 completed_usage,
             );
             snapshot.apply_run_state(sessions::SessionRunState {
@@ -1925,6 +2437,7 @@ impl SessionService {
                 previous_response_duration_ms: response_timing.previous_response_duration_ms,
                 response_durations_ms: response_timing.response_durations_ms,
                 token_usages,
+                unattributed_token_usage,
             })
         };
 
@@ -1941,6 +2454,33 @@ impl SessionService {
             active_run.client_id.clone(),
         );
 
+        Ok(())
+    }
+
+    /// Persist the projected context size after a manual compaction so the
+    /// frontend context gauge reflects the new (reduced) context. Updates
+    /// `unattributed_token_usage` in the in-memory snapshot and SQLite,
+    /// preserving all other run-state fields. Called before the compaction
+    /// completion SSE event so the debounced snapshot refetch sees the update.
+    async fn persist_compaction_context(&self, projected_context: u64) -> Result<()> {
+        let update = {
+            let mut snapshot = self.session_snapshot.lock().await;
+            let Some(snapshot) = snapshot.as_mut() else {
+                return Ok(());
+            };
+            let mut unattributed = snapshot.unattributed_token_usage.clone().unwrap_or_default();
+            unattributed.replace_context(projected_context);
+            snapshot.apply_run_state(sessions::SessionRunState {
+                last_response_duration_ms: snapshot.last_response_duration_ms,
+                previous_response_duration_ms: snapshot.previous_response_duration_ms,
+                response_durations_ms: snapshot.response_durations_ms.clone(),
+                token_usages: snapshot.token_usages.clone(),
+                unattributed_token_usage: Some(unattributed),
+            })
+        };
+        let store_path = self.metadata.store_path.clone();
+        tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
+            .await??;
         Ok(())
     }
 
@@ -1961,8 +2501,20 @@ impl SessionService {
     }
 }
 
+/// What a revert left behind, so the caller can report it without re-reading
+/// everything the revert just changed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RevertOutcome {
+    pub transcript_len: usize,
+    pub messages_removed: usize,
+    pub workspace_restored: bool,
+    pub revisions_removed: usize,
+    pub threads_removed: usize,
+}
+
 struct LoadedFrontendMessages {
     messages: Vec<Message>,
+    created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
 }
@@ -2058,6 +2610,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
         .collect();
     MessagesPageSnapshot {
         messages,
+        created_at: Vec::new(),
         page: MessagePageMetadata {
             start,
             end,
@@ -2199,6 +2752,7 @@ fn response_timing_after_run(
         response_durations_ms: Some(durations),
         token_usages: None,
         last_token_usage: None,
+        unattributed_token_usage: None,
         cumulative_token_usage: None,
     }
 }
@@ -2226,8 +2780,10 @@ fn response_duration_history_from_snapshot(
 /// Build the per-response token-usage vector after a run, mirroring the
 /// logic in `response_timing_after_run` for durations.  The existing
 /// vector is preserved and padded to match the new response count; the
-/// most recent response's usage is set from `completed_usage` when the
-/// run completed successfully.
+/// most recent response's usage is set from `completed_usage` only when the
+/// run appended a new visible response. A failed tool loop can accumulate
+/// usage without producing a visible response, and must not overwrite the
+/// usage/cost attributed to the preceding response.
 fn token_usages_after_run(
     existing: &[Option<crate::model::TokenUsage>],
     previous_response_count: usize,
@@ -2242,13 +2798,45 @@ fn token_usages_after_run(
     if usages.len() < current_response_count {
         usages.resize(current_response_count, None);
     }
-    if let (Some(usage), Some(last_index)) =
-        (completed_usage, current_response_count.checked_sub(1))
-    {
-        usages[last_index] = Some(usage);
+    if current_response_count > previous_response_count {
+        if let (Some(usage), Some(last_index)) =
+            (completed_usage, current_response_count.checked_sub(1))
+        {
+            usages[last_index] = Some(usage);
+        }
     }
 
     usages
+}
+
+/// Accumulate billable usage for runs with no visible response without
+/// disturbing the response-indexed history. Context tokens remain a latest
+/// value gauge while token and cost fields accumulate across failed runs.
+fn unattributed_usage_after_run(
+    existing: Option<crate::model::TokenUsage>,
+    appended_visible_response: bool,
+    completed_usage: Option<crate::model::TokenUsage>,
+) -> Option<crate::model::TokenUsage> {
+    if appended_visible_response {
+        return existing.map(|mut cumulative| {
+            if completed_usage.is_some() {
+                // This response has usage and is now the latest context gauge.
+                // Retain failed-run cumulative accounting, but prevent its
+                // older gauge from overriding the response in frontend totals.
+                cumulative.replace_context(0);
+            }
+            cumulative
+        });
+    }
+    let Some(completed_usage) = completed_usage else {
+        return existing;
+    };
+    let mut cumulative = existing.unwrap_or_default();
+    cumulative.add_cost_saturating(&completed_usage);
+    if completed_usage.orchestrator_context_tokens != 0 {
+        cumulative.replace_context(completed_usage.orchestrator_context_tokens);
+    }
+    Some(cumulative)
 }
 
 #[cfg(test)]
@@ -2283,6 +2871,9 @@ pub(super) mod tests {
                 reasoning_text: Some("reasoning without visible content".to_string()),
                 reasoning_details: Some(serde_json::json!({"type": "reasoning"})),
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "older-tool".to_string(),
@@ -2306,6 +2897,9 @@ pub(super) mod tests {
                     thread_call("thread-malformed", r#"{"name":"broken"#),
                     thread_call("thread-empty", r#"{"name":"   "}"#),
                 ]),
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "thread-zeta".to_string(),
@@ -2316,6 +2910,9 @@ pub(super) mod tests {
                 reasoning_text: Some("new reasoning".to_string()),
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::System {
                 content: "system-three".to_string(),
@@ -2328,6 +2925,9 @@ pub(super) mod tests {
                     "thread-alpha",
                     r#"{"name":"alpha","action":"inside the cycle"}"#,
                 )]),
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::Tool {
                 tool_call_id: "thread-alpha".to_string(),
@@ -2338,6 +2938,9 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
         ]
     }
@@ -2356,6 +2959,7 @@ pub(super) mod tests {
         let start = end.saturating_sub(request.limit.max(1));
         MessagesPageSnapshot {
             messages: visible[start..end].to_vec(),
+            created_at: Vec::new(),
             page: MessagePageMetadata {
                 start,
                 end,
@@ -2458,7 +3062,7 @@ pub(super) mod tests {
                 working_directory: "/repo".to_string(),
                 worker_executable: None,
                 sandbox: None,
-                ssh_host: None,
+                ssh: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
@@ -2480,7 +3084,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         })
     }
@@ -2521,7 +3125,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
@@ -2580,6 +3184,9 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
             Message::User {
                 content: "recent request".to_string(),
@@ -2659,10 +3266,221 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
+    }
+
+    #[tokio::test]
+    async fn frontend_snapshot_reuses_one_runtime_connection() {
+        let (parts, store_path) =
+            test_active_service("snapshot_connection_reuse", "connection-session");
+        for index in 0..3 {
+            crate::store::define_workset(
+                &store_path,
+                "connection-session",
+                &crate::store::WorksetDefinition {
+                    id: format!("workset-{index}"),
+                    goal: "verify connection reuse".to_string(),
+                    status: "active".to_string(),
+                    summary: String::new(),
+                    verification_recipe: None,
+                    items: Vec::new(),
+                },
+            )
+            .unwrap();
+        }
+        crate::store::append_episode(
+            &store_path,
+            "connection-session",
+            "worker",
+            "implementation",
+            "retained episode",
+        )
+        .unwrap();
+        let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
+            thread_name: Some("worker".to_string()),
+            content: "retained event".to_string(),
+            usage: None,
+        })
+        .unwrap();
+        crate::store::append_thread_event(&store_path, "connection-session", "worker", &event_json)
+            .unwrap();
+        crate::store::queue_thread_steering(
+            &store_path,
+            "connection-session",
+            "worker",
+            "dispatch",
+            "retained steering",
+        )
+        .unwrap();
+        crate::store::track_connection_opens(&store_path);
+
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(snapshot.threads.len(), 1);
+        assert_eq!(snapshot.thread_episodes["worker"].len(), 1);
+        assert_eq!(snapshot.thread_events["worker"].len(), 1);
+        assert_eq!(snapshot.thread_steering.len(), 1);
+        assert_eq!(snapshot.worksets.items.len(), 3);
+        assert_eq!(crate::store::tracked_connection_opens(&store_path), 1);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore = "manual latency benchmark; run with --ignored --nocapture"]
+    async fn benchmark_frontend_snapshot_latency() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+        const ITERATIONS: usize = 100;
+        let (mut parts, store_path) =
+            test_active_service("snapshot_benchmark", "benchmark-session");
+        let workspace = store_path.parent().unwrap().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&workspace)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "--quiet"]);
+        for index in 0..64 {
+            std::fs::write(
+                workspace.join(format!("file-{index}.txt")),
+                format!("baseline {index}\n"),
+            )
+            .unwrap();
+        }
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=nac benchmark",
+            "-c",
+            "user.email=nac-benchmark@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "benchmark fixture",
+        ]);
+        for index in 0..16 {
+            std::fs::write(
+                workspace.join(format!("file-{index}.txt")),
+                format!("modified {index}\n"),
+            )
+            .unwrap();
+        }
+        let metadata = Arc::make_mut(&mut parts.service.metadata);
+        metadata.cwd = workspace.display().to_string();
+        metadata.workspace_host_path = Some(workspace);
+        for thread_index in 0..16 {
+            let thread_name = format!("worker-{thread_index}");
+            for episode_index in 0..8 {
+                crate::store::append_episode(
+                    &store_path,
+                    "benchmark-session",
+                    &thread_name,
+                    "implementation",
+                    &format!("episode {episode_index}"),
+                )
+                .unwrap();
+            }
+            for event_index in 0..32 {
+                let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
+                    thread_name: Some(thread_name.clone()),
+                    content: format!("event {event_index}"),
+                    usage: None,
+                })
+                .unwrap();
+                crate::store::append_thread_event(
+                    &store_path,
+                    "benchmark-session",
+                    &thread_name,
+                    &event_json,
+                )
+                .unwrap();
+            }
+        }
+        for workset_index in 0..4 {
+            crate::store::define_workset(
+                &store_path,
+                "benchmark-session",
+                &crate::store::WorksetDefinition {
+                    id: format!("workset-{workset_index}"),
+                    goal: "measure dashboard reads".to_string(),
+                    status: "active".to_string(),
+                    summary: "benchmark fixture".to_string(),
+                    verification_recipe: None,
+                    items: (0..8)
+                        .map(|item_index| crate::store::WorksetItemDefinition {
+                            title: format!("item-{item_index}"),
+                            scope: "crates/nac-core".to_string(),
+                            description: "exercise workset detail reads".to_string(),
+                            role: "implementation".to_string(),
+                            depends_on: Vec::new(),
+                            acceptance: "snapshot includes this item".to_string(),
+                            notes: None,
+                        })
+                        .collect(),
+                },
+            )
+            .unwrap();
+        }
+        seed_store_transcript(
+            &parts,
+            (0..128)
+                .map(|index| Message::User {
+                    content: format!("benchmark message {index}"),
+                })
+                .collect(),
+        )
+        .await;
+
+        for _ in 0..10 {
+            parts.service.frontend_snapshot().await.unwrap();
+        }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let max_scheduler_gap_us = Arc::new(AtomicU64::new(0));
+        let ticker_stop = Arc::clone(&stop);
+        let ticker_gap = Arc::clone(&max_scheduler_gap_us);
+        let ticker = tokio::spawn(async move {
+            let mut previous = Instant::now();
+            while !ticker_stop.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                let now = Instant::now();
+                let lateness_us =
+                    (now.duration_since(previous).as_micros() as u64).saturating_sub(1_000);
+                ticker_gap.fetch_max(lateness_us, Ordering::Relaxed);
+                previous = now;
+            }
+        });
+
+        let mut latency_us = Vec::with_capacity(ITERATIONS);
+        for _ in 0..ITERATIONS {
+            let started = Instant::now();
+            parts.service.frontend_snapshot().await.unwrap();
+            latency_us.push(started.elapsed().as_micros() as u64);
+        }
+        stop.store(true, Ordering::Relaxed);
+        ticker.await.unwrap();
+        latency_us.sort_unstable();
+        let p95_index = (ITERATIONS * 95).div_ceil(100) - 1;
+        eprintln!(
+            "frontend_snapshot_benchmark iterations={ITERATIONS} median_us={} p95_us={} max_scheduler_lateness_us={}",
+            latency_us[ITERATIONS / 2],
+            latency_us[p95_index],
+            max_scheduler_gap_us.load(Ordering::Relaxed)
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     #[tokio::test]
@@ -2775,6 +3593,9 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ],
         )
@@ -2788,6 +3609,9 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         });
         let expected_live = page_messages(&expected_live, request);
         let live = parts.service.messages_page(request).await.unwrap();
@@ -2893,7 +3717,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -3244,6 +4068,9 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         };
         let cases: Vec<(Vec<crate::store::ThreadSteeringRecord>, Vec<Message>)> = vec![
             (vec![], vec![]),
@@ -3290,6 +4117,79 @@ pub(super) mod tests {
                 "incremental coverage must match the reference pairing"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn frontend_snapshot_reconciles_steering_delivered_during_workspace_load() {
+        let (mut parts, store_path) =
+            test_active_service("steering_workspace_race", "session-steering-workspace-race");
+        let queued = crate::store::queue_thread_steering(
+            &store_path,
+            "session-steering-workspace-race",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "run-1",
+            "change direction",
+        )
+        .unwrap();
+        crate::store::claim_thread_steering(
+            &store_path,
+            "session-steering-workspace-race",
+            "run-1",
+        )
+        .unwrap();
+
+        let gate = Arc::new(FrontendSnapshotAfterWorkspaceGate::default());
+        parts.service.frontend_snapshot_after_workspace_gate = Some(Arc::clone(&gate));
+        let snapshot_service = parts.service.clone();
+        let snapshot_task =
+            tokio::spawn(async move { snapshot_service.frontend_snapshot().await.unwrap() });
+        let reached = tokio::time::timeout(Duration::from_secs(5), async {
+            while !gate.reached.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        if reached.is_err() {
+            gate.resume.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = snapshot_task.await;
+            panic!("snapshot did not finish workspace inspection");
+        }
+
+        crate::store::acknowledge_thread_steering_batch(
+            &store_path,
+            &[queued.id],
+            "session-steering-workspace-race",
+            "run-1",
+        )
+        .unwrap();
+        seed_log_tail(
+            &parts,
+            vec![Message::User {
+                content: "change direction".to_string(),
+            }],
+        )
+        .await;
+        gate.resume.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let snapshot = snapshot_task.await.unwrap();
+        assert_eq!(snapshot.covered_orchestrator_steering_ids, vec![queued.id]);
+        assert_eq!(
+            snapshot
+                .thread_steering
+                .iter()
+                .find(|record| record.id == queued.id)
+                .map(|record| record.status.as_str()),
+            Some("delivered")
+        );
+        assert!(
+            matches!(
+                snapshot.messages.last(),
+                Some(Message::User { content }) if content == "change direction"
+            ),
+            "the canonical message must cover steering delivered during workspace inspection"
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     #[tokio::test]
@@ -3456,7 +4356,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "loaded".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -3506,7 +4406,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -3530,6 +4430,9 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 })
                 .await
                 .unwrap();
@@ -3625,11 +4528,17 @@ pub(super) mod tests {
 
         // Two full runs: the blob stays byte-identical (never-fold) while
         // the run-state bookkeeping accumulates per visible response.
-        for (prompt, response, input_tokens) in [
+        for (loaded_visible_response_count, (prompt, response, input_tokens)) in [
             ("first prompt", "first done", 10_u64),
             ("second prompt", "second done", 20_u64),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let active = parts.service.try_begin_run(None, prompt).unwrap();
+            parts
+                .service
+                .set_run_transcript_baseline(&active.run_id, loaded_visible_response_count);
             {
                 let mut agent = parts.service.agent.lock().await;
                 agent
@@ -3644,6 +4553,9 @@ pub(super) mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     })
                     .await
                     .unwrap();
@@ -3729,6 +4641,9 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         });
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),
@@ -3766,7 +4681,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -3804,10 +4719,7 @@ pub(super) mod tests {
         assert_eq!(loaded.previous_response_duration_ms, Some(999));
         assert_eq!(loaded.token_usages.len(), 2);
         assert!(loaded.token_usages[0].is_none());
-        assert_eq!(
-            loaded.token_usages[1].as_ref().unwrap().input_tokens,
-            10
-        );
+        assert_eq!(loaded.token_usages[1].as_ref().unwrap().input_tokens, 10);
         let blob_json_after: String = crate::store::open_connection(&store_path)
             .unwrap()
             .query_row(
@@ -3855,11 +4767,12 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
         let active = parts.service.try_begin_run(None, "prompt").unwrap();
+        parts.service.set_run_transcript_baseline(&active.run_id, 0);
         {
             let mut agent = parts.service.agent.lock().await;
             agent
@@ -3874,6 +4787,9 @@ pub(super) mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 })
                 .await
                 .unwrap();
@@ -3886,6 +4802,7 @@ pub(super) mod tests {
             cache_write_tokens: 15,
             reasoning_tokens: 0,
             orchestrator_context_tokens: 715,
+            cost: crate::model::TokenCostMicros::default(),
         };
         assert!(
             parts
@@ -3933,7 +4850,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn failed_run_persists_token_usage() {
+    async fn failed_run_without_visible_response_round_trips_token_usage() {
         // Regression test: when a run fails (e.g. model API error after a tool
         // round that dispatched workers), the accumulated token usage —
         // including worker thread tokens — must still be persisted so it is
@@ -3967,25 +4884,17 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
         let active = parts.service.try_begin_run(None, "prompt").unwrap();
+        parts.service.set_run_transcript_baseline(&active.run_id, 0);
         {
             let mut agent = parts.service.agent.lock().await;
             agent
                 .push_and_log_for_test(Message::User {
                     content: "prompt".to_string(),
-                })
-                .await
-                .unwrap();
-            agent
-                .push_and_log_for_test(Message::Assistant {
-                    content: Some("partial response".to_string()),
-                    reasoning_text: None,
-                    reasoning_details: None,
-                    tool_calls: None,
                 })
                 .await
                 .unwrap();
@@ -4000,6 +4909,7 @@ pub(super) mod tests {
             cache_write_tokens: 15,
             reasoning_tokens: 0,
             orchestrator_context_tokens: 715,
+            cost: crate::model::TokenCostMicros::default(),
         };
         assert!(
             parts
@@ -4011,19 +4921,167 @@ pub(super) mod tests {
                 .await
         );
 
-        // The failed run should still persist the token usage.
+        // The response-indexed history stays empty, while the failed run's
+        // accounting round-trips through the extended token accounting JSON.
         let loaded = sessions::load_session(&store_path, &session_id).unwrap();
-        assert_eq!(loaded.token_usages.len(), 1);
-        let persisted = loaded.token_usages[0]
+        assert!(loaded.token_usages.is_empty());
+        let persisted = loaded
+            .unattributed_token_usage
             .as_ref()
-            .expect("token usage should be persisted even on failed run");
+            .expect("failed usage should persist without a visible response");
         assert_eq!(persisted.input_tokens, 500);
         assert_eq!(persisted.output_tokens, 120);
         assert_eq!(persisted.cache_read_tokens, 80);
         assert_eq!(persisted.cache_write_tokens, 15);
         assert_eq!(persisted.orchestrator_context_tokens, 715);
 
+        let frontend = parts.service.frontend_snapshot().await.unwrap();
+        assert!(frontend.response_timing.token_usages.unwrap().is_empty());
+        assert_eq!(
+            frontend
+                .response_timing
+                .cumulative_token_usage
+                .unwrap()
+                .input_tokens,
+            500
+        );
+
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
+        let store_path = test_store_path("failed_then_successful_token_usage");
+        let client = ModelClient::new_for_test();
+        let session_id = "session-failed-then-successful";
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.unattributed_token_usage = Some(crate::model::TokenUsage {
+            input_tokens: 500,
+            output_tokens: 120,
+            cache_read_tokens: 80,
+            cache_write_tokens: 15,
+            orchestrator_context_tokens: 715,
+            cost: crate::model::TokenCostMicros {
+                input: 1_000,
+                output: 480,
+                total: 1_480,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        });
+        sessions::create_session(&store_path, &snapshot).unwrap();
+
+        let successful_usage = crate::model::TokenUsage {
+            input_tokens: 700,
+            output_tokens: 200,
+            cache_read_tokens: 100,
+            cache_write_tokens: 0,
+            orchestrator_context_tokens: 1_000,
+            cost: crate::model::TokenCostMicros {
+                input: 1_400,
+                output: 800,
+                total: 2_200,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        };
+        let token_usages = token_usages_after_run(&[], 0, 1, Some(successful_usage.clone()));
+        let unattributed_token_usage = unattributed_usage_after_run(
+            snapshot.unattributed_token_usage.clone(),
+            true,
+            Some(successful_usage.clone()),
+        );
+        let update = snapshot.apply_run_state(sessions::SessionRunState {
+            last_response_duration_ms: None,
+            previous_response_duration_ms: None,
+            response_durations_ms: None,
+            token_usages,
+            unattributed_token_usage,
+        });
+        sessions::save_session_run_state(&store_path, &update).unwrap();
+
+        let loaded = sessions::load_session(&store_path, session_id).unwrap();
+        let unattributed = loaded.unattributed_token_usage.as_ref().unwrap();
+        assert_eq!(unattributed.input_tokens, 500);
+        assert_eq!(unattributed.output_tokens, 120);
+        assert_eq!(unattributed.cache_read_tokens, 80);
+        assert_eq!(unattributed.cache_write_tokens, 15);
+        assert_eq!(unattributed.cost.total, 1_480);
+        assert_eq!(unattributed.orchestrator_context_tokens, 0);
+
+        let timing = ResponseTimingSnapshot::from(&loaded);
+        assert_eq!(
+            timing
+                .last_token_usage
+                .as_ref()
+                .unwrap()
+                .orchestrator_context_tokens,
+            1_000
+        );
+        let cumulative = timing.cumulative_token_usage.unwrap();
+        assert_eq!(cumulative.input_tokens, 1_200);
+        assert_eq!(cumulative.output_tokens, 320);
+        assert_eq!(cumulative.cache_read_tokens, 180);
+        assert_eq!(cumulative.cache_write_tokens, 15);
+        assert_eq!(cumulative.cost.total, 3_680);
+        assert_eq!(cumulative.orchestrator_context_tokens, 1_000);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_run_without_new_visible_response_preserves_and_accumulates_usage() {
+        let previous_usage = crate::model::TokenUsage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cost: crate::model::TokenCostMicros {
+                input: 200,
+                output: 80,
+                total: 280,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        };
+        let failed_usage = crate::model::TokenUsage {
+            input_tokens: 900,
+            output_tokens: 70,
+            cost: crate::model::TokenCostMicros {
+                input: 1_800,
+                output: 280,
+                total: 2_080,
+                ..crate::model::TokenCostMicros::default()
+            },
+            ..crate::model::TokenUsage::default()
+        };
+
+        let usages = token_usages_after_run(
+            &[Some(previous_usage.clone())],
+            1,
+            1,
+            Some(failed_usage.clone()),
+        );
+        let unattributed =
+            unattributed_usage_after_run(None, false, Some(failed_usage.clone())).unwrap();
+        let accumulated =
+            unattributed_usage_after_run(Some(unattributed), false, Some(failed_usage.clone()))
+                .unwrap();
+
+        assert_eq!(usages, vec![Some(previous_usage)]);
+        assert_eq!(accumulated.input_tokens, failed_usage.input_tokens * 2);
+        assert_eq!(accumulated.output_tokens, failed_usage.output_tokens * 2);
+        assert_eq!(accumulated.cost.total, failed_usage.cost.total * 2);
     }
 
     #[tokio::test]
@@ -4090,7 +5148,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         // Inject the log failure precisely at the tool-result commit point:
@@ -4253,7 +5311,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
 
@@ -4274,6 +5332,9 @@ pub(super) mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             });
         }
 
@@ -4339,7 +5400,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut agent_events = parts.service.subscribe_agent_events();
@@ -4449,7 +5510,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -4643,6 +5704,9 @@ pub(super) mod tests {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         });
         let mut snapshot = sessions::new_snapshot(
             session_id.clone(),
@@ -4671,7 +5735,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -4763,7 +5827,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();
@@ -4796,6 +5860,17 @@ pub(super) mod tests {
                 })
                 .await
                 .unwrap();
+            agent.last_usage = Some(crate::model::TokenUsage {
+                input_tokens: 40,
+                output_tokens: 10,
+                cost: crate::model::TokenCostMicros {
+                    input: 80,
+                    output: 40,
+                    total: 120,
+                    ..crate::model::TokenCostMicros::default()
+                },
+                ..crate::model::TokenUsage::default()
+            });
         }
 
         parts.service.request_cancel(&active.run_id).await.unwrap();
@@ -4831,14 +5906,9 @@ pub(super) mod tests {
         let saved = events.recv().await.unwrap();
         assert_eq!(saved.run_id.as_ref(), Some(&active.run_id));
         assert!(matches!(saved.event, SessionEvent::SnapshotSaved { .. }));
-        let failed = events.recv().await.unwrap();
-        assert_eq!(failed.run_id.as_ref(), Some(&active.run_id));
-        assert_eq!(
-            failed.event,
-            SessionEvent::RunFailed {
-                message: "run failed".to_string()
-            }
-        );
+        let cancelled = events.recv().await.unwrap();
+        assert_eq!(cancelled.run_id.as_ref(), Some(&active.run_id));
+        assert_eq!(cancelled.event, SessionEvent::RunCancelled);
         assert!(parts.service.active_run().is_none());
         assert!(parts.service.active_thread_names().await.is_empty());
         assert!(crate::store::list_thread_steering(&store_path, &session_id)
@@ -4850,6 +5920,13 @@ pub(super) mod tests {
         // the blob keeps the system head and the cancellation marker lives
         // in the transcript log.
         let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(loaded.token_usages.len(), 1);
+        let cancellation_usage = loaded.token_usages[0]
+            .as_ref()
+            .expect("early cancellation usage should be attributed to its marker");
+        assert_eq!(cancellation_usage.input_tokens, 40);
+        assert_eq!(cancellation_usage.output_tokens, 10);
+        assert_eq!(cancellation_usage.cost.total, 120);
         assert_eq!(
             serde_json::to_value(&loaded.messages).unwrap(),
             serde_json::to_value(&parts.init.restored_messages).unwrap()
@@ -4880,7 +5957,7 @@ pub(super) mod tests {
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: "/repo".to_string(),
-            workspace_host_path: Some(PathBuf::from("/repo")),
+            workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
         let mut events = parts.service.subscribe_events();

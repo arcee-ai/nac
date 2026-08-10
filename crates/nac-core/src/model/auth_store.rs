@@ -46,6 +46,17 @@ pub(super) fn with_arcee_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> 
     result
 }
 
+/// Serialize read-modify-write access to any credential file in NAC home.
+pub(super) fn with_credential_lock<T>(
+    lock_path: &Path,
+    operation: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let lock = acquire_lock(lock_path)?;
+    let result = operation();
+    drop(lock);
+    result
+}
+
 pub(super) fn read_arcee_auth_string() -> Result<Option<String>> {
     read_auth_string_from_path(&arcee_auth_file_path()?)
 }

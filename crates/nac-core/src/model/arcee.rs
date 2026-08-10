@@ -6,7 +6,7 @@ use super::*;
 use anyhow::Context;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CLIENT_ID: &str = "nac-cli";
@@ -287,6 +287,30 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
     Ok(parsed)
 }
 
+/// Resolves an Arcee/OpenAI-compatible base URL to its model-index route.
+///
+/// The index is the sibling of the chat-completions route rather than a path off
+/// the base URL, and the two are reached through the same canonicalization: a
+/// stored login records the origin it was issued for, while the REST surface
+/// lives under `/api/v1`. Asked at the bare origin, `/models` answers 200 with an
+/// empty body, which reads as a provider offering nothing rather than as a URL
+/// that was never the index.
+pub(super) fn models_url(base_url: &str) -> Result<Url> {
+    let mut url = chat_completions_url(base_url)?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|_| {
+            anyhow!(
+                "invalid Arcee base URL '{}': URL cannot be a base",
+                base_url
+            )
+        })?;
+        segments.pop();
+        segments.pop();
+        segments.push("models");
+    }
+    Ok(url)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct StoredArceeAuth {
     #[serde(rename = "type")]
@@ -388,53 +412,113 @@ fn validate_auth_service_base_url(base_url: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn arcee_auth_login() -> Result<()> {
+/// An Arcee device login that has been issued a code and is waiting for the
+/// user to approve it.
+pub(super) struct ArceeDeviceLogin {
+    client: Client,
+    service: ArceeAuthService,
+    device: DeviceCode,
+}
+
+impl ArceeDeviceLogin {
+    pub(super) fn prompt(&self) -> DeviceLoginPrompt {
+        DeviceLoginPrompt {
+            verification_uri: self.device.verification_uri_complete.clone(),
+            // The URL already carries this code, so it is only ever shown for
+            // the user to check the page against.
+            user_code: Some(self.device.user_code.clone()),
+            expires_in_secs: self.device.expires_in_secs,
+        }
+    }
+
+    pub(super) async fn complete(self) -> Result<ManagedAuthSnapshot> {
+        let success = poll_device_code(&self.client, &self.service, &self.device).await?;
+        let auth = stored_auth_from_token_success(success)?;
+        with_arcee_auth_lock(|| write_stored_auth(&auth))?;
+        Ok(snapshot_from_stored(Some(auth), arcee_auth_file_path()?))
+    }
+}
+
+pub(super) async fn begin_arcee_device_login() -> Result<ArceeDeviceLogin> {
     let service = ArceeAuthService::canonical()?;
     let client = no_redirect_client()?;
     let device = request_device_code(&client, &service).await?;
+    Ok(ArceeDeviceLogin {
+        client,
+        service,
+        device,
+    })
+}
+
+pub(super) fn arcee_auth_snapshot() -> Result<ManagedAuthSnapshot> {
+    let path = arcee_auth_file_path()?;
+    Ok(snapshot_from_stored(read_stored_auth_optional()?, path))
+}
+
+fn snapshot_from_stored(auth: Option<StoredArceeAuth>, path: PathBuf) -> ManagedAuthSnapshot {
+    ManagedAuthSnapshot {
+        provider: ManagedAuthProvider::Arcee,
+        signed_in: auth.is_some(),
+        account: auth.as_ref().map(|auth| auth.workspace_name.clone()),
+        organization: auth.as_ref().map(|auth| auth.organization_id.clone()),
+        base_url: auth.as_ref().map(|auth| auth.base_url.clone()),
+        expires_at_ms: auth.as_ref().map(|auth| auth.expires_at_ms),
+        path: path.display().to_string(),
+    }
+}
+
+pub(super) fn arcee_auth_remove() -> Result<bool> {
+    let path = arcee_auth_file_path()?;
+    with_arcee_auth_lock(|| remove_arcee_auth_file_for_logout(&path))
+}
+
+pub(super) async fn arcee_auth_login() -> Result<()> {
+    let login = begin_arcee_device_login().await?;
+    let prompt = login.prompt();
 
     println!("Open this URL in a browser to authorize nac:");
-    println!("{}", device.verification_uri_complete);
-    println!();
-    println!("Confirm this code matches what the page shows:");
-    println!("{}", device.user_code);
+    println!("{}", prompt.verification_uri);
+    if let Some(code) = &prompt.user_code {
+        println!();
+        println!("Confirm this code matches what the page shows:");
+        println!("{code}");
+    }
     println!();
     println!("Waiting for authorization...");
 
-    let success = poll_device_code(&client, &service, &device).await?;
-    let auth = stored_auth_from_token_success(success)?;
-    with_arcee_auth_lock(|| write_stored_auth(&auth))?;
+    let snapshot = login.complete().await?;
 
     println!("Arcee auth saved.");
-    println!("workspace: {}", auth.workspace_name);
-    println!("base_url: {}", auth.base_url);
-    println!("path: {}", arcee_auth_file_path()?.display());
+    println!("workspace: {}", snapshot.account.unwrap_or_default());
+    println!("base_url: {}", snapshot.base_url.unwrap_or_default());
+    println!("path: {}", snapshot.path);
     Ok(())
 }
 
 pub(super) fn arcee_auth_status() -> Result<()> {
-    let path = arcee_auth_file_path()?;
-    let auth = read_stored_auth_optional()?;
-    match auth {
-        Some(auth) => {
-            println!("Arcee auth: signed in");
-            println!("workspace: {}", auth.workspace_name);
-            println!("organization: {}", auth.organization_id);
-            println!("base_url: {}", auth.base_url);
-            println!("access token: {}", expiry_status(auth.expires_at_ms));
-            println!("path: {}", path.display());
-        }
-        None => {
-            println!("Arcee auth: not signed in");
-            println!("path: {}", path.display());
-        }
+    let snapshot = arcee_auth_snapshot()?;
+    if snapshot.signed_in {
+        println!("Arcee auth: signed in");
+        println!("workspace: {}", snapshot.account.unwrap_or_default());
+        println!(
+            "organization: {}",
+            snapshot.organization.unwrap_or_default()
+        );
+        println!("base_url: {}", snapshot.base_url.unwrap_or_default());
+        println!(
+            "access token: {}",
+            expiry_status(snapshot.expires_at_ms.unwrap_or_default())
+        );
+    } else {
+        println!("Arcee auth: not signed in");
     }
+    println!("path: {}", snapshot.path);
     Ok(())
 }
 
 pub(super) fn arcee_auth_logout() -> Result<()> {
     let path = arcee_auth_file_path()?;
-    let removed = with_arcee_auth_lock(|| remove_arcee_auth_file_for_logout(&path))?;
+    let removed = arcee_auth_remove()?;
     if removed {
         println!("Arcee auth removed.");
     } else {
@@ -683,6 +767,12 @@ async fn request_token_refresh(
             truncate(&body)
         )),
     }
+}
+
+/// Whether a stored Arcee credential exists and parses (the `/models`
+/// auth-status check; any read/parse/permission failure reads as absent).
+pub(super) fn stored_credential_present() -> bool {
+    matches!(read_stored_auth_optional(), Ok(Some(_)))
 }
 
 pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {

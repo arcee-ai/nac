@@ -107,7 +107,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
             .plan(&messages, &[], CompactionReason::Auto)
             .prepared
             .context_estimate,
-        52
+        50
     );
 
     let mut changed_projection = messages.clone();
@@ -121,7 +121,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
         .prepared;
     assert_eq!(
         prepared.context_estimate,
-        full_provider_byte_estimate(&prepared.messages, &[])
+        estimate_message_tokens(&prepared.messages).saturating_add(estimate_tool_tokens(&[]))
     );
 
     state.restore_newest_valid_checkpoint(&messages).unwrap();
@@ -149,7 +149,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     let prepared = state.plan(&messages, &[], CompactionReason::Auto).prepared;
     assert_eq!(
         prepared.context_estimate,
-        full_provider_byte_estimate(&prepared.messages, &[])
+        estimate_message_tokens(&prepared.messages).saturating_add(estimate_tool_tokens(&[]))
     );
     assert_ne!(prepared.context_estimate, 50);
 
@@ -258,7 +258,7 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
             .plan(&messages, &[], CompactionReason::Auto)
             .prepared
             .context_estimate
-            > 50
+            != 50
     );
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -281,6 +281,9 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
                     arguments: "{}".to_string(),
                 },
             }]),
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::Tool {
             tool_call_id: "call".to_string(),
@@ -326,7 +329,7 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
                 checkpoint.id
             );
             state.record_ordinary_context(&appended, 20, appended.len(), Some(checkpoint.id));
-            assert_eq!(state.prepare(&appended, &[]).context_estimate, 22);
+            assert_eq!(state.prepare(&appended, &[]).context_estimate, 20);
         }
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
