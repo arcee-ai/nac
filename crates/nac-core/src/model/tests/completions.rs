@@ -343,3 +343,60 @@ fn responses_input_items_expand_reasoning_and_tool_state() {
     assert_eq!(items[3]["role"], "assistant");
     assert_eq!(items[4]["type"], "function_call_output");
 }
+
+#[test]
+fn responses_input_items_replay_exact_output_sequence() {
+    let output = vec![
+        json!({
+            "type": "message",
+            "id": "msg_commentary",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Checking that now."}]
+        }),
+        json!({
+            "type": "reasoning",
+            "id": "rs_1",
+            "encrypted_content": "encrypted",
+            "summary": [{"type": "summary_text", "text": "Need the file."}]
+        }),
+        json!({
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_1",
+            "name": "read",
+            "arguments": "{\"path\":\"src/main.rs\"}",
+            "status": "completed"
+        }),
+    ];
+    let items = responses_input_items(&[
+        Message::Assistant {
+            content: Some("Checking that now.".to_string()),
+            reasoning_text: Some("Need the file.".to_string()),
+            reasoning_details: Some(json!({
+                "type": "openai_responses_output",
+                "items": output.clone()
+            })),
+            tool_calls: Some(vec![ToolCall {
+                id: "call_1".to_string(),
+                call_type: "function".to_string(),
+                function: FunctionCall {
+                    name: "read".to_string(),
+                    arguments: "{\"path\":\"src/main.rs\"}".to_string(),
+                },
+            }]),
+            model_origin: None,
+            reasoning_field: None,
+            duration_ms: None,
+        },
+        Message::Tool {
+            tool_call_id: "call_1".to_string(),
+            content: "tool output".to_string(),
+        },
+    ]);
+
+    assert_eq!(&items[..output.len()], output.as_slice());
+    assert_eq!(items.len(), output.len() + 1);
+    assert_eq!(items[3]["type"], "function_call_output");
+    assert_eq!(items[3]["call_id"], "call_1");
+}

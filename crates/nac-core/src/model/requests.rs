@@ -264,6 +264,11 @@ pub(super) fn responses_input_items(messages: &[Message]) -> Vec<Value> {
                 tool_calls,
                 ..
             } => {
+                if let Some(output) = reasoning_details.as_ref().and_then(stored_responses_output) {
+                    items.extend(output.iter().cloned());
+                    continue;
+                }
+
                 if let Some(reasoning_details) = reasoning_details {
                     match reasoning_details {
                         Value::Array(values) => items.extend(values.clone()),
