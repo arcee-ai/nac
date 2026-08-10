@@ -646,7 +646,7 @@ export function FilesView({
   // revision is frozen, so it never needs this.
   useEffect(() => {
     if (revision != null) return;
-    void client.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
+    void client.invalidateQueries({ queryKey: queryKeys.sessionSnapshot(sessionId) });
   }, [client, sessionId, revision]);
 
   const workspace = snapshot?.workspace ?? null;

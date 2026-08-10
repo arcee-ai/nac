@@ -115,7 +115,11 @@ export default function SessionPage() {
 
   perfRender("SessionPage");
 
-  const { data: snapshot = null, error } = useSessionSnapshot(id);
+  const {
+    data: snapshot = null,
+    error,
+    refetch: refetchSnapshot,
+  } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
   const actions = useSessionActions();
   const collapsed = useSidePanelCollapsed();
@@ -161,7 +165,13 @@ export default function SessionPage() {
         },
       }
     : fetchError
-      ? { message: fetchError }
+      ? {
+          message: fetchError,
+          action: {
+            label: "Try again",
+            onClick: () => void refetchSnapshot(),
+          },
+        }
       : null;
 
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));

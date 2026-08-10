@@ -587,7 +587,7 @@ export interface MessageCycleMetadata {
 
 export interface MessagesPageResponse {
   messages: Message[];
-  created_at?: (string | null)[];
+  created_at: (string | null)[];
   page: MessagePageMetadata;
 }
 
