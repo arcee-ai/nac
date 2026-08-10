@@ -68,7 +68,11 @@ fn truncate_string(s: &str, max: usize) -> String {
 
 /// Extract a short human-readable preview of the key argument for a tool call.
 /// This survives sanitization and is used by the UI for compact display.
-pub(crate) fn key_arg_preview(tool_name: &str, args_detail: Option<&str>, args_preview: &str) -> String {
+pub(crate) fn key_arg_preview(
+    tool_name: &str,
+    args_detail: Option<&str>,
+    args_preview: &str,
+) -> String {
     let args_json = args_detail.unwrap_or(args_preview);
     let Ok(obj) = serde_json::from_str::<serde_json::Value>(args_json) else {
         return truncate_string(args_preview, 120);
@@ -79,21 +83,21 @@ pub(crate) fn key_arg_preview(tool_name: &str, args_detail: Option<&str>, args_p
         "read" | "write" | "edit" => {
             get_str("path").unwrap_or_else(|| truncate_string(args_preview, 120))
         }
-        "exec_command" => {
-            get_str("cmd")
-                .or_else(|| get_str("command"))
-                .unwrap_or_else(|| {
-                    let workdir = get_str("workdir").unwrap_or_default();
-                    if !workdir.is_empty() {
-                        format!("(in {})", truncate_string(&workdir, 80))
-                    } else {
-                        String::new()
-                    }
-                })
-        }
+        "exec_command" => get_str("cmd")
+            .or_else(|| get_str("command"))
+            .unwrap_or_else(|| {
+                let workdir = get_str("workdir").unwrap_or_default();
+                if !workdir.is_empty() {
+                    format!("(in {})", truncate_string(&workdir, 80))
+                } else {
+                    String::new()
+                }
+            }),
         "write_stdin" => {
             if let Some(session_id) = get_str("session_id") {
-                let chars = get_str("chars").map(|c| truncate_string(&c, 60)).unwrap_or_default();
+                let chars = get_str("chars")
+                    .map(|c| truncate_string(&c, 60))
+                    .unwrap_or_default();
                 if chars.is_empty() {
                     format!("→ {}", truncate_string(&session_id, 40))
                 } else {
@@ -129,12 +133,19 @@ pub(crate) fn key_arg_preview(tool_name: &str, args_detail: Option<&str>, args_p
                 truncate_string(args_preview, 120)
             }
         }
-        "workset_read" => {
-            get_str("id").unwrap_or_else(|| truncate_string(args_preview, 120))
-        }
+        "workset_read" => get_str("id").unwrap_or_else(|| truncate_string(args_preview, 120)),
         "workset_list" => "list".to_string(),
         _ if tool_name.starts_with("mcp__") => {
-            for key in &["query", "path", "url", "command", "pattern", "libraryName", "name", "input"] {
+            for key in &[
+                "query",
+                "path",
+                "url",
+                "command",
+                "pattern",
+                "libraryName",
+                "name",
+                "input",
+            ] {
                 if let Some(val) = get_str(key) {
                     return truncate_string(&val, 120);
                 }

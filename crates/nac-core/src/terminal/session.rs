@@ -419,7 +419,11 @@ pub(crate) fn terminal_env() -> &'static [(&'static str, &'static str)] {
         ("GIT_PAGER", "cat"),
         ("GH_PAGER", "cat"),
         ("LANG", "C.UTF-8"),
-        ("LC_ALL", "C.UTF-8"),
+        // Blank instead of "C.UTF-8": an empty LC_ALL is ignored by setlocale,
+        // so LANG still wins over whatever the caller inherited, while macOS
+        // (which has no C.UTF-8 locale) stops printing a setlocale warning on
+        // stderr for every command.
+        ("LC_ALL", ""),
         ("COLORTERM", ""),
         ("NO_COLOR", "1"),
     ]

@@ -15,8 +15,15 @@ pub(super) async fn execute_tools_parallel(
     // 2. If there are no thread dispatches, use the simple path — just spawn
     //    all non-thread calls into a JoinSet, same as the original logic.
     if thread_dispatches.is_empty() {
-        return execute_simple(other_calls, parse_errors, runtime, client, event_sink, thread_name)
-            .await;
+        return execute_simple(
+            other_calls,
+            parse_errors,
+            runtime,
+            client,
+            event_sink,
+            thread_name,
+        )
+        .await;
     }
 
     // 3. Build the DAG from thread dispatches.
@@ -356,16 +363,8 @@ mod tests {
     #[tokio::test]
     async fn test_dag_error_duplicate_name() {
         let tool_calls = vec![
-            make_tool_call(
-                "call_0",
-                "thread",
-                json!({"name": "X", "action": "work"}),
-            ),
-            make_tool_call(
-                "call_1",
-                "thread",
-                json!({"name": "X", "action": "work"}),
-            ),
+            make_tool_call("call_0", "thread", json!({"name": "X", "action": "work"})),
+            make_tool_call("call_1", "thread", json!({"name": "X", "action": "work"})),
         ];
 
         let runtime = test_runtime();

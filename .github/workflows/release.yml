@@ -20,11 +20,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: crates/nac-server/web/package-lock.json
 
-      - name: Check web assets
+      - name: Install web dependencies
+        working-directory: crates/nac-server/web
+        run: npm ci
+
+      - name: Lint and typecheck the web app
+        working-directory: crates/nac-server/web
         run: |
-          node --check crates/nac-server/assets/app.js
-          node --test crates/nac-server/assets/app.test.js
+          npm run lint
+          npm run typecheck
+
+      # The build output is committed so that building nac-web never needs Node.
+      # Rebuilding it here catches a commit that changed `web/` without shipping
+      # the matching bundle.
+      - name: Check the committed frontend build is current
+        working-directory: crates/nac-server/web
+        run: |
+          npm run build
+          if [ -n "$(git status --porcelain -- ../assets/dist)" ]; then
+            echo "::error::crates/nac-server/assets/dist is stale; run 'npm --prefix crates/nac-server/web run build' and commit the result"
+            git status --porcelain -- ../assets/dist
+            exit 1
+          fi
 
       - name: Run tests
         run: cargo test --workspace --locked

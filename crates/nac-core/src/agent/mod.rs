@@ -1,15 +1,16 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
-use crate::events::{AgentEvent, EventSink};
+use crate::events::{AgentEvent, AssistantStreamDelta, EventSink};
 use crate::mcp::McpRegistry;
-use crate::model::{ModelClient, TokenUsage};
-use crate::sandbox::SandboxSession;
+use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, TokenUsage};
+use crate::sandbox::{SandboxSession, SshConnection};
 use crate::skills::SkillRegistry;
 use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
@@ -34,11 +35,25 @@ pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };
 use compaction::{CompactionState, PreparedProviderView};
-use preview::*;
 pub(crate) use preview::key_arg_preview;
+use preview::*;
 use tool_exec::execute_tools_parallel;
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
+
+/// What a turn that answered with neither prose nor a tool call is asked next.
+///
+/// Providers that split reasoning out of the response can swallow a whole turn
+/// into the reasoning channel, leaving nothing behind (see
+/// `model::pseudo_tool_calls`). One nudge is enough to tell that apart from a
+/// model that genuinely has nothing left to say: the retry either produces the
+/// answer or the turn fails loudly instead of reporting an empty success.
+const EMPTY_TURN_NUDGE: &str = "Your last turn arrived empty: no answer and no tool call. \
+Reply with your answer as ordinary text, or issue the tool call you meant to make.";
+
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentMode {
@@ -61,8 +76,8 @@ pub struct AgentConfig {
     pub working_directory: String,
     pub worker_executable: Option<PathBuf>,
     pub sandbox: Option<SandboxSession>,
-    /// OpenSSH target for remote sessions; mutually exclusive with sandbox.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session; mutually exclusive with sandbox.
+    pub ssh: Option<SshConnection>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub extra_tool_defs: Vec<ToolDefinition>,
@@ -334,7 +349,7 @@ impl Agent {
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
         let backend = crate::sandbox::select_execution_backend(
-            config.ssh_host,
+            config.ssh,
             config.sandbox,
             &config.workspace_cwd,
             &local_paths,
@@ -389,7 +404,7 @@ impl Agent {
                 working_directory,
                 worker_executable: None,
                 sandbox: None,
-                ssh_host: None,
+                ssh: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
@@ -449,6 +464,7 @@ impl Agent {
         }
 
         let mut iteration = 0usize;
+        let mut empty_turn_nudged = false;
         let mut accumulated_usage = TokenUsage::default();
         loop {
             self.append_pending_steering_checked().await?;
@@ -471,17 +487,37 @@ impl Agent {
                 iteration,
             });
 
-            let response = match self
+            let call_started = Instant::now();
+            let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
+                self.event_sink.emit_assistant_delta(AssistantStreamDelta {
+                    thread_name: self.thread_name.clone(),
+                    text: (!delta.text.is_empty()).then_some(delta.text),
+                    reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
+                });
+            });
+            let push_delta = |delta| deltas.push(delta);
+            // Only the orchestrator's output is read as it arrives: a thread is
+            // summarized on its card, and nobody watching at all means the
+            // cheaper buffered request shape.
+            let delta_sink: DeltaSink<'_> = (self.thread_name.is_none()
+                && self.event_sink.wants_assistant_deltas())
+            .then_some(&push_delta);
+            let turn = self
                 .client
-                .send_turn(provider_view.messages, self.tool_defs.clone())
-                .await
-            {
+                .send_turn_streaming(provider_view.messages, self.tool_defs.clone(), delta_sink)
+                .await;
+            // Whatever arrived in the last partial window still belongs on screen.
+            deltas.flush();
+            let response = match turn {
                 Ok(response) => response,
                 Err(error) => {
                     // Preserve accumulated usage (including summary and worker
                     // costs from prior rounds) so it survives the error return.
                     self.last_usage = Some(accumulated_usage.clone());
-                    self.emit(AgentEvent::Error {
+                    // The provider's own words about the call it refused: the
+                    // one error class worth showing rather than reducing to
+                    // "operation failed".
+                    self.emit(AgentEvent::ModelError {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
@@ -542,6 +578,9 @@ impl Agent {
                     reasoning_text: response.assistant.reasoning_text.clone(),
                     reasoning_details: response.assistant.reasoning_details.clone(),
                     tool_calls: response.assistant.tool_calls.clone(),
+                    duration_ms: Some(duration_millis(call_started.elapsed())),
+                    model_origin: Some(self.client.model_origin()),
+                    reasoning_field: response.assistant.reasoning_field.clone(),
                 })
                 .await
             {
@@ -568,10 +607,42 @@ impl Agent {
                 if self.append_pending_steering_checked().await? > 0 {
                     continue;
                 }
-                let content = response
+                let answer = response
                     .assistant
                     .content
-                    .unwrap_or_else(|| "[No response]".to_string());
+                    .filter(|content| !content.trim().is_empty());
+                let Some(content) = answer else {
+                    if !empty_turn_nudged {
+                        empty_turn_nudged = true;
+                        if let Err(error) = self
+                            .push_and_log(Message::User {
+                                content: EMPTY_TURN_NUDGE.to_string(),
+                            })
+                            .await
+                        {
+                            self.last_usage = Some(accumulated_usage.clone());
+                            self.emit(AgentEvent::Error {
+                                thread_name: self.thread_name.clone(),
+                                message: error.to_string(),
+                            });
+                            self.tool_runtime.terminal_manager.remove_all().await;
+                            return Err(error);
+                        }
+                        continue;
+                    }
+                    // Reporting this as an answer is what let an empty run pass
+                    // for a finished one, and cost the caller a blind re-dispatch.
+                    let error = anyhow!(
+                        "The model answered twice with neither text nor a tool call, so this run has nothing to report. Retry with a more concrete action, or split the work across smaller threads."
+                    );
+                    self.last_usage = Some(accumulated_usage.clone());
+                    self.emit(AgentEvent::Error {
+                        thread_name: self.thread_name.clone(),
+                        message: error.to_string(),
+                    });
+                    self.tool_runtime.terminal_manager.remove_all().await;
+                    return Err(error);
+                };
                 self.emit(AgentEvent::AssistantMessage {
                     thread_name: self.thread_name.clone(),
                     content: content.clone(),
@@ -584,6 +655,10 @@ impl Agent {
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Ok(content);
             }
+
+            // Only consecutive empty turns are a stuck model, so a turn that
+            // acted earns the next one a fresh nudge.
+            empty_turn_nudged = false;
 
             let tool_calls = response.assistant.tool_calls.unwrap_or_default();
             let results = execute_tools_parallel(
@@ -669,9 +744,7 @@ impl Agent {
     /// log through the same writer for store-backed transcript reads (step
     /// 3), so reads and appends serialize on one connection.
     pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
-        self.transcript_log
-            .as_ref()
-            .map(|sink| sink.writer.clone())
+        self.transcript_log.as_ref().map(|sink| sink.writer.clone())
     }
 
     #[cfg(test)]
@@ -780,6 +853,9 @@ impl Agent {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         })
         .await
     }
@@ -803,7 +879,8 @@ impl Agent {
             .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
         // Live trigger (step 3): emitted after the log commit, before the
         // vec push — the store-backed read path sees the rows immediately.
-        self.event_sink.emit_transcript_appended(start_idx + batch_len);
+        self.event_sink
+            .emit_transcript_appended(start_idx + batch_len);
         Ok(())
     }
 

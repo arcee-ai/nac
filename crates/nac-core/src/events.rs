@@ -14,6 +14,9 @@ use crate::agent::key_arg_preview;
 pub const STDERR_EVENT_PREFIX: &str = "__NAC_EVENT__";
 pub const SESSION_EVENT_BUS_CAPACITY: usize = 1024;
 pub const SESSION_EVENT_BUS_REPLAY_BYTE_CAP: usize = 256 * 1024;
+/// Deltas are coalesced before they reach the bus, so this holds many seconds
+/// of output for a subscriber that is briefly slow to read.
+pub const ASSISTANT_DELTA_CHANNEL_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
@@ -221,6 +224,18 @@ pub enum AgentEvent {
         thread_name: Option<String>,
         message: String,
     },
+    /// A model call the provider itself refused, reported verbatim.
+    ///
+    /// Ordinary errors are reduced to a constant before they leave the process,
+    /// because their text can carry paths and tool output. What a provider says
+    /// about its own API — no credits, bad key, rate limit, context too long —
+    /// carries none of that and is the one thing the user has to see to act, so
+    /// it travels intact. Live-only, like the other events whose absence keeps
+    /// the persisted stream readable by older builds.
+    ModelError {
+        thread_name: Option<String>,
+        message: String,
+    },
     RunFinished {
         thread_name: Option<String>,
     },
@@ -263,7 +278,7 @@ pub struct SubmittedUserMessageSnapshot {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
     /// Agent/model progress. The canonical top-level session busy lifecycle is
-    /// represented by RunStarted/RunCompleted/RunFailed. AgentEvent
+    /// represented by RunStarted/RunCompleted/RunFailed/RunCancelled. AgentEvent
     /// RunStarted/RunFinished remain low-level progress markers.
     Agent {
         event: AgentEvent,
@@ -282,6 +297,10 @@ pub enum SessionEvent {
     RunFailed {
         message: String,
     },
+    /// The run ended because the user asked it to, which is an outcome rather
+    /// than a fault. Carries no message: the user already knows what happened,
+    /// and the reason is a constant with nothing to report.
+    RunCancelled,
     SnapshotSaved {
         session_id: String,
     },
@@ -293,9 +312,38 @@ pub enum SessionEvent {
     TranscriptAppended {
         transcript_len: u64,
     },
+    /// Live-only signal that a revert cut the transcript back to
+    /// `transcript_len` messages. Subscribers must refetch rather than apply a
+    /// delta: unlike an append, everything they hold past this point is gone.
+    TranscriptReverted {
+        transcript_len: u64,
+    },
+}
+
+/// A slice of model output as it is being produced. Rides its own channel
+/// rather than [`SessionEvent`]: deltas arrive an order of magnitude more
+/// often than session events, they are worthless the moment the assistant
+/// message lands, and pushing them through the sequenced bus would evict the
+/// replay ring a reconnecting client depends on. So no sequence id, no replay,
+/// no persistence — a subscriber that falls behind just misses text it is about
+/// to receive in full anyway.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantStreamDelta {
+    pub thread_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+}
+
+impl AssistantStreamDelta {
+    pub fn is_empty(&self) -> bool {
+        self.text.is_none() && self.reasoning.is_none()
+    }
 }
 
 pub type SessionEventReceiver = broadcast::Receiver<SessionEventEnvelope>;
+pub type AssistantStreamDeltaReceiver = broadcast::Receiver<AssistantStreamDelta>;
 
 pub struct SessionEventSubscription {
     pub client_id: SessionClientId,
@@ -314,6 +362,10 @@ pub struct SessionEventReplaySubscription {
     pub replay_gap: Option<SessionReplayGap>,
     pub replayed_events: Vec<SessionEventEnvelope>,
     pub receiver: SessionEventReceiver,
+    /// Live model output for the same session. Unsequenced and never replayed,
+    /// so a reconnecting client picks up mid-sentence and is squared up by the
+    /// assistant message that follows.
+    pub assistant_deltas: AssistantStreamDeltaReceiver,
 }
 
 #[derive(Clone)]
@@ -322,6 +374,7 @@ pub struct SessionEventBus {
     thread_event_persistence: ThreadEventPersistence,
     epoch_id: String,
     sender: broadcast::Sender<SessionEventEnvelope>,
+    delta_sender: broadcast::Sender<AssistantStreamDelta>,
     state: Arc<StdMutex<SessionEventBusState>>,
     recent_capacity: usize,
     recent_byte_capacity: usize,
@@ -383,11 +436,13 @@ impl SessionEventBus {
         let capacity = capacity.max(1);
         let byte_capacity = byte_capacity.max(1);
         let (sender, _) = broadcast::channel(capacity);
+        let (delta_sender, _) = broadcast::channel(ASSISTANT_DELTA_CHANNEL_CAPACITY);
         Self {
             session_id,
             thread_event_persistence: ThreadEventPersistence::Disabled,
             epoch_id: Uuid::new_v4().to_string(),
             sender,
+            delta_sender,
             state: Arc::new(StdMutex::new(SessionEventBusState {
                 next_sequence_id: 0,
                 published_sequence_id: 0,
@@ -401,6 +456,23 @@ impl SessionEventBus {
 
     pub fn subscribe(&self) -> SessionEventReceiver {
         self.sender.subscribe()
+    }
+
+    pub fn subscribe_assistant_deltas(&self) -> AssistantStreamDeltaReceiver {
+        self.delta_sender.subscribe()
+    }
+
+    /// Publish one slice of live model output. Dropped when nobody is watching,
+    /// which is the common case for a run started from the CLI.
+    pub fn emit_assistant_delta(&self, delta: AssistantStreamDelta) {
+        if delta.is_empty() {
+            return;
+        }
+        let _ = self.delta_sender.send(delta);
+    }
+
+    pub fn has_assistant_delta_subscribers(&self) -> bool {
+        self.delta_sender.receiver_count() > 0
     }
 
     pub fn subscribe_for_client(&self, client_id: SessionClientId) -> SessionEventSubscription {
@@ -435,6 +507,7 @@ impl SessionEventBus {
             &replayed_events,
         );
         let receiver = self.sender.subscribe();
+        let assistant_deltas = self.delta_sender.subscribe();
         SessionEventReplaySubscription {
             epoch_id: self.epoch_id.clone(),
             client_id,
@@ -446,6 +519,7 @@ impl SessionEventBus {
             replay_gap,
             replayed_events,
             receiver,
+            assistant_deltas,
         }
     }
 
@@ -612,6 +686,7 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
         AgentEvent::ModelCallStarted { .. }
         | AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::ThreadLog { .. }
+        | AgentEvent::ModelError { .. }
         | AgentEvent::OrchestratorSteeringQueued { .. }
         | AgentEvent::OrchestratorSteeringDelivered { .. }
         | AgentEvent::OrchestratorSteeringExpired { .. }
@@ -644,9 +719,7 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             // (empty string or raw JSON from an older code version).
             let key = existing_key
                 .filter(|k| !k.is_empty() && !k.starts_with('{') && !k.starts_with('['))
-                .unwrap_or_else(|| {
-                    key_arg_preview(&name, args_detail.as_deref(), &args_preview)
-                });
+                .unwrap_or_else(|| key_arg_preview(&name, args_detail.as_deref(), &args_preview));
             let safe_args = safe_tool_arguments(&name, args_detail.as_deref(), &args_preview);
             AgentEvent::ToolCallStarted {
                 thread_name,
@@ -667,7 +740,7 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             thread_name,
             call_id,
             name,
-            content_preview: safe_tool_result(&content_preview, is_error),
+            content_preview,
             is_error,
         },
         AgentEvent::ThreadStarted {
@@ -735,6 +808,14 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             thread_name,
             message: "operation failed".to_string(),
         },
+        AgentEvent::ModelError {
+            thread_name,
+            message,
+        } => AgentEvent::ModelError {
+            thread_name,
+            // Provider bodies can be long; the actionable part is at the front.
+            message: bounded_provider_message(&message),
+        },
         event @ (AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::AssistantMessage { .. }
         | AgentEvent::RunFinished { .. }
@@ -743,6 +824,16 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
         | AgentEvent::OrchestratorCompactionSkipped { .. }
         | AgentEvent::OrchestratorCompactionFailed { .. }) => event,
     })
+}
+
+const MAX_PROVIDER_MESSAGE_BYTES: usize = 600;
+
+fn bounded_provider_message(message: &str) -> String {
+    let mut end = message.len().min(MAX_PROVIDER_MESSAGE_BYTES);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    message[..end].to_string()
 }
 
 fn sanitize_external_session_event(event: SessionEvent) -> Option<SessionEvent> {
@@ -900,34 +991,6 @@ fn copy_array_length(
             target_key.to_string(),
             serde_json::Value::from(value.len() as u64),
         );
-    }
-}
-
-fn safe_tool_result(content: &str, is_error: bool) -> String {
-    let normalized = content.trim().to_ascii_lowercase();
-    if normalized.contains("timed out") || normalized.contains("timeout") {
-        return "timed out".to_string();
-    }
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(content) {
-        if let Some(exit_code) = value.get("exit_code").and_then(serde_json::Value::as_i64) {
-            return format!("exit code {exit_code}");
-        }
-    }
-    for prefix in ["exit code ", "exit code:", "exit "] {
-        if let Some(value) = normalized.strip_prefix(prefix) {
-            if let Some(code) = value
-                .split(|character: char| character.is_whitespace() || character == ':')
-                .next()
-                .and_then(|code| code.parse::<i64>().ok())
-            {
-                return format!("exit code {code}");
-            }
-        }
-    }
-    if is_error {
-        "failed".to_string()
-    } else {
-        "succeeded".to_string()
     }
 }
 
@@ -1110,6 +1173,24 @@ impl EventSink {
     /// the log append commits, so session subscribers refetch the
     /// store-backed transcript mid-run. A no-op without a bus (workers,
     /// channel sinks, tests).
+    /// Live-only model output, for the transcript to render before the
+    /// assistant message is committed. Bus-only: the stderr and channel sinks
+    /// carry the durable event log, which deltas are deliberately not part of.
+    pub fn emit_assistant_delta(&self, delta: AssistantStreamDelta) {
+        if let Some(bus) = &self.bus {
+            bus.emit_assistant_delta(delta);
+        }
+    }
+
+    /// Whether anything is listening for deltas. The streaming request shape
+    /// costs an extra parse per chunk, so a run nobody is watching keeps using
+    /// the plain one.
+    pub fn wants_assistant_deltas(&self) -> bool {
+        self.bus
+            .as_ref()
+            .is_some_and(SessionEventBus::has_assistant_delta_subscribers)
+    }
+
     pub fn emit_transcript_appended(&self, transcript_len: u64) {
         if let Some(bus) = &self.bus {
             bus.emit_with_context(
@@ -1877,7 +1958,7 @@ mod tests {
             thread_name: Some("worker".to_string()),
             call_id: "call-safe".to_string(),
             name: "exec_command".to_string(),
-            content_preview: "exit 7: CANARY_RESULT".to_string(),
+            content_preview: "exit 7: test result".to_string(),
             is_error: true,
         });
         bus_sink.emit(AgentEvent::Error {
@@ -1932,7 +2013,7 @@ mod tests {
             .join("\n");
         assert!(!serialized.contains("CANARY"));
         assert!(serialized.contains("/safe/work"));
-        assert!(serialized.contains("exit code 7"));
+        assert!(serialized.contains("exit 7: test result"));
         assert!(serialized.contains("operation failed"));
         assert!(serialized.contains("thread dispatched"));
         assert!(serialized.contains("thread timed out"));

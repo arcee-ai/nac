@@ -7,6 +7,27 @@ pub mod commands;
 pub mod events;
 mod mcp;
 pub mod model;
+
+/// Named, reusable model setups the launch UI offers instead of asking for a
+/// backend, model and base URL every time.
+pub mod model_configurations {
+    pub use crate::store::{
+        delete_model_configuration, insert_model_configuration, list_model_configurations,
+        load_model_configuration, update_model_configuration, ModelConfigurationRecord,
+        ModelConfigurationStoreError, NewModelConfiguration,
+    };
+}
+
+/// Named, reusable SSH connections the launch UI offers instead of asking for a
+/// host, port and identity file every time.
+pub mod ssh_configurations {
+    pub use crate::store::{
+        delete_ssh_configuration, insert_ssh_configuration, list_ssh_configurations,
+        load_ssh_configuration, update_ssh_configuration, NewSshConfiguration,
+        SshConfigurationRecord, SshConfigurationStoreError,
+    };
+}
+
 mod paths;
 mod process;
 pub mod runtime;
@@ -21,6 +42,7 @@ pub mod types;
 pub mod upgrade;
 pub mod view;
 mod worker;
+pub mod workspace;
 
 /// Largest token count that can be persisted exactly and transported through
 /// JavaScript-backed public settings without precision loss.

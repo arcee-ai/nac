@@ -104,7 +104,11 @@ pub(super) fn parse_openai_responses_response(
             cache_read_tokens: cached,
             cache_write_tokens: 0,
             reasoning_tokens: 0,
-            orchestrator_context_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            orchestrator_context_tokens: u
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            cost: TokenCostMicros::default(),
         }
     });
 
@@ -112,6 +116,7 @@ pub(super) fn parse_openai_responses_response(
         assistant: AssistantTurn {
             content,
             reasoning_text,
+            reasoning_field: None,
             reasoning_details,
             tool_calls: if tool_calls.is_empty() {
                 None

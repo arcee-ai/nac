@@ -47,7 +47,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
         let usage_before = agent.last_usage.clone();
 
         let result = agent.compact().await.unwrap();
-        let CompactionResult::Compacted { compaction_id } = result else {
+        let CompactionResult::Compacted { compaction_id, .. } = result else {
             panic!("manual attempt should compact: {result:?}");
         };
         assert_eq!(
@@ -145,6 +145,9 @@ async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: Some(vec![unsafe_tool_call]),
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 Message::User {
                     content: "recent".to_string(),
@@ -370,7 +373,7 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
             working_directory: ".".to_string(),
             worker_executable: None,
             sandbox: None,
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),

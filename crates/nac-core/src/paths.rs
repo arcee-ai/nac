@@ -34,13 +34,22 @@ impl PathContext {
         env::var_os("HOME").map(|home| self.resolve_env_path(home))
     }
 
-    fn resolve_env_path(&self, value: OsString) -> PathBuf {
-        let path = PathBuf::from(value);
+    /// A caller-supplied path as an absolute one.
+    ///
+    /// A relative value is joined to the directory this context was built for
+    /// rather than to the process working directory, so a path that is
+    /// validated now and used later cannot come to mean two different files.
+    pub fn resolve(&self, path: impl AsRef<Path>) -> PathBuf {
+        let path = path.as_ref();
         if path.is_absolute() {
-            path
+            path.to_path_buf()
         } else {
             self.cwd.join(path)
         }
+    }
+
+    fn resolve_env_path(&self, value: OsString) -> PathBuf {
+        self.resolve(PathBuf::from(value))
     }
 }
 

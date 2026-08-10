@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{BackendKind, ReasoningEffort};
-use crate::sandbox::{SandboxBackendType, SandboxSpec};
+use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
 
 mod codec;
@@ -16,10 +16,11 @@ mod operation_lease;
 mod snapshot;
 mod summary;
 
+pub(crate) use db::list_sessions_with_connection;
 pub use db::{
-    create_session, delete_session, list_sessions, load_last_session, load_session,
-    load_session_config, reorder_sessions, save_session, save_session_run_state, session_exists,
-    update_raw_session_config, update_session_config, update_session_presentation,
+    create_session, delete_session, increment_run_count, list_sessions, load_last_session,
+    load_session, load_session_config, reorder_sessions, save_session, save_session_run_state,
+    session_exists, update_raw_session_config, update_session_config, update_session_presentation,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
@@ -30,7 +31,7 @@ pub type SessionRunLeaseError = SessionOperationLeaseError;
 pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunStateUpdate};
 
 use codec::*;
-use summary::*;
+pub(crate) use summary::{last_user_prompt, visible_message_count};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RawSessionConfig {
@@ -98,8 +99,10 @@ pub struct SessionSnapshot {
     pub backend: BackendKind,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub sandbox_spec: Option<SandboxSpec>,
-    /// OpenSSH target for remote sessions; `None` for local sessions.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session; `None` for local sessions.
+    /// Persisted in full so resume reaches the same machine the same way,
+    /// without depending on the ssh config of whoever restarts nac.
+    pub ssh: Option<SshConnection>,
     /// Env var name used to resolve the API key at session creation time.
     /// Stored per-session so resume uses the same key source, not current config.
     pub api_key_env: Option<String>,
@@ -117,6 +120,9 @@ pub struct SessionSnapshot {
     pub response_durations_ms: Option<Vec<Option<u64>>>,
     /// Per-response token usage, one entry per assistant response (in order).
     pub token_usages: Vec<Option<crate::model::TokenUsage>>,
+    /// Cumulative usage from billable runs that produced no visible response.
+    /// Kept separate so `token_usages` remains correctly indexed by response.
+    pub unattributed_token_usage: Option<crate::model::TokenUsage>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -135,14 +141,22 @@ pub struct SessionSummary {
     pub visible_message_count: usize,
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
-    /// OpenSSH target for remote sessions.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session.
+    pub ssh: Option<SshConnection>,
     pub title: Option<String>,
     pub pinned: bool,
     pub sort_order: i64,
     pub presentation_version: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// Billable tokens accumulated over the whole session, or `None` when no
+    /// response ever reported usage.
+    pub total_tokens: Option<u64>,
+    /// Micro-USD spend accumulated over the session, or `None` when no response
+    /// ever reported usage. Zero means the catalog had no rates for the model.
+    pub total_cost_micros: Option<u64>,
+    /// Number of runs ever started in this session.
+    pub run_count: u64,
 }
 
 #[derive(Debug)]
@@ -283,6 +297,7 @@ mod tests {
                 cache_write_tokens: 0,
                 reasoning_tokens: 0,
                 orchestrator_context_tokens: 150,
+                cost: crate::model::TokenCostMicros::default(),
             }),
             None,
             Some(crate::model::TokenUsage {
@@ -292,6 +307,7 @@ mod tests {
                 cache_write_tokens: 10,
                 reasoning_tokens: 0,
                 orchestrator_context_tokens: 330,
+                cost: crate::model::TokenCostMicros::default(),
             }),
         ];
         create_session(&store_path, &snapshot).unwrap();
@@ -419,7 +435,7 @@ mod tests {
             "legacy rows without token_usages_json column load as empty Vec"
         );
         assert_eq!(
-            loaded.ssh_host, None,
+            loaded.ssh, None,
             "legacy rows without a host_id column load as local sessions"
         );
 
@@ -500,11 +516,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
+    /// The whole connection has to survive, not just the host name: a session
+    /// resumed after a restart has nothing else to tell it which port and key
+    /// reached that machine.
     #[test]
-    fn ssh_host_round_trips_through_store_refresh_and_summaries() {
+    fn ssh_connection_round_trips_through_store_refresh_and_summaries() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("ssh_host_round_trip");
 
+        let connection = SshConnection {
+            host: "deploy@build-box".to_string(),
+            port: Some(2222),
+            identity_file: Some(PathBuf::from("/keys/ci")),
+        };
         let snapshot = new_snapshot(
             "session-remote".to_string(),
             PathBuf::from("/remote/workspace"),
@@ -513,7 +537,7 @@ mod tests {
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(connection.clone()),
             vec![Message::User {
                 content: "hello".to_string(),
             }],
@@ -523,7 +547,7 @@ mod tests {
         create_session(&store_path, &snapshot).unwrap();
 
         let loaded = load_session(&store_path, "session-remote").unwrap();
-        assert_eq!(loaded.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(loaded.ssh.as_ref(), Some(&connection));
 
         let refreshed = refresh_snapshot(
             &loaded,
@@ -533,19 +557,16 @@ mod tests {
             None,
             loaded.token_usages.clone(),
         );
-        assert_eq!(refreshed.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(refreshed.ssh.as_ref(), Some(&connection));
         save_session(&store_path, &refreshed).unwrap();
         assert_eq!(
-            load_session(&store_path, "session-remote")
-                .unwrap()
-                .ssh_host
-                .as_deref(),
-            Some("build-box")
+            load_session(&store_path, "session-remote").unwrap().ssh,
+            Some(connection.clone())
         );
 
         let summaries = list_sessions(&store_path).unwrap();
         assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(summaries[0].ssh.as_ref(), Some(&connection));
         assert_eq!(
             summaries[0].workspace_host_path, None,
             "remote sessions must not expose a local path for host-side git inspection"
@@ -654,6 +675,9 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ],
             None,
@@ -768,6 +792,80 @@ mod tests {
     }
 
     #[test]
+    fn session_row_with_removed_sandbox_backend_loads_without_sandbox() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("removed_sandbox_backend");
+        let snapshot = test_snapshot(
+            "legacy-sandbox",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        create_session(&store_path, &snapshot).unwrap();
+
+        // Simulate a row written by an older build whose sandbox backend has
+        // since been removed ("smolvm"): the stored spec must not break loads.
+        let legacy_sandbox_json = r#"{
+            "backend": "smolvm",
+            "image": "python:3.13-bookworm",
+            "workdir": "/workspace",
+            "mounts": [],
+            "gpu_devices": [],
+            "shm_size": "0",
+            "cpus": 2,
+            "memory_mib": 2048
+        }"#;
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET sandbox_json = ?1 WHERE session_id = 'legacy-sandbox'",
+            [legacy_sandbox_json],
+        )
+        .unwrap();
+        drop(conn);
+
+        let loaded = load_session(&store_path, "legacy-sandbox").unwrap();
+        assert!(loaded.sandbox_spec.is_none());
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(!summaries[0].sandboxed);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn session_row_with_podman_sandbox_backend_still_loads_with_sandbox() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("podman_sandbox_backend");
+        let mut snapshot = test_snapshot(
+            "podman-sandbox",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        snapshot.sandbox_spec = Some(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: "python:3.13-bookworm".to_string(),
+            workdir: PathBuf::from("/workspace"),
+            mounts: Vec::new(),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+        create_session(&store_path, &snapshot).unwrap();
+
+        let loaded = load_session(&store_path, "podman-sandbox").unwrap();
+        let spec = loaded.sandbox_spec.expect("podman sandbox must survive");
+        assert_eq!(spec.backend, SandboxBackendType::Podman);
+        assert_eq!(spec.image, "python:3.13-bookworm");
+
+        let summaries = list_sessions(&store_path).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].sandboxed);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
     fn api_key_env_and_extra_headers_round_trip_through_store() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("api_key_env_headers");
@@ -873,6 +971,9 @@ mod tests {
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ];
             completed_run.last_response_duration_ms = Some(250);
@@ -885,6 +986,7 @@ mod tests {
                 cache_write_tokens: 4,
                 reasoning_tokens: 5,
                 orchestrator_context_tokens: 42,
+                cost: crate::model::TokenCostMicros::default(),
             })];
             completed_run.updated_at = "2026-01-02 00:00:00.000000000".to_string();
 
@@ -1638,8 +1740,10 @@ mod tests {
                     cache_write_tokens: 4,
                     reasoning_tokens: 5,
                     orchestrator_context_tokens: 42,
+                    cost: crate::model::TokenCostMicros::default(),
                 }),
             ],
+            unattributed_token_usage: None,
         });
         save_session_run_state(&store_path, &update).unwrap();
 
@@ -1706,6 +1810,9 @@ mod tests {
                 reasoning_text: None,
                 reasoning_details: None,
                 tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
             },
         ];
         create_session(&store_path, &with_log).unwrap();
@@ -1731,12 +1838,18 @@ mod tests {
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::Assistant {
                         content: None,
                         reasoning_text: None,
                         reasoning_details: None,
                         tool_calls: Some(vec![tool_call]),
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),

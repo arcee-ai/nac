@@ -38,7 +38,7 @@ fn transcript_test_agent(
             working_directory: ".".to_string(),
             worker_executable: None,
             sandbox: None,
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
@@ -116,6 +116,9 @@ fn plain_assistant(content: &str) -> Message {
         reasoning_text: None,
         reasoning_details: None,
         tool_calls: None,
+        duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
     }
 }
 
@@ -137,6 +140,9 @@ fn tool_call_assistant(call_ids: &[&str]) -> Message {
                 })
                 .collect(),
         ),
+        duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
     }
 }
 
@@ -779,6 +785,114 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
         crate::store::load_all_thread_events(&store_path, "session", 100)
             .unwrap()
             .is_empty()
+    );
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let store_path = test_store_path("origin_stamp");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        serde_json::json!({
+            "status": "completed",
+            "output": [
+                {"type": "reasoning", "id": "rs_1",
+                 "summary": [{"type": "summary_text", "text": "orchestrator thinking"}]},
+                {"type": "message", "content": [{"type": "output_text", "text": "stamped answer"}]}
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+        })
+        .to_string(),
+    )]);
+    let mut agent =
+        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+
+    assert_eq!(agent.send("current").await.unwrap(), "stamped answer");
+    server.finish();
+
+    let Message::Assistant {
+        model_origin,
+        reasoning_field,
+        reasoning_text,
+        ..
+    } = agent.messages.last().expect("assistant message pushed")
+    else {
+        panic!("last message should be the assistant turn");
+    };
+    assert_eq!(
+        model_origin
+            .as_ref()
+            .map(|origin| (origin.backend, origin.model.as_str())),
+        Some((crate::model::BackendKind::OpenAiResponses, "gpt-5.5")),
+        "the push site stamps the client identity"
+    );
+    assert_eq!(reasoning_text.as_deref(), Some("orchestrator thinking"));
+    assert_eq!(
+        reasoning_field, &None,
+        "responses-api reasoning is details-based; no completions field stamp"
+    );
+
+    let log = read_log(&store_path, "session");
+    let Message::Assistant {
+        model_origin: logged_origin,
+        ..
+    } = &log.last().expect("assistant row logged").1
+    else {
+        panic!("last log row should be the assistant turn");
+    };
+    assert_eq!(
+        logged_origin, model_origin,
+        "the durable row carries the stamp"
+    );
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn errored_turns_never_enter_the_transcript() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let store_path = test_store_path("errored_turn");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    // HTTP 400 is non-retryable: the turn fails immediately, before the
+    // assistant push. This pins the S5 precondition that reasoning
+    // normalization never has to skip errored assistant messages — they
+    // do not exist.
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "400 Bad Request",
+        serde_json::json!({"error": {"message": "bad request"}}).to_string(),
+    )]);
+    let mut agent =
+        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+
+    let error = agent
+        .send("current")
+        .await
+        .expect_err("a 400 fails the turn")
+        .to_string();
+    server.finish();
+    assert!(error.contains("HTTP 400"), "{error}");
+
+    assert!(
+        !agent
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::Assistant { .. })),
+        "no assistant message in the in-memory transcript: {:?}",
+        agent.messages
+    );
+    let log = read_log(&store_path, "session");
+    assert!(
+        !log.iter()
+            .any(|(_, message)| matches!(message, Message::Assistant { .. })),
+        "no assistant row in the durable log: {log:?}"
     );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

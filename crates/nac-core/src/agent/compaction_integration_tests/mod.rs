@@ -46,7 +46,7 @@ fn compaction_test_agent(
             working_directory: ".".to_string(),
             worker_executable: None,
             sandbox: None,
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
@@ -70,6 +70,9 @@ fn compactable_messages() -> Vec<Message> {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "recent user".to_string(),

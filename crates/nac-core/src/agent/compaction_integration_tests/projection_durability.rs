@@ -67,6 +67,9 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::System {
             content: "canonical agents".to_string(),
@@ -270,6 +273,9 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "newly aged turn".to_string(),
@@ -377,6 +383,9 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
         },
         Message::User {
             content: "retained".to_string(),

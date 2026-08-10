@@ -15,15 +15,20 @@ use crate::model::{
     ModelConfigurationError, ReasoningEffort,
 };
 use crate::paths::PathContext;
+/// Public because callers outside this crate build the connections that sessions
+/// and git targets are created from.
+pub use crate::sandbox::SshConnection;
 use crate::sandbox::{
-    build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType, SandboxSession,
-    DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+    browse_remote_directory, build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType,
+    SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
+pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
 use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
 pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
+use crate::workspace::GitTarget;
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct NacConfig {
@@ -37,6 +42,8 @@ pub struct NacConfig {
     pub sandbox: SandboxConfig,
     #[serde(default)]
     pub worker: WorkerConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -45,12 +52,26 @@ pub struct StorageConfig {
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct SecurityConfig {
+    /// Extra hosts allowed to receive API-key credentials as `base_url`.
+    ///
+    /// Only this file can widen the set, which is what keeps the credential
+    /// destination out of reach of the unauthenticated HTTP API.
+    #[serde(default)]
+    pub trusted_base_url_hosts: Vec<String>,
+}
+
+/// Model defaults from config.toml's `[model]` section. Slim by design:
+/// the backend is resolved from the configured model id through the
+/// catalog, base URLs materialize from catalog provider endpoint defaults,
+/// and credentials auto-select the provider's conventional env var — so
+/// only the model id, an optional effort, and extra headers remain.
+/// Removed keys (`backend`, `base_url`, `api_key_env`) in an old config
+/// are ignored with a one-time warning at load.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct ModelConfig {
-    pub backend: Option<BackendKind>,
     pub model: Option<String>,
-    pub base_url: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
-    pub api_key_env: Option<String>,
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
 }
@@ -82,6 +103,8 @@ struct NonModelNacConfig {
     sandbox: SandboxConfig,
     #[serde(default)]
     worker: WorkerConfig,
+    #[serde(default)]
+    security: SecurityConfig,
 }
 
 impl From<NonModelNacConfig> for NacConfig {
@@ -92,6 +115,7 @@ impl From<NonModelNacConfig> for NacConfig {
             compaction: CompactionConfig::default(),
             sandbox: config.sandbox,
             worker: config.worker,
+            security: config.security,
         }
     }
 }
@@ -135,9 +159,85 @@ impl NacConfig {
             .with_context(|| format!("failed to parse non-model config {}", path.display()))
     }
 
+    /// Load the settings that decide where credentials may be sent.
+    ///
+    /// Deliberately lenient about the rest of `[model]`: config repair runs
+    /// through the same request path, so an obsolete backend name must not
+    /// stop NAC from authorizing a destination.
+    pub fn load_credential_destination_policy(cwd: &Path) -> Result<CredentialDestinationPolicy> {
+        let paths = PathContext::new(cwd);
+        let Some(path) = paths.nac_config_path() else {
+            return Ok(CredentialDestinationPolicy::default());
+        };
+        let raw = Self::read_config(&path)?;
+        let parsed = toml::from_str::<CredentialPolicyConfig>(&raw).with_context(|| {
+            format!("failed to parse credential policy from {}", path.display())
+        })?;
+        Ok(CredentialDestinationPolicy {
+            configured_base_url: parsed.model.base_url,
+            trusted_hosts: parsed.security.trusted_base_url_hosts,
+        })
+    }
+
+    /// Read the provider identity an explicitly named config file spells out.
+    ///
+    /// Launching ignores these keys — the catalog resolves the provider from
+    /// the model id — but importing a file the user pointed at is the one
+    /// case where they are the only statement of intent available, so the
+    /// importer reads them directly instead of through [`ModelConfig`].
+    pub fn load_model_identity_from_file(path: &Path) -> Result<ConfiguredModelIdentity> {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config {}", path.display()))?;
+        toml::from_str::<ConfiguredModelIdentityConfig>(&raw)
+            .map(|config| config.model)
+            .with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
+    /// Load a configuration file the user pointed at explicitly.
+    ///
+    /// Unlike the ambient search, a missing file is an error: the user named
+    /// this path, so silently falling back to defaults would hide a typo.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config {}", path.display()))?;
+        toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
     fn load_from_path(path: PathBuf) -> Result<Self> {
         let raw = Self::read_config(&path)?;
+        Self::warn_removed_model_keys(&raw);
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
+    /// One-time migration warning for `[model]` keys removed from the
+    /// config schema (`backend`, `base_url`, `api_key_env`): they parse
+    /// tolerantly (serde ignores them) and the catalog-driven resolution
+    /// replaces them. Printed at most once per process even though config
+    /// loads happen per session launch.
+    fn warn_removed_model_keys(raw: &str) {
+        const REMOVED_KEYS: [&str; 3] = ["backend", "base_url", "api_key_env"];
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if WARNED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Ok(value) = raw.parse::<toml::Value>() else {
+            return;
+        };
+        let Some(model) = value.get("model").and_then(|model| model.as_table()) else {
+            return;
+        };
+        let removed: Vec<&str> = REMOVED_KEYS
+            .into_iter()
+            .filter(|key| model.contains_key(*key))
+            .collect();
+        if removed.is_empty() {
+            return;
+        }
+        WARNED.store(true, std::sync::atomic::Ordering::Relaxed);
+        eprintln!(
+            "nac: config: ignoring removed [model] keys ({}) — the backend now resolves from the model id through the catalog, base URLs default from the catalog, and credentials auto-select the provider's conventional environment variable",
+            removed.join(", ")
+        );
     }
 
     fn read_config(path: &Path) -> Result<String> {
@@ -149,6 +249,43 @@ impl NacConfig {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct ConfiguredModelIdentityConfig {
+    #[serde(default)]
+    model: ConfiguredModelIdentity,
+}
+
+/// The `[model]` keys an older config file uses to name a provider outright.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct ConfiguredModelIdentity {
+    pub backend: Option<BackendKind>,
+    pub base_url: Option<String>,
+    pub api_key_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct CredentialPolicyConfig {
+    #[serde(default)]
+    model: CredentialPolicyModelConfig,
+    #[serde(default)]
+    security: SecurityConfig,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct CredentialPolicyModelConfig {
+    #[serde(default)]
+    base_url: Option<String>,
+}
+
+/// Destinations an operator has approved for API-key credentials.
+#[derive(Debug, Clone, Default)]
+pub struct CredentialDestinationPolicy {
+    /// `[model] base_url`, which is authoritative by virtue of living in a
+    /// hand-edited file rather than arriving over the HTTP API.
+    pub configured_base_url: Option<String>,
+    pub trusted_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -248,8 +385,90 @@ pub struct RunOptions {
     /// `Some(0)` explicitly disables the persisted threshold.
     pub orchestrator_compaction_threshold: Option<u64>,
     pub sandbox: SandboxOptions,
-    /// OpenSSH target for remote sessions; mutually exclusive with sandbox.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote session; mutually exclusive with sandbox.
+    pub ssh: SshOptions,
+}
+
+/// How to reach a host, as the caller supplies it: untrimmed, with the key path
+/// still as typed. [`SshOptions::connection`] turns it into what ssh is given.
+///
+/// Every option OpenSSH would otherwise read from `~/.ssh/config` can be stated
+/// here, so a remote session never depends on config nac cannot see. An alias
+/// still works: a host with no port and no key leaves both to ssh.
+#[derive(Debug, Clone, Default)]
+pub struct SshOptions {
+    /// `host` or `user@host`; absent or blank means the session is local.
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub identity_file: Option<PathBuf>,
+}
+
+impl SshOptions {
+    /// The host name, trimmed, or `None` for a local session.
+    pub fn host(&self) -> Option<String> {
+        trim_ssh_host(self.host.clone())
+    }
+
+    /// The connection these options describe, or `None` for a local session.
+    ///
+    /// `paths` is nac's own local path context, because the key lives on this
+    /// machine: a `~` typed into the launch form has to become a real path
+    /// before ssh, which is spawned without a shell, ever sees it.
+    pub fn connection(&self, paths: &PathContext) -> Option<SshConnection> {
+        self.host().map(|host| {
+            SshConnection::resolved(host, self.port, self.identity_file.as_deref(), paths)
+        })
+    }
+
+    /// Rejects what would otherwise fail later as an opaque ssh error.
+    ///
+    /// nac runs ssh in batch mode, where a missing key is reported as a refused
+    /// authentication rather than as a missing file, so the file is checked here
+    /// while there is still something specific to say about it.
+    fn validate(&self, paths: &PathContext) -> Result<()> {
+        let Some(connection) = self.connection(paths) else {
+            if self.port.is_some() || self.identity_file.is_some() {
+                anyhow::bail!("an ssh port or private key needs an ssh host as well");
+            }
+            return Ok(());
+        };
+        if self.port == Some(0) {
+            anyhow::bail!("ssh port must be between 1 and 65535");
+        }
+        if let Some(key) = connection.identity_file.as_deref() {
+            if !key.exists() {
+                anyhow::bail!("ssh private key '{}' does not exist", key.display());
+            }
+            if !key.is_file() {
+                anyhow::bail!("ssh private key '{}' is not a file", key.display());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Lists a directory on the host these options describe, or the login home when
+/// `path` is empty.
+///
+/// This is also how a launch form finds out whether the connection works: the
+/// listing needs the same handshake a session would, and it leaves the
+/// multiplexed connection behind for the session that follows. `config_cwd` is
+/// the *local* directory nac's own paths resolve against, since the private key
+/// and the control socket are on this machine.
+pub async fn browse_ssh_directory(
+    options: &SshOptions,
+    path: Option<&str>,
+    hidden: bool,
+    config_cwd: &Path,
+) -> std::result::Result<RemoteListing, RemoteBrowseError> {
+    let paths = PathContext::new(config_cwd);
+    options
+        .validate(&paths)
+        .map_err(|error| RemoteBrowseError::Invalid(error.to_string()))?;
+    let connection = options.connection(&paths).ok_or_else(|| {
+        RemoteBrowseError::Invalid("an ssh host is required to browse a remote directory".into())
+    })?;
+    browse_remote_directory(&connection, path, hidden, &paths).await
 }
 
 #[derive(Debug, Clone, Default)]
@@ -261,8 +480,8 @@ pub struct ManagedWorkerOptions {
     pub store: StoreOptions,
     pub model: ModelOptions,
     pub sandbox: SandboxOptions,
-    /// OpenSSH target for remote workers; mutually exclusive with sandbox.
-    pub ssh_host: Option<String>,
+    /// How to reach the host of a remote worker; mutually exclusive with sandbox.
+    pub ssh: SshOptions,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -347,7 +566,11 @@ pub struct OrchestratorRunConfig {
     pub(crate) sandbox_status: String,
     pub(crate) agents_md_status: String,
     pub(crate) workspace_display: String,
-    pub(crate) workspace_host_path: Option<PathBuf>,
+    /// Where git can be run for this session's checkout. `None` is a sandbox
+    /// whose working directory is not mounted from the host: nothing outside
+    /// the container can see those files, and the container does not outlive
+    /// the session.
+    pub(crate) workspace_git: Option<GitTarget>,
     pub(crate) resume_base_cwd: PathBuf,
 }
 
@@ -427,10 +650,6 @@ fn validate_sandbox_options(options: &EffectiveSandboxOptions) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn configured_api_key_env(config: &NacConfig) -> Option<String> {
-    config.model.api_key_env.clone()
-}
-
 /// Merge explicit new-session model options over `config.toml` settings.
 ///
 /// This resolution never consults `OPENAI_MODEL`, `OPENAI_BASE_URL`, or any
@@ -440,31 +659,35 @@ pub fn effective_model_settings(
     model: &ModelOptions,
     config: &NacConfig,
 ) -> Result<EffectiveModelSettings> {
-    let backend = model.backend.or(config.model.backend);
+    let model_id = model
+        .api_model
+        .clone()
+        .or_else(|| config.model.model.clone());
+    // The backend is explicit (request/CLI) or resolved from the model id
+    // through the catalog (unique exact match; collisions prefer the
+    // non-managed provider with a warning; unknown ids stay unresolved and
+    // surface as the missing-backend error).
+    let backend = model.backend.or_else(|| {
+        model_id
+            .as_deref()
+            .and_then(crate::model::provider_for_model)
+    });
     let selected_managed_base_url = model
         .backend
         .and_then(managed_backend_base_url)
         .map(str::to_string);
-    let base_url = model
-        .api_base_url
-        .clone()
-        .or_else(|| selected_managed_base_url.or_else(|| config.model.base_url.clone()));
-    let api_key_env = match (
-        &model.api_key_env,
-        backend.and_then(managed_backend_base_url),
-    ) {
-        // A managed backend always selects its stored credential mode unless
-        // the caller explicitly supplies a selector (which validation rejects).
-        (OptionalModelOption::Inherit, Some(_)) => None,
-        _ => model.api_key_env.resolve(configured_api_key_env(config)),
-    };
+    // base_url chain: request/override → managed-if-request-names-backend →
+    // (catalog provider default → managed second-stage → error, inside
+    // `resolve_model_base_url`). No config tier.
+    let base_url = model.api_base_url.clone().or(selected_managed_base_url);
+    // api_key_env chain: request/override → (conventional-var
+    // auto-selection inside `from_optional`) → managed = None → guided
+    // error. No config tier.
+    let api_key_env = model.api_key_env.snapshot_value();
 
     EffectiveModelSettings::from_optional(
         backend,
-        model
-            .api_model
-            .clone()
-            .or_else(|| config.model.model.clone()),
+        model_id,
         base_url,
         model
             .reasoning_effort
@@ -553,7 +776,7 @@ pub async fn build_run_config(
     options: RunOptions,
     config: &NacConfig,
 ) -> Result<OrchestratorRunConfig> {
-    let ssh_host = trim_ssh_host(options.ssh_host.clone());
+    let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
         .clone()
@@ -574,11 +797,17 @@ pub async fn build_run_config(
     let store_path = resolve_store_path(store_base_cwd, options.store, config);
     store::initialize(&store_path)?;
 
-    if let Some(ssh_host) = ssh_host {
+    let config_paths = PathContext::new(&config_cwd);
+    options.ssh.validate(&config_paths)?;
+    if ssh_host.is_some() {
+        let connection = options
+            .ssh
+            .connection(&config_paths)
+            .expect("a trimmed ssh host yields a connection");
         let remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
         let working_directory = directory_display(&remote_cwd);
+        let workspace_git = GitTarget::ssh(connection.clone(), remote_cwd.clone(), &config_cwd);
         let session_id = Uuid::new_v4().to_string();
-        let config_paths = PathContext::new(&config_cwd);
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         let agent = Agent::with_config(
             client.clone(),
@@ -596,7 +825,7 @@ pub async fn build_run_config(
                 working_directory: working_directory.clone(),
                 worker_executable: options.worker_executable,
                 sandbox: None,
-                ssh_host: Some(ssh_host.clone()),
+                ssh: Some(connection.clone()),
                 mcp: None,
                 skills,
                 extra_tool_defs: Vec::new(),
@@ -612,7 +841,7 @@ pub async fn build_run_config(
             settings.backend,
             settings.reasoning_effort,
             None,
-            Some(ssh_host),
+            Some(connection),
             agent.messages.clone(),
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
@@ -631,7 +860,7 @@ pub async fn build_run_config(
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
             workspace_display: working_directory,
-            workspace_host_path: None,
+            workspace_git: Some(workspace_git),
             resume_base_cwd: config_cwd,
         });
     }
@@ -651,10 +880,10 @@ pub async fn build_run_config(
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let workspace_host_path = if let Some(session) = sandbox.as_ref() {
-        session.host_workdir()
+    let workspace_git = if let Some(session) = sandbox.as_ref() {
+        session.host_workdir().map(GitTarget::local)
     } else {
-        Some(workspace_cwd.clone())
+        Some(GitTarget::local(workspace_cwd.clone()))
     };
     let sandbox_status = sandbox
         .as_ref()
@@ -680,7 +909,7 @@ pub async fn build_run_config(
             working_directory: working_directory.clone(),
             worker_executable: options.worker_executable,
             sandbox: sandbox.clone(),
-            ssh_host: None,
+            ssh: None,
             mcp: None,
             skills,
             extra_tool_defs: Vec::new(),
@@ -715,7 +944,7 @@ pub async fn build_run_config(
         sandbox_status,
         agents_md_status,
         workspace_display: working_directory,
-        workspace_host_path,
+        workspace_git,
         resume_base_cwd: workspace_cwd,
     })
 }
@@ -727,7 +956,7 @@ pub async fn build_managed_worker_config(
     let client = ModelClient::from_effective_settings(managed_worker_effective_model_settings(
         &options.model,
     )?)?;
-    let ssh_host = trim_ssh_host(options.ssh_host.clone());
+    let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
         .clone()
@@ -809,7 +1038,7 @@ pub async fn build_managed_worker_config(
             working_directory,
             worker_executable: None,
             sandbox,
-            ssh_host,
+            ssh: options.ssh.connection(&config_paths),
             mcp,
             skills: None,
             extra_tool_defs,
@@ -899,15 +1128,17 @@ async fn build_resume_config_from_snapshot(
     worker_executable: Option<PathBuf>,
 ) -> Result<OrchestratorRunConfig> {
     let snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
-    let ssh_host = snapshot.ssh_host.clone();
-    if ssh_host.is_some() && snapshot.sandbox_spec.is_some() {
+    // Resume reaches the host with the connection the session recorded, not with
+    // whatever the local ssh config happens to say now.
+    let ssh = snapshot.ssh.clone();
+    if ssh.is_some() && snapshot.sandbox_spec.is_some() {
         anyhow::bail!(
             "invalid session configuration: ssh_host and podman sandbox metadata cannot both be set"
         );
     }
 
     let workspace_cwd = snapshot.cwd.clone();
-    let config_cwd = if ssh_host.is_some() {
+    let config_cwd = if ssh.is_some() {
         resume_base_cwd.clone()
     } else {
         workspace_cwd.clone()
@@ -947,7 +1178,7 @@ async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
-    let sandbox = if ssh_host.is_some() {
+    let sandbox = if ssh.is_some() {
         None
     } else {
         match snapshot.sandbox_spec.clone() {
@@ -960,7 +1191,7 @@ async fn build_resume_config_from_snapshot(
 
     store::initialize(&store_path)?;
 
-    let (skills, agents_md_status) = if ssh_host.is_some() {
+    let (skills, agents_md_status) = if ssh.is_some() {
         let config_paths = PathContext::new(&config_cwd);
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         (skills, "off".to_string())
@@ -979,12 +1210,16 @@ async fn build_resume_config_from_snapshot(
         .as_ref()
         .map(|session| session.workdir_display())
         .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let workspace_host_path = if ssh_host.is_some() {
-        None
-    } else if let Some(session) = sandbox.as_ref() {
-        session.host_workdir()
-    } else {
-        Some(workspace_cwd.clone())
+    let workspace_git = match ssh.clone() {
+        Some(connection) => Some(GitTarget::ssh(
+            connection,
+            workspace_cwd.clone(),
+            &config_cwd,
+        )),
+        None => match sandbox.as_ref() {
+            Some(session) => session.host_workdir().map(GitTarget::local),
+            None => Some(GitTarget::local(workspace_cwd.clone())),
+        },
     };
     let sandbox_status = sandbox
         .as_ref()
@@ -1007,7 +1242,7 @@ async fn build_resume_config_from_snapshot(
             working_directory: working_directory.clone(),
             worker_executable,
             sandbox,
-            ssh_host,
+            ssh,
             mcp: None,
             skills,
             extra_tool_defs: Vec::new(),
@@ -1036,7 +1271,7 @@ async fn build_resume_config_from_snapshot(
         sandbox_status,
         agents_md_status,
         workspace_display: working_directory,
-        workspace_host_path,
+        workspace_git,
         resume_base_cwd,
     })
 }
@@ -1046,7 +1281,7 @@ fn normalize_snapshot_paths(
     resume_base_cwd: &Path,
 ) -> Result<SessionSnapshot> {
     // Remote cwd values are not local paths.
-    if snapshot.ssh_host.is_some() {
+    if snapshot.ssh.is_some() {
         return Ok(snapshot);
     }
 
@@ -1228,12 +1463,13 @@ mod tests {
         }
     }
 
+    /// A config whose `[model]` section resolves through the catalog:
+    /// gpt-5.2 is unique to openai-responses, so the backend, the catalog
+    /// endpoint default and the conventional credential variable all come
+    /// from the catalog rather than config fields.
     fn complete_model_config() -> NacConfig {
         let mut config = NacConfig::default();
-        config.model.backend = Some(BackendKind::OpenAiResponses);
-        config.model.model = Some("config-model".to_string());
-        config.model.base_url = Some("https://config.example/v1".to_string());
-        config.model.api_key_env = Some("NAC_TEST_API_KEY".to_string());
+        config.model.model = Some("gpt-5.2".to_string());
         config
     }
 
@@ -1291,8 +1527,8 @@ mod tests {
 
         let settings =
             effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();
-        assert_eq!(settings.base_url, "https://config.example/v1");
-        assert_eq!(settings.model, "config-model");
+        assert_eq!(settings.base_url, "https://api.openai.com/v1");
+        assert_eq!(settings.model, "gpt-5.2");
 
         restore_env("OPENAI_BASE_URL", original_base_url);
         restore_env("OPENAI_MODEL", original_model);
@@ -1300,6 +1536,10 @@ mod tests {
 
     #[test]
     fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_openai_key = std::env::var_os("OPENAI_API_KEY");
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+
         let mut config = complete_model_config();
         config.model.reasoning_effort = Some(ReasoningEffort::High);
         config
@@ -1309,10 +1549,14 @@ mod tests {
 
         let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
         assert_eq!(inherited.backend, BackendKind::OpenAiResponses);
-        assert_eq!(inherited.model, "config-model");
-        assert_eq!(inherited.base_url, "https://config.example/v1");
+        assert_eq!(inherited.model, "gpt-5.2");
+        assert_eq!(inherited.base_url, "https://api.openai.com/v1");
         assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(inherited.api_key_env.as_deref(), Some("NAC_TEST_API_KEY"));
+        assert_eq!(inherited.api_key_env, None);
+        assert_eq!(
+            inherited.extra_headers.get("X-Config").map(String::as_str),
+            Some("config")
+        );
 
         let headers = BTreeMap::from([("X-Explicit".to_string(), "explicit".to_string())]);
         let explicit = effective_model_settings(
@@ -1333,10 +1577,23 @@ mod tests {
         assert_eq!(explicit.reasoning_effort, Some(ReasoningEffort::Low));
         assert_eq!(explicit.api_key_env.as_deref(), Some("EXPLICIT_API_KEY"));
         assert_eq!(explicit.extra_headers, headers);
+
+        restore_env("OPENAI_API_KEY", original_openai_key);
     }
 
     #[test]
     fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
+        // A configured model id that collides with a managed provider's
+        // entries resolves to the non-managed provider (the codex seed ids
+        // all overlap the openai baseline), so managed backends are
+        // reachable only through an explicit selection.
+        let mut colliding_config = NacConfig::default();
+        colliding_config.model.model = Some("gpt-5.3-codex-spark".to_string());
+        let resolved = effective_model_settings(&ModelOptions::default(), &colliding_config)
+            .expect("a colliding configured model resolves the non-managed provider");
+        assert_eq!(resolved.backend, BackendKind::OpenAiResponses);
+        assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+
         for (backend, expected) in [
             (
                 BackendKind::ChatGptCodexResponses,
@@ -1347,18 +1604,16 @@ mod tests {
                 crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
             ),
         ] {
-            let mut inherited_config = NacConfig::default();
-            inherited_config.model.backend = Some(backend);
-            inherited_config.model.model = Some("managed-model".to_string());
-            let inherited = effective_model_settings(&ModelOptions::default(), &inherited_config)
-                .expect("managed config should not require a redundant base_url");
-            assert_eq!(inherited.base_url, expected);
-
             let mut explicit_config = NacConfig::default();
             explicit_config.model.model = Some("managed-model".to_string());
             let explicit = effective_model_settings(
                 &ModelOptions {
                     backend: Some(backend),
+                    api_model: Some(if backend == BackendKind::ArceeAuth {
+                        "trinity-large-thinking".to_string()
+                    } else {
+                        "managed-model".to_string()
+                    }),
                     ..ModelOptions::default()
                 },
                 &explicit_config,
@@ -1413,11 +1668,15 @@ mod tests {
 
     #[test]
     fn optional_model_overrides_distinguish_inherit_value_and_clear() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_openai_key = std::env::var_os("OPENAI_API_KEY");
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+
         let mut config = complete_model_config();
         config.model.reasoning_effort = Some(ReasoningEffort::High);
 
         let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
-        assert_eq!(inherited.api_key_env.as_deref(), Some("NAC_TEST_API_KEY"));
+        assert_eq!(inherited.api_key_env, None);
         assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
 
         let valued = effective_model_settings(
@@ -1443,15 +1702,45 @@ mod tests {
         .unwrap();
         assert_eq!(cleared.api_key_env, None);
         assert_eq!(cleared.reasoning_effort, None);
+
+        // With the conventional variable set, Inherit and Clear both fall
+        // through to auto-selection; an explicit Value always wins.
+        unsafe { std::env::set_var("OPENAI_API_KEY", "env-key") };
+        let auto_selected = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(auto_selected.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        let cleared = effective_model_settings(
+            &ModelOptions {
+                api_key_env: OptionalModelOption::Clear,
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(cleared.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        let valued = effective_model_settings(
+            &ModelOptions {
+                api_key_env: OptionalModelOption::Value("CLI_API_KEY".to_string()),
+                ..ModelOptions::default()
+            },
+            &config,
+        )
+        .unwrap();
+        assert_eq!(valued.api_key_env.as_deref(), Some("CLI_API_KEY"));
+
+        restore_env("OPENAI_API_KEY", original_openai_key);
     }
 
     #[test]
     fn api_key_selectors_are_preserved_for_api_backends_and_normalized_for_managed_auth() {
         for selector in ["", "   ", " SURROUNDED_KEY "] {
-            let mut config = complete_model_config();
-            config.model.api_key_env = Some(selector.to_string());
-
-            let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+            let settings = effective_model_settings(
+                &ModelOptions {
+                    api_key_env: OptionalModelOption::Value(selector.to_string()),
+                    ..ModelOptions::default()
+                },
+                &complete_model_config(),
+            )
+            .unwrap();
             assert_eq!(settings.api_key_env.as_deref(), Some(selector));
             let error = ModelClient::from_effective_settings(settings)
                 .expect_err("invalid configured selector must not be normalized or ignored");
@@ -1459,38 +1748,43 @@ mod tests {
             assert!(error.to_string().contains("api_key_env"), "{error:#}");
         }
 
-        let mut managed = complete_model_config();
-        managed.model.backend = Some(BackendKind::ArceeAuth);
-        managed.model.base_url = Some("https://api.arcee.ai".to_string());
-        managed.model.api_key_env = Some("STALE_CONFIG_KEY".to_string());
-        let settings = effective_model_settings(&ModelOptions::default(), &managed).unwrap();
+        // A managed backend never auto-selects and rejects any explicit
+        // selector at validation.
+        let settings = effective_model_settings(
+            &ModelOptions {
+                backend: Some(BackendKind::ArceeAuth),
+                api_model: Some("trinity-large-thinking".to_string()),
+                ..ModelOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .unwrap();
         assert_eq!(settings.api_key_env, None);
     }
 
     #[test]
     fn required_model_settings_are_rejected_without_defaults() {
-        for (config, expected) in [
-            (NacConfig::default(), "backend"),
-            (
-                {
-                    let mut config = complete_model_config();
-                    config.model.model = None;
-                    config
-                },
-                "model",
-            ),
-            (
-                {
-                    let mut config = complete_model_config();
-                    config.model.base_url = Some("   ".to_string());
-                    config
-                },
-                "base_url",
-            ),
-        ] {
+        // No configured or requested model: no id to resolve a backend
+        // from. An unknown configured model id fails the same way.
+        for config in [NacConfig::default(), {
+            let mut config = NacConfig::default();
+            config.model.model = Some("never-seen-model".to_string());
+            config
+        }] {
             let error = effective_model_settings(&ModelOptions::default(), &config).unwrap_err();
-            assert!(error.to_string().contains(expected), "{error:#}");
+            assert!(error.to_string().contains("backend"), "{error:#}");
         }
+
+        // An explicit backend with no model id anywhere fails on the model.
+        let error = effective_model_settings(
+            &ModelOptions {
+                backend: Some(BackendKind::OpenAiResponses),
+                ..ModelOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("model"), "{error:#}");
     }
 
     #[test]
@@ -1629,6 +1923,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[tokio::test]
+    async fn resume_picker_and_selection_perform_no_network() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let server = crate::model::test_http::ScriptedServer::start_unexpected_request_server(
+            std::time::Duration::from_millis(300),
+        );
+        let original_url = std::env::var_os("MODELS_DEV_URL");
+        unsafe { std::env::set_var("MODELS_DEV_URL", &server.base_url) };
+        let key_name = "NAC_MISSING_NETWORK_FREE_PICKER_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::remove_var(key_name) };
+
+        let root = temp_store_path("network_free_picker")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("sessions.db");
+        store::initialize(&store_path).unwrap();
+        sessions::create_session(
+            &store_path,
+            &sessions::new_snapshot(
+                "network-free-session".to_string(),
+                root.clone(),
+                "snapshot-model".to_string(),
+                "https://snapshot.example/v1".to_string(),
+                BackendKind::TogetherChat,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some(key_name.to_string()),
+                BTreeMap::new(),
+            ),
+        )
+        .unwrap();
+
+        let picker = build_resume_picker_config(
+            ResumeOptions {
+                lookup_cwd: root.clone(),
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                ..ResumeOptions::default()
+            },
+            &NacConfig::default(),
+        )
+        .await
+        .expect("picker startup must not touch the network");
+        // The selection path resolves model settings and catalog metadata
+        // locally (it fails on the missing credential, never on network).
+        let error = match build_resume_config_for_session(
+            picker.store_path,
+            "network-free-session",
+            &NacConfig::default(),
+            picker.lookup_cwd,
+            None,
+        )
+        .await
+        {
+            Ok(_) => panic!("selection without a credential must fail locally"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(key_name), "{error:#}");
+
+        match original_url {
+            Some(value) => unsafe { std::env::set_var("MODELS_DEV_URL", value) },
+            None => unsafe { std::env::remove_var("MODELS_DEV_URL") },
+        }
+        match original_key {
+            Some(value) => unsafe { std::env::set_var(key_name, value) },
+            None => unsafe { std::env::remove_var(key_name) },
+        }
+        let _ = std::fs::remove_dir_all(root);
+        let requests = server.finish();
+        assert!(
+            requests.is_empty(),
+            "resume/picker paths must not touch the network: {requests:?}"
+        );
+    }
+
     #[test]
     fn parse_extra_headers_json_requires_valid_object() {
         assert!(parse_extra_headers_json("").is_err());
@@ -1649,27 +2024,28 @@ mod tests {
             .unwrap()
             .to_path_buf();
         std::fs::create_dir_all(&root).unwrap();
-        let cases = [
-            (NacConfig::default(), "backend"),
+        let cases: [(ModelOptions, NacConfig, &str); 3] = [
+            (ModelOptions::default(), NacConfig::default(), "backend"),
             (
+                ModelOptions::default(),
                 {
-                    let mut config = complete_model_config();
-                    config.model.model = None;
+                    let mut config = NacConfig::default();
+                    config.model.model = Some("never-seen-model".to_string());
                     config
                 },
-                "model",
+                "backend",
             ),
             (
-                {
-                    let mut config = complete_model_config();
-                    config.model.base_url = Some("".to_string());
-                    config
+                ModelOptions {
+                    backend: Some(BackendKind::OpenAiResponses),
+                    ..ModelOptions::default()
                 },
-                "base_url",
+                NacConfig::default(),
+                "model",
             ),
         ];
 
-        for (index, (config, expected)) in cases.into_iter().enumerate() {
+        for (index, (model, config, expected)) in cases.into_iter().enumerate() {
             let store_path = root.join(format!("store-{index}.db"));
             let error = match build_run_config(
                 RunOptions {
@@ -1677,6 +2053,7 @@ mod tests {
                     store: StoreOptions {
                         store_path: Some(store_path.clone()),
                     },
+                    model,
                     ..RunOptions::default()
                 },
                 &config,
@@ -1759,11 +2136,8 @@ mod tests {
 store_path = "custom/store.db"
 
 [model]
-backend = "openai-responses"
 model = "config-model"
-base_url = "https://config.example/v1"
 reasoning_effort = "high"
-api_key_env = " NAC_TEST_API_KEY "
 
 [sandbox]
 image = "config-image"
@@ -1787,17 +2161,8 @@ url = "https://mcp.context7.com/mcp"
             config.storage.store_path.as_deref(),
             Some(Path::new("custom/store.db"))
         );
-        assert_eq!(config.model.backend, Some(BackendKind::OpenAiResponses));
         assert_eq!(config.model.model.as_deref(), Some("config-model"));
-        assert_eq!(
-            config.model.base_url.as_deref(),
-            Some("https://config.example/v1")
-        );
         assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(
-            config.model.api_key_env.as_deref(),
-            Some(" NAC_TEST_API_KEY ")
-        );
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
 
@@ -1821,13 +2186,23 @@ url = "https://mcp.context7.com/mcp"
             std::env::set_var("NAC_HOME", &root);
         }
 
+        // Removed `[model]` keys (backend/base_url/api_key_env) are
+        // parse-tolerated by the new-session load too — they are ignored
+        // with a one-time warning, so only genuinely invalid remaining
+        // fields fail.
         let invalid_model_sections = [
-            "[model]\nbackend = \"auto\"\nmodel = \"legacy\"\n",
-            "[model]\nbackend = \"arcee\"\napi_key_env = [\"NOT_A_SELECTOR\"]\n",
-            "model = [\"not\", \"a\", \"table\"]\n",
-            "[model]\nextra_headers = \"not-a-header-map\"\nreasoning_effort = 7\n",
+            ("[model]\nbackend = \"auto\"\nmodel = \"legacy\"\n", true),
+            (
+                "[model]\nbackend = \"arcee\"\napi_key_env = [\"NOT_A_SELECTOR\"]\n",
+                true,
+            ),
+            ("model = [\"not\", \"a\", \"table\"]\n", false),
+            (
+                "[model]\nextra_headers = \"not-a-header-map\"\nreasoning_effort = 7\n",
+                false,
+            ),
         ];
-        for invalid_model in invalid_model_sections {
+        for (invalid_model, accepted) in invalid_model_sections {
             std::fs::write(
                 root.join("config.toml"),
                 format!(
@@ -1843,11 +2218,11 @@ url = "https://mcp.context7.com/mcp"
             );
             assert_eq!(config.sandbox.image.as_deref(), Some("runtime-image"));
             assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-            assert!(config.model.backend.is_none());
             assert!(config.model.model.is_none());
-            assert!(
-                NacConfig::load_from_cwd(&root).is_err(),
-                "new-session config unexpectedly accepted {invalid_model:?}"
+            assert_eq!(
+                NacConfig::load_from_cwd(&root).is_ok(),
+                accepted,
+                "new-session config mishandled {invalid_model:?}"
             );
         }
 
@@ -1860,6 +2235,69 @@ url = "https://mcp.context7.com/mcp"
         assert!(error.to_string().contains("non-model config"), "{error:#}");
 
         restore_env("NAC_HOME", original_nac_home);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn removed_model_config_keys_are_ignored_and_resolution_uses_the_catalog() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_openai_key = std::env::var_os("OPENAI_API_KEY");
+        let root = std::env::temp_dir().join(format!(
+            "nac_removed_model_keys_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        // A pre-slimming config: backend/base_url/api_key_env are ignored
+        // (with a one-time warning); the kept fields load and the
+        // configured model resolves through the catalog.
+        std::fs::write(
+            root.join("config.toml"),
+            r#"
+[model]
+backend = "fireworks-chat"
+model = "gpt-5.2"
+base_url = "https://stale.example/v1"
+api_key_env = "STALE_KEY"
+reasoning_effort = "high"
+
+[model.extra_headers]
+X-Config = "yes"
+"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+            std::env::set_var("OPENAI_API_KEY", "env-openai-key");
+        }
+
+        let config = NacConfig::load().expect("removed keys parse tolerantly");
+        assert_eq!(config.model.model.as_deref(), Some("gpt-5.2"));
+        assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            config
+                .model
+                .extra_headers
+                .get("X-Config")
+                .map(String::as_str),
+            Some("yes")
+        );
+
+        // The stale backend/base_url/api_key_env values play no role:
+        // gpt-5.2 resolves to openai-responses, the base URL comes from the
+        // catalog default, and the credential auto-selects the conventional
+        // variable.
+        let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+        assert_eq!(settings.backend, BackendKind::OpenAiResponses);
+        assert_eq!(settings.base_url, "https://api.openai.com/v1");
+        assert_eq!(settings.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(settings.reasoning_effort, Some(ReasoningEffort::High));
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("OPENAI_API_KEY", original_openai_key);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2093,7 +2531,7 @@ url = "https://mcp.context7.com/mcp"
                     ..ModelOptions::default()
                 },
                 sandbox: SandboxOptions::default(),
-                ssh_host: None,
+                ssh: SshOptions::default(),
             },
             &NacConfig::default(),
         )
@@ -2169,7 +2607,7 @@ url = "https://mcp.context7.com/mcp"
             },
             model: test_openai_model_options(),
             sandbox: SandboxOptions::default(),
-            ssh_host: None,
+            ssh: SshOptions::default(),
         };
 
         let run_config = build_managed_worker_config(options, &NacConfig::default())
@@ -2247,7 +2685,7 @@ url = "https://mcp.context7.com/mcp"
                 },
                 orchestrator_compaction_threshold: Some(48_000),
                 sandbox: SandboxOptions::default(),
-                ssh_host: None,
+                ssh: SshOptions::default(),
             },
             &NacConfig::default(),
         )
@@ -2356,6 +2794,9 @@ url = "https://mcp.context7.com/mcp"
                     reasoning_text: None,
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
                 Message::User {
                     content: "hello".to_string(),
@@ -2365,6 +2806,9 @@ url = "https://mcp.context7.com/mcp"
                     reasoning_text: Some("hidden thinking".to_string()),
                     reasoning_details: None,
                     tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
                 },
             ],
             Some("OPENAI_API_KEY".to_string()),
@@ -2396,7 +2840,6 @@ url = "https://mcp.context7.com/mcp"
         let caller_cwd = original_cwd.canonicalize().unwrap();
         let mut changed_config = complete_model_config();
         changed_config.model.model = Some("changed-config-model".to_string());
-        changed_config.model.base_url = Some("https://changed-config.example/v1".to_string());
         changed_config.model.reasoning_effort = Some(ReasoningEffort::High);
         let mut run_config = build_resume_config(
             ResumeOptions {
@@ -2427,7 +2870,10 @@ url = "https://mcp.context7.com/mcp"
             "resume should not mutate the process cwd"
         );
         assert_eq!(
-            run_config.workspace_host_path.as_deref(),
+            run_config
+                .workspace_git
+                .as_ref()
+                .and_then(|target| target.local_path()),
             Some(canonical_session_cwd.as_path())
         );
         assert_eq!(run_config.session.session_id(), Some("resume-session"));
@@ -2479,7 +2925,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2500,7 +2946,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2529,7 +2975,7 @@ url = "https://mcp.context7.com/mcp"
                 cpus: 2,
                 memory_mib: 2048,
             }),
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2565,7 +3011,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
             BTreeMap::new(),
@@ -2648,7 +3094,7 @@ url = "https://mcp.context7.com/mcp"
             BackendKind::OpenAiResponses,
             None,
             None,
-            Some("build-box".to_string()),
+            Some(SshConnection::new("build-box")),
             vec![
                 Message::System {
                     content: "You are nac. Working directory: /old/stale/local/path.".to_string(),
@@ -2735,7 +3181,10 @@ url = "https://mcp.context7.com/mcp"
                 model: test_openai_model_options(),
                 orchestrator_compaction_threshold: None,
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -2746,8 +3195,14 @@ url = "https://mcp.context7.com/mcp"
             run_config.workspace_display,
             remote_cwd.display().to_string()
         );
+        let workspace_git = run_config
+            .workspace_git
+            .as_ref()
+            .expect("a remote session must still have a git target");
+        assert_eq!(workspace_git.ssh_host(), Some("build-box"));
         assert_eq!(
-            run_config.workspace_host_path, None,
+            workspace_git.local_path(),
+            None,
             "remote sessions must not expose a local path for git inspection"
         );
         assert_eq!(run_config.sandbox_status, "off");
@@ -2765,7 +3220,10 @@ url = "https://mcp.context7.com/mcp"
             .expect("remote creation must produce an active session")
             .to_string();
         let stored = sessions::load_session(&store_path, &session_id).unwrap();
-        assert_eq!(stored.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(
+            stored.ssh.as_ref().map(|c| c.host.as_str()),
+            Some("build-box")
+        );
         assert_eq!(stored.cwd, remote_cwd);
         assert_eq!(stored.model, "test-model");
         assert_eq!(stored.base_url, "https://api.openai.com/v1");
@@ -2813,7 +3271,10 @@ url = "https://mcp.context7.com/mcp"
                 model: test_openai_model_options(),
                 orchestrator_compaction_threshold: None,
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -2894,7 +3355,10 @@ url = "https://mcp.context7.com/mcp"
                     sandbox: true,
                     ..SandboxOptions::default()
                 },
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -2936,7 +3400,10 @@ url = "https://mcp.context7.com/mcp"
                     sandbox: true,
                     ..SandboxOptions::default()
                 },
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -2980,7 +3447,10 @@ url = "https://mcp.context7.com/mcp"
             model: test_openai_model_options(),
             orchestrator_compaction_threshold: None,
             sandbox,
-            ssh_host: Some("build-box".to_string()),
+            ssh: SshOptions {
+                host: Some("build-box".to_string()),
+                ..SshOptions::default()
+            },
         };
 
         let run_config = build_run_config(
@@ -2993,7 +3463,10 @@ url = "https://mcp.context7.com/mcp"
         let session_id = run_config.session.session_id().unwrap().to_string();
         let stored = sessions::load_session(&store_path, &session_id).unwrap();
         assert_eq!(stored.cwd, PathBuf::from("~"));
-        assert_eq!(stored.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(
+            stored.ssh.as_ref().map(|c| c.host.as_str()),
+            Some("build-box")
+        );
 
         let conflicting = match build_run_config(
             options(
@@ -3056,7 +3529,10 @@ url = "https://mcp.context7.com/mcp"
                 },
                 model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -3130,7 +3606,10 @@ args = ["-c", {}]
                 },
                 model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )
@@ -3219,7 +3698,10 @@ args = ["-c", {}]
                 },
                 model: test_openai_model_options(),
                 sandbox: SandboxOptions::default(),
-                ssh_host: Some("build-box".to_string()),
+                ssh: SshOptions {
+                    host: Some("build-box".to_string()),
+                    ..SshOptions::default()
+                },
             },
             &NacConfig::default(),
         )

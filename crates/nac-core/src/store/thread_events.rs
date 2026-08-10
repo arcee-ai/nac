@@ -36,15 +36,24 @@ pub fn append_thread_event(
     ThreadEventWriter::new(path)?.append(session_id, thread_name, event_json)
 }
 
+#[cfg(test)]
 pub fn load_all_thread_events(
     path: &Path,
+    session_id: &str,
+    per_thread_limit: usize,
+) -> Result<HashMap<String, Vec<ThreadEventRecord>>> {
+    let conn = open_runtime_connection(path)?;
+    load_all_thread_events_with_connection(&conn, session_id, per_thread_limit)
+}
+
+pub(crate) fn load_all_thread_events_with_connection(
+    conn: &Connection,
     session_id: &str,
     per_thread_limit: usize,
 ) -> Result<HashMap<String, Vec<ThreadEventRecord>>> {
     if per_thread_limit == 0 {
         return Ok(HashMap::new());
     }
-    let conn = open_runtime_connection(path)?;
     // Transcript log rows live under the reserved orchestrator target
     // (store/transcript.rs); they must never enter the event/tile paths.
     let mut stmt = conn.prepare(

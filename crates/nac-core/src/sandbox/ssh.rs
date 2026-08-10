@@ -1,8 +1,6 @@
 //! OpenSSH execution backend.
 
-use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -17,13 +15,17 @@ use uuid::Uuid;
 use crate::paths::PathContext;
 
 use super::podman::{SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER};
+use super::ssh_command::{
+    prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, shell_quote,
+    shell_quote_path, SshConnection,
+};
 
 const REMOTE_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SSH_PIDFILE_DIR: &str = "~/.cache/nac/exec";
 
 pub struct SshBackend {
-    ssh_host: String,
+    connection: SshConnection,
     remote_cwd: PathBuf,
     control_path: PathBuf,
 }
@@ -32,42 +34,35 @@ impl SshBackend {
     #[cfg(test)]
     pub fn new(ssh_host: String, remote_cwd: PathBuf) -> Self {
         let config_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self::new_with_paths(ssh_host, remote_cwd, &PathContext::new(config_cwd))
+        Self::new_with_paths(
+            SshConnection::new(ssh_host),
+            remote_cwd,
+            &PathContext::new(config_cwd),
+        )
     }
 
     pub(crate) fn new_with_paths(
-        ssh_host: String,
+        connection: SshConnection,
         remote_cwd: PathBuf,
         paths: &PathContext,
     ) -> Self {
-        let control_path = ssh_control_path(&ssh_host, paths);
+        let control_path = connection.control_path(paths);
         Self {
-            ssh_host,
+            connection,
             remote_cwd,
             control_path,
         }
     }
 
     fn ssh_args(&self) -> Vec<String> {
-        vec![
-            "-o".to_string(),
-            "ControlMaster=auto".to_string(),
-            "-o".to_string(),
-            format!("ControlPath={}", self.control_path.display()),
-            "-o".to_string(),
-            "ControlPersist=60s".to_string(),
-            "-o".to_string(),
-            "BatchMode=yes".to_string(),
-            "-o".to_string(),
-            "ConnectTimeout=10".to_string(),
-        ]
+        self.connection.ssh_args(&self.control_path)
     }
 
     fn ssh_command(&self, remote_command: &str) -> Command {
         let mut command = Command::new("ssh");
         command.args(self.ssh_args());
         command.arg("--");
-        command.arg(&self.ssh_host);
+        command.arg(&self.connection.host);
         command.arg(remote_command);
         command
     }
@@ -78,39 +73,20 @@ impl SshBackend {
         envs: &[(String, String)],
         words: &[String],
     ) -> String {
-        let mut parts = vec![
-            "cd".to_string(),
-            shell_quote_path(&dir.display().to_string()),
-            "&&".to_string(),
-        ];
-        if !envs.is_empty() {
-            parts.push("env".to_string());
-            for (key, value) in envs {
-                parts.push(shell_quote(&format!("{key}={value}")));
-            }
-        }
-        parts.extend(words.iter().cloned());
-        parts.join(" ")
+        remote_command_in_dir(dir, envs, words)
     }
 
     fn quoted_program_and_args(program: &str, args: &[String]) -> Vec<String> {
-        let mut words = Vec::with_capacity(args.len() + 1);
-        words.push(shell_quote(program));
-        words.extend(args.iter().map(|arg| shell_quote(arg)));
-        words
+        quoted_program_and_args(program, args)
     }
 
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
-        if let Some(dir) = self.control_path.parent() {
-            std::fs::create_dir_all(dir).with_context(|| {
-                format!("failed to create ssh control directory {}", dir.display())
-            })?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
-            }
-        }
+        prepare_control_socket_dir(&self.control_path).with_context(|| {
+            format!(
+                "failed to create ssh control directory for {}",
+                self.control_path.display()
+            )
+        })?;
 
         let remote = self.remote_command_in_dir(&self.remote_cwd, &[], &["true".to_string()]);
         let mut command = self.ssh_command(&remote);
@@ -124,7 +100,7 @@ impl SshBackend {
         if !output.status.success() {
             bail!(
                 "ssh connection to '{}' failed or remote cwd '{}' is unusable: {}",
-                self.ssh_host,
+                self.connection.describe(),
                 self.remote_cwd.display(),
                 String::from_utf8_lossy(&output.stderr).trim()
             );
@@ -163,7 +139,7 @@ impl SshBackend {
         &self,
         program: &str,
         args: &[String],
-        stdin: Option<Vec<u8>>,
+        stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         let words = Self::quoted_program_and_args(program, args);
         let remote = self.remote_command_in_dir(&self.remote_cwd, &[], &words);
@@ -174,6 +150,7 @@ impl SshBackend {
             command.stdin(Stdio::null());
         }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.kill_on_drop(true);
 
         let mut child = command
             .spawn()
@@ -181,7 +158,7 @@ impl SshBackend {
 
         if let Some(input) = stdin {
             if let Some(mut stdin_pipe) = child.stdin.take() {
-                stdin_pipe.write_all(&input).await?;
+                stdin_pipe.write_all(input).await?;
             }
         }
 
@@ -248,16 +225,27 @@ impl SshBackend {
         cmd.arg("-tt");
         cmd.args(self.ssh_args());
         cmd.arg("--");
-        cmd.arg(&self.ssh_host);
+        cmd.arg(&self.connection.host);
         cmd.arg(remote);
         (cmd, Some(pidfile))
     }
 
+    /// What a managed worker needs to rebuild this exact connection, since it
+    /// reaches the host itself and cannot inherit the parent's socket.
     pub(crate) fn worker_cli_args(&self) -> Vec<OsString> {
-        vec![
+        let mut args = vec![
             OsString::from("--ssh-host"),
-            OsString::from(self.ssh_host.clone()),
-        ]
+            OsString::from(self.connection.host.clone()),
+        ];
+        if let Some(port) = self.connection.port {
+            args.push(OsString::from("--ssh-port"));
+            args.push(OsString::from(port.to_string()));
+        }
+        if let Some(identity) = self.connection.identity_file.as_deref() {
+            args.push(OsString::from("--ssh-identity-file"));
+            args.push(OsString::from(identity));
+        }
+        args
     }
 
     pub(crate) fn default_terminal_cwd(&self) -> PathBuf {
@@ -268,24 +256,6 @@ impl SshBackend {
     pub(crate) fn control_path_for_test(&self) -> &Path {
         &self.control_path
     }
-}
-
-fn ssh_control_path(ssh_host: &str, paths: &PathContext) -> PathBuf {
-    let dir = paths
-        .nac_home_dir()
-        .unwrap_or_else(|| std::env::temp_dir().join("nac"))
-        .join("ssh");
-    dir.join(format!(
-        "{}-{:016x}.sock",
-        sanitize_socket_name(ssh_host),
-        stable_hash(ssh_host)
-    ))
-}
-
-fn stable_hash(value: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    hasher.finish()
 }
 
 fn make_ssh_pidfile() -> String {
@@ -300,41 +270,6 @@ mkdir -p "$pidfile_dir" || exit 125
 chmod 700 "$HOME/.cache/nac" "$pidfile_dir" || exit 125
 {wrapper}"#
     )
-}
-
-fn sanitize_socket_name(input: &str) -> String {
-    let mut out = String::new();
-    for ch in input.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('-');
-        }
-    }
-    let trimmed = out.trim_matches('-');
-    let shortened: String = trimmed.chars().take(48).collect();
-    if shortened.is_empty() {
-        "host".to_string()
-    } else {
-        shortened
-    }
-}
-
-fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn shell_quote_path(value: &str) -> String {
-    if value == "~" {
-        return "~".to_string();
-    }
-    if let Some(rest) = value.strip_prefix("~/") {
-        return format!("~/{}", shell_quote(rest));
-    }
-    shell_quote(value)
 }
 
 #[cfg(test)]
@@ -513,7 +448,7 @@ mod tests {
         }
 
         let backend = SshBackend::new_with_paths(
-            "build-box".to_string(),
+            SshConnection::new("build-box"),
             PathBuf::from("~"),
             &PathContext::new(&config_cwd),
         );
@@ -534,9 +469,69 @@ mod tests {
     fn control_socket_name_includes_hash_to_avoid_sanitization_collisions() {
         let paths =
             PathContext::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let first = ssh_control_path("a/b", &paths);
-        let second = ssh_control_path("a:b", &paths);
+        let first = SshConnection::new("a/b").control_path(&paths);
+        let second = SshConnection::new("a:b").control_path(&paths);
         assert_ne!(first, second);
         assert!(first.to_string_lossy().contains("a-b-"));
+    }
+
+    /// The socket is shared per connection, and a port or a key is what makes
+    /// one connection a different one even under the same host name.
+    #[test]
+    fn control_socket_separates_connections_that_differ_beyond_the_host() {
+        let paths =
+            PathContext::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let plain = SshConnection::new("build-box").control_path(&paths);
+        let other_port = SshConnection {
+            host: "build-box".to_string(),
+            port: Some(2222),
+            identity_file: None,
+        }
+        .control_path(&paths);
+        let other_key = SshConnection {
+            host: "build-box".to_string(),
+            port: None,
+            identity_file: Some(PathBuf::from("/keys/ci")),
+        }
+        .control_path(&paths);
+        assert_ne!(plain, other_port);
+        assert_ne!(plain, other_key);
+        assert_ne!(other_port, other_key);
+    }
+
+    #[test]
+    fn ssh_args_carry_the_port_and_the_key_when_set() {
+        let backend = SshBackend::new_with_paths(
+            SshConnection {
+                host: "build-box".to_string(),
+                port: Some(2222),
+                identity_file: Some(PathBuf::from("/keys/ci")),
+            },
+            PathBuf::from("/srv/work"),
+            &PathContext::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
+        );
+        let args = backend.ssh_args();
+        let position = |value: &str| args.iter().position(|arg| arg == value);
+        assert_eq!(
+            args.get(position("-p").expect("port flag") + 1).unwrap(),
+            "2222"
+        );
+        assert_eq!(
+            args.get(position("-i").expect("identity flag") + 1)
+                .unwrap(),
+            "/keys/ci"
+        );
+        assert!(args.contains(&"IdentitiesOnly=yes".to_string()));
+        assert_eq!(
+            backend.worker_cli_args(),
+            vec![
+                OsString::from("--ssh-host"),
+                OsString::from("build-box"),
+                OsString::from("--ssh-port"),
+                OsString::from("2222"),
+                OsString::from("--ssh-identity-file"),
+                OsString::from("/keys/ci"),
+            ]
+        );
     }
 }
