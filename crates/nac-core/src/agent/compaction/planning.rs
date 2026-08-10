@@ -13,8 +13,6 @@ use crate::store::orchestrator_compaction::{
 use crate::types::{Message, ToolDefinition};
 
 pub(in crate::agent) const PROMPT_POLICY_VERSION: u32 = 2;
-const CONTEXT_FRAMING_SAFETY_ALLOWANCE: u64 = 1_024;
-const UNSAMPLED_SAFETY_ALLOWANCE: u64 = 256;
 
 pub(in crate::agent) const NAC_COMPACTION_PROMPT: &str =
     include_str!("../prompts/nac_compaction.md");
@@ -24,9 +22,8 @@ pub(in crate::agent) const HISTORICAL_CONTEXT_PREFIX: &str =
 
 #[derive(Debug, Clone)]
 struct ContextSample {
-    // The base is provider tokens or a conservative projection. Newly appended
-    // messages are added as serialized bytes, deliberately overestimating when
-    // an exact tokenizer is unavailable.
+    // The base is provider-reported tokens or a conservative projection.
+    // Newly appended messages are estimated as chars/4 token approximation.
     base_context_units: u64,
     canonical_message_len: usize,
     checkpoint_id: Option<i64>,
@@ -229,27 +226,15 @@ impl CompactionState {
     pub fn projected_context_estimate(
         &self,
         messages: &[Message],
-        tools: &[ToolDefinition],
-        boundary: usize,
-        installed_summary: &str,
-        summary_prompt_tokens: Option<u64>,
-        summary_completion_tokens: Option<u64>,
+        summary_prompt_tokens: u64,
+        summary_completion_tokens: u64,
         old_context_estimate: u64,
     ) -> u64 {
-        let compacted_view = provider_view_with_summary(messages, boundary, installed_summary);
-        let serialized_floor = full_provider_byte_estimate(&compacted_view, tools);
-        let arithmetic_projection = match (summary_prompt_tokens, summary_completion_tokens) {
-            (Some(prompt), Some(completion)) => {
-                let non_source_allowance = summary_non_source_allowance(messages);
-                let removable_source = prompt.saturating_sub(non_source_allowance);
-                old_context_estimate
-                    .saturating_sub(removable_source)
-                    .saturating_add(completion)
-                    .saturating_add(installed_summary_wrapper_allowance())
-            }
-            _ => serialized_floor,
-        };
-        arithmetic_projection.max(serialized_floor)
+        let non_source_tokens = estimate_non_source_tokens(messages);
+        let removable_source = summary_prompt_tokens.saturating_sub(non_source_tokens);
+        old_context_estimate
+            .saturating_sub(removable_source)
+            .saturating_add(summary_completion_tokens)
     }
 
     pub fn append_and_activate(
@@ -371,17 +356,13 @@ impl CompactionState {
         }
         if let Some(sample) = &self.context_sample {
             let unsampled = &canonical_messages[sample.canonical_message_len..];
-            let delta = serialized_byte_len(&unsampled);
-            return sample
-                .base_context_units
-                .saturating_add(delta)
-                .saturating_add(
-                    (!unsampled.is_empty())
-                        .then_some(UNSAMPLED_SAFETY_ALLOWANCE)
-                        .unwrap_or(0),
-                );
+            if unsampled.is_empty() {
+                return sample.base_context_units;
+            }
+            let delta_tokens = estimate_message_tokens(unsampled);
+            return sample.base_context_units.saturating_add(delta_tokens);
         }
-        full_provider_byte_estimate(provider_messages, tools)
+        estimate_message_tokens(provider_messages).saturating_add(estimate_tool_tokens(tools))
     }
 
     #[cfg(test)]
@@ -585,24 +566,35 @@ fn system_policy_digest(messages: &[Message]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-pub(super) fn summary_non_source_allowance(messages: &[Message]) -> u64 {
-    messages
+fn estimate_non_source_tokens(messages: &[Message]) -> u64 {
+    let system_chars: usize = messages
         .iter()
-        .filter(|message| matches!(message, Message::System { .. }))
-        .map(serialized_byte_len)
-        .fold(
-            serialized_byte_len(&Message::User {
-                content: NAC_COMPACTION_PROMPT.to_string(),
-            })
-            .saturating_add(CONTEXT_FRAMING_SAFETY_ALLOWANCE),
-            u64::saturating_add,
-        )
+        .filter(|m| matches!(m, Message::System { .. }))
+        .map(message_content_len)
+        .sum();
+    let compaction_prompt_chars = NAC_COMPACTION_PROMPT.len();
+    (system_chars + compaction_prompt_chars) as u64 / 4
 }
 
-pub(super) fn installed_summary_wrapper_allowance() -> u64 {
-    serialized_byte_len(&Message::User {
-        content: HISTORICAL_CONTEXT_PREFIX.to_string(),
-    })
+fn message_content_len(message: &Message) -> usize {
+    match message {
+        Message::System { content } => content.len(),
+        Message::User { content } => content.len(),
+        Message::Assistant { content, .. } => content.as_deref().map_or(0, str::len),
+        Message::Tool { content, .. } => content.len(),
+    }
+}
+
+pub(super) fn estimate_message_tokens(messages: &[Message]) -> u64 {
+    let chars: usize = messages.iter().map(message_content_len).sum();
+    chars as u64 / 4
+}
+
+pub(super) fn estimate_tool_tokens(tools: &[ToolDefinition]) -> u64 {
+    if tools.is_empty() {
+        return 0;
+    }
+    serialized_byte_len(tools) / 4
 }
 
 fn update_serialized<T: Serialize>(hasher: &mut Sha256, value: &T) {
@@ -619,10 +611,4 @@ pub(super) fn serialized_byte_len<T: Serialize + ?Sized>(value: &T) -> u64 {
     serde_json::to_vec(value)
         .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
         .unwrap_or(u64::MAX)
-}
-
-pub(super) fn full_provider_byte_estimate(messages: &[Message], tools: &[ToolDefinition]) -> u64 {
-    serialized_byte_len(messages)
-        .saturating_add(serialized_byte_len(tools))
-        .saturating_add(CONTEXT_FRAMING_SAFETY_ALLOWANCE)
 }
