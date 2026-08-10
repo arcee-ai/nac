@@ -7,7 +7,7 @@
 #
 #   ./start_dev.sh
 #     API   http://127.0.0.1:3210
-#     app   http://localhost:5173
+#     app   http://localhost:5173   (opens in the browser)
 #
 # The dev server also enables LocatorJS: hold Alt and click a rendered element to
 # open its source. It is absent from the committed build that ./start.sh serves.
@@ -76,7 +76,9 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "==> starting nac-web on http://$BIND"
-"target/$PROFILE/nac-web" --bind "$BIND" &
+# The browser should open on the Vite origin below, not the API bind.
+# `-y` skips the project-folder prompt so a backgrounded API never blocks.
+"target/$PROFILE/nac-web" --bind "$BIND" --no-open -y &
 BACKEND_PID=$!
 
 # Vite would otherwise start proxying to a socket that is not listening yet and
@@ -94,8 +96,9 @@ done
 
 echo "==> vite dev server on http://localhost:$VITE_PORT"
 # Vite runs in the background so that a signal reaching this script is handled
-# right away instead of after the foreground child returns.
+# right away instead of after the foreground child returns. `--open` opens the
+# app origin (not the API) once Vite is ready — same idea as Storybook.
 NAC_API_URL="http://$BIND" \
-  npm --prefix "$WEB_DIR" run dev -- --port "$VITE_PORT" &
+  npm --prefix "$WEB_DIR" run dev -- --port "$VITE_PORT" --open &
 VITE_PID=$!
 wait "$VITE_PID" || true

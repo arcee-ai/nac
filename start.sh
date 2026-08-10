@@ -4,12 +4,14 @@
 # Needs only a Rust toolchain: the bundle under crates/nac-server/assets/dist is
 # committed and embedded into the binary, so no Node install is involved.
 #
-#   ./start.sh                      # http://127.0.0.1:3210
+#   ./start.sh                      # http://127.0.0.1:3210 (opens the browser)
 #   ./start.sh --bind 0.0.0.0:8080  # extra args go straight to nac-web
+#   ./start.sh --no-open            # keep the terminal-only workflow
 #
 # Environment:
 #   NAC_BIND      address to bind when --bind is not passed (default 127.0.0.1:3210)
 #   NAC_PROFILE   cargo profile: release (default) or debug
+#   BROWSER=none  same as passing --no-open to nac-web
 
 set -euo pipefail
 
@@ -64,5 +66,19 @@ for arg in "$@"; do
 done
 
 echo "==> nac-web on http://$BIND"
+# Accept cwd (this repo after `cd` above) unless the caller already passed -C/-y.
+YES_ARGS=(-y)
+prev=""
+for arg in "$@"; do
+  if [[ "$arg" == "-y" || "$arg" == "--yes" || "$arg" == "-C" || "$arg" == --directory=* ]]; then
+    YES_ARGS=()
+    break
+  fi
+  if [[ "$prev" == "-C" || "$prev" == "--directory" ]]; then
+    YES_ARGS=()
+    break
+  fi
+  prev="$arg"
+done
 exec "target/$PROFILE/nac-web" \
-  ${BIND_ARGS[@]+"${BIND_ARGS[@]}"} ${1+"$@"}
+  ${BIND_ARGS[@]+"${BIND_ARGS[@]}"} ${YES_ARGS[@]+"${YES_ARGS[@]}"} ${1+"$@"}

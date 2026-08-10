@@ -321,6 +321,10 @@ pub async fn codex_auth_login() -> Result<()> {
         println!("{code}");
     }
     println!();
+    if crate::browser::should_open_browser() {
+        println!("Opening the authorization page in your browser…");
+        crate::browser::open_url(&prompt.verification_uri);
+    }
     println!("Waiting for authorization...");
 
     let snapshot = login.complete().await?;

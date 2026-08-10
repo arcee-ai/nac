@@ -14,8 +14,8 @@ const AUTH_TYPE: &str = "arcee_device_token";
 const CANONICAL_AUTH_SERVICE_BASE_URL: &str = "https://api.arcee.ai";
 const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_DEVICE_EXPIRES_IN_SECS: u64 = 900;
-const DEFAULT_TOKEN_EXPIRES_IN_SECS: u64 = 3600;
-const REFRESH_SKEW_MS: u64 = 60_000;
+const DEFAULT_TOKEN_EXPIRES_IN_SECS: u64 = 43200;
+const REFRESH_SKEW_MS: u64 = 10_800_000;
 const REFRESH_LOCK_POLL_INTERVAL_MS: u64 = 50;
 const REFRESH_LOCK_TIMEOUT_MS: u64 = 15_000;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
@@ -484,6 +484,10 @@ pub(super) async fn arcee_auth_login() -> Result<()> {
         println!("{code}");
     }
     println!();
+    if crate::browser::should_open_browser() {
+        println!("Opening the authorization page in your browser…");
+        crate::browser::open_url(&prompt.verification_uri);
+    }
     println!("Waiting for authorization...");
 
     let snapshot = login.complete().await?;

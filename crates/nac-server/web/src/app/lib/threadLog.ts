@@ -195,3 +195,30 @@ export function groupThreadLog(lines: ThreadLogLine[]): LogEntry[] {
 
   return entries;
 }
+
+/**
+ * Whether the command log should show a live "▸ Working…" line: the thread is
+ * still working, but no tool call is in flight — so the model is between steps
+ * (or preparing the next one). Without this the log looks stuck after a ✓.
+ */
+export function threadIsThinking(
+  running: boolean,
+  lines: ThreadLogLine[],
+): boolean {
+  if (!running) return false;
+  const finished = new Set<string>();
+  for (const line of lines) {
+    if (line.key.startsWith("result-")) {
+      finished.add(line.key.slice("result-".length));
+    }
+  }
+  for (const line of lines) {
+    if (
+      line.key.startsWith("call-") &&
+      !finished.has(line.key.slice("call-".length))
+    ) {
+      return false;
+    }
+  }
+  return true;
+}

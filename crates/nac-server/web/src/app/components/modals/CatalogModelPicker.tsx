@@ -1,7 +1,7 @@
-// Browsing `GET /models` the way the legacy dashboard did: the catalog is local
-// and credential-free, so every model a build knows about can be searched and
-// picked before any key exists. Picking one names the provider too, which is
-// the whole point — a model id alone does not say who serves it.
+// Browsing `GET /models`: the catalog is local and credential-free, so every
+// model a build knows about can be searched and picked before any key exists.
+// Managed providers the server already authenticates as overlay their live
+// `POST /providers/models` index (same path Create New uses after login).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -27,21 +27,16 @@ import {
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { formatTokensCompact } from "@/app/lib/format";
-import { providerLabel } from "@/app/lib/providers";
+import { providerLabel, providerOrder } from "@/app/lib/providers";
+import { useReadyManagedProviderModels } from "@/app/services/queries";
 import type {
   BackendKind,
   CatalogModel,
   CatalogProvider,
   ModelCatalog,
   ModelCostRates,
+  ProviderModel,
 } from "@/app/types/api";
-
-/**
- * The only model `arcee-auth` accepts: `validate_backend_model` in
- * crates/nac-core/src/model/client/mod.rs rejects every other id, so offering
- * them here would just build a session the server refuses.
- */
-const ARCEE_AUTH_MODEL = "trinity-large-thinking";
 
 export interface CatalogPick {
   backend: BackendKind;
@@ -60,13 +55,58 @@ function catalogBaseUrl(provider: CatalogProvider): string {
   return provider.managed_base_url ?? provider.default_base_url ?? "";
 }
 
-function rowsFor(catalog: ModelCatalog | undefined, query: string): Row[] {
+const EMPTY_COST: ModelCostRates = {
+  input: 0,
+  output: 0,
+  cache_read: 0,
+  cache_write: 0,
+};
+
+/** Live discovery only returns id + display name; fill limits from the catalog. */
+function modelsForProvider(
+  provider: CatalogProvider,
+  live: ProviderModel[] | undefined,
+): CatalogModel[] {
+  if (!live?.length) return provider.models;
+  const known = new Map(provider.models.map((model) => [model.id, model]));
+  return live.map((entry) => {
+    const catalog = known.get(entry.id);
+    if (catalog) {
+      return entry.display_name && entry.display_name !== catalog.display_name
+        ? { ...catalog, display_name: entry.display_name }
+        : catalog;
+    }
+    return {
+      id: entry.id,
+      display_name: entry.display_name,
+      context_window: provider.default_limits.context_window,
+      max_tokens: provider.default_limits.max_tokens,
+      cost: EMPTY_COST,
+      reasoning: false,
+      supported_efforts: provider.default_limits.supported_efforts,
+      source: "fallback",
+    };
+  });
+}
+
+function rowsFor(
+  catalog: ModelCatalog | undefined,
+  query: string,
+  liveByBackend: Map<BackendKind, ProviderModel[]>,
+): Row[] {
   const needle = query.trim().toLowerCase();
+  const providers = [...(catalog?.providers ?? [])].sort((left, right) => {
+    const leftReady = left.auth_status === "ready" ? 0 : 1;
+    const rightReady = right.auth_status === "ready" ? 0 : 1;
+    if (leftReady !== rightReady) return leftReady - rightReady;
+    return providerOrder(left.id) - providerOrder(right.id);
+  });
   const rows: Row[] = [];
-  for (const provider of catalog?.providers ?? []) {
-    for (const model of provider.models) {
-      if (provider.id === "arcee-auth" && model.id !== ARCEE_AUTH_MODEL)
-        continue;
+  for (const provider of providers) {
+    for (const model of modelsForProvider(
+      provider,
+      liveByBackend.get(provider.id),
+    )) {
       if (needle) {
         const haystack =
           `${model.id} ${model.display_name ?? ""} ${provider.id}`.toLowerCase();
@@ -107,7 +147,15 @@ const modelName = (model: CatalogModel) => model.display_name || model.id;
  * asked for right below this row.
  */
 function ProviderBadges({ provider }: { provider: CatalogProvider }) {
-  if (provider.auth_status !== "no_credential") return null;
+  if (provider.auth_status === "ready") {
+    return (
+      <Badge
+        text="available"
+        color={BadgeColor.Green}
+        className="shrink-0 whitespace-nowrap"
+      />
+    );
+  }
   return (
     <Badge
       text={
@@ -138,8 +186,12 @@ export function CatalogModelPicker({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const tabSize = isMobile ? TabButtonSize.Large : TabButtonSize.Medium;
+  const liveByBackend = useReadyManagedProviderModels(catalog);
 
-  const rows = useMemo(() => rowsFor(catalog, query), [catalog, query]);
+  const rows = useMemo(
+    () => rowsFor(catalog, query, liveByBackend),
+    [catalog, query, liveByBackend],
+  );
   // A shorter list can leave the highlight past its end.
   const index = Math.min(active, Math.max(rows.length - 1, 0));
 

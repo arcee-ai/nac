@@ -68,6 +68,7 @@ mkdir -p "$INSTALL_DIR"
 tar -xzf "$archive" -C "$tmpdir"
 install -m 755 "$tmpdir/nac-web" "$INSTALL_DIR/nac-web"
 
+echo "downloaded $asset from $CHANNEL"
 echo "installed nac-web to $INSTALL_DIR/nac-web"
 
 case ":$PATH:" in
@@ -77,3 +78,23 @@ case ":$PATH:" in
     echo "add $INSTALL_DIR to your PATH to run nac-web directly"
     ;;
 esac
+
+cat <<'EOF'
+
+Next steps – pick how you'll talk to models:
+
+  nac-web arcee-auth login
+      # recommended: Arcee account → open / Trinity models (no API key)
+
+  nac-web codex-auth login
+      # ChatGPT account → OpenAI / Codex models
+
+Or skip login and set a model plus the provider's conventional API key
+env var — a bare model is usually enough (base URL and key env resolve
+from the embedded catalog; see the README).
+
+Then cd into your project and run (confirms the folder, then opens the UI):
+
+  nac-web
+
+EOF

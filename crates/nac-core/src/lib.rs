@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 mod agent;
 mod agents_md;
+pub mod browser;
 pub mod commands;
 pub mod events;
 mod mcp;

@@ -15,9 +15,19 @@ The installer places one binary in `$HOME/.local/bin` by default:
 
 - `nac-web`: the web dashboard for managing multiple sessions, plus utility commands such as `codex-auth`, `arcee-auth`, and `upgrade`.
 
-Before launching a new session, configure a `model` (or pick one in the dashboard's model picker). The backend resolves from the model id through the embedded model catalog, the base URL materializes from the catalog's provider endpoint default, and an API-key credential auto-selects the provider's conventional environment variable when it is set — so a bare `model` is usually the whole configuration. Explicit `backend`, `base_url`, and `api_key_env` overrides remain available per session. The full contract and examples are under [Model configuration](#model-configuration).
+### Choose auth
 
-To use ChatGPT Codex OAuth instead of an API key, run `nac-web codex-auth login` and complete the device-code flow in a browser, then select `chatgpt-codex-responses` with its required model. An omitted base URL resolves to `https://chatgpt.com/backend-api`.
+Pick one path before you start a session — each unlocks a different set of models:
+
+| Path | Command | What you get |
+| --- | --- | --- |
+| **Arcee (recommended)** | `nac-web arcee-auth login` | Arcee account via device-code login → open / Trinity models, no API key |
+| **ChatGPT Codex** | `nac-web codex-auth login` | ChatGPT account via OAuth → OpenAI / Codex models |
+| **API key** | export the provider's conventional env var | Any catalog provider (DeepSeek, Fireworks, Together, OpenAI, Anthropic, `arcee-api`, …) |
+
+Arcee login is the shortest path to Arcee's hosted open models. Codex login is for people who already use ChatGPT and want those models inside nac. API keys skip browser login entirely. Details for the managed flows are under [Managed credentials and endpoints](#managed-credentials-and-endpoints).
+
+Before launching a new session, configure a `model` (or pick one in the dashboard's model picker). The backend resolves from the model id through the embedded model catalog, the base URL materializes from the catalog's provider endpoint default, and an API-key credential auto-selects the provider's conventional environment variable when it is set — so a bare `model` is usually the whole configuration. Explicit `backend`, `base_url`, and `api_key_env` overrides remain available per session. The full contract and examples are under [Model configuration](#model-configuration).
 
 Linux installs use the portable static build.
 
@@ -29,13 +39,13 @@ nac-web upgrade
 
 `nac-web upgrade` reinstalls `nac-web`.
 
-Run the web dashboard:
+Run the web dashboard from the project you want to work in:
 
 ```sh
-nac-web -C /path/to/project --bind 127.0.0.1:3210
+nac-web
 ```
 
-Open `http://127.0.0.1:3210/` for the session dashboard. It is a React app whose build output is committed under `crates/nac-server/assets/dist` and embedded in the binary, so a release never needs Node. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once.
+It confirms the current working directory as the project folder (`Y` to accept, `n` to type another path), then listens on `http://127.0.0.1:3210` and opens that URL in your browser. Pass `-C /path/to/project` to skip the prompt, or `-y` to accept cwd non-interactively. The dashboard is a React app whose build output is committed under `crates/nac-server/assets/dist` and embedded in the binary, so a release never needs Node. `nac-web` exposes a central session manager for web clients. It resolves one server store at startup, then can create, resume, inspect, submit prompts to, and stream events from multiple sessions at once.
 
 Server and session lifecycle:
 
