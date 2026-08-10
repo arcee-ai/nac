@@ -119,6 +119,7 @@ function TierModelRow({
       <ConfigRow
         label={`${TIER_LABELS[tier]} model`}
         required
+        verticalOnMobile
         hint={TIER_HINTS[tier]}
         control={
           <CatalogModelPicker
