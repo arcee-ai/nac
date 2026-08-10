@@ -2605,16 +2605,29 @@ async fn update_model_config_handler(
         configuration,
     ) {
         Ok(record) => {
-            if let Some(name) = superseded
-                .as_deref()
+            // A generated key survives exactly as long as something in the
+            // updated record — top-level or a tier — still names it; every
+            // other generated key this update walked away from is retired.
+            let mut retired: std::collections::BTreeSet<&str> = existing
+                .mixed_models
+                .as_ref()
+                .map(mixed_models::tier_credentials)
+                .into_iter()
+                .flatten()
+                .chain(superseded.as_deref())
                 .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-                .filter(|name| {
-                    !record
-                        .mixed_models
-                        .as_ref()
-                        .is_some_and(|mixed| mixed_models::references_credential(mixed, name))
-                })
-            {
+                .collect();
+            for kept in record.api_key_env.iter().map(String::as_str).chain(
+                record
+                    .mixed_models
+                    .as_ref()
+                    .map(mixed_models::tier_credentials)
+                    .into_iter()
+                    .flatten(),
+            ) {
+                retired.remove(kept);
+            }
+            for name in retired {
                 let _ = remove_api_key(name);
             }
             Ok(Json(record))
@@ -2796,12 +2809,23 @@ async fn delete_model_config_handler(
     model_configurations::delete_model_configuration(&manager.inner.store_path, &config_id)?;
 
     // Only a key this server filed away is ours to drop; a hand-configured
-    // environment variable name belongs to the operator.
-    if let Some(name) = record
+    // environment variable name belongs to the operator. Tiers can hold a
+    // generated key the top level already rotated off, so both are swept.
+    let generated: std::collections::BTreeSet<&str> = record
         .api_key_env
         .as_deref()
+        .into_iter()
+        .chain(
+            record
+                .mixed_models
+                .as_ref()
+                .map(mixed_models::tier_credentials)
+                .into_iter()
+                .flatten(),
+        )
         .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-    {
+        .collect();
+    for name in generated {
         let _ = remove_api_key(name);
     }
     Ok(StatusCode::NO_CONTENT)
@@ -8181,6 +8205,18 @@ model = "gpt-5.2"
         .unwrap()
     }
 
+    async fn delete_response(app: Router, uri: &str) -> Response {
+        app.oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
     fn mixed_openai_tiers(easy_model: &str) -> serde_json::Value {
         let tier = |model: &str| {
             serde_json::json!({
@@ -8313,10 +8349,74 @@ model = "gpt-5.2"
         for tier in ["easy", "medium", "hard"] {
             assert_eq!(updated["mixed_models"][tier]["api_key_env"], generated_name);
         }
-        let listed = listed_credentials(app).await.to_string();
+        let listed = listed_credentials(app.clone()).await.to_string();
         assert!(
             listed.contains(&generated_name),
             "the generated key is still referenced by tiers and must not be deleted: {listed}"
+        );
+
+        // Once nothing in the record names the key — here, clearing the
+        // tiers — the update retires it instead of orphaning the secret.
+        let response = patch_json(
+            app.clone(),
+            &format!("/model-configs/{config_id}"),
+            serde_json::json!({ "mixed_models": null }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let listed = listed_credentials(app).await.to_string();
+        assert!(
+            !listed.contains(&generated_name),
+            "clearing the last tier reference must retire the generated key: {listed}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_configuration_sweeps_generated_tier_credentials() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("delete_sweeps_tier_credentials");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let created = post_json(
+            app.clone(),
+            "/model-configs",
+            serde_json::json!({
+                "name": "delete sweep",
+                "backend": "openai-responses",
+                "model": "gpt-5.5",
+                "api_key": "tier-shared-secret",
+                "mixed_models": mixed_openai_tiers("gpt-5.5")
+            }),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let record = response_json(created).await;
+        let config_id = record["config_id"].as_str().unwrap().to_string();
+        let generated_name = record["api_key_env"].as_str().unwrap().to_string();
+
+        // Move the primary off the key so only tiers reference it.
+        let response = patch_json(
+            app.clone(),
+            &format!("/model-configs/{config_id}"),
+            serde_json::json!({
+                "backend": "chatgpt-codex-responses",
+                "model": "gpt-5.6-sol"
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = delete_response(app.clone(), &format!("/model-configs/{config_id}")).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let listed = listed_credentials(app).await.to_string();
+        assert!(
+            !listed.contains(&generated_name),
+            "deleting the configuration must sweep tier-only generated keys: {listed}"
         );
 
         let _ = std::fs::remove_dir_all(root);
