@@ -1,7 +1,8 @@
 use std::{
     ffi::{OsStr, OsString},
-    net::SocketAddr,
-    path::PathBuf,
+    io::{self, IsTerminal, Write},
+    net::{IpAddr, SocketAddr},
+    path::{Path, PathBuf},
     process,
 };
 
@@ -27,9 +28,16 @@ struct ServerCli {
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
 
-    /// Server root directory for default config and relative store paths.
+    /// Project directory (skips the interactive confirmation).
+    ///
+    /// Without this flag an interactive terminal confirms the current working
+    /// directory, or asks for another path. Non-interactive runs use cwd.
     #[arg(short = 'C', long)]
     directory: Option<PathBuf>,
+
+    /// Accept the current working directory without prompting.
+    #[arg(short = 'y', long, action = clap::ArgAction::SetTrue)]
+    yes: bool,
 
     /// Override the server SQLite store path.
     #[arg(long)]
@@ -38,6 +46,17 @@ struct ServerCli {
     /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
+
+    /// Open the dashboard in the default browser after listening.
+    ///
+    /// Interactive terminals open by default; pass `--no-open` to skip, or set
+    /// `BROWSER=none`. `--open` forces a window even when stdin is not a TTY.
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    open: bool,
+
+    /// Do not open a browser window.
+    #[arg(long = "no-open", action = clap::ArgAction::SetTrue)]
+    no_open: bool,
 }
 
 #[derive(Parser)]
@@ -379,7 +398,12 @@ async fn run() -> Result<()> {
 
 async fn run_server(cli: ServerCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
-    let root_cwd = resolve_cli_cwd(&launch_cwd, cli.directory.as_deref())?;
+    let root_cwd = resolve_project_directory(
+        &launch_cwd,
+        cli.directory.as_deref(),
+        cli.yes,
+    )?;
+    eprintln!("project: {}", root_cwd.display());
     let manager = SessionManager::new(ServerOptions {
         root_cwd,
         store_path: cli.store_path,
@@ -389,9 +413,93 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     // ETag-revalidated, never on picker/resume/validation paths).
     nac_core::model::spawn_overlay_refresh();
     let info = manager.store_info();
-    eprintln!("nac-web listening on http://{}", cli.bind);
+    let url = dashboard_url(cli.bind);
+    eprintln!("nac-web listening on {url}");
     eprintln!("store: {}", info.store_path.display());
+    if should_open_dashboard(cli.open, cli.no_open) {
+        eprintln!("opening the dashboard in your browser…");
+        nac_core::browser::open_url(&url);
+    }
     serve(cli.bind, manager).await
+}
+
+/// Picks the project root: explicit `-C`, else confirm cwd (or type another path).
+fn resolve_project_directory(
+    launch_cwd: &Path,
+    directory: Option<&Path>,
+    assume_yes: bool,
+) -> Result<PathBuf> {
+    if let Some(path) = directory {
+        return resolve_cli_cwd(launch_cwd, Some(path));
+    }
+
+    let default = resolve_cli_cwd(launch_cwd, None)?;
+    if assume_yes || !io::stdin().is_terminal() {
+        return Ok(default);
+    }
+
+    eprintln!("Project directory: {}", default.display());
+    eprint!("Confirm this project folder? [Y/n] ");
+    io::stderr().flush()?;
+
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .context("failed to read project folder confirmation")?;
+    let answer = answer.trim();
+    if answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
+    {
+        return Ok(default);
+    }
+    if !(answer.eq_ignore_ascii_case("n") || answer.eq_ignore_ascii_case("no")) {
+        anyhow::bail!("expected y or n");
+    }
+
+    eprint!("Enter project directory: ");
+    io::stderr().flush()?;
+    let mut entered = String::new();
+    io::stdin()
+        .read_line(&mut entered)
+        .context("failed to read project directory")?;
+    let entered = entered.trim();
+    if entered.is_empty() {
+        anyhow::bail!("project directory is required");
+    }
+    resolve_cli_cwd(launch_cwd, Some(Path::new(&expand_user_path(entered))))
+}
+
+fn expand_user_path(value: &str) -> PathBuf {
+    if value == "~" {
+        return std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(value));
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(value)
+}
+
+/// URL shown to humans and handed to the browser. Wildcard binds (`0.0.0.0`,
+/// `::`) are rewritten to loopback so the link is actually reachable.
+fn dashboard_url(bind: SocketAddr) -> String {
+    let host = match bind.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => "127.0.0.1".to_string(),
+        IpAddr::V6(ip) if ip.is_unspecified() => "[::1]".to_string(),
+        IpAddr::V6(ip) => format!("[{ip}]"),
+        ip => ip.to_string(),
+    };
+    format!("http://{host}:{}", bind.port())
+}
+
+fn should_open_dashboard(force_open: bool, no_open: bool) -> bool {
+    if no_open {
+        return false;
+    }
+    force_open || nac_core::browser::should_open_browser()
 }
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
@@ -466,7 +574,14 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
 
 async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
     match cli.command {
-        Some(command) => run_codex_auth_action(codex_auth_action(command)).await,
+        Some(command) => {
+            let start_dashboard = matches!(command, CodexAuthCommand::Login);
+            run_codex_auth_action(codex_auth_action(command)).await?;
+            if start_dashboard {
+                start_dashboard_after_login().await?;
+            }
+            Ok(())
+        }
         None => {
             let mut command = CodexAuthCli::command();
             command.print_help()?;
@@ -486,7 +601,14 @@ fn codex_auth_action(command: CodexAuthCommand) -> CodexAuthAction {
 
 async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
     match cli.command {
-        Some(command) => run_arcee_auth_action(arcee_auth_action(command)).await,
+        Some(command) => {
+            let start_dashboard = matches!(command, ArceeAuthCommand::Login);
+            run_arcee_auth_action(arcee_auth_action(command)).await?;
+            if start_dashboard {
+                start_dashboard_after_login().await?;
+            }
+            Ok(())
+        }
         None => {
             let mut command = ArceeAuthCli::command();
             command.print_help()?;
@@ -494,6 +616,20 @@ async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// After a successful browser login, continue into the same flow as a plain
+/// `nac-web`: confirm the project folder and open the dashboard. Non-interactive
+/// shells only print the next command so CI / scripts are not blocked.
+async fn start_dashboard_after_login() -> Result<()> {
+    println!();
+    if !nac_core::browser::should_open_browser() {
+        println!("Next: run `nac-web` from your project directory to open the dashboard.");
+        return Ok(());
+    }
+    println!("Login complete. Starting the dashboard…");
+    println!();
+    run_server(ServerCli::parse_from(["nac-web"])).await
 }
 
 fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {

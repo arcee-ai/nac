@@ -108,8 +108,8 @@ export function ConfigurationsPanel({
   // still settle once the list arrives.
   const [picked, setPicked] = useState<Source | null>(null);
   const [catalogPick, setCatalogPick] = useState<CatalogPick | null>(null);
-  const [provider, setProvider] = useState<ProviderChoice>("openai-responses");
-  const [protocol, setProtocol] = useState<BackendKind>("openai-responses");
+  const [provider, setProvider] = useState<ProviderChoice>("arcee-api");
+  const [protocol, setProtocol] = useState<BackendKind>("arcee-api");
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [modelDraft, setModelDraft] = useState("");

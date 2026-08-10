@@ -1,9 +1,10 @@
 // TanStack Query bindings for the nac API. Server state lives here; only
 // client state (selection, filters, live run status) goes into the stores.
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
   type UseQueryOptions,
@@ -28,6 +29,7 @@ import type {
   ManagedSessionSummary,
   ModelCatalog,
   ModelConfigurationList,
+  ProviderModel,
   ProviderModelList,
   RawSessionConfig,
   ManagedAuthList,
@@ -382,6 +384,39 @@ export function useManagedProviderModels(
     retry: false,
     staleTime: 5 * 60_000,
   });
+}
+
+/**
+ * Live model indexes for managed providers the catalog already marks ready.
+ * Same `POST /providers/models` path Create New uses after login — Browse can
+ * overlay these on the local catalog so Arcee/Codex show what the account can
+ * actually reach. Failures leave that provider on its catalog entries.
+ */
+export function useReadyManagedProviderModels(
+  catalog: ModelCatalog | undefined,
+) {
+  const ready = useMemo(
+    () =>
+      (catalog?.providers ?? []).filter(
+        (provider) =>
+          provider.auth_status === "ready" && provider.auth !== "api_key_env",
+      ),
+    [catalog],
+  );
+  const results = useQueries({
+    queries: ready.map((provider) => ({
+      queryKey: queryKeys.managedProviderModels(provider.id),
+      queryFn: () => api.listProviderModels({ backend: provider.id }),
+      retry: false,
+      staleTime: 5 * 60_000,
+    })),
+  });
+  const live = new Map<BackendKind, ProviderModel[]>();
+  ready.forEach((provider, index) => {
+    const models = results[index]?.data?.models;
+    if (models?.length) live.set(provider.id, models);
+  });
+  return live;
 }
 
 /**
