@@ -34,6 +34,7 @@ import { perfRender } from "@/app/lib/perfDebug";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
+  useCompactSession,
   useModelCatalog,
   useSshConnect,
   useSubmitRun,
@@ -161,6 +162,7 @@ export function ChatInputBox({
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
+  const compactSession = useCompactSession();
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const metrics = runMetrics(snapshot, entry);
@@ -183,7 +185,7 @@ export function ChatInputBox({
   const connectSsh = useSshConnect();
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
-  const busy = submitRun.isPending || running;
+  const busy = submitRun.isPending || compactSession.isPending || running;
   const canSend = Boolean(value.trim()) && !busy;
 
   const resize = useCallback(() => {
@@ -237,6 +239,19 @@ export function ChatInputBox({
   const submit = useCallback(async () => {
     const prompt = value.trim();
     if (!prompt || busy) return;
+    if (prompt === "/compact") {
+      try {
+        await compactSession.mutateAsync(sessionId);
+        pushLocalEvent("compaction", "▶ compacting context…");
+        setValue("");
+        if (ref.current) ref.current.style.height = `${rowPx}px`;
+      } catch (error) {
+        const message = errorMessage(error);
+        pushLocalEvent("error", `compact failed: ${message}`, true);
+        toast.error(`Failed to compact: ${message}`);
+      }
+      return;
+    }
     try {
       await submitRun.mutateAsync({ id: sessionId, prompt });
       pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
@@ -247,7 +262,7 @@ export function ChatInputBox({
       pushLocalEvent("error", `submit failed: ${message}`, true);
       toast.error(`Failed to send: ${message}`);
     }
-  }, [value, busy, sessionId, submitRun, toast, rowPx]);
+  }, [value, busy, sessionId, submitRun, compactSession, toast, rowPx]);
 
   const stop = useCallback(async () => {
     const summary = entry?.summary;

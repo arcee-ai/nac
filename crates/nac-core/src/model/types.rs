@@ -418,12 +418,11 @@ impl TokenUsage {
     }
 
     /// Accept a provider context total only when all represented usage fields
-    /// fit in the supported range and the total covers their full sum. Zero
-    /// means unavailable.
+    /// fit in the supported range and the total covers their full sum. When
+    /// the provider omits `total_tokens` (zero) but does report component
+    /// usage, fall back to the component sum as the context total.
     pub(crate) fn valid_provider_context(&self) -> Option<u64> {
-        if self.orchestrator_context_tokens == 0
-            || self.orchestrator_context_tokens > crate::MAX_SUPPORTED_TOKEN_COUNT
-        {
+        if self.orchestrator_context_tokens > crate::MAX_SUPPORTED_TOKEN_COUNT {
             return None;
         }
         let represented = self
@@ -431,8 +430,13 @@ impl TokenUsage {
             .checked_add(self.cache_read_tokens)?
             .checked_add(self.cache_write_tokens)?
             .checked_add(self.output_tokens)?;
-        (self.orchestrator_context_tokens >= represented)
-            .then_some(self.orchestrator_context_tokens)
+        if self.orchestrator_context_tokens != 0 {
+            return (self.orchestrator_context_tokens >= represented)
+                .then_some(self.orchestrator_context_tokens);
+        }
+        // Fallback: provider didn't report total_tokens but did report
+        // component usage. Use the component sum as the context total.
+        (represented > 0).then_some(represented)
     }
 }
 

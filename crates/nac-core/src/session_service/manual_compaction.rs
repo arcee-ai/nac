@@ -294,12 +294,18 @@ impl SessionService {
             lifecycle: Some(lifecycle),
         };
         let agent = self.agent.clone();
+        let persist_service = self.clone();
         let compaction_id = snapshot.compaction_id;
         let task = tokio::spawn(async move {
             let result = {
                 let mut agent = agent.lock().await;
                 agent.compact_for_session(compaction_id, event_sink).await
             };
+            if let Ok(CompactionResult::Compacted { projected_context, .. }) = &result {
+                if let Err(error) = persist_service.persist_compaction_context(*projected_context).await {
+                    eprintln!("nac: failed to persist compaction context: {error:#}");
+                }
+            }
             task_guard.complete(result);
         });
         #[cfg(test)]

@@ -17,6 +17,7 @@ pub(super) use planning::{NAC_COMPACTION_PROMPT, PROMPT_POLICY_VERSION};
 pub enum CompactionResult {
     Compacted {
         compaction_id: Uuid,
+        projected_context: u64,
     },
     Unchanged {
         compaction_id: Uuid,
@@ -309,11 +310,8 @@ impl super::Agent {
             .expect("compaction state exists for a triggered attempt")
             .projected_context_estimate(
                 &self.messages,
-                &self.tool_defs,
-                candidate.boundary,
-                &installed,
-                summary_prompt_tokens,
-                summary_completion_tokens,
+                summary_prompt_tokens.unwrap_or(0),
+                summary_completion_tokens.unwrap_or(0),
                 candidate.old_context_estimate,
             );
 
@@ -362,7 +360,7 @@ impl super::Agent {
             .as_mut()
             .expect("compaction state exists after activation")
             .prepare(&self.messages, &self.tool_defs);
-        (prepared, Ok(CompactionResult::Compacted { compaction_id }))
+        (prepared, Ok(CompactionResult::Compacted { compaction_id, projected_context: projected }))
     }
 
     fn account_summary_usage(

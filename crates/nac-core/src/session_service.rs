@@ -2457,6 +2457,33 @@ impl SessionService {
         Ok(())
     }
 
+    /// Persist the projected context size after a manual compaction so the
+    /// frontend context gauge reflects the new (reduced) context. Updates
+    /// `unattributed_token_usage` in the in-memory snapshot and SQLite,
+    /// preserving all other run-state fields. Called before the compaction
+    /// completion SSE event so the debounced snapshot refetch sees the update.
+    async fn persist_compaction_context(&self, projected_context: u64) -> Result<()> {
+        let update = {
+            let mut snapshot = self.session_snapshot.lock().await;
+            let Some(snapshot) = snapshot.as_mut() else {
+                return Ok(());
+            };
+            let mut unattributed = snapshot.unattributed_token_usage.clone().unwrap_or_default();
+            unattributed.replace_context(projected_context);
+            snapshot.apply_run_state(sessions::SessionRunState {
+                last_response_duration_ms: snapshot.last_response_duration_ms,
+                previous_response_duration_ms: snapshot.previous_response_duration_ms,
+                response_durations_ms: snapshot.response_durations_ms.clone(),
+                token_usages: snapshot.token_usages.clone(),
+                unattributed_token_usage: Some(unattributed),
+            })
+        };
+        let store_path = self.metadata.store_path.clone();
+        tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
+            .await??;
+        Ok(())
+    }
+
     async fn append_cancellation_message(&self) -> Option<crate::model::TokenUsage> {
         let mut agent = self.agent.lock().await;
         // Trims any dangling tool turn from the transcript AND the transcript
