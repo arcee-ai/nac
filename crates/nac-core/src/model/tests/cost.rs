@@ -47,6 +47,23 @@ fn token_usage_validation_and_accumulation_are_overflow_safe() {
         },
     };
     assert_eq!(hostile.valid_provider_context(), None);
+
+    // Fallback: provider omits total_tokens (zero) but reports component
+    // usage. The component sum is used as the context total.
+    let no_total = TokenUsage {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 2,
+        cache_write_tokens: 3,
+        reasoning_tokens: 0,
+        orchestrator_context_tokens: 0,
+        cost: TokenCostMicros::default(),
+    };
+    assert_eq!(no_total.valid_provider_context(), Some(20));
+
+    // Zero across the board is still None (no usage at all).
+    let all_zero = TokenUsage::default();
+    assert_eq!(all_zero.valid_provider_context(), None);
     let mut accumulated = hostile.clone();
     accumulated.add_cost_saturating(&hostile);
     accumulated += hostile;

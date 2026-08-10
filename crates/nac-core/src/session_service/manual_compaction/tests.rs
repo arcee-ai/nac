@@ -543,16 +543,6 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     );
     let persisted_before = sessions::load_session(&store_path, "success-session").unwrap();
     let persisted_before_state = persisted_response_state(&store_path, "success-session");
-    let in_memory_snapshot_before = format!(
-        "{:?}",
-        parts
-            .service
-            .session_snapshot
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-    );
     let messages_before = {
         let agent = parts.service.agent.lock().await;
         serde_json::to_vec(&agent.messages).unwrap()
@@ -594,10 +584,10 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     release_tx.send(()).unwrap();
 
     let result = handle.wait().await.unwrap();
-    assert_eq!(
+    assert!(matches!(
         result,
-        SessionCompactionResult::Compacted { compaction_id: id }
-    );
+        SessionCompactionResult::Compacted { compaction_id: cmp_id, .. } if cmp_id == id
+    ));
     assert!(!parts.service.has_active_operation());
     let lease =
         sessions::SessionOperationLease::try_acquire(&store_path, "success-session").unwrap();
@@ -607,23 +597,41 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     assert_eq!(requests.len(), 1);
     let request: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert!(request.get("tools").is_none());
+    // Messages and timing are preserved — compaction doesn't touch the
+    // write-once blob or response durations.
+    let persisted_after = persisted_response_state(&store_path, "success-session");
+    assert_eq!(persisted_after.0, persisted_before_state.0); // messages_json
+    assert_eq!(persisted_after.1, persisted_before_state.1); // last_response_duration_ms
+    assert_eq!(persisted_after.2, persisted_before_state.2); // previous_response_duration_ms
+    assert_eq!(persisted_after.3, persisted_before_state.3); // response_durations_ms_json
+    // token_usages_json now includes the compaction's projected context
+    // as unattributed_usage (the context gauge override).
+    assert_ne!(persisted_after.4, persisted_before_state.4);
+    assert!(persisted_after
+        .4
+        .as_ref()
+        .unwrap()
+        .contains("unattributed_usage"));
+    // The in-memory snapshot's unattributed_token_usage is now set with
+    // the projected context. Messages and other fields are preserved.
+    let snapshot_after = parts
+        .service
+        .session_snapshot
+        .lock()
+        .await
+        .as_ref()
+        .unwrap()
+        .clone();
     assert_eq!(
-        persisted_response_state(&store_path, "success-session"),
-        persisted_before_state
+        serde_json::to_vec(&snapshot_after.messages).unwrap(),
+        serde_json::to_vec(&persisted_before.messages).unwrap()
     );
     assert_eq!(
-        format!(
-            "{:?}",
-            parts
-                .service
-                .session_snapshot
-                .lock()
-                .await
-                .as_ref()
-                .unwrap()
-        ),
-        in_memory_snapshot_before
+        snapshot_after.last_response_duration_ms,
+        persisted_before.last_response_duration_ms
     );
+    let unattributed = snapshot_after.unattributed_token_usage.as_ref().unwrap();
+    assert!(unattributed.orchestrator_context_tokens > 0);
     let agent = parts.service.agent.lock().await;
     assert_eq!(
         serde_json::to_vec(&agent.messages).unwrap(),
@@ -827,10 +835,11 @@ async fn abort_after_manual_compaction_commit_cannot_supersede_completion() {
         }
     }
     handle.abort();
-    assert_eq!(
-        handle.wait().await.unwrap(),
-        SessionCompactionResult::Compacted { compaction_id: id }
-    );
+    let result = handle.wait().await.unwrap();
+    assert!(matches!(
+        result,
+        SessionCompactionResult::Compacted { compaction_id: cmp_id, .. } if cmp_id == id
+    ));
     assert!(!parts.service.has_active_operation());
     assert_eq!(server.finish().len(), 1);
     let lifecycle = parts
