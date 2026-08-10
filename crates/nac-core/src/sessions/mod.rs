@@ -22,6 +22,7 @@ pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
     load_session, load_session_config, reorder_sessions, save_session, save_session_run_state,
     session_exists, update_raw_session_config, update_session_config, update_session_presentation,
+    MALFORMED_MIXED_MODELS_DIAGNOSTIC,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,

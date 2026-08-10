@@ -60,6 +60,16 @@ pub(crate) fn normalize(
     })
 }
 
+/// Whether any tier still points at `name`. Rotation only follows tiers on
+/// the new primary backend, so a superseded generated key may stay referenced
+/// (backend switched, or auth moved off API keys) and must then outlive the
+/// update.
+pub(crate) fn references_credential(mixed: &MixedModeConfig, name: &str) -> bool {
+    [&mixed.easy, &mixed.medium, &mixed.hard]
+        .into_iter()
+        .any(|tier| tier.api_key_env.as_deref() == Some(name))
+}
+
 /// Rotate inherited tier references when a saved configuration's generated
 /// top-level credential changes.
 pub(crate) fn rotate_inherited_credential(

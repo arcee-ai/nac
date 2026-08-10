@@ -51,6 +51,11 @@ fn deserialize_token_accounting(
     }
 }
 
+/// Diagnostic prefix `load_session_config` uses for an unparseable
+/// `mixed_models_json` column, so callers can require an explicit repair
+/// instead of persisting the loss.
+pub const MALFORMED_MIXED_MODELS_DIAGNOSTIC: &str = "malformed stored mixed models";
+
 pub(super) fn serialize_mixed_models(mixed: Option<&MixedModeConfig>) -> Result<Option<String>> {
     mixed
         .map(|config| {
@@ -344,7 +349,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
         Ok(mixed_models) => config.mixed_models = mixed_models,
         Err(error) => config
             .diagnostics
-            .push(format!("malformed stored mixed models: {error:#}")),
+            .push(format!("{MALFORMED_MIXED_MODELS_DIAGNOSTIC}: {error:#}")),
     }
     config.orchestrator_compaction_threshold =
         validate_stored_compaction_threshold(config.orchestrator_compaction_threshold)?;
