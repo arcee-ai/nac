@@ -174,7 +174,9 @@ impl McpRegistry {
                 continue;
             }
             // Two names for the same endpoint would mount every tool twice
-            // under different prefixes, so only the first name connects.
+            // under different prefixes, so only the first name that mounts
+            // tools claims the endpoint; a failed attempt leaves it free for
+            // a later twin.
             let endpoint = endpoint_key(&server_config.transport);
             if let Some(existing) = seen_endpoints.get(&endpoint) {
                 eprintln!(
@@ -182,7 +184,6 @@ impl McpRegistry {
                 );
                 continue;
             }
-            seen_endpoints.insert(endpoint, server_name.clone());
 
             let service = match timeout(
                 MCP_CONNECT_TIMEOUT,
@@ -229,6 +230,7 @@ impl McpRegistry {
                 }
             };
 
+            seen_endpoints.insert(endpoint, server_name.clone());
             let server = Arc::new(McpServer {
                 _service: service.clone(),
             });
