@@ -117,14 +117,26 @@ pub struct TestMcpServerResponse {
     pub tools: Vec<McpProbedTool>,
 }
 
-/// A literal never leaves the process whole: only a `${ENV_VAR}` reference —
-/// which carries no secret — echoes back unchanged.
+/// True when the whole value is one `${ENV_VAR}` reference and nothing else.
+fn is_env_reference(value: &str) -> bool {
+    value
+        .strip_prefix("${")
+        .and_then(|rest| rest.strip_suffix('}'))
+        .is_some_and(|name| {
+            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+}
+
+/// A literal never leaves the process whole: only a pure `${ENV_VAR}`
+/// reference — which carries no secret — echoes back unchanged. Anything
+/// else containing `${` is fully masked, since its literal parts may be
+/// secret; a plain literal keeps a short suffix so it stays identifiable.
 fn redact_value(value: &str) -> String {
-    if value.contains("${") {
+    if is_env_reference(value) {
         return value.to_string();
     }
     let chars: Vec<char> = value.chars().collect();
-    if chars.len() > 8 {
+    if !value.contains("${") && chars.len() > 8 {
         let suffix: String = chars[chars.len() - 4..].iter().collect();
         format!("****{suffix}")
     } else {
@@ -397,10 +409,30 @@ pub async fn test_server_handler(
                 .args
                 .or_else(|| stored.as_ref().map(|record| record.args.clone()))
                 .unwrap_or_default();
-            let env = match request.env {
-                Some(env) => merge_map(env, stored_env.unwrap_or(&empty))?,
-                None => stored_env.cloned().unwrap_or_default(),
+            let (env, borrowed) = match request.env {
+                Some(env) => {
+                    let borrowed = env.values().any(Option::is_none);
+                    (merge_map(env, stored_env.unwrap_or(&empty))?, borrowed)
+                }
+                None => {
+                    let env = stored_env.cloned().unwrap_or_default();
+                    let borrowed = !env.is_empty();
+                    (env, borrowed)
+                }
             };
+            // Borrowed secrets end up in the spawned process's environment,
+            // so they may only run the command they were stored for.
+            if borrowed {
+                let record = stored.as_ref().expect("borrowing requires a stored record");
+                if record.transport != MCP_TRANSPORT_STDIO
+                    || record.command.as_deref() != Some(command.as_str())
+                    || record.args != args
+                {
+                    return Err(ApiError::bad_request(
+                        "stored env values can only be tested with the stored command".to_string(),
+                    ));
+                }
+            }
             McpServerConfig {
                 enabled: true,
                 transport: McpTransportConfig::Stdio { command, args, env },
@@ -412,10 +444,33 @@ pub async fn test_server_handler(
                 .or_else(|| stored.as_ref().and_then(|record| record.url.clone()))
                 .filter(|url| !url.trim().is_empty())
                 .ok_or_else(|| ApiError::bad_request("a url is required".to_string()))?;
-            let headers = match request.headers {
-                Some(headers) => merge_map(headers, stored_headers.unwrap_or(&empty))?,
-                None => stored_headers.cloned().unwrap_or_default(),
+            let (headers, borrowed) = match request.headers {
+                Some(headers) => {
+                    let borrowed = headers.values().any(Option::is_none);
+                    (
+                        merge_map(headers, stored_headers.unwrap_or(&empty))?,
+                        borrowed,
+                    )
+                }
+                None => {
+                    let headers = stored_headers.cloned().unwrap_or_default();
+                    let borrowed = !headers.is_empty();
+                    (headers, borrowed)
+                }
             };
+            // Borrowed secrets are sent with the request, so they may only
+            // travel to the URL they were stored for.
+            if borrowed {
+                let record = stored.as_ref().expect("borrowing requires a stored record");
+                if record.transport != MCP_TRANSPORT_STREAMABLE_HTTP
+                    || record.url.as_deref() != Some(url.as_str())
+                {
+                    return Err(ApiError::bad_request(
+                        "stored header values can only be tested against the stored URL"
+                            .to_string(),
+                    ));
+                }
+            }
             McpServerConfig {
                 enabled: true,
                 transport: McpTransportConfig::StreamableHttp { url, headers },
@@ -453,10 +508,9 @@ mod tests {
 
     #[test]
     fn references_pass_through_and_literals_are_masked() {
-        assert_eq!(
-            redact_value("Bearer ${GITHUB_TOKEN}"),
-            "Bearer ${GITHUB_TOKEN}"
-        );
+        assert_eq!(redact_value("${GITHUB_TOKEN}"), "${GITHUB_TOKEN}");
+        assert_eq!(redact_value("Bearer ${GITHUB_TOKEN}"), "****");
+        assert_eq!(redact_value("sk-secret${odd"), "****");
         assert_eq!(redact_value("sk-1234567890abcdef"), "****cdef");
         assert_eq!(redact_value("short"), "****");
     }

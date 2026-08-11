@@ -57,17 +57,14 @@ const TRANSPORT_ITEMS = [
 ];
 
 /**
- * One header or env line of the form. `stored` marks a secret that lives on
- * the server: the input shows the redacted preview as a placeholder, and an
- * empty value sends null so the stored value survives untouched. A library
- * template's auth row carries only a hint placeholder, not a stored secret.
+ * One header or env line of the form. `storedKey` marks a secret that lives
+ * on the server under that key: the input shows the redacted preview as a
+ * placeholder, and an empty value sends null so the stored value survives
+ * untouched. A library template's auth row carries only a hint placeholder.
  */
 interface KvRow {
   key: string;
   value: string;
-  stored: boolean;
-  keepStored: boolean;
-  /** The key the secret is stored under; keeping only works under it. */
   storedKey?: string;
   placeholder?: string;
 }
@@ -76,8 +73,6 @@ function rowsFromRecord(map: Record<string, string>): KvRow[] {
   return Object.entries(map).map(([key, preview]) => ({
     key,
     value: "",
-    stored: true,
-    keepStored: true,
     storedKey: key,
     placeholder: preview,
   }));
@@ -93,7 +88,7 @@ function mapFromRows(rows: KvRow[]): Record<string, string | null> {
     const key = row.key.trim();
     if (!key) continue;
     if (!row.value) {
-      if (row.keepStored && key === row.storedKey) map[key] = null;
+      if (key === row.storedKey) map[key] = null;
       continue;
     }
     map[key] = row.value;
@@ -435,22 +430,9 @@ function KvEditor({
   rows: KvRow[];
   onChange: (rows: KvRow[]) => void;
 }) {
-  const updateKey = (index: number, key: string) => {
-    onChange(rows.map((row, at) => (at === index ? { ...row, key } : row)));
-  };
-  // A cleared value falls back to keeping the stored secret when the row came
-  // from the server; only a typed literal replaces it.
-  const updateValue = (index: number, value: string) => {
+  const update = (index: number, patch: Partial<KvRow>) => {
     onChange(
-      rows.map((row, at) =>
-        at === index
-          ? {
-              ...row,
-              value,
-              keepStored: value === "" && row.stored,
-            }
-          : row,
-      ),
+      rows.map((row, at) => (at === index ? { ...row, ...patch } : row)),
     );
   };
   return (
@@ -463,14 +445,14 @@ function KvEditor({
             className="flex-1 min-w-0"
             placeholder={keyPlaceholder}
             value={row.key}
-            onChange={(event) => updateKey(index, event.target.value)}
+            onChange={(event) => update(index, { key: event.target.value })}
           />
           <Input
             inputSize={InputSize.Medium}
             className="flex-1 min-w-0"
             placeholder={row.placeholder ?? "value"}
             value={row.value}
-            onChange={(event) => updateValue(index, event.target.value)}
+            onChange={(event) => update(index, { value: event.target.value })}
           />
           <Button
             size={ButtonSize.Medium}
@@ -487,12 +469,7 @@ function KvEditor({
         size={ButtonSize.Medium}
         variant={ButtonVariant.Secondary}
         className="self-start"
-        onClick={() =>
-          onChange([
-            ...rows,
-            { key: "", value: "", stored: false, keepStored: false },
-          ])
-        }
+        onClick={() => onChange([...rows, { key: "", value: "" }])}
       >
         <Icon iconName={IconName.Add} />
         Add entry
@@ -539,8 +516,6 @@ function McpServerForm({
         {
           key: template.auth_header,
           value: "",
-          stored: false,
-          keepStored: false,
           placeholder: template.auth_hint ?? undefined,
         },
       ];
