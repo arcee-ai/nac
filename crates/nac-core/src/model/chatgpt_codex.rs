@@ -1,6 +1,6 @@
 use super::auth_store::ensure_open_credential_file_is_safe;
 use super::responses_stream::ResponsesStreamFold;
-use super::sse::{read_sse_response, StreamFold};
+use super::sse::{read_sse_response, StreamFold, StreamFoldError};
 use super::*;
 use anyhow::Context;
 use fs2::FileExt;
@@ -96,6 +96,8 @@ struct AuthorizationCode {
 struct CodexRequestError {
     status: Option<StatusCode>,
     message: String,
+    retryable_stream: bool,
+    observable_delta: bool,
 }
 
 impl fmt::Display for CodexRequestError {
@@ -105,6 +107,12 @@ impl fmt::Display for CodexRequestError {
 }
 
 impl std::error::Error for CodexRequestError {}
+
+impl CodexRequestError {
+    fn can_retry_stream(&self) -> bool {
+        self.retryable_stream && !self.observable_delta
+    }
+}
 
 pub(super) fn validate_base_url(base_url: &str) -> Result<Url> {
     let parsed = Url::parse(base_url)
@@ -909,9 +917,32 @@ async fn post_codex_json_with_retry(
     prompt_cache_key: Option<&str>,
     on_delta: DeltaSink<'_>,
 ) -> std::result::Result<Value, CodexRequestError> {
+    post_codex_json_with_retry_delay(
+        client,
+        url,
+        body,
+        auth,
+        prompt_cache_key,
+        on_delta,
+        super::backoff_duration,
+    )
+    .await
+}
+
+async fn post_codex_json_with_retry_delay(
+    client: &Client,
+    url: &str,
+    body: &Value,
+    auth: &StoredCodexAuth,
+    prompt_cache_key: Option<&str>,
+    on_delta: DeltaSink<'_>,
+    retry_delay: impl Fn(usize) -> Duration,
+) -> std::result::Result<Value, CodexRequestError> {
     let mut last_error = CodexRequestError {
         status: None,
         message: "No attempts made".to_string(),
+        retryable_stream: false,
+        observable_delta: false,
     };
 
     for attempt in 0..10 {
@@ -934,9 +965,11 @@ async fn post_codex_json_with_retry(
                 last_error = CodexRequestError {
                     status: None,
                     message: format!("HTTP request failed for {url}: {e}"),
+                    retryable_stream: false,
+                    observable_delta: false,
                 };
                 if attempt < 9 {
-                    sleep(super::backoff_duration(attempt)).await;
+                    sleep(retry_delay(attempt)).await;
                 }
                 continue;
             }
@@ -962,11 +995,23 @@ async fn post_codex_json_with_retry(
             //
             // Codex often omits Content-Type on streamed responses. `Accept`
             // and `stream: true` make a missing header an SSE response here.
-            if content_type.is_none() || is_event_stream(content_type.as_deref()) {
-                return stream_codex_responses(response, url, status, on_delta).await;
+            let result = if content_type.is_none() || is_event_stream(content_type.as_deref()) {
+                stream_codex_responses(response, url, status, on_delta).await
+            } else {
+                let response_body = read_codex_body(response, url, status).await?;
+                parse_codex_success_body(url, status, content_type.as_deref(), &response_body)
+            };
+            match result {
+                Ok(value) => return Ok(value),
+                Err(error) if error.can_retry_stream() => {
+                    last_error = error;
+                    if attempt < 9 {
+                        sleep(retry_delay(attempt)).await;
+                    }
+                    continue;
+                }
+                Err(error) => return Err(error),
             }
-            let response_body = read_codex_body(response, url, status).await?;
-            return parse_codex_success_body(url, status, content_type.as_deref(), &response_body);
         }
 
         let response_body = read_codex_body(response, url, status).await?;
@@ -978,6 +1023,8 @@ async fn post_codex_json_with_retry(
                 status.as_u16(),
                 truncate(&response_body)
             ),
+            retryable_stream: false,
+            observable_delta: false,
         };
         if status == StatusCode::UNAUTHORIZED {
             return Err(error);
@@ -988,9 +1035,9 @@ async fn post_codex_json_with_retry(
                 let delay = if status.as_u16() == 429 {
                     retry_after
                         .map(Duration::from_secs)
-                        .unwrap_or_else(|| super::backoff_duration(attempt))
+                        .unwrap_or_else(|| retry_delay(attempt))
                 } else {
-                    super::backoff_duration(attempt)
+                    retry_delay(attempt)
                 };
                 sleep(delay).await;
             }
@@ -1010,6 +1057,8 @@ async fn read_codex_body(
     response.text().await.map_err(|error| CodexRequestError {
         status: Some(status),
         message: format!("Failed to read response body from {url}: {error}"),
+        retryable_stream: false,
+        observable_delta: false,
     })
 }
 
@@ -1031,7 +1080,9 @@ async fn stream_codex_responses(
         .await
         .map_err(|error| CodexRequestError {
             status: Some(status),
-            message: format!("{error:#}"),
+            message: error.to_string(),
+            retryable_stream: error.is_retryable(),
+            observable_delta: error.has_observable_delta(),
         })
 }
 
@@ -1046,12 +1097,14 @@ fn parse_codex_success_body(
         .unwrap_or(false)
         || response_body.lines().any(|line| line.starts_with("data:"))
     {
-        return parse_codex_sse_response(response_body).map_err(|message| CodexRequestError {
+        return parse_codex_sse_response(response_body).map_err(|error| CodexRequestError {
             status: Some(status),
             message: format!(
-                "Failed to parse SSE response from {url}: {message}\nBody: {}",
+                "Failed to parse SSE response from {url}: {error}\nBody: {}",
                 truncate(response_body)
             ),
+            retryable_stream: error.is_retryable(),
+            observable_delta: false,
         });
     }
 
@@ -1061,10 +1114,12 @@ fn parse_codex_success_body(
             "Failed to parse response from {url}: {error}\nBody: {}",
             truncate(response_body)
         ),
+        retryable_stream: false,
+        observable_delta: false,
     })
 }
 
-fn parse_codex_sse_response(response_body: &str) -> std::result::Result<Value, String> {
+fn parse_codex_sse_response(response_body: &str) -> std::result::Result<Value, StreamFoldError> {
     let mut fold = ResponsesStreamFold::new(None);
 
     for data in sse_data_payloads(response_body) {
@@ -1072,8 +1127,9 @@ fn parse_codex_sse_response(response_body: &str) -> std::result::Result<Value, S
             continue;
         }
 
-        let event: Value = serde_json::from_str(&data)
-            .map_err(|error| format!("invalid SSE JSON event: {error}"))?;
+        let event: Value = serde_json::from_str(&data).map_err(|error| {
+            StreamFoldError::permanent(format!("invalid SSE JSON event: {error}"))
+        })?;
         fold.push(&event)?;
     }
 
@@ -2085,6 +2141,225 @@ mod tests {
         assert_eq!(parsed["output"][0]["type"], "message");
         assert_eq!(parsed["output"][0]["content"][0]["text"], "hello");
         assert_eq!(parsed["usage"]["total_tokens"], 3);
+    }
+
+    #[test]
+    fn buffered_codex_sse_preserves_transient_retry_metadata() {
+        let body = concat!(
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":",
+            "{\"type\":\"overloaded_error\",\"message\":\"You can retry your request.\"}}}\n\n"
+        );
+        let error = parse_codex_success_body(
+            "https://chatgpt.com/backend-api/codex/responses",
+            StatusCode::OK,
+            Some("application/json"),
+            body,
+        )
+        .unwrap_err();
+
+        assert!(error.can_retry_stream());
+        assert!(error.to_string().contains("You can retry your request"));
+    }
+
+    async fn scripted_codex_sse_server(
+        bodies: Vec<&'static str>,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for body in bodies {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 16 * 1024];
+                let _ = stream.read(&mut request).await.unwrap();
+                let headers = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(headers.as_bytes()).await.unwrap();
+                stream.write_all(body.as_bytes()).await.unwrap();
+                stream.flush().await.unwrap();
+            }
+        });
+        (address, server)
+    }
+
+    fn completed_codex_sse() -> &'static str {
+        concat!(
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,",
+            "\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",",
+            "\"text\":\"complete\"}]}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":",
+            "{\"status\":\"completed\",\"output\":[]}}\n\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn retries_transient_codex_sse_error_before_observable_output() {
+        use std::sync::mpsc;
+        use tokio::time::timeout;
+
+        let overloaded = concat!(
+            "data: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",",
+            "\"message\":\"Our servers are currently overloaded. Please try again later.\"}}\n\n"
+        );
+        let (address, server) =
+            scripted_codex_sse_server(vec![overloaded, completed_codex_sse()]).await;
+        let (send, receive) = mpsc::channel();
+        let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
+        let response = timeout(
+            Duration::from_secs(3),
+            post_codex_json_with_retry_delay(
+                &Client::new(),
+                &format!("http://{address}"),
+                &json!({"stream": true}),
+                &stored_codex_auth("access-token"),
+                None,
+                Some(&sink),
+                |_| Duration::ZERO,
+            ),
+        )
+        .await
+        .expect("transient stream retry timed out")
+        .unwrap();
+
+        timeout(Duration::from_secs(1), server)
+            .await
+            .expect("expected exactly two requests")
+            .unwrap();
+        assert_eq!(response["output"][0]["content"][0]["text"], "complete");
+        assert_eq!(
+            receive.try_iter().collect::<Vec<_>>(),
+            vec![
+                ModelStreamDelta::reasoning("thinking"),
+                ModelStreamDelta::text("complete"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_permanent_or_malformed_codex_sse_error() {
+        use tokio::time::timeout;
+
+        let permanent = concat!(
+            "data: {\"type\":\"error\",\"error\":{\"code\":\"insufficient_quota\",",
+            "\"message\":\"quota exhausted\"}}\n\n"
+        );
+        for (body, expected_error) in [
+            (permanent, "quota exhausted"),
+            ("data: {not-json}\n\n", "invalid SSE event"),
+        ] {
+            let (address, server) = scripted_codex_sse_server(vec![body]).await;
+            let error = timeout(
+                Duration::from_secs(1),
+                post_codex_json_with_retry(
+                    &Client::new(),
+                    &format!("http://{address}"),
+                    &json!({"stream": true}),
+                    &stored_codex_auth("access-token"),
+                    None,
+                    None,
+                ),
+            )
+            .await
+            .expect("permanent stream error unexpectedly retried")
+            .unwrap_err();
+
+            timeout(Duration::from_secs(1), server)
+                .await
+                .expect("expected exactly one request")
+                .unwrap();
+            assert!(error.to_string().contains(expected_error), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn exhausts_transient_codex_sse_retries_with_final_provider_error() {
+        use tokio::time::timeout;
+
+        let overloaded = concat!(
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":",
+            "{\"type\":\"overloaded_error\",\"message\":\"You can retry your request.\"}}}\n\n"
+        );
+        let final_overloaded = concat!(
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":",
+            "{\"type\":\"overloaded_error\",\"message\":\"final provider failure\"}}}\n\n"
+        );
+        let mut bodies = vec![overloaded; 9];
+        bodies.push(final_overloaded);
+        let (address, server) = scripted_codex_sse_server(bodies).await;
+        let error = timeout(
+            Duration::from_secs(2),
+            post_codex_json_with_retry_delay(
+                &Client::new(),
+                &format!("http://{address}"),
+                &json!({"stream": true}),
+                &stored_codex_auth("access-token"),
+                None,
+                None,
+                |_| Duration::ZERO,
+            ),
+        )
+        .await
+        .expect("bounded transient stream retries timed out")
+        .unwrap_err();
+
+        timeout(Duration::from_secs(1), server)
+            .await
+            .expect("expected exactly ten requests")
+            .unwrap();
+        assert!(error.to_string().contains("final provider failure"));
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_codex_sse_error_after_observable_delta() {
+        use std::sync::mpsc;
+        use tokio::time::timeout;
+
+        let partial_text = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+            "data: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",",
+            "\"message\":\"Our servers are currently overloaded.\"}}\n\n"
+        );
+        let partial_reasoning = concat!(
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n",
+            "data: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",",
+            "\"message\":\"Our servers are currently overloaded.\"}}\n\n"
+        );
+        for (body, expected_delta) in [
+            (partial_text, ModelStreamDelta::text("partial")),
+            (partial_reasoning, ModelStreamDelta::reasoning("thinking")),
+        ] {
+            let (address, server) = scripted_codex_sse_server(vec![body]).await;
+            let (send, receive) = mpsc::channel();
+            let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
+            let error = timeout(
+                Duration::from_secs(1),
+                post_codex_json_with_retry(
+                    &Client::new(),
+                    &format!("http://{address}"),
+                    &json!({"stream": true}),
+                    &stored_codex_auth("access-token"),
+                    None,
+                    Some(&sink),
+                ),
+            )
+            .await
+            .expect("post-delta stream error unexpectedly retried")
+            .unwrap_err();
+
+            timeout(Duration::from_secs(1), server)
+                .await
+                .expect("expected exactly one request")
+                .unwrap();
+            assert!(error.to_string().contains("currently overloaded"));
+            assert_eq!(receive.try_iter().collect::<Vec<_>>(), vec![expected_delta]);
+        }
     }
 
     #[tokio::test]
