@@ -89,11 +89,20 @@ export function ThreadLogTail({
               // Aging is a fade rather than a step, so a line dims over the same
               // beat as the slide that pushed it up.
               "transition-opacity duration-150 ease-out",
-              line.isError ? "text-error-primary" : "text-basic-tertiary",
+              "text-basic-tertiary",
               lineOpacity(visible.length - 1 - index),
             )}
           >
-            {line.bare}
+            {/* A failure is marked by its glyph alone, so the one line the card
+                has room for still reads as the command it ran. */}
+            {line.isError && line.mark ? (
+              <>
+                <span className="text-error-primary">{line.mark}</span>{" "}
+                {line.body}
+              </>
+            ) : (
+              line.bare
+            )}
           </span>
         ))}
       </div>
