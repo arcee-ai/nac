@@ -244,9 +244,12 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
 /// it). Max output is undocumented except trinity-large-thinking's 80k
 /// (Vercel AI Gateway's arcee-ai integration); the others keep the
 /// conservative fallback. Cache pricing is undocumented (zero = unknown).
-/// Effort maps stay empty per the matrix: Arcee accepts no explicit effort
-/// levels. `reasoning` marks the thinking variant's reasoning_content
-/// output; it accepts no effort knob.
+/// Effort maps stay empty for the Trinity models: trinity-large-thinking
+/// always reasons (no effort knob), and the non-thinking variants accept no
+/// reasoning control. The Arcee passthrough models (deepseek-v4-pro, glm-5.2,
+/// etc.) get their effort maps from the arcee overlay's
+/// `passthrough_effort_map`. `reasoning` marks the thinking variant's
+/// reasoning_content output.
 fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
     let model =
         |id: &str, display_name: &str, max_tokens: u64, cost: ModelCostRates, reasoning: bool| {
@@ -259,7 +262,11 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
                 cost,
                 reasoning,
                 ThinkingLevelMap::default(),
-                completions_compat(None, "reasoning_content", Some(0.0)),
+                completions_compat(
+                    Some(CompletionsThinkingFormat::Arcee),
+                    "reasoning_content",
+                    Some(0.0),
+                ),
             )
         };
     vec![
@@ -424,14 +431,22 @@ pub(super) fn seed_catalog() -> ModelCatalog {
     );
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         register(
-            // Arcee accepts no explicit effort levels; its completions
-            // responses still carry reasoning text in `reasoning_content`.
+            // Arcee passthrough models accept bare `reasoning_effort`; the
+            // Arcee thinking format sends it without wrapper objects. The
+            // seed models (trinity-*) keep an empty thinking_level_map, so
+            // validation rejects every explicit effort and the format is
+            // never reached for them. Responses carry reasoning text in
+            // `reasoning_content`.
             entry(
                 backend,
                 PROVIDER_DEFAULT_MODEL_ID,
                 false,
                 ThinkingLevelMap::default(),
-                completions_compat(None, "reasoning_content", Some(0.0)),
+                completions_compat(
+                    Some(CompletionsThinkingFormat::Arcee),
+                    "reasoning_content",
+                    Some(0.0),
+                ),
             ),
             &arcee_seed_models(backend),
             // arcee-api's conventional variable (the README's provider-named

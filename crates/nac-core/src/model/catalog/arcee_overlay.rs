@@ -331,13 +331,26 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
         cache_write: parse_pricing_rate(pricing.and_then(|p| p.input_cache_writes.as_deref())),
     };
 
-    let reasoning = model
-        .supported_features
-        .as_ref()
-        .is_some_and(|features| features.iter().any(|f| f == "reasoning"));
+    // Known passthrough models get a hardcoded effort map matching the
+    // underlying model's capabilities (the arcee API's
+    // `supported_reasoning_efforts` is always null, so the API-derived map
+    // is always empty). Unknown models and trinity-large-thinking fall back
+    // to the API-derived map (empty), so validation rejects every explicit
+    // effort for them.
+    let passthrough_map = passthrough_effort_map(&model.id);
+    let thinking_level_map = passthrough_map
+        .clone()
+        .unwrap_or_else(|| map_reasoning_efforts(model.supported_reasoning_efforts.as_deref()));
 
-    let thinking_level_map =
-        map_reasoning_efforts(model.supported_reasoning_efforts.as_deref());
+    // Passthrough models always produce reasoning_content (confirmed via API
+    // testing); the `supported_features` field is null for some of them
+    // (minimax-m3, kimi-k3, deepseek-v4-flash-latest), so the features check
+    // alone is unreliable. Any model with a passthrough effort map reasons.
+    let reasoning = passthrough_map.is_some()
+        || model
+            .supported_features
+            .as_ref()
+            .is_some_and(|features| features.iter().any(|f| f == "reasoning"));
 
     ArceeOverlayEntry {
         id: model.id.clone(),
@@ -368,6 +381,40 @@ fn parse_pricing_rate(value: Option<&str>) -> f64 {
     } else {
         per_million
     }
+}
+
+/// Effort map for known arcee passthrough models. The arcee API's
+/// `supported_reasoning_efforts` is always null, so the API-derived map is
+/// always empty. These models pass through to the same underlying models
+/// served by Fireworks/Together, and the arcee API accepts `reasoning_effort`
+/// for all of them (confirmed via API testing). The maps match the union of
+/// Fireworks/Together effort levels for each model.
+///
+/// Returns `None` for unknown models and trinity-large-thinking (arcee's own
+/// model, which rejects all `reasoning_effort` values).
+fn passthrough_effort_map(model_id: &str) -> Option<super::ThinkingLevelMap> {
+    let entries: &[(ReasoningEffort, &str)] = match model_id {
+        "deepseek-ai/deepseek-v4-pro" | "deepseek/deepseek-v4-flash-latest" | "zai-org/glm-5.2" => &[
+            (ReasoningEffort::None, "none"),
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::Medium, "medium"),
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Xhigh, "max"),
+        ],
+        "moonshotai/kimi-k3" | "minimaxai/minimax-m3" => &[
+            (ReasoningEffort::None, "none"),
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::Medium, "medium"),
+            (ReasoningEffort::High, "high"),
+        ],
+        _ => return None,
+    };
+    Some(super::ThinkingLevelMap(
+        entries
+            .iter()
+            .map(|(effort, wire)| (*effort, Some((*wire).to_string())))
+            .collect(),
+    ))
 }
 
 /// Map the API's `supported_reasoning_efforts` array to a

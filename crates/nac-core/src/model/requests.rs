@@ -206,6 +206,12 @@ pub(super) fn completions_chat_request(
             request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
             request["chat_template_kwargs"] = json!({"clear_thinking": false});
         }
+        (Some(CompletionsThinkingFormat::Arcee), Some(ReasoningEffort::None)) => {
+            request["reasoning_effort"] = json!("none");
+        }
+        (Some(CompletionsThinkingFormat::Arcee), Some(effort)) => {
+            request["reasoning_effort"] = json!(validated_wire_effort(thinking_levels, effort));
+        }
     }
     request
 }

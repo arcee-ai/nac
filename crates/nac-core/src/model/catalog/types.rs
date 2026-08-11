@@ -32,6 +32,10 @@ pub enum CompletionsThinkingFormat {
     /// `reasoning: {"enabled": bool}` plus `reasoning_effort` and
     /// `chat_template_kwargs.clear_thinking`.
     Together,
+    /// Bare `reasoning_effort` string only — no wrapper objects.
+    /// Used by arcee, which passes through to underlying models but
+    /// rejects `thinking`, `reasoning_history`, and `chat_template_kwargs`.
+    Arcee,
 }
 
 /// Per-api quirk data; drives the consolidated completions builder/parser in

@@ -326,12 +326,19 @@ fn wire_level_special_cases_are_encoded_in_data() {
         Some("reasoning")
     );
 
-    // Arcee accepts no explicit effort levels, not even `none`.
+    // Arcee's _default entry has the Arcee thinking format (bare
+    // reasoning_effort) but an empty thinking_level_map, so unknown models
+    // accept no explicit effort levels. The passthrough models get their
+    // effort maps from the arcee overlay at runtime.
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         let arcee = resolve(backend, "arcee-model");
         assert!(arcee.thinking_level_map.0.is_empty(), "{backend}");
         assert!(!arcee.reasoning, "{backend}");
-        assert_eq!(arcee.compat.completions_thinking_format, None, "{backend}");
+        assert_eq!(
+            arcee.compat.completions_thinking_format,
+            Some(CompletionsThinkingFormat::Arcee),
+            "{backend}"
+        );
     }
 }
 
@@ -489,7 +496,8 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
             assert_eq!(metadata.cost.cache_read, 0.0, "{backend}/{id}");
             assert_eq!(metadata.cost.cache_write, 0.0, "{backend}/{id}");
             assert_eq!(metadata.reasoning, *reasoning, "{backend}/{id}");
-            // Arcee matrix behavior: no explicit effort levels accepted.
+            // Trinity models accept no explicit effort levels (empty map).
+            // The passthrough models get their maps from the arcee overlay.
             assert!(metadata.thinking_level_map.0.is_empty(), "{backend}/{id}");
             // The completions compat matches the provider default.
             let default = resolve(backend, "model-with-no-catalog-entry");
