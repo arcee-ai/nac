@@ -642,6 +642,57 @@ args = ["-c", {}]
         let _ = fs::remove_dir_all(&nac_home);
     }
 
+    #[tokio::test]
+    async fn servers_sharing_an_endpoint_connect_once() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-endpoint-dedup");
+        fs::create_dir_all(&nac_home).unwrap();
+        let (http_url, http_server) = start_fake_http_mcp_server();
+        fs::write(
+            nac_home.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.exa]
+transport = "streamable_http"
+url = {url}
+
+[mcp_servers.exa_web_search]
+transport = "streamable_http"
+url = {url}
+"#,
+                url = toml_string(&http_url)
+            ),
+        )
+        .unwrap();
+        unsafe {
+            env::set_var("NAC_HOME", &nac_home);
+        }
+
+        let cwd = std::env::current_dir().unwrap();
+        let registry = McpRegistry::load_with_policy(
+            &cwd,
+            None,
+            &PathContext::new(&cwd),
+            None,
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .unwrap()
+        .expect("the endpoint's tools should load once");
+        let definitions = registry.tool_definitions();
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].function.name, "mcp__exa__echo");
+
+        drop(registry);
+        http_server.join().unwrap();
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
     #[test]
     fn no_roots_policy_advertises_no_file_roots_for_tilde_remote_cwd() {
         let roots = mcp_roots_for_policy(Path::new("~"), None, McpRootPolicy::None).unwrap();

@@ -160,6 +160,7 @@ impl McpRegistry {
 
         let mut tools = HashMap::new();
         let mut seen_names = HashMap::<String, usize>::new();
+        let mut seen_endpoints = HashMap::<String, String>::new();
 
         for (server_name, server_config) in servers {
             if !server_config.enabled {
@@ -172,6 +173,16 @@ impl McpRegistry {
                 );
                 continue;
             }
+            // Two names for the same endpoint would mount every tool twice
+            // under different prefixes, so only the first name connects.
+            let endpoint = endpoint_key(&server_config.transport);
+            if let Some(existing) = seen_endpoints.get(&endpoint) {
+                eprintln!(
+                    "Skipping MCP server '{server_name}': same endpoint as server '{existing}'"
+                );
+                continue;
+            }
+            seen_endpoints.insert(endpoint, server_name.clone());
 
             let service = match timeout(
                 MCP_CONNECT_TIMEOUT,
@@ -349,6 +360,26 @@ pub(super) fn mcp_roots_for_policy(
                     .to_string()
             };
             Ok(vec![Root::new(root_uri).with_name(root_name)])
+        }
+    }
+}
+
+/// The identity a server connects to: the process for stdio, the URL for
+/// HTTP. Env vars and headers are credentials for the endpoint, not part of
+/// its identity.
+fn endpoint_key(transport: &McpTransportConfig) -> String {
+    match transport {
+        McpTransportConfig::Stdio { command, args, .. } => {
+            let mut key = String::from("stdio\0");
+            key.push_str(command);
+            for arg in args {
+                key.push('\0');
+                key.push_str(arg);
+            }
+            key
+        }
+        McpTransportConfig::StreamableHttp { url, .. } => {
+            format!("http\0{}", url.trim_end_matches('/'))
         }
     }
 }
