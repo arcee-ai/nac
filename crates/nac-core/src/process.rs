@@ -21,11 +21,17 @@ pub struct ProcessTreeGuard {
 
 impl ProcessTreeGuard {
     pub fn for_child(child: &Child) -> Self {
+        #[cfg(unix)]
+        let root_pid = child.id().map(|pid| pid as libc::pid_t);
         Self {
             #[cfg(unix)]
-            root_pid: child.id().map(|pid| pid as libc::pid_t),
+            root_pid,
+            // Worker pipe commands skip process-group isolation, so the
+            // child is not necessarily a group leader; only allow killpg
+            // when it actually is one, otherwise fall back to killing the
+            // child pid directly.
             #[cfg(unix)]
-            pgid: child.id().map(|pid| pid as libc::pid_t),
+            pgid: root_pid.filter(|pid| unsafe { libc::getpgid(*pid) } == *pid),
             #[cfg(unix)]
             group_leader: None,
         }
@@ -138,6 +144,14 @@ impl ProcessTreeGuard {
             }
             self.disarm();
             return;
+        }
+
+        // The child is not a process-group leader, so killpg cannot reach
+        // it; kill any known descendants directly so pipe readers can
+        // finish, then kill the child itself.
+        #[cfg(unix)]
+        if let Some(root_pid) = self.root_pid {
+            signal_pids(&descendant_pids(root_pid), libc::SIGKILL);
         }
 
         let _ = child.kill().await;
