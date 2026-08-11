@@ -312,17 +312,17 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
     // documents the provenance of every value). These pins make seed edits
     // deliberate.
     let codex_cases = [
-        ("gpt-5.6-sol", "GPT-5.6 Sol", 1_050_000, 128_000, 5.0, 30.0),
+        ("gpt-5.6-sol", "GPT-5.6 Sol", 272_000, 128_000, 5.0, 30.0),
         (
             "gpt-5.6-terra",
             "GPT-5.6 Terra",
-            1_050_000,
+            272_000,
             128_000,
             2.0,
             12.0,
         ),
-        ("gpt-5.6-luna", "GPT-5.6 Luna", 1_050_000, 128_000, 0.2, 1.2),
-        ("gpt-5.6", "GPT-5.6", 1_050_000, 128_000, 5.0, 30.0),
+        ("gpt-5.6-luna", "GPT-5.6 Luna", 272_000, 128_000, 0.2, 1.2),
+        ("gpt-5.6", "GPT-5.6", 272_000, 128_000, 5.0, 30.0),
         (
             "gpt-5.3-codex-spark",
             "GPT-5.3 Codex Spark",

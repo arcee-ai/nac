@@ -10,10 +10,14 @@
 //! arcee-auth/arcee-api and chatgpt-codex-responses are absent from
 //! models.dev, so their known-model entries are maintained by hand here
 //! (`codex_seed_models`/`arcee_seed_models`): limits and pricing come from
-//! the providers' own documentation (the codex entries reference the
-//! overlapping models.dev openai baseline values). Every entry's thinking
-//! map still matches the provider's matrix behavior exactly — codex
-//! all-levels verbatim, arcee rejects every explicit effort.
+//! the providers' own documentation. The codex entries' context windows
+//! reflect the Codex subscription endpoint's server-side cap of 272K
+//! (confirmed via the live Codex models API at
+//! chatgpt.com/backend-api/codex/models), which is ~3.9× smaller than the
+//! standard OpenAI API's 1.05M for the same GPT-5.6 models; max output
+//! tokens and pricing match the models.dev openai baseline. Every entry's
+//! thinking map still matches the provider's matrix behavior exactly —
+//! codex all-levels verbatim, arcee rejects every explicit effort.
 
 use super::{
     api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelCostRates, ModelMetadata,
@@ -157,10 +161,15 @@ fn seeded_model(
 /// chatgpt-codex-responses known models: OpenAI's documented Codex lineup
 /// for ChatGPT sign-in (developers.openai.com/codex/models — Sol/Terra/Luna,
 /// gpt-5.6, and the Pro-tier Spark preview; deprecated codex models are
-/// deliberately omitted). Limits and pricing reference the overlapping
-/// models.dev openai baseline entries; ChatGPT-sign-in usage is
-/// subscription-billed, so the rates are the API-equivalent prices. Effort
-/// maps stay all-levels verbatim per the matrix.
+/// deliberately omitted). Context windows reflect the Codex subscription
+/// endpoint's server-side cap of 272K (confirmed via the live Codex models
+/// API at chatgpt.com/backend-api/codex/models), not the standard OpenAI
+/// API's 1.05M — the same GPT-5.6 models accept 1.05M through
+/// api.openai.com but only 272K through the ChatGPT-sign-in transport.
+/// Max output tokens and pricing reference the overlapping models.dev
+/// openai baseline entries; ChatGPT-sign-in usage is subscription-billed,
+/// so the rates are the API-equivalent prices. Effort maps stay all-levels
+/// verbatim per the matrix.
 fn codex_seed_models() -> Vec<ModelMetadata> {
     let provider = BackendKind::ChatGptCodexResponses;
     let model = |id: &str,
@@ -185,7 +194,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
         model(
             "gpt-5.6-sol",
             "GPT-5.6 Sol",
-            1_050_000,
+            272_000,
             128_000,
             rates(5.0, 30.0, 0.5, 6.25),
             all_levels_with_max(),
@@ -193,7 +202,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
         model(
             "gpt-5.6-terra",
             "GPT-5.6 Terra",
-            1_050_000,
+            272_000,
             128_000,
             rates(2.0, 12.0, 0.2, 2.5),
             all_levels_with_max(),
@@ -201,7 +210,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
         model(
             "gpt-5.6-luna",
             "GPT-5.6 Luna",
-            1_050_000,
+            272_000,
             128_000,
             rates(0.2, 1.2, 0.02, 0.25),
             all_levels_with_max(),
@@ -209,7 +218,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
         model(
             "gpt-5.6",
             "GPT-5.6",
-            1_050_000,
+            272_000,
             128_000,
             rates(5.0, 30.0, 0.5, 6.25),
             all_levels_with_max(),
