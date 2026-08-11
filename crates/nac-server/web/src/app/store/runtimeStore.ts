@@ -272,8 +272,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
       // The run's own answer is the authoritative version of whatever the
       // stream last held, so it takes over until the snapshot lands. The run
       // outlives every worker it dispatched, so a thread still marked running
-      // here only means its own finish event never arrived — without this it
-      // would shimmer forever.
+      // here only means its own finish event never arrived.
       setState((state) => ({
         running: false,
         activity: "",

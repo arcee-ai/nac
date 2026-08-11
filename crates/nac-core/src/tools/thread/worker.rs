@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -260,16 +260,7 @@ pub(super) async fn run_worker(
         let mut output = String::new();
         let mut worker_usage = TokenUsage::default();
         let mut model_error = None;
-        loop {
-            // A line that does not decode as UTF-8 (a subprocess writing raw
-            // bytes to the inherited stderr) must not stop the pump: the
-            // worker's remaining events still have to reach the UI.
-            let line = match lines.next_line().await {
-                Ok(Some(line)) => line,
-                Ok(None) => break,
-                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
-                Err(_) => break,
-            };
+        while let Some(line) = next_pipe_line(&mut lines).await {
             if stderr_cancellation.is_cancelled() {
                 break;
             }
@@ -320,13 +311,7 @@ pub(super) async fn run_worker(
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut output = String::new();
-        loop {
-            let line = match lines.next_line().await {
-                Ok(Some(line)) => line,
-                Ok(None) => break,
-                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
-                Err(_) => break,
-            };
+        while let Some(line) = next_pipe_line(&mut lines).await {
             if stdout_cancellation.is_cancelled() {
                 break;
             }
@@ -408,6 +393,19 @@ pub(super) async fn run_worker(
         usage: worker_usage,
         model_error,
     })
+}
+
+/// Next line of a worker pipe. A line that does not decode as UTF-8 (a
+/// subprocess writing raw bytes to the inherited pipe) is skipped rather than
+/// ending the pump, so the worker's remaining events still reach the UI.
+async fn next_pipe_line<R: AsyncBufRead + Unpin>(lines: &mut Lines<R>) -> Option<String> {
+    loop {
+        match lines.next_line().await {
+            Ok(line) => return line,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(_) => return None,
+        }
+    }
 }
 
 #[cfg(test)]
