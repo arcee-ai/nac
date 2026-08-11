@@ -6569,8 +6569,6 @@ threshold_tokens = 64000
         assert_eq!(stored.base_url, "https://api.openai.com/v1");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-        // Config.toml [compaction] is ignored; the default is 70% of the
-        // resolved model's context window (gpt-5.2: 400k).
         assert_eq!(stored.orchestrator_compaction_threshold, Some(280_000));
         assert_eq!(
             stored.extra_headers,
