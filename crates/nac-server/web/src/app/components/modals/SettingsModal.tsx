@@ -198,7 +198,10 @@ export function SettingsModal({
       ? initialFromConfig(config)
       : null;
 
-  if (!initial || !entry) {
+  // The form seeds its mixed-mode state from `config` once at mount, so it
+  // must not mount before /config settles — a mixed config arriving later
+  // would leave the form on Single and a save would clear mixed mode.
+  if (!initial || !entry || isLoading) {
     return (
       <SettingsShell open={open} onClose={onClose}>
         <p className="text-basic-muted text-micro">
