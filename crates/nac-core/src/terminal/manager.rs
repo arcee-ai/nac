@@ -164,15 +164,24 @@ impl TerminalManager {
             .await;
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
             self.remove_all().await;
+            return Err(anyhow!("terminal command cancelled"));
         }
         wait_result?;
-
-        let preview = self.output_registry.preview_since(
+        let preview = match self.output_registry.preview_since(
             &output_id,
             OutputStream::Combined,
             start_cursor,
             max_output,
-        )?;
+        ) {
+            Ok(preview) => preview,
+            Err(error) => {
+                if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+                    self.remove_all().await;
+                    return Err(anyhow!("terminal command cancelled"));
+                }
+                return Err(error);
+            }
+        };
 
         let ended_session = {
             let mut sessions = self.sessions.lock().await;
@@ -200,6 +209,10 @@ impl TerminalManager {
         } else {
             (Some(name.to_string()), None)
         };
+        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+            self.remove_all().await;
+            return Err(anyhow!("terminal command cancelled"));
+        }
 
         Ok(TerminalOutput {
             session_name,
@@ -298,8 +311,7 @@ impl TerminalManager {
                 Err(error) => {
                     status = CommandStatus::SpawnError;
                     runtime_error = Some(format!("failed to wait for command: {error}"));
-                    process_exited = true;
-                    continue;
+                    break;
                 }
             }
 
@@ -336,7 +348,7 @@ impl TerminalManager {
             }
         }
 
-        if matches!(status, CommandStatus::TimedOut | CommandStatus::Cancelled) {
+        if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
                 let _ = backend.terminal_pipe_kill(pidfile).await;
             }
@@ -344,14 +356,18 @@ impl TerminalManager {
             exit_code = None;
         }
 
+        let mut append_failed = false;
         while let Some(chunk) = receiver.recv().await {
+            if append_failed {
+                continue;
+            }
             if let Err(error) = self
                 .output_registry
                 .append(&output_id, chunk.stream, chunk.bytes)
             {
                 status = CommandStatus::SpawnError;
                 runtime_error = Some(error.to_string());
-                break;
+                append_failed = true;
             }
         }
 
@@ -472,6 +488,9 @@ impl TerminalManager {
     ) -> Result<()> {
         let deadline = Instant::now() + Duration::from_millis(yield_ms);
         loop {
+            if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+                return Err(anyhow!("terminal command cancelled"));
+            }
             let alive = {
                 let mut sessions = self.sessions.lock().await;
                 let session = sessions
@@ -489,8 +508,7 @@ impl TerminalManager {
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             tokio::select! {
-                _ = notify.notified() => {}
-                _ = sleep(remaining) => return Ok(()),
+                biased;
                 _ = async {
                     if let Some(cancellation) = cancellation {
                         cancellation.cancelled().await;
@@ -498,6 +516,8 @@ impl TerminalManager {
                         std::future::pending::<()>().await;
                     }
                 } => return Err(anyhow!("terminal command cancelled")),
+                _ = notify.notified() => {}
+                _ = sleep(remaining) => return Ok(()),
             }
         }
     }
@@ -726,6 +746,50 @@ mod tests {
         assert!(
             !path.exists(),
             "cancelled command produced a late side effect"
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_clear_terminates_an_active_one_shot_command() {
+        let manager = TerminalManager::new();
+        let path = std::env::temp_dir().join(format!(
+            "nac-command-registry-clear-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let command = format!(
+            "python3 -c 'from pathlib import Path; from threading import Timer; import sys; \
+             Timer(1,lambda:Path(r\"{}\").write_text(\"late\")).start(); \
+             exec(\"while True:\\n sys.stdout.write(\\\"x\\\"*65536)\\n sys.stdout.flush()\")'",
+            path.display()
+        );
+        let task_manager = manager.clone();
+        let task_backend = backend();
+        let task = tokio::spawn(async move {
+            task_manager
+                .exec_one_shot(
+                    &command,
+                    None,
+                    120,
+                    40,
+                    5_000,
+                    8_000,
+                    task_backend.as_ref(),
+                    None,
+                )
+                .await
+        });
+
+        sleep(Duration::from_millis(50)).await;
+        manager.remove_all().await;
+        let output = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("one-shot command stalled after registry clear")
+            .unwrap();
+        assert_eq!(output.status, CommandStatus::SpawnError);
+        sleep(Duration::from_millis(1_100)).await;
+        assert!(
+            !path.exists(),
+            "registry-cleared command produced a late side effect"
         );
     }
 
