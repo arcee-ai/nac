@@ -40,12 +40,16 @@ pub struct NacMcpService {
 struct CreateSessionParams {
     #[schemars(description = "Working directory for the session")]
     cwd: Option<String>,
-    #[schemars(description = "Model id, e.g. \"claude-sonnet-4-20250514\"")]
+    #[schemars(description = "Model id, e.g. \"claude-sonnet-4-20250514\". Call list_models to see available ids.")]
     model: Option<String>,
-    #[schemars(description = "Backend kind: \"anthropic\", \"openai\", \"deepseek\", etc.")]
+    #[schemars(description = "Backend kind: \"anthropic\", \"openai\", \"deepseek\", etc. Auto-detected from the model id — pass only to override.")]
     backend: Option<String>,
-    #[schemars(description = "Reasoning effort: \"low\", \"medium\", or \"high\"")]
+    #[schemars(description = "Reasoning effort level. Valid values: none, minimal, low, medium, high, xhigh, max. Not all models support all levels — check list_models output.")]
     reasoning_effort: Option<String>,
+    #[schemars(description = "Custom API base URL (overrides the provider default)")]
+    base_url: Option<String>,
+    #[schemars(description = "Environment variable name holding the API key (overrides the provider conventional var)")]
+    api_key_env: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -138,7 +142,7 @@ struct UpdateSessionParams {
 
 #[tool_router]
 impl NacMcpService {
-    #[tool(name = "create_session", description = "Create a new nac session with optional model, backend, and reasoning effort overrides.")]
+    #[tool(name = "create_session", description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max.")]
     async fn create_session(
         &self,
         Parameters(params): Parameters<CreateSessionParams>,
@@ -146,10 +150,10 @@ impl NacMcpService {
         let request = CreateSessionRequest {
             cwd: params.cwd.map(std::path::PathBuf::from),
             model: field(params.model),
-            base_url: RequestField::Omitted,
+            base_url: field(params.base_url),
             backend: field(params.backend),
             reasoning_effort: field(params.reasoning_effort),
-            api_key_env: RequestField::Omitted,
+            api_key_env: field(params.api_key_env),
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
             ssh_host: None,
@@ -208,7 +212,7 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "get_session_status", description = "Get the status of a session: active run, active threads, and thread summaries.")]
+    #[tool(name = "get_session_status", description = "Get a lightweight status snapshot: active_run, active_threads, and thread summaries. Use this for polling — it does not include messages or episode content. When active_run is null, the run is complete.")]
     async fn get_session_status(
         &self,
         Parameters(params): Parameters<GetSessionStatusParams>,
@@ -249,7 +253,7 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "send_message", description = "Submit a prompt to a session and start a run.")]
+    #[tool(name = "send_message", description = "Submit a prompt to a session and start a run. Returns immediately with a run_id — the run continues asynchronously. Poll get_session_status to check completion.")]
     async fn send_message(
         &self,
         Parameters(params): Parameters<SendMessageParams>,
@@ -274,7 +278,7 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "steer", description = "Queue a steering instruction for a session, optionally targeting a specific thread.")]
+    #[tool(name = "steer", description = "Inject guidance into a running session without stopping it. Target the orchestrator (omit thread_name) or a specific worker thread. The instruction is delivered on the next iteration.")]
     async fn steer(
         &self,
         Parameters(params): Parameters<SteerParams>,
@@ -371,7 +375,7 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "get_thread_episodes", description = "Get retained episodes for a thread (or all threads) in a session.")]
+    #[tool(name = "get_thread_episodes", description = "Get the retained output from worker threads. Each episode contains the thread's action (its task prompt) and content (its final response). Pass thread_name for one thread, or omit for all threads.")]
     async fn get_thread_episodes(
         &self,
         Parameters(params): Parameters<GetThreadEpisodesParams>,
@@ -427,7 +431,7 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "get_thread_events", description = "Get recent events for a thread (or all threads from the snapshot) in a session.")]
+    #[tool(name = "get_thread_events", description = "Get recent activity for worker threads: tool calls, tool results, errors, and completion status. Pass thread_name for one thread, or omit for all threads.")]
     async fn get_thread_events(
         &self,
         Parameters(params): Parameters<GetThreadEventsParams>,
@@ -479,7 +483,7 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "session_action", description = "Perform a lifecycle action on a session: compact, cancel, delete, or revert.")]
+    #[tool(name = "session_action", description = "Perform a lifecycle action: 'compact' (reduce context), 'cancel' (stop active run), 'delete' (remove session), or 'revert' (roll back to a message index, requires message_idx).")]
     async fn session_action(
         &self,
         Parameters(params): Parameters<SessionActionParams>,
@@ -560,7 +564,7 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "list_models", description = "List available model providers and their models.")]
+    #[tool(name = "list_models", description = "List available model providers and their models. Each model includes supported reasoning efforts and context window. Use the model id when calling create_session — the backend is auto-detected.")]
     async fn list_models(&self) -> Result<CallToolResult, ErrorData> {
         let listing = nac_core::model::api_listing();
         let providers: Vec<_> = listing
@@ -571,27 +575,34 @@ impl NacMcpService {
                     .models
                     .iter()
                     .map(|m| {
+                        let efforts: Vec<_> = m
+                            .supported_efforts
+                            .iter()
+                            .map(|e| e.as_str().to_string())
+                            .collect();
                         json!({
                             "id": m.id,
                             "display_name": m.display_name,
                             "context_window": m.context_window,
+                            "reasoning": m.reasoning,
+                            "supported_efforts": efforts,
                         })
                     })
                     .collect();
                 json!({
-                    "id": p.id,
+                    "provider": p.id.as_str(),
                     "models": models,
                 })
             })
             .collect();
-        let result = json!({ "providers": providers });
+        let result = json!(providers);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("Error serializing: {e}")),
         )]))
     }
 }
 
-#[tool_handler]
+#[tool_handler(instructions = "nac is an AI coding agent orchestrator. It manages coding sessions where an orchestrator agent receives your prompt, plans the work, and dispatches worker threads to execute tasks autonomously. Each worker operates independently — reading files, writing code, running commands, and calling tools — then reports back with its results. The orchestrator reviews thread output, compacts context when approaching the model's context window limit, and either dispatches more threads or produces a final response. Each worker's final output is retained as an episode you can inspect.\n\nSessions are asynchronous: send_message returns immediately with a run_id and the work continues in the background. Poll get_session_status to check completion, use steer to guide running tasks mid-flight, and inspect results with get_messages, get_thread_episodes, and get_thread_events. Sessions persist across server restarts and you can manage multiple simultaneously.")]
 impl ServerHandler for NacMcpService {}
 
 // ---------------------------------------------------------------------------
