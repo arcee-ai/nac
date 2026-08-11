@@ -206,6 +206,9 @@ pub struct ModelClient {
     /// Anthropic prompt-cache TTL. `None` = default 5-minute TTL (workers);
     /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
     cache_ttl: Option<&'static str>,
+    /// Stable OpenAI cache-routing identity. Session UUIDs are reused by the
+    /// orchestrator and its workers so related prefixes reach the same cache.
+    prompt_cache_key: Option<String>,
     /// Catalog metadata resolved with the effective settings; drives
     /// per-response cost, effort wire translation, and api-axis dispatch.
     resolved_model: ModelMetadata,
@@ -262,6 +265,7 @@ impl ModelClient {
             extra_headers: settings.extra_headers,
             arcee_credential_source,
             cache_ttl: None,
+            prompt_cache_key: None,
             resolved_model: settings.resolved,
         })
     }
@@ -270,6 +274,11 @@ impl ModelClient {
     /// TTL (requires beta header); `None` uses the default 5-minute TTL.
     pub fn with_cache_ttl(mut self, ttl: Option<&'static str>) -> Self {
         self.cache_ttl = ttl;
+        self
+    }
+
+    pub(crate) fn with_prompt_cache_key(mut self, key: Option<String>) -> Self {
+        self.prompt_cache_key = key;
         self
     }
 
@@ -319,6 +328,7 @@ impl ModelClient {
                     messages,
                     tools,
                     &self.resolved_model.thinking_level_map,
+                    self.prompt_cache_key.as_deref(),
                     on_delta,
                 )
                 .await?;
@@ -447,7 +457,9 @@ impl ModelClient {
         // for logging. arcee-auth already sends client metadata through the OAuth
         // token, so it skips these headers.
         if self.backend == BackendKind::ArceeApi {
-            return self.post_arcee_api_chat(url, request, reasoning_field, on_delta).await;
+            return self
+                .post_arcee_api_chat(url, request, reasoning_field, on_delta)
+                .await;
         }
 
         // Standard Bearer auth for other backends
@@ -493,7 +505,9 @@ impl ModelClient {
         };
 
         if on_delta.is_none() {
-            return self.post_json_with_retry_headers(url, &request, apply_headers).await;
+            return self
+                .post_json_with_retry_headers(url, &request, apply_headers)
+                .await;
         }
         request["stream"] = Value::Bool(true);
         request["stream_options"] = json!({"include_usage": true});
@@ -519,6 +533,7 @@ impl ModelClient {
             &messages,
             &tools,
             &self.resolved_model.thinking_level_map,
+            self.prompt_cache_key.as_deref(),
         );
 
         let value = match on_delta {
@@ -632,12 +647,16 @@ impl ModelClient {
                     request.header("Authorization", format!("Bearer {token}"))
                 })
                 .await?;
-            return read_sse_response(url, response, ChatStreamFold::new(Some(on_delta), reasoning_field))
-                .await
-                .map_err(|error| ModelHttpError {
-                    status: None,
-                    message: error.to_string(),
-                });
+            return read_sse_response(
+                url,
+                response,
+                ChatStreamFold::new(Some(on_delta), reasoning_field),
+            )
+            .await
+            .map_err(|error| ModelHttpError {
+                status: None,
+                message: error.to_string(),
+            });
         }
         self.try_post_json_with_retry_headers(url, body, |request| {
             request.header("Authorization", format!("Bearer {token}"))
@@ -874,6 +893,7 @@ impl ModelClient {
             extra_headers: std::collections::BTreeMap::new(),
             arcee_credential_source: None,
             cache_ttl: None,
+            prompt_cache_key: None,
             resolved_model: catalog::resolve(BackendKind::OpenAiResponses, "gpt-5.5"),
         }
     }

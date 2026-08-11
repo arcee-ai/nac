@@ -20,13 +20,23 @@ use super::{TerminalInfo, TerminalOutput};
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
     max_sessions: usize,
+    isolate_process_groups: bool,
 }
 
 impl TerminalManager {
     pub fn new() -> Self {
+        Self::with_process_group_isolation(true)
+    }
+
+    pub(crate) fn for_worker() -> Self {
+        Self::with_process_group_isolation(false)
+    }
+
+    fn with_process_group_isolation(isolate_process_groups: bool) -> Self {
         TerminalManager {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             max_sessions: 16,
+            isolate_process_groups,
         }
     }
 
@@ -151,7 +161,14 @@ impl TerminalManager {
         backend: &ExecutionBackend,
     ) -> Result<TerminalOutput> {
         let start = Instant::now();
-        let outcome = run_pipe_command(cmd, cwd, Duration::from_millis(yield_ms), backend).await?;
+        let outcome = run_pipe_command(
+            cmd,
+            cwd,
+            Duration::from_millis(yield_ms),
+            backend,
+            self.isolate_process_groups,
+        )
+        .await?;
         let (exit_code, combined) = match outcome {
             PipeCommandOutcome::Completed(output) => {
                 let mut combined = String::new();
@@ -275,10 +292,13 @@ async fn run_pipe_command(
     cwd: Option<PathBuf>,
     timeout_duration: Duration,
     backend: &ExecutionBackend,
+    should_isolate_process_group: bool,
 ) -> Result<PipeCommandOutcome> {
     let envs = terminal_env_owned();
     let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
-    isolate_process_group(&mut command);
+    if should_isolate_process_group {
+        isolate_process_group(&mut command);
+    }
 
     command
         .stdin(Stdio::null())

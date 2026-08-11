@@ -5,11 +5,13 @@
 # committed and embedded into the binary, so no Node install is involved.
 #
 #   ./start.sh                      # http://127.0.0.1:3210 (opens the browser)
+#   ./start.sh --port 4321          # choose a custom loopback port
 #   ./start.sh --bind 0.0.0.0:8080  # extra args go straight to nac-web
 #   ./start.sh --no-open            # keep the terminal-only workflow
 #
 # Environment:
-#   NAC_BIND      address to bind when --bind is not passed (default 127.0.0.1:3210)
+#   NAC_BIND      address to bind when neither --bind nor --port is passed
+#                 (default 127.0.0.1:3210)
 #   NAC_PROFILE   cargo profile: release (default) or debug
 #   BROWSER=none  same as passing --no-open to nac-web
 
@@ -50,16 +52,25 @@ echo "==> building nac-web ($PROFILE)"
 cargo build ${CARGO_PROFILE_ARGS[@]+"${CARGO_PROFILE_ARGS[@]}"} \
   -p nac-server --bin nac-web
 
-# An explicit --bind in the caller's arguments wins over NAC_BIND.
+# An explicit --bind or --port in the caller's arguments wins over NAC_BIND.
 BIND_ARGS=(--bind "$BIND")
 prev=""
 for arg in "$@"; do
   if [[ "$prev" == "--bind" ]]; then
     BIND="$arg"
+  elif [[ "$prev" == "--port" || "$prev" =~ ^-[yh]*p$ ]]; then
+    BIND="127.0.0.1:$arg"
   elif [[ "$arg" == --bind=* ]]; then
     BIND="${arg#--bind=}"
+  elif [[ "$arg" == --port=* ]]; then
+    BIND="127.0.0.1:${arg#--port=}"
+  elif [[ "$arg" =~ ^-[yh]*p.+$ ]]; then
+    port="${arg#*p}"
+    BIND="127.0.0.1:${port#=}"
   fi
-  if [[ "$arg" == "--bind" || "$arg" == --bind=* ]]; then
+  if [[ "$arg" == "--bind" || "$arg" == --bind=* ||
+        "$arg" == "--port" || "$arg" == --port=* ||
+        "$arg" =~ ^-[yh]*p ]]; then
     BIND_ARGS=()
   fi
   prev="$arg"
@@ -70,7 +81,8 @@ echo "==> nac-web on http://$BIND"
 YES_ARGS=(-y)
 prev=""
 for arg in "$@"; do
-  if [[ "$arg" == "-y" || "$arg" == "--yes" || "$arg" == "-C" || "$arg" == --directory=* ]]; then
+  if [[ "$arg" == "-y" || "$arg" == "--yes" || "$arg" == "-C" ||
+        "$arg" == --directory=* || "$arg" =~ ^-[yh]*y ]]; then
     YES_ARGS=()
     break
   fi

@@ -28,6 +28,18 @@ struct ServerCli {
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
 
+    /// Port to listen on at 127.0.0.1 (1-65535; default: 3210).
+    ///
+    /// Cannot be used with --bind.
+    #[arg(
+        short,
+        long,
+        value_name = "PORT",
+        value_parser = clap::value_parser!(u16).range(1..),
+        conflicts_with = "bind"
+    )]
+    port: Option<u16>,
+
     /// Project directory (skips the interactive confirmation).
     ///
     /// Without this flag an interactive terminal confirms the current working
@@ -57,6 +69,16 @@ struct ServerCli {
     /// Do not open a browser window.
     #[arg(long = "no-open", action = clap::ArgAction::SetTrue)]
     no_open: bool,
+}
+
+impl ServerCli {
+    fn bind_addr(&self) -> SocketAddr {
+        let mut bind = self.bind;
+        if let Some(port) = self.port {
+            bind.set_port(port);
+        }
+        bind
+    }
 }
 
 #[derive(Parser)]
@@ -397,6 +419,7 @@ async fn run() -> Result<()> {
 }
 
 async fn run_server(cli: ServerCli) -> Result<()> {
+    let bind = cli.bind_addr();
     let launch_cwd = std::env::current_dir()?;
     let root_cwd = resolve_project_directory(
         &launch_cwd,
@@ -418,7 +441,7 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     // Open the browser only after bind succeeds — otherwise the first load can
     // hit connection-refused while the socket is still closed. Post-login
     // dashboard launch goes through this same path.
-    serve_with(cli.bind, manager, |bound| {
+    serve_with(bind, manager, |bound| {
         let url = dashboard_url(bound);
         eprintln!("nac-web listening on {url}");
         eprintln!("store: {store_path}");
@@ -814,5 +837,48 @@ thread_timeout_secs = 7200
             cli.install_dir.as_deref(),
             Some(std::path::Path::new("/tmp/test"))
         );
+    }
+
+    #[test]
+    fn server_cli_resolves_bind_address() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["nac-web"], "127.0.0.1:3210"),
+            (&["nac-web", "--port", "4321"], "127.0.0.1:4321"),
+            (&["nac-web", "--bind", "[::1]:4322"], "[::1]:4322"),
+        ];
+
+        for (args, expected) in cases {
+            let cli = ServerCli::try_parse_from(*args).unwrap();
+            assert_eq!(cli.bind_addr(), expected.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn server_cli_rejects_bind_with_port() {
+        let error =
+            ServerCli::try_parse_from(["nac-web", "--bind", "127.0.0.1:4321", "--port", "4322"])
+                .err()
+                .expect("explicit --bind and --port must conflict");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn server_cli_rejects_ports_outside_supported_range() {
+        for port in ["0", "65536"] {
+            let error = ServerCli::try_parse_from(["nac-web", "--port", port])
+                .err()
+                .expect("out-of-range port must be rejected");
+            assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+        }
+    }
+
+    #[test]
+    fn server_cli_help_documents_port_contract() {
+        let help = ServerCli::command().render_long_help().to_string();
+        assert!(help.contains("-p, --port <PORT>"), "{help}");
+        assert!(help.contains("127.0.0.1"), "{help}");
+        assert!(help.contains("1-65535"), "{help}");
+        assert!(help.contains("default: 3210"), "{help}");
+        assert!(help.contains("Cannot be used with --bind"), "{help}");
     }
 }

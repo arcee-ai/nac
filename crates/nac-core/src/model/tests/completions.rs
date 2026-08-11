@@ -252,7 +252,8 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
     assert!(together_none.get("reasoning_effort").is_none());
 
     let openai_levels = test_resolved(BackendKind::OpenAiResponses, "model").thinking_level_map;
-    let openai_absent = openai_responses_request("model", None, &messages, &[], &openai_levels);
+    let openai_absent =
+        openai_responses_request("model", None, &messages, &[], &openai_levels, None);
     // Readable reasoning is asked for regardless; only the effort is opt-in.
     assert_eq!(openai_absent["reasoning"], json!({"summary": "auto"}));
     assert!(openai_absent.get("tools").is_none());
@@ -264,6 +265,7 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
         &messages,
         &[],
         &openai_levels,
+        None,
     );
     assert_eq!(openai_none["reasoning"]["effort"], "none");
 
@@ -298,10 +300,49 @@ fn openai_compatible_request_schemas_honor_absent_none_and_supported_efforts() {
     .get("tools")
     .is_some());
     assert!(
-        openai_responses_request("model", None, &messages, &tools, &openai_levels)
+        openai_responses_request("model", None, &messages, &tools, &openai_levels, None)
             .get("tools")
             .is_some()
     );
+}
+
+#[test]
+fn gpt_5_6_responses_cache_only_the_stable_system_prefix() {
+    let messages = [
+        Message::System {
+            content: "stable instructions".to_string(),
+        },
+        Message::User {
+            content: "changing request".to_string(),
+        },
+    ];
+    let levels = test_resolved(BackendKind::OpenAiResponses, "gpt-5.6").thinking_level_map;
+    let request =
+        openai_responses_request("gpt-5.6", None, &messages, &[], &levels, Some("session-1"));
+
+    assert_eq!(request["prompt_cache_key"], "session-1");
+    assert_eq!(request["prompt_cache_options"], json!({"mode": "explicit"}));
+    assert_eq!(
+        request["input"][0]["content"][0]["prompt_cache_breakpoint"],
+        json!({"mode": "explicit"})
+    );
+    assert_eq!(
+        request["input"][0]["content"][0]["text"],
+        "stable instructions"
+    );
+    assert_eq!(request["input"][1]["content"], "changing request");
+
+    let older = openai_responses_request(
+        "gpt-5.5",
+        None,
+        &messages,
+        &[],
+        &test_resolved(BackendKind::OpenAiResponses, "gpt-5.5").thinking_level_map,
+        Some("session-1"),
+    );
+    assert_eq!(older["prompt_cache_key"], "session-1");
+    assert!(older.get("prompt_cache_options").is_none());
+    assert_eq!(older["input"][0]["content"], "stable instructions");
 }
 
 #[test]
@@ -342,4 +383,61 @@ fn responses_input_items_expand_reasoning_and_tool_state() {
     assert_eq!(items[2]["type"], "function_call");
     assert_eq!(items[3]["role"], "assistant");
     assert_eq!(items[4]["type"], "function_call_output");
+}
+
+#[test]
+fn responses_input_items_replay_exact_output_sequence() {
+    let output = vec![
+        json!({
+            "type": "message",
+            "id": "msg_commentary",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Checking that now."}]
+        }),
+        json!({
+            "type": "reasoning",
+            "id": "rs_1",
+            "encrypted_content": "encrypted",
+            "summary": [{"type": "summary_text", "text": "Need the file."}]
+        }),
+        json!({
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_1",
+            "name": "read",
+            "arguments": "{\"path\":\"src/main.rs\"}",
+            "status": "completed"
+        }),
+    ];
+    let items = responses_input_items(&[
+        Message::Assistant {
+            content: Some("Checking that now.".to_string()),
+            reasoning_text: Some("Need the file.".to_string()),
+            reasoning_details: Some(json!({
+                "type": "openai_responses_output",
+                "items": output.clone()
+            })),
+            tool_calls: Some(vec![ToolCall {
+                id: "call_1".to_string(),
+                call_type: "function".to_string(),
+                function: FunctionCall {
+                    name: "read".to_string(),
+                    arguments: "{\"path\":\"src/main.rs\"}".to_string(),
+                },
+            }]),
+            model_origin: None,
+            reasoning_field: None,
+            duration_ms: None,
+        },
+        Message::Tool {
+            tool_call_id: "call_1".to_string(),
+            content: "tool output".to_string(),
+        },
+    ]);
+
+    assert_eq!(&items[..output.len()], output.as_slice());
+    assert_eq!(items.len(), output.len() + 1);
+    assert_eq!(items[3]["type"], "function_call_output");
+    assert_eq!(items[3]["call_id"], "call_1");
 }

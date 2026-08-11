@@ -5,6 +5,8 @@ use serde_json::Value;
 use crate::sandbox::FileIoMode;
 use crate::tools::{require_str, resolve_workspace_path, ToolResult, ToolRuntime};
 
+const MAX_OUTPUT_BYTES: usize = 30_000;
+
 const REMOTE_READ_SCRIPT: &str = r#"
 from pathlib import Path
 import sys
@@ -116,8 +118,12 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         output.push_str(&format!("{:4}| {}\n", offset + idx + 1, line));
     }
 
-    if output.len() > 30_000 {
-        output.truncate(30_000);
+    if output.len() > MAX_OUTPUT_BYTES {
+        let mut end = MAX_OUTPUT_BYTES;
+        while !output.is_char_boundary(end) {
+            end -= 1;
+        }
+        output.truncate(end);
         output.push_str(&format!("\n... (truncated, {} total lines)", total_lines));
     } else if offset + selected.len() < total_lines {
         output.push_str(&format!(
@@ -225,6 +231,35 @@ mod tests {
             "Got: {}",
             result.content
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn oversized_utf8_output_truncates_at_a_character_boundary() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nac_read_utf8_{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("unicode.txt"),
+            format!("{}€\n", "a".repeat(29_993)),
+        )
+        .unwrap();
+
+        let result = execute(
+            json!({ "path": "unicode.txt" }),
+            &local_runtime_at(dir.clone()),
+        )
+        .await;
+
+        assert!(!result.is_error, "Got error: {}", result.content);
+        assert!(result
+            .content
+            .starts_with(&format!("   1| {}", "a".repeat(29_993))));
+        assert!(!result.content.contains('€'));
+        assert!(result.content.ends_with("... (truncated, 1 total lines)"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

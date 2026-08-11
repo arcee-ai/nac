@@ -59,6 +59,7 @@ import {
   useProviderModels,
   useSessionConfig,
   useSessionSnapshot,
+  useSessionSummary,
   useStoreGeneratedCredential,
   useStoredKeyProviderModels,
   useUpdateConfig,
@@ -174,6 +175,9 @@ export function SettingsModal({
   // dialog starts closing would blank the form out mid-slide.
   const mounted = useExitTransition(open);
   const { data: snapshot } = useSessionSnapshot(mounted ? id : null);
+  const { data: entry, isLoading: isSummaryLoading } = useSessionSummary(
+    mounted ? id : null,
+  );
   // Fetched for diagnostics ("repair required") and as a fallback source when
   // the live snapshot is unavailable.
   const { data: config, isLoading } = useSessionConfig(mounted ? id : null);
@@ -187,11 +191,11 @@ export function SettingsModal({
       ? initialFromConfig(config)
       : null;
 
-  if (!initial) {
+  if (!initial || !entry) {
     return (
       <SettingsShell open={open} onClose={onClose}>
         <p className="text-basic-muted text-micro">
-          {isLoading
+          {isLoading || isSummaryLoading
             ? "Loading session configuration…"
             : "Session configuration unavailable."}
         </p>
@@ -204,9 +208,7 @@ export function SettingsModal({
       open={open}
       id={id}
       initial={initial}
-      summary={
-        snapshot?.sessions.find((entry) => entry.session_id === id) ?? null
-      }
+      summary={entry.summary}
       diagnostics={config?.diagnostics ?? []}
       onClose={onClose}
     />
@@ -226,17 +228,18 @@ function SettingsForm({
   id: string;
   initial: SettingsInitialValues;
   /** Carries the presentation version the title save has to match. */
-  summary: SessionSummarySnapshot | null;
+  summary: SessionSummarySnapshot;
   diagnostics: string[];
   onClose: () => void;
 }) {
   const isMobile = useIsMobile();
   const toast = useToast();
   const updateConfig = useUpdateConfig();
+  const [openingSummary] = useState(summary);
   const updatePresentation = useUpdatePresentation();
   const storeKey = useStoreGeneratedCredential();
 
-  const initialTitle = summary?.title ?? "";
+  const initialTitle = openingSummary.title ?? "";
   const [title, setTitle] = useState(initialTitle);
   const [model, setModel] = useState(initial.model);
   const [backend, setBackend] = useState(initial.backend);
@@ -327,7 +330,7 @@ function SettingsForm({
     updatePresentation.isPending ||
     storeKey.isPending;
 
-  const seedTarget = sshTargetFromSummary(summary);
+  const seedTarget = sshTargetFromSummary(openingSummary);
   const sshStatus = useSshConnectionStatus(seedTarget);
   // Null means "follow the shared store"; a concrete value is the user's last
   // Connect/Disconnect action in this dialog.
@@ -351,8 +354,8 @@ function SettingsForm({
       await updatePresentation.mutateAsync({
         id,
         title: title.trim(),
-        pinned: Boolean(summary?.pinned),
-        expectedVersion: summary?.presentation_version ?? 0,
+        pinned: Boolean(openingSummary.pinned),
+        expectedVersion: openingSummary.presentation_version ?? 0,
       });
     } catch (saveError) {
       const conflict =
@@ -519,7 +522,7 @@ function SettingsForm({
         <Input
           label="Session title"
           inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-          placeholder={displaySessionTitle(summary) || "Session name"}
+          placeholder={displaySessionTitle(openingSummary) || "Session name"}
           hintText="Leave empty to restore the automatic title (the last prompt)."
           value={title}
           onChange={(event) => setTitle(event.target.value)}

@@ -117,6 +117,10 @@ export function resetRuntime(sessionId: string | null): void {
   });
 }
 
+export function clearRuntimeThreads(): void {
+  setState({ threads: {} });
+}
+
 /** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
 export function setOptimisticUserPrompt(prompt: string | null): void {
   setState({ optimisticUserPrompt: prompt });
@@ -221,12 +225,13 @@ function pushThreadLog(name: string | undefined, event: AgentEvent) {
   });
 }
 
+export type RefreshKind = "none" | "messages" | "snapshot" | "replace-snapshot";
+
 /**
- * Classify one envelope. Returns true when the canonical snapshot should be
- * re-fetched, because the stream carries whole-message granularity and the
- * snapshot is what reconciles ordering.
+ * Classify one envelope by the smallest canonical projection it invalidates.
+ * Runtime state is updated synchronously before the caller starts that read.
  */
-export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
+export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
   const seq = envelope.sequence_id;
   const event = envelope.event;
   switch (event.type) {
@@ -248,7 +253,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         text: `Run started: ${event.prompt_preview}`,
         isError: false,
       });
-      return true;
+      return "snapshot";
     case "run_completed":
       // The run's own answer is the authoritative version of whatever the
       // stream last held, so it takes over until the snapshot lands.
@@ -260,7 +265,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         streamSettled: true,
       });
       pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
-      return true;
+      return "snapshot";
     case "run_failed": {
       // The terminal message is a constant; a provider refusal seen earlier in
       // this run explains the same failure and says something useful.
@@ -272,27 +277,35 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         streamSettled: true,
       });
       pushEvent({ seq, kind: "error", text: message, isError: true });
-      return true;
+      return "snapshot";
     }
     case "run_cancelled":
       // Stopping is what the user asked for: the transcript already carries the
-      // cancellation marker, so a red box would only contradict it. A provider
-      // refusal seen earlier in this run is moot now for the same reason.
-      setState({
+      // cancellation marker, so a red box would only contradict it. Terminalize
+      // only live workers; completed cards and their logs remain useful history.
+      setState((state) => ({
         running: false,
         activity: "",
         error: null,
         modelError: null,
         streamSettled: true,
-      });
+        threads: Object.fromEntries(
+          Object.entries(state.threads).map(([name, thread]) => [
+            name,
+            thread.status === "running"
+              ? { ...thread, status: "finished", exitCode: null, isError: false }
+              : thread,
+          ]),
+        ),
+      }));
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
-      return true;
+      return "snapshot";
     case "snapshot_saved":
-      return true;
+      return "snapshot";
     case "transcript_appended":
       // A message was committed, so the buffers now describe the past.
       setState({ streamSettled: true });
-      return true;
+      return "messages";
     case "transcript_reverted":
       // The messages the buffers were catching up to no longer exist, so the
       // leftovers would be replayed against a transcript that never had them.
@@ -304,15 +317,15 @@ export function applyEnvelope(envelope: SessionEventEnvelope): boolean {
         streamReasoning: "",
         threads: {},
       });
-      return true;
+      return "replace-snapshot";
     case "agent":
       return applyAgent(seq, event.event);
     default:
-      return false;
+      return "none";
   }
 }
 
-function applyAgent(seq: number, event: AgentEvent): boolean {
+function applyAgent(seq: number, event: AgentEvent): RefreshKind {
   switch (event.type) {
     case "tool_call_started":
       setState({ activity: `Tool: ${event.name}` });
@@ -325,12 +338,12 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: `▶ ${event.name}(${event.args_preview})`,
         isError: false,
       });
-      return false;
+      return "none";
     case "thread_log":
       // Deliberately not in the log below: the worker prints these as it works,
       // and at that rate they would push everything else out of the events tab.
       pushThreadLog(event.name, event);
-      return false;
+      return "none";
     case "tool_call_finished":
       pushThreadLog(event.thread_name, event);
       pushEvent({
@@ -339,7 +352,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: `${event.is_error ? "✕" : "✓"} ${event.name}: ${event.content_preview}`,
         isError: event.is_error,
       });
-      return false;
+      return "none";
     case "thread_started":
       setState({ activity: `Thread ${event.name}: ${event.action}` });
       pushEvent({
@@ -357,7 +370,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         // not this one's.
         log: [],
       });
-      return false;
+      return "none";
     case "thread_finished":
       pushEvent({
         seq,
@@ -370,7 +383,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         exitCode: event.exit_code,
         isError: Boolean(event.exit_code),
       });
-      return false;
+      return "none";
     case "assistant_message":
       setState({ activity: "" });
       pushEvent({
@@ -379,7 +392,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: "New assistant message",
         isError: false,
       });
-      return true;
+      return "none";
     case "thread_steering_queued":
     case "thread_steering_delivered":
     case "thread_steering_expired":
@@ -389,7 +402,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: `${steeringVerb(event.type)} → ${event.name}: ${event.instruction_preview}`,
         isError: event.type === "thread_steering_expired",
       });
-      return false;
+      return "none";
     case "orchestrator_steering_queued":
     case "orchestrator_steering_delivered":
     case "orchestrator_steering_expired":
@@ -399,7 +412,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: `${steeringVerb(event.type)} → orchestrator: ${event.instruction_preview}`,
         isError: event.type === "orchestrator_steering_expired",
       });
-      return false;
+      return "none";
     case "orchestrator_compaction_started":
       setState({ activity: "Compacting context…" });
       pushEvent({
@@ -408,7 +421,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: `Compaction started (${event.reason})`,
         isError: false,
       });
-      return false;
+      return "none";
     case "orchestrator_compaction_completed":
       setState({ activity: "" });
       pushEvent({
@@ -417,7 +430,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: "Compaction completed",
         isError: false,
       });
-      return true;
+      return "replace-snapshot";
     case "orchestrator_compaction_skipped":
       setState({ activity: "" });
       pushEvent({
@@ -426,7 +439,7 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: `Compaction skipped: ${event.cause}`,
         isError: false,
       });
-      return false;
+      return "none";
     case "orchestrator_compaction_failed":
       setState({ activity: "" });
       pushEvent({
@@ -435,17 +448,17 @@ function applyAgent(seq: number, event: AgentEvent): boolean {
         text: `Compaction failed: ${event.failure}`,
         isError: true,
       });
-      return false;
+      return "none";
     case "error":
       setState({ error: event.message });
       pushEvent({ seq, kind: "error", text: event.message, isError: true });
-      return false;
+      return "none";
     case "model_error":
       setState({ error: event.message, modelError: event.message });
       pushEvent({ seq, kind: "error", text: event.message, isError: true });
-      return false;
+      return "none";
     default:
-      return false;
+      return "none";
   }
 }
 

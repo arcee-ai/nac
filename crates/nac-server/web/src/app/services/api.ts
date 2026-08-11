@@ -137,6 +137,14 @@ export interface WorkspaceDiffOptions {
   revision?: number | null;
   signal?: AbortSignal;
 }
+export interface SessionSnapshotOptions {
+  messageLimit?: number;
+  threadEventLimit?: number;
+  includeSessions?: boolean;
+  includeSystem?: boolean;
+  signal?: AbortSignal;
+}
+
 
 export interface MessagesPageOptions {
   before?: number;
@@ -305,8 +313,25 @@ export const api = {
       { signal },
     ),
 
-  getSession: (id: string, signal?: AbortSignal) =>
-    request<SessionSnapshotResponse>("GET", sessionPath(id), { signal }),
+  getSession: (id: string, options: SessionSnapshotOptions = {}) => {
+    const params = new URLSearchParams();
+    if (options.messageLimit !== undefined) {
+      params.set("message_limit", String(options.messageLimit));
+    }
+    if (options.threadEventLimit !== undefined) {
+      params.set("thread_event_limit", String(options.threadEventLimit));
+    }
+    if (options.includeSessions !== undefined) {
+      params.set("include_sessions", String(options.includeSessions));
+    }
+    if (options.includeSystem) params.set("include_system", "true");
+    const query = params.toString();
+    return request<SessionSnapshotResponse>(
+      "GET",
+      `${sessionPath(id)}${query ? `?${query}` : ""}`,
+      { signal: options.signal },
+    );
+  },
 
   createSession: (payload: CreateSessionRequest) =>
     request<SessionSnapshotResponse>("POST", "/sessions", { body: payload }),

@@ -1,5 +1,30 @@
 use super::*;
 
+const RESPONSES_OUTPUT_DETAILS_TYPE: &str = "openai_responses_output";
+const RESPONSES_OUTPUT_ITEMS_FIELD: &str = "items";
+
+fn responses_output_details(items: &[Value]) -> Value {
+    json!({
+        "type": RESPONSES_OUTPUT_DETAILS_TYPE,
+        "items": items,
+    })
+}
+
+/// Returns the exact output sequence retained for a stateless Responses
+/// continuation. Older transcripts stored only reasoning items as a bare array,
+/// so the tagged wrapper distinguishes the lossless format from that fallback.
+pub(super) fn stored_responses_output(details: &Value) -> Option<&[Value]> {
+    let object = details.as_object()?;
+    (object.get("type").and_then(Value::as_str) == Some(RESPONSES_OUTPUT_DETAILS_TYPE))
+        .then(|| {
+            object
+                .get(RESPONSES_OUTPUT_ITEMS_FIELD)
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+        })
+        .flatten()
+}
+
 pub(super) fn parse_openai_responses_response(
     value: &Value,
     url: &str,
@@ -11,7 +36,6 @@ pub(super) fn parse_openai_responses_response(
 
     let mut message_text_parts = Vec::new();
     let mut tool_calls = Vec::new();
-    let mut reasoning_items = Vec::new();
 
     for item in output {
         match item.get("type").and_then(Value::as_str) {
@@ -59,7 +83,6 @@ pub(super) fn parse_openai_responses_response(
                     },
                 });
             }
-            Some("reasoning") => reasoning_items.push(item.clone()),
             _ => {}
         }
     }
@@ -72,12 +95,12 @@ pub(super) fn parse_openai_responses_response(
             .and_then(Value::as_str)
             .map(ToString::to_string)
     };
-    let reasoning_text = extract_reasoning_text(&reasoning_items);
-    let reasoning_details = if reasoning_items.is_empty() {
-        None
-    } else {
-        Some(Value::Array(reasoning_items))
-    };
+    let reasoning_text = extract_reasoning_text(output);
+    // `store: false` continuations must replay every output item in order.
+    // Keeping only the reasoning items loses function-call/message item IDs and
+    // reorders mixed output, forcing the model to reconstruct turn state.
+    let reasoning_details =
+        (!output.is_empty()).then(|| responses_output_details(output.as_slice()));
     let finish_reason = if value.get("status").and_then(Value::as_str) == Some("incomplete")
         && value
             .get("incomplete_details")
@@ -93,16 +116,22 @@ pub(super) fn parse_openai_responses_response(
 
     let usage = value.get("usage").map(|u| {
         let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cached = u
-            .get("input_tokens_details")
-            .and_then(|d| d.get("cached_tokens"))
+        let input_details = u.get("input_tokens_details");
+        let cache_read = input_details
+            .and_then(|details| details.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_write = input_details
+            .and_then(|details| details.get("cache_write_tokens"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         TokenUsage {
-            input_tokens: input_tokens.saturating_sub(cached),
+            input_tokens: input_tokens
+                .saturating_sub(cache_read)
+                .saturating_sub(cache_write),
             output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-            cache_read_tokens: cached,
-            cache_write_tokens: 0,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: cache_write,
             reasoning_tokens: 0,
             orchestrator_context_tokens: u
                 .get("total_tokens")
@@ -133,6 +162,9 @@ pub(super) fn extract_reasoning_text(items: &[Value]) -> Option<String> {
     let mut parts = Vec::new();
 
     for item in items {
+        if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
         if let Some(summary) = item.get("summary").and_then(Value::as_array) {
             for entry in summary {
                 if let Some(text) = entry.get("text").and_then(Value::as_str) {

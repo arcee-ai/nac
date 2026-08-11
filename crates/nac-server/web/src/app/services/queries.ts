@@ -3,9 +3,11 @@
 
 import { useCallback, useMemo } from "react";
 import {
+  useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
+  type InfiniteData,
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query";
@@ -17,7 +19,22 @@ import {
   sameOrder,
   withUpdatedSummary,
 } from "@/app/lib/sessionOrder";
+import {
+  SNAPSHOT_MESSAGE_LIMIT,
+  SNAPSHOT_THREAD_EVENT_LIMIT,
+  mergeFocusedSnapshot,
+  validSnapshotWindow,
+  prependMessagePage,
+  validMessagesPage,
+} from "@/app/lib/messageWindow";
 import { api } from "@/app/services/api";
+import {
+  beginSnapshotFetch,
+  finishSnapshotFetch,
+  currentSessionGeneration,
+  fenceSessionSnapshot,
+  isCurrentSessionGeneration,
+} from "@/app/services/sessionRefresh";
 import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
 import type {
   BackendKind,
@@ -37,6 +54,7 @@ import type {
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  ThreadEventPage,
   SshConfigurationList,
   CreateSshConfigurationRequest,
   UpdateSshConfigurationRequest,
@@ -56,6 +74,8 @@ import type {
 
 /** How often the session list is refreshed; the list has no event stream. */
 export const SESSIONS_POLL_MS = 5000;
+export const WORKSPACE_STATS_POLL_MS = 30_000;
+
 
 export const queryKeys = {
   storeInfo: ["store"] as const,
@@ -90,8 +110,13 @@ export const queryKeys = {
   resolvedConfigFile: (path: string) => ["config-file-resolved", path] as const,
   resolvedConfigFilesAll: ["config-file-resolved"] as const,
   sessions: (workspaceStats: boolean) => ["sessions", { workspaceStats }] as const,
+  sessionRoot: (id: string) => ["session", id] as const,
+  sessionSnapshot: (id: string) => ["session", id, "snapshot"] as const,
   sessionsAll: ["sessions"] as const,
-  session: (id: string) => ["session", id] as const,
+  threadEventsRoot: (id: string) =>
+    ["session", id, "thread-events"] as const,
+  threadEvents: (id: string, threadName: string) =>
+    ["session", id, "thread-events", threadName] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
   workspaceDiff: (
     id: string,
@@ -494,13 +519,56 @@ export function useDeleteModelConfig() {
   });
 }
 
-export function useSessions(workspaceStats = true) {
+export function useSessions(pollMs = SESSIONS_POLL_MS) {
   return useQuery<ManagedSessionSummary[]>({
-    queryKey: queryKeys.sessions(workspaceStats),
-    queryFn: ({ signal }) => api.listSessions(workspaceStats, signal),
-    refetchInterval: SESSIONS_POLL_MS,
+    queryKey: queryKeys.sessions(false),
+    queryFn: ({ signal }) => api.listSessions(false, signal),
+    refetchInterval: pollMs,
     staleTime: 0,
   });
+}
+
+export function mergeWorkspaceStats(
+  base: ManagedSessionSummary[],
+  stats: ManagedSessionSummary[],
+): ManagedSessionSummary[] {
+  const workspaceById = new Map(
+    stats
+      .filter((entry) => entry.workspace_diff !== undefined)
+      .map((entry) => [entry.summary.session_id, entry.workspace_diff]),
+  );
+  return base.map((entry) => {
+    const workspaceDiff = workspaceById.get(entry.summary.session_id);
+    return workspaceDiff === undefined
+      ? entry
+      : { ...entry, workspace_diff: workspaceDiff };
+  });
+}
+
+export function useSessionsWithWorkspaceStats(
+  cadence: {
+    baseMs: number;
+    statsMs: number;
+  } = {
+    baseMs: SESSIONS_POLL_MS,
+    statsMs: WORKSPACE_STATS_POLL_MS,
+  },
+) {
+  const base = useSessions(cadence.baseMs);
+  const stats = useQuery<ManagedSessionSummary[]>({
+    queryKey: queryKeys.sessions(true),
+    queryFn: ({ signal }) => api.listSessions(true, signal),
+    refetchInterval: cadence.statsMs,
+    staleTime: cadence.statsMs,
+  });
+  const data = useMemo(
+    () =>
+      base.data
+        ? mergeWorkspaceStats(base.data, stats.data ?? [])
+        : base.data,
+    [base.data, stats.data],
+  );
+  return { ...base, data };
 }
 
 /**
@@ -521,13 +589,11 @@ export function useSessionSummary(id: string | null) {
     Error,
     ManagedSessionSummary | null
   >({
-    queryKey: queryKeys.sessions(true),
-    queryFn: ({ signal }) => api.listSessions(true, signal),
+    queryKey: queryKeys.sessions(false),
+    queryFn: ({ signal }) => api.listSessions(false, signal),
     refetchInterval: SESSIONS_POLL_MS,
     staleTime: 0,
     select,
-    // Nothing here reads the fetch flags, and they flip twice per poll.
-    notifyOnChangeProps: ["data"],
   });
 }
 
@@ -535,15 +601,104 @@ export function useSessionSnapshot(
   id: string | null,
   options?: Partial<UseQueryOptions<SessionSnapshotResponse>>,
 ) {
+  const client = useQueryClient();
   return useQuery<SessionSnapshotResponse>({
-    queryKey: queryKeys.session(id ?? ""),
-    queryFn: ({ signal }) => api.getSession(id!, signal),
+    queryKey: queryKeys.sessionSnapshot(id ?? ""),
+    queryFn: async ({ signal }) => {
+      const token = beginSnapshotFetch(id!);
+      const incoming = await api.getSession(id!, {
+        messageLimit: SNAPSHOT_MESSAGE_LIMIT,
+        threadEventLimit: SNAPSHOT_THREAD_EVENT_LIMIT,
+        includeSessions: false,
+        includeSystem: true,
+        signal,
+      });
+      if (!validSnapshotWindow(incoming)) {
+        throw new Error("The server returned an invalid snapshot message page.");
+      }
+      if (
+        signal.aborted ||
+        !isCurrentSessionGeneration(id!, token.generation)
+      ) {
+        throw new DOMException("Snapshot superseded", "AbortError");
+      }
+      finishSnapshotFetch(id!, token);
+      return mergeFocusedSnapshot(
+        client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id!)),
+        incoming,
+        token.replace,
+      );
+    },
     enabled: Boolean(id),
     // The stream invalidates this query, so a stale time only guards bursts.
     staleTime: 1000,
     ...options,
   });
 }
+export function useLoadOlderMessages(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<boolean> => {
+      const current = client.getQueryData<SessionSnapshotResponse>(
+        queryKeys.sessionSnapshot(id),
+      );
+      const start = current?.message_page?.start;
+      if (start === undefined || start <= 0) {
+        throw new Error("No older messages are available.");
+      }
+      const generation = currentSessionGeneration(id);
+      const page = await api.getMessages(id, {
+        before: start,
+        limit: SNAPSHOT_MESSAGE_LIMIT,
+        includeSystem: true,
+      });
+      if (!validMessagesPage(page)) {
+        throw new Error("The server returned an invalid message page.");
+      }
+      if (!isCurrentSessionGeneration(id, generation)) return false;
+
+      let accepted = false;
+      client.setQueryData<SessionSnapshotResponse>(
+        queryKeys.sessionSnapshot(id),
+        (latest) => {
+          if (!latest) return latest;
+          const merged = prependMessagePage(latest, page, start);
+          if (!merged) return latest;
+          accepted = true;
+          return merged;
+        },
+      );
+      return accepted;
+    },
+  });
+}
+export function useThreadEventPages(
+  id: string | null,
+  threadName: string | null,
+) {
+  return useInfiniteQuery<
+    ThreadEventPage,
+    Error,
+    InfiniteData<ThreadEventPage, number | null>,
+    ReturnType<typeof queryKeys.threadEvents>,
+    number | null
+  >({
+    queryKey: queryKeys.threadEvents(id ?? "", threadName ?? ""),
+    queryFn: ({ pageParam, signal }) =>
+      api.getThreadEvents(id!, threadName!, {
+        beforeId: pageParam ?? undefined,
+        limit: SNAPSHOT_THREAD_EVENT_LIMIT,
+        signal,
+      }),
+    initialPageParam: null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_older ? lastPage.next_before_id : undefined,
+    enabled: Boolean(id && threadName),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+
 
 export function useSessionConfig(id: string | null) {
   return useQuery<RawSessionConfig>({
@@ -652,7 +807,7 @@ export function useSwitchBranch(id: string) {
       // The checkout moved, so the branch label, the changed files and every
       // cached diff under this session are all stale.
       void client.invalidateQueries({ queryKey: queryKeys.branches(id) });
-      void client.invalidateQueries({ queryKey: queryKeys.session(id) });
+      void client.invalidateQueries({ queryKey: queryKeys.sessionRoot(id) });
       void client.invalidateQueries({ queryKey: queryKeys.sessionsAll });
     },
   });
@@ -667,7 +822,7 @@ export function useCommitWorkspace(id: string) {
       // HEAD moved and the tree is clean again, so the changed-file list, every
       // cached diff and the branch's dirty flag are all stale. They hang off
       // the session key, which invalidates them as its prefix.
-      void client.invalidateQueries({ queryKey: queryKeys.session(id) });
+      void client.invalidateQueries({ queryKey: queryKeys.sessionRoot(id) });
       void client.invalidateQueries({ queryKey: queryKeys.sessionsAll });
     },
   });
@@ -680,7 +835,12 @@ function useInvalidators() {
     sessions: () =>
       client.invalidateQueries({ queryKey: queryKeys.sessionsAll }),
     session: (id: string) =>
-      client.invalidateQueries({ queryKey: queryKeys.session(id) }),
+      client.invalidateQueries({
+        queryKey: queryKeys.sessionSnapshot(id),
+        exact: true,
+      }),
+    sessionRoot: (id: string) =>
+      client.invalidateQueries({ queryKey: queryKeys.sessionRoot(id) }),
   };
 }
 
@@ -825,15 +985,17 @@ export function useCompactSession() {
   const invalidate = useInvalidators();
   return useMutation({
     mutationFn: (id: string) => api.compactSession(id),
-    onSuccess: (_data, id) => invalidate.session(id),
+    onSuccess: (_data, id) => {
+      fenceSessionSnapshot(id, true);
+      return invalidate.sessionRoot(id);
+    },
   });
 }
 
 /**
- * A revert rewrites the transcript and the checkout at once. The session key is
- * the prefix of every workspace key, so invalidating it also drops the file and
- * revision views, which would otherwise keep diffing against revisions the
- * revert has just discarded.
+ * A revert rewrites the transcript and the checkout at once. Invalidating the
+ * session root drops the snapshot, thread history, file data, and revision
+ * views that the reverted state invalidated.
  */
 export function useRevertSession() {
   const invalidate = useInvalidators();
@@ -841,7 +1003,8 @@ export function useRevertSession() {
     mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
       api.revertSession(id, messageIdx),
     onSuccess: (_data, { id }) => {
-      void invalidate.session(id);
+      fenceSessionSnapshot(id, true);
+      void invalidate.sessionRoot(id);
       void invalidate.sessions();
     },
   });
@@ -857,7 +1020,8 @@ export function useRegenerateRun() {
     mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
       api.regenerateRun(id, messageIdx),
     onSuccess: (_data, { id }) => {
-      void invalidate.session(id);
+      fenceSessionSnapshot(id, true);
+      void invalidate.sessionRoot(id);
       void invalidate.sessions();
     },
   });

@@ -37,6 +37,8 @@ use axum::{
     Json, Router,
 };
 use include_dir::{include_dir, Dir};
+#[cfg(test)]
+use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{
@@ -51,18 +53,18 @@ use nac_core::{
         ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
-    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
         RunOptions, SandboxOptions, StoreOptions,
     },
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
-        MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
-        SessionSubmitError, ThreadEventPage,
+        MessagePageRequest, MessagesPageSnapshot, SessionCancelError, SessionCoordinationError,
+        SessionEventReceiver, SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
+        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
+    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
@@ -674,6 +676,7 @@ pub struct MessagePageMetadata {
 #[derive(Debug, Clone, Serialize)]
 pub struct MessagesPageResponse {
     pub messages: Vec<Message>,
+    pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
@@ -717,6 +720,7 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
     fn from(page: MessagesPageSnapshot) -> Self {
         Self {
             messages: page.messages,
+            created_at: page.created_at,
             page: page.page.into(),
         }
     }
@@ -1665,14 +1669,16 @@ impl SessionManager {
 
     pub async fn cancel_active_run(&self, session_id: &str) -> Result<()> {
         let service = self.attach_session(session_id).await?;
-        let active = service
-            .active_run()
-            .ok_or_else(|| anyhow!("session has no active run"))?;
-        service
+        let Some(active) = service.active_run() else {
+            return Ok(());
+        };
+        match service
             .connect_client()
             .request_cancel(&active.run_id)
             .await
-            .map_err(|error| anyhow!(error.to_string()))
+        {
+            Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
+        }
     }
 
     /// Deletes a session and all related data (threads, episodes, worksets,
@@ -5681,6 +5687,67 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
+    async fn cancel_active_run_route_is_idempotent() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cancel_idempotent");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+        let service = manager.attach_session("session").await.unwrap();
+        manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "begin the original task".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let app = router(manager);
+        let request = || {
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/session/cancel-active-run")
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        let (first, second) = tokio::join!(
+            app.clone().oneshot(request()),
+            app.clone().oneshot(request())
+        );
+        assert_eq!(first.unwrap().status(), StatusCode::ACCEPTED);
+        assert_eq!(second.unwrap().status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            app.clone().oneshot(request()).await.unwrap().status(),
+            StatusCode::ACCEPTED
+        );
+
+        let terminal_events = service
+            .recent_events(None, 64)
+            .into_iter()
+            .filter(|envelope| {
+                matches!(
+                    envelope.event,
+                    nac_core::events::SessionEvent::RunCompleted { .. }
+                        | nac_core::events::SessionEvent::RunFailed { .. }
+                        | nac_core::events::SessionEvent::RunCancelled
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(terminal_events.len(), 1);
+        assert_eq!(
+            terminal_events[0].event,
+            nac_core::events::SessionEvent::RunCancelled
+        );
+        assert!(service.active_run().is_none());
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn deletion_winning_lifecycle_gate_prevents_late_submission_recreation() {
         let root = temp_root("delete_before_submit");
         seed_editable_session(&root, "session");
@@ -7768,6 +7835,102 @@ model = "gpt-5.2"
         let mut expected_projected = default.clone();
         expected_projected["sessions"] = serde_json::json!([]);
         assert_eq!(projected, expected_projected);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn paged_routes_preserve_raw_indexes_timestamps_and_projection_caps() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("paged_route_contract");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+        let mut transcript = test_transcript();
+        transcript.insert(
+            6,
+            Message::Tool {
+                tool_call_id: "call-thread".to_string(),
+                content: "thread result".to_string(),
+            },
+        );
+        seed_session_with_messages(&root, "target", "2026-01-02 00:00:00.000000000", transcript);
+        TranscriptLogWriter::new(&root.join("store.db"))
+            .unwrap()
+            .append(
+                "target",
+                9,
+                &Message::User {
+                    content: "logged tail".to_string(),
+                },
+            )
+            .unwrap();
+        let app = router(test_manager(&root));
+
+        let response = get_response(
+            app.clone(),
+            "/sessions/target/messages?before=10&limit=4&include_system=true",
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let page: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(
+            page["page"],
+            serde_json::json!({
+                "start": 6,
+                "end": 10,
+                "total": 10,
+                "has_older": true,
+            })
+        );
+        assert_eq!(
+            page["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|message| message["role"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["tool", "system", "assistant", "user"]
+        );
+        let created_at = page["created_at"].as_array().unwrap();
+        assert_eq!(created_at.len(), 4);
+        assert!(created_at[..3].iter().all(serde_json::Value::is_null));
+        assert!(created_at[3].is_string());
+        assert_eq!(page["messages"][3]["content"], "logged tail");
+
+        let response = get_response(
+            app,
+            "/sessions/target?message_limit=3&thread_event_limit=1&include_sessions=false&include_system=true",
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let snapshot: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(snapshot["messages"].as_array().unwrap().len(), 3);
+        assert_eq!(snapshot["message_created_at"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            snapshot["message_page"],
+            serde_json::json!({
+                "start": 7,
+                "end": 10,
+                "total": 10,
+                "has_older": true,
+            })
+        );
+        let message_created_at = snapshot["message_created_at"].as_array().unwrap();
+        assert!(message_created_at[..2]
+            .iter()
+            .all(serde_json::Value::is_null));
+        assert!(message_created_at[2].is_string());
+        assert_eq!(snapshot["sessions"], serde_json::json!([]));
+        assert!(snapshot["thread_events"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|events| events.as_array().unwrap().len() <= 1));
 
         let _ = std::fs::remove_dir_all(root);
     }

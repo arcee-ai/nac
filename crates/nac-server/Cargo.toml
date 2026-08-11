@@ -27,4 +27,5 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 flate2 = "1"
+nac-core = { path = "../nac-core", features = ["test-support"] }
 tower = { version = "0.5", features = ["util"] }
