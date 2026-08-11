@@ -94,10 +94,10 @@ struct AnthropicOverlayEntry {
     id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display_name: Option<String>,
-    #[serde(default)]
-    context_window: u64,
-    #[serde(default)]
-    max_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context_window: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u64>,
     #[serde(default)]
     reasoning: bool,
     #[serde(default)]
@@ -399,15 +399,11 @@ fn map_anthropic_model(model: &AnthropicApiModel) -> Option<AnthropicOverlayEntr
         .and_then(|ct| ct.supported)
         .unwrap_or(false);
 
-    let context_window = model
-        .max_input_tokens
-        .filter(|&c| c > 0)
-        .unwrap_or(FALLBACK_CONTEXT_WINDOW);
+    let context_window = model.max_input_tokens.filter(|&c| c > 0);
     let max_tokens = model
         .max_tokens
         .filter(|&m| m > 0)
-        .unwrap_or(FALLBACK_MAX_TOKENS);
-    let max_tokens = max_tokens.min(context_window);
+        .map(|m| m.min(context_window.unwrap_or(u64::MAX)));
 
     Some(AnthropicOverlayEntry {
         id: model.id.clone(),
@@ -482,8 +478,12 @@ pub(super) fn merge_anthropic_overlay(
             if let Some(display_name) = &entry.display_name {
                 existing.display_name = Some(display_name.clone());
             }
-            existing.context_window = entry.context_window;
-            existing.max_tokens = entry.max_tokens;
+            if let Some(context_window) = entry.context_window {
+                existing.context_window = context_window;
+            }
+            if let Some(max_tokens) = entry.max_tokens {
+                existing.max_tokens = max_tokens;
+            }
             existing.reasoning = entry.reasoning;
             existing.thinking_level_map = thinking_level_map.clone();
             existing.adaptive_thinking = entry.adaptive_thinking;
@@ -498,8 +498,8 @@ pub(super) fn merge_anthropic_overlay(
             // New model not in the baseline: insert with zero cost.
             let generated = GeneratedModel {
                 display_name: entry.display_name.clone(),
-                context_window: entry.context_window,
-                max_tokens: entry.max_tokens,
+                context_window: entry.context_window.unwrap_or(FALLBACK_CONTEXT_WINDOW),
+                max_tokens: entry.max_tokens.unwrap_or(FALLBACK_MAX_TOKENS),
                 cost: super::ModelCostRates::default(),
                 reasoning: entry.reasoning,
                 thinking_level_map: thinking_level_map.clone(),
@@ -531,8 +531,12 @@ pub(super) fn merge_anthropic_overlay(
                     if let Some(display_name) = &entry.display_name {
                         snapshot.display_name = Some(display_name.clone());
                     }
-                    snapshot.context_window = entry.context_window;
-                    snapshot.max_tokens = entry.max_tokens;
+                    if let Some(context_window) = entry.context_window {
+                        snapshot.context_window = context_window;
+                    }
+                    if let Some(max_tokens) = entry.max_tokens {
+                        snapshot.max_tokens = max_tokens;
+                    }
                     snapshot.reasoning = entry.reasoning;
                     snapshot.thinking_level_map = thinking_level_map.clone();
                     snapshot.adaptive_thinking = entry.adaptive_thinking;

@@ -256,6 +256,20 @@ impl EffectiveModelSettings {
         // session). Managed backends never auto-select.
         let api_key_env = api_key_env.or_else(|| backend::auto_select_api_key_env(backend));
         let resolved = catalog::resolve(backend, &model);
+        // Migration: old sessions may have xhigh on Anthropic models that now
+        // expose max directly (opus-4-6, sonnet-4-6). Route xhigh to max when
+        // xhigh is unsupported but max is. This is a one-time migration — the
+        // session stores "max" on next save.
+        let reasoning_effort = reasoning_effort.map(|effort| {
+            if effort == ReasoningEffort::Xhigh
+                && !resolved.thinking_level_map.is_supported(ReasoningEffort::Xhigh)
+                && resolved.thinking_level_map.is_supported(ReasoningEffort::Max)
+            {
+                ReasoningEffort::Max
+            } else {
+                effort
+            }
+        });
         super::backend::validate_model_reasoning_effort_with_map(
             backend,
             &model,

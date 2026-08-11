@@ -1,6 +1,7 @@
 mod compaction;
 mod filesystem;
 mod managed_auth;
+mod mcp;
 mod mcp_api;
 mod mixed_models;
 mod revert;
@@ -2184,6 +2185,7 @@ fn api_router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
+        .nest_service("/mcp", mcp::streamable_http_service(manager.clone()))
         .with_state(manager)
 }
 
@@ -6605,7 +6607,7 @@ threshold_tokens = 64000
         assert_eq!(stored.base_url, "https://api.openai.com/v1");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-        assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
+        assert_eq!(stored.orchestrator_compaction_threshold, Some(280_000));
         assert_eq!(
             stored.extra_headers,
             BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
@@ -6618,7 +6620,7 @@ threshold_tokens = 64000
             config.extra_headers_json.as_deref(),
             Some("{\"X-Config\":\"yes\"}")
         );
-        assert_eq!(config.orchestrator_compaction_threshold, Some(64_000));
+        assert_eq!(config.orchestrator_compaction_threshold, Some(280_000));
         assert!(manager
             .snapshot(&inherited_id)
             .await
