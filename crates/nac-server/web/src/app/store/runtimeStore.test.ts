@@ -126,6 +126,36 @@ describe("run cancellation", () => {
     });
   });
 
+  it("finishes live threads when the run completes without their finish events", () => {
+    resetRuntime("session-a");
+    applyEnvelope(envelope({ type: "run_started", prompt_preview: "work" }));
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: { type: "thread_started", name: "worker", action: "run", source_threads: [] },
+      }),
+    );
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "tool_call_started",
+          thread_name: "worker",
+          call_id: "call-1",
+          name: "exec_command",
+          args_preview: "ls",
+        },
+      }),
+    );
+
+    expect(applyEnvelope(envelope({ type: "run_completed", response: "ok" }))).toBe("snapshot");
+    const state = getRuntimeState();
+    expect(state.running).toBe(false);
+    expect(state.threads.worker.status).toBe("finished");
+    expect(state.threads.worker.isError).toBe(false);
+    expect(state.threads.worker.log).toHaveLength(1);
+  });
+
   it("keeps provider failures visible for failed runs", () => {
     resetRuntime("session-a");
     applyEnvelope(envelope({ type: "run_started", prompt_preview: "work" }));
