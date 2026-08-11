@@ -559,6 +559,20 @@ fn generated_baseline_merges_real_models_dev_data_over_the_seeds() {
 }
 
 #[test]
+fn arcee_passthrough_without_output_limit_gets_a_large_safe_default() {
+    let entries = arcee_overlay::map_arcee_api_response(
+        r#"{"data":[{"id":"deepseek-ai/deepseek-v4-pro","context_length":512000},{"id":"trinity-large-thinking","context_length":128000}]}"#,
+    )
+    .unwrap();
+    let entry = serde_json::to_value(&entries[0]).unwrap();
+    assert_eq!(entry["max_tokens"], 256_000);
+    assert_eq!(
+        serde_json::to_value(&entries[1]).unwrap()["max_tokens"],
+        80_000
+    );
+}
+
+#[test]
 fn manifest_sha256_pins_the_embedded_catalog() {
     let manifest = data::parse_manifest().expect("embedded manifest parses");
     assert!(!manifest.sha256.is_empty());

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
-use super::sse::{StreamFold, StreamFoldError};
+use super::sse::{provider_stream_error, StreamFold, StreamFoldError};
 use super::stream::{DeltaSink, ModelStreamDelta};
 
 /// Rebuilds a chat-completions response out of its stream chunks, so the
@@ -20,6 +20,7 @@ pub(super) struct ChatStreamFold<'sink> {
     /// in the call list: identity comes once and the arguments accumulate.
     tool_calls: BTreeMap<u64, PartialToolCall>,
     saw_choice: bool,
+    observable_delta: bool,
 }
 
 #[derive(Default)]
@@ -41,11 +42,13 @@ impl<'sink> ChatStreamFold<'sink> {
             usage: None,
             tool_calls: BTreeMap::new(),
             saw_choice: false,
+            observable_delta: false,
         }
     }
 
-    fn emit(&self, delta: ModelStreamDelta) {
-        if let Some(on_delta) = self.on_delta {
+    fn emit(&mut self, delta: ModelStreamDelta) {
+        if let Some(on_delta) = self.on_delta.filter(|_| !delta.is_empty()) {
+            self.observable_delta = true;
             on_delta(delta);
         }
     }
@@ -77,12 +80,16 @@ impl<'sink> ChatStreamFold<'sink> {
 
 impl StreamFold for ChatStreamFold<'_> {
     fn push(&mut self, event: &Value) -> Result<(), StreamFoldError> {
-        if let Some(message) = event
-            .get("error")
-            .and_then(|error| error.get("message"))
-            .and_then(Value::as_str)
-        {
-            return Err(StreamFoldError::permanent(message));
+        if let Some(error) = event.get("error") {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("model stream reported an error");
+            let code = error
+                .get("code")
+                .or_else(|| error.get("type"))
+                .and_then(Value::as_str);
+            return Err(provider_stream_error(code, message));
         }
 
         if let Some(usage) = event.get("usage").filter(|usage| !usage.is_null()) {
@@ -123,9 +130,13 @@ impl StreamFold for ChatStreamFold<'_> {
 
         Ok(())
     }
+    fn has_observable_delta(&self) -> bool {
+        self.observable_delta
+    }
+
     fn finish(self) -> Result<Value, StreamFoldError> {
         if !self.saw_choice {
-            return Err(StreamFoldError::permanent(
+            return Err(StreamFoldError::retryable(
                 "stream ended without any completion chunk",
             ));
         }

@@ -976,11 +976,7 @@ async fn post_codex_json_with_retry_delay(
         };
 
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok());
+        let retry_after = super::retry_after_delay(response.headers());
         let content_type = response
             .headers()
             .get(header::CONTENT_TYPE)
@@ -1029,16 +1025,10 @@ async fn post_codex_json_with_retry_delay(
         if status == StatusCode::UNAUTHORIZED {
             return Err(error);
         }
-        if status.as_u16() == 429 || status.is_server_error() {
+        if super::retryable_http_status(status) {
             last_error = error;
             if attempt < 9 {
-                let delay = if status.as_u16() == 429 {
-                    retry_after
-                        .map(Duration::from_secs)
-                        .unwrap_or_else(|| retry_delay(attempt))
-                } else {
-                    retry_delay(attempt)
-                };
+                let delay = retry_after.unwrap_or_else(|| retry_delay(attempt));
                 sleep(delay).await;
             }
             continue;
