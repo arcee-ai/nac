@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
-use super::sse::{StreamFold, StreamFoldError};
+use super::sse::{provider_stream_error, StreamFold, StreamFoldError};
 use super::stream::{DeltaSink, ModelStreamDelta};
 
 /// Rebuilds an Anthropic Messages response out of its event stream.
@@ -19,6 +19,7 @@ pub(super) struct AnthropicStreamFold<'sink> {
     input_usage: Option<Value>,
     output_tokens: Option<u64>,
     saw_message: bool,
+    observable_delta: bool,
 }
 
 struct PartialBlock {
@@ -36,11 +37,13 @@ impl<'sink> AnthropicStreamFold<'sink> {
             input_usage: None,
             output_tokens: None,
             saw_message: false,
+            observable_delta: false,
         }
     }
 
-    fn emit(&self, delta: ModelStreamDelta) {
-        if let Some(on_delta) = self.on_delta {
+    fn emit(&mut self, delta: ModelStreamDelta) {
+        if let Some(on_delta) = self.on_delta.filter(|_| !delta.is_empty()) {
+            self.observable_delta = true;
             on_delta(delta);
         }
     }
@@ -66,7 +69,11 @@ impl StreamFold for AnthropicStreamFold<'_> {
                     .and_then(|error| error.get("message"))
                     .and_then(Value::as_str)
                     .unwrap_or("Anthropic stream reported an error");
-                return Err(StreamFoldError::permanent(message));
+                let code = event
+                    .get("error")
+                    .and_then(|error| error.get("type"))
+                    .and_then(Value::as_str);
+                return Err(provider_stream_error(code, message));
             }
             Some("message_start") => {
                 self.saw_message = true;
@@ -143,9 +150,13 @@ impl StreamFold for AnthropicStreamFold<'_> {
         }
         Ok(())
     }
+    fn has_observable_delta(&self) -> bool {
+        self.observable_delta
+    }
+
     fn finish(self) -> Result<Value, StreamFoldError> {
         if !self.saw_message {
-            return Err(StreamFoldError::permanent(
+            return Err(StreamFoldError::retryable(
                 "stream ended without a message_start event",
             ));
         }

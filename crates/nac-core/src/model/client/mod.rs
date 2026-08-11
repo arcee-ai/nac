@@ -404,7 +404,7 @@ impl ModelClient {
         // Trinity's vLLM front end needs its own assistant-message shape; the
         // quirk rides the provider axis, like the URL join right below.
         let arcee = matches!(self.backend, BackendKind::ArceeAuth | BackendKind::ArceeApi);
-        let request = completions_chat_request(
+        let mut request = completions_chat_request(
             &self.model,
             self.reasoning_effort,
             &messages,
@@ -417,6 +417,10 @@ impl ModelClient {
                 CompletionsMessageShape::Standard
             },
         );
+        request["max_tokens"] = json!(self.resolved_model.max_tokens.min(262_144));
+        if self.backend == BackendKind::TogetherChat {
+            request["context_length_exceeded_behavior"] = json!("truncate");
+        }
         let url = match self.backend {
             BackendKind::ArceeAuth | BackendKind::ArceeApi => {
                 arcee::chat_completions_url(&self.base_url)
@@ -479,7 +483,7 @@ impl ModelClient {
             url,
             &request,
             |request| request.header("Authorization", format!("Bearer {api_key}")),
-            ChatStreamFold::new(on_delta, reasoning_field),
+            || ChatStreamFold::new(on_delta, reasoning_field),
         )
         .await
     }
@@ -521,7 +525,7 @@ impl ModelClient {
             url,
             &request,
             apply_headers,
-            ChatStreamFold::new(on_delta, reasoning_field),
+            || ChatStreamFold::new(on_delta, reasoning_field),
         )
         .await
     }
@@ -550,7 +554,7 @@ impl ModelClient {
                     &url,
                     &request,
                     |request| request.header("Authorization", format!("Bearer {}", api_key)),
-                    ResponsesStreamFold::new(on_delta),
+                    || ResponsesStreamFold::new(on_delta),
                 )
                 .await?
             }
@@ -598,7 +602,7 @@ impl ModelClient {
                     &url,
                     &request,
                     |request| anthropic_headers(request, api_key, cache_ttl, context_management),
-                    AnthropicStreamFold::new(on_delta),
+                    || AnthropicStreamFold::new(on_delta),
                 )
                 .await?
             }
@@ -662,23 +666,14 @@ impl ModelClient {
         on_delta: DeltaSink<'_>,
     ) -> std::result::Result<Value, ModelHttpError> {
         if let Some(on_delta) = on_delta {
-            // Same forfeit-retry rule as the other SSE adapters: once chunks
-            // have been forwarded, a mid-stream failure cannot be retried.
-            let response = self
-                .send_with_retry_headers(url, body, |request| {
-                    request.header("Authorization", format!("Bearer {token}"))
-                })
-                .await?;
-            return read_sse_response(
-                url,
-                response,
-                ChatStreamFold::new(Some(on_delta), reasoning_field),
-            )
-            .await
-            .map_err(|error| ModelHttpError {
-                status: None,
-                message: error.to_string(),
-            });
+            return self
+                .try_post_sse_with_retry_headers(
+                    url,
+                    body,
+                    |request| request.header("Authorization", format!("Bearer {token}")),
+                    || ChatStreamFold::new(Some(on_delta), reasoning_field),
+                )
+                .await;
         }
         self.try_post_json_with_retry_headers(url, body, |request| {
             request.header("Authorization", format!("Bearer {token}"))
@@ -785,11 +780,7 @@ impl ModelClient {
             };
 
             let status = response.status();
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok());
+            let retry_after = super::retry_after_delay(response.headers());
             let redirect_location = response
                 .headers()
                 .get(reqwest::header::LOCATION)
@@ -829,16 +820,10 @@ impl ModelClient {
                 ),
             };
 
-            if status.as_u16() == 429 || status.is_server_error() {
+            if super::retryable_http_status(status) {
                 last_error = error;
                 if attempt < 9 {
-                    let delay = if status.as_u16() == 429 {
-                        retry_after
-                            .map(Duration::from_secs)
-                            .unwrap_or_else(|| super::backoff_duration(attempt))
-                    } else {
-                        super::backoff_duration(attempt)
-                    };
+                    let delay = retry_after.unwrap_or_else(|| super::backoff_duration(attempt));
                     sleep(delay).await;
                 }
                 continue;
@@ -852,24 +837,60 @@ impl ModelClient {
 
     /// Send a streaming request, folding the event stream back into the response
     /// value the buffered parsers expect.
-    async fn post_sse_with_retry_headers<F, Fold>(
+    async fn post_sse_with_retry_headers<F, MakeFold, Fold>(
         &self,
         url: &str,
         body: &Value,
         apply_headers: F,
-        fold: Fold,
+        make_fold: MakeFold,
     ) -> Result<Value>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
+        MakeFold: Fn() -> Fold,
         Fold: StreamFold,
     {
-        let response = self
-            .send_with_retry_headers(url, body, apply_headers)
+        self.try_post_sse_with_retry_headers(url, body, apply_headers, make_fold)
             .await
-            .map_err(|error| anyhow!(error.message))?;
-        read_sse_response(url, response, fold)
-            .await
-            .map_err(anyhow::Error::new)
+            .map_err(|error| anyhow!(error.message))
+    }
+
+    async fn try_post_sse_with_retry_headers<F, MakeFold, Fold>(
+        &self,
+        url: &str,
+        body: &Value,
+        apply_headers: F,
+        make_fold: MakeFold,
+    ) -> std::result::Result<Value, ModelHttpError>
+    where
+        F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
+        MakeFold: Fn() -> Fold,
+        Fold: StreamFold,
+    {
+        let mut last_error = None;
+        for attempt in 0..10 {
+            let response = self
+                .send_with_retry_headers(url, body, apply_headers)
+                .await?;
+            match read_sse_response(url, response, make_fold()).await {
+                Ok(value) => return Ok(value),
+                Err(error) if error.is_retryable() && !error.has_observable_delta() => {
+                    last_error = Some(ModelHttpError {
+                        status: None,
+                        message: error.to_string(),
+                    });
+                    if attempt < 9 {
+                        sleep(super::backoff_duration(attempt)).await;
+                    }
+                }
+                Err(error) => {
+                    return Err(ModelHttpError {
+                        status: None,
+                        message: error.to_string(),
+                    });
+                }
+            }
+        }
+        Err(last_error.expect("SSE retry loop makes at least one attempt"))
     }
 
     /// Whether the configured extra_headers already set `name` (case-insensitive).
