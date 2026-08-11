@@ -96,11 +96,20 @@ export function persistedThreadLog(
 }
 
 /**
- * The persisted log followed by whatever the stream has added on top of it.
+ * The persisted log with the stream spliced around it.
  *
  * The snapshot is only refetched at message boundaries while tool calls arrive
  * between them, so the two overlap by however much of the run is already on
  * disk; the shared line keys are what tells that overlap apart.
+ *
+ * The overlap is a range rather than a suffix, because the persisted side is a
+ * page of the newest events while the live side reaches back to the dispatch —
+ * so a thread that issues more commands than one page holds has live lines on
+ * both sides of the window. Both sides are chronological, which is what lets
+ * the two ends be placed around it: appending everything the window lacks
+ * would drop the older half of the run behind the newer one, and a call whose
+ * result ended up on the far side of that seam then reads as a command still
+ * in flight.
  */
 export function mergeThreadLog(
   persisted: ThreadLogLine[],
@@ -109,7 +118,17 @@ export function mergeThreadLog(
   if (!live.length) return persisted;
   if (!persisted.length) return live;
   const seen = new Set(persisted.map((line) => line.key));
-  return [...persisted, ...live.filter((line) => !seen.has(line.key))];
+  let first = -1;
+  let last = -1;
+  live.forEach((line, index) => {
+    if (!seen.has(line.key)) return;
+    if (first < 0) first = index;
+    last = index;
+  });
+  // Nothing shared: the live log either continues the window or belongs to a
+  // dispatch the window predates, and in both readings it comes after.
+  if (first < 0) return [...persisted, ...live];
+  return [...live.slice(0, first), ...persisted, ...live.slice(last + 1)];
 }
 
 /** Chronological, ID-unique event history from newest-first cursor pages. */

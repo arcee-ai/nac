@@ -247,7 +247,7 @@ export const ModelMessage = memo(function ModelMessage({
             )}
           >
             {canRefresh ? (
-              <Tooltip title="Resend" position={TooltipPosition.TopCenter}>
+              <Tooltip title="Resend" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
                   variant={
@@ -267,7 +267,7 @@ export const ModelMessage = memo(function ModelMessage({
             {canRevert ? (
               <Tooltip
                 title="Revert to this snapshot"
-                position={TooltipPosition.TopCenter}
+                position={TooltipPosition.BottomRight}
               >
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
@@ -286,7 +286,7 @@ export const ModelMessage = memo(function ModelMessage({
             ) : (
               <Tooltip
                 title="This message is not in the transcript yet"
-                position={TooltipPosition.TopCenter}
+                position={TooltipPosition.BottomRight}
               >
                 <span className="inline-flex">
                   <Button
@@ -310,7 +310,7 @@ export const ModelMessage = memo(function ModelMessage({
               size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
               variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
               title="Copy message"
-              position={TooltipPosition.TopCenter}
+              position={TooltipPosition.BottomRight}
               className="md:!h-4 md:!min-h-4 md:!p-0"
             />
           </div>
