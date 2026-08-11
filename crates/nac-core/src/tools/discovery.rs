@@ -195,10 +195,8 @@ def glob_regex(pattern):
             if end >= len(pattern):
                 fail('invalid_glob', f'unclosed character class at byte {index}')
             stuff = pattern[index + 1:end]
-            if stuff.startswith('!'):
+            if stuff.startswith(('!', '^')):
                 stuff = '^' + stuff[1:]
-            elif stuff.startswith('^'):
-                stuff = '\\' + stuff
             out.append('[' + stuff.replace('\\', '\\\\') + ']')
             index = end
         elif char == '\\':
@@ -230,11 +228,12 @@ def parse_ignore_line(line):
         line = line[:-1]
     if not line:
         return None
-    if line.startswith('\\#') or line.startswith('\\!'):
+    escaped_marker = line.startswith('\\#') or line.startswith('\\!')
+    if escaped_marker:
         line = line[1:]
     elif line.startswith('#'):
         return None
-    negated = line.startswith('!')
+    negated = not escaped_marker and line.startswith('!')
     if negated:
         line = line[1:]
     directory_only = line.endswith('/')
@@ -276,8 +275,15 @@ def load_ignore(fd, base, budget):
             fail('ignore_limit', f'ignore files exceed {MAX_TOTAL_IGNORE_BYTES} aggregate bytes', path)
         text = bytes(raw).decode('utf-8', errors='replace')
         rules = []
-        for line in text.splitlines():
-            parsed = parse_ignore_line(line)
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            try:
+                parsed = parse_ignore_line(line)
+            except SearchError as error:
+                budget['rules'] -= 1
+                if budget['rules'] < 0:
+                    fail('ignore_limit', f'ignore files exceed {MAX_IGNORE_RULES} rules', path)
+                rules.append(diagnostic('invalid_ignore', f'line {line_number}: {error.message}', path))
+                continue
             if parsed is not None:
                 budget['rules'] -= 1
                 if budget['rules'] < 0:
@@ -351,6 +357,13 @@ def ignored(path, is_dir, rule_stack, gitignore):
             decision = not negated
     return decision
 
+def has_ignored_ancestor(path, rule_stack, gitignore):
+    components = path.split('/')
+    return any(
+        ignored('/'.join(components[:index]), True, rule_stack, gitignore)
+        for index in range(1, len(components) + 1)
+    )
+
 def is_hidden(path):
     return any(part.startswith('.') and part not in ('.', '..') for part in path.split('/'))
 
@@ -375,7 +388,7 @@ def walk_root(workspace_fd, workspace_real, root, hidden, gitignore, budget, ign
     parent_rules, records = ancestor_ignore_rules(workspace_fd, root, gitignore, ignore_budget)
     if root and (not hidden and is_hidden(root)):
         return records
-    if root and ignored(root, True, parent_rules, gitignore):
+    if root and has_ignored_ancestor(root, parent_rules, gitignore):
         return records
     stack = [(root, parent_rules)]
     while stack:
@@ -1629,13 +1642,19 @@ mod tests {
     #[tokio::test]
     async fn scoped_roots_inherit_workspace_ignore_rules() {
         let (runtime, root) = fixture_runtime();
-        fs::write(root.join(".gitignore"), "ignored.rs\n*.generated.rs\n")
-            .expect("extend workspace ignore fixture");
+        fs::write(
+            root.join(".gitignore"),
+            "ignored.rs\n*.generated.rs\n/dist\n",
+        )
+        .expect("extend workspace ignore fixture");
         fs::write(
             root.join("nested/skipped.generated.rs"),
             "ExecutionBackend\n",
         )
         .expect("write ancestor-ignored fixture");
+        fs::create_dir_all(root.join("dist/assets")).expect("create anchored ignore fixture");
+        fs::write(root.join("dist/assets/skipped.rs"), "ExecutionBackend\n")
+            .expect("write anchored ignored fixture");
 
         let glob = parsed(
             execute(
@@ -1655,6 +1674,34 @@ mod tests {
             .await,
         );
         assert!(grep["matches"].as_array().expect("matches").is_empty());
+        let anchored_glob = parsed(
+            execute(
+                "glob",
+                json!({"pattern": "**/*.rs", "root": "dist/assets"}),
+                &runtime,
+            )
+            .await,
+        );
+        assert!(anchored_glob["entries"]
+            .as_array()
+            .expect("entries")
+            .is_empty());
+        let anchored_grep = parsed(
+            execute(
+                "grep",
+                json!({
+                    "pattern": "ExecutionBackend",
+                    "regex": false,
+                    "roots": ["dist/assets"]
+                }),
+                &runtime,
+            )
+            .await,
+        );
+        assert!(anchored_grep["matches"]
+            .as_array()
+            .expect("matches")
+            .is_empty());
         fs::remove_dir_all(root).expect("remove fixture");
     }
 
@@ -1825,6 +1872,37 @@ mod tests {
             .expect("errors")
             .iter()
             .any(|error| error["code"] == "materialized_limit"));
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[tokio::test]
+    async fn gitignore_literals_invalid_rules_and_caret_classes_match_git() {
+        let (runtime, root) = fixture_runtime();
+        fs::write(
+            root.join(".gitignore"),
+            "\\!literal.rs\n[^a].txt\n[unterminated\n",
+        )
+        .expect("write gitignore semantics fixture");
+        fs::write(root.join("!literal.rs"), "x").expect("write escaped-bang fixture");
+        fs::write(root.join("a.txt"), "x").expect("write retained class fixture");
+        fs::write(root.join("b.txt"), "x").expect("write ignored class fixture");
+
+        let rust = parsed(execute("glob", json!({"pattern": "*literal.rs"}), &runtime).await);
+        assert!(rust["entries"].as_array().expect("entries").is_empty());
+        assert!(rust["errors"]
+            .as_array()
+            .expect("errors")
+            .iter()
+            .any(|error| error["code"] == "invalid_ignore"));
+
+        let text = parsed(execute("glob", json!({"pattern": "*.txt"}), &runtime).await);
+        let text_paths: Vec<&str> = text["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .map(|entry| entry["path"].as_str().expect("path"))
+            .collect();
+        assert_eq!(text_paths, vec!["a.txt"]);
         fs::remove_dir_all(root).expect("remove fixture");
     }
 
