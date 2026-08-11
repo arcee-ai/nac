@@ -1855,13 +1855,22 @@ impl SessionService {
             });
         };
 
+        let steering_store = self
+            .metadata
+            .session_id
+            .as_deref()
+            .map(|session_id| (self.metadata.store_path.as_path(), session_id));
+        match self.active_threads.cancel_and_drain(steering_store).await {
+            Ok(records) => self.emit_steering_expired(records),
+            Err(error) => eprintln!("nac: failed to expire cancelled worker steering: {error:#}"),
+        }
+
         if let Some(task) = cancelling_run.task {
             task.abort();
             let _ = task.await;
         }
 
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
-        self.close_active_thread_dispatches();
 
         // A cancellation marker is itself a visible response. If the run task
         // was cancelled before capturing its baseline, record the count before
@@ -1902,19 +1911,17 @@ impl SessionService {
             }
         };
 
-        // Cancellation is not a failure, so it gets its own terminal event and
-        // the UI keeps the "stopped by user" story it already told. A snapshot
-        // that could not be persisted is a real fault and still says so.
-        let terminal_event = match persistence_error {
-            Some(error) => SessionEvent::RunFailed {
-                message: format!(
-                    "run cancelled by user\nAdditionally, failed to persist session snapshot: {error}"
-                ),
-            },
-            None => SessionEvent::RunCancelled,
-        };
+        // Persistence is bookkeeping after the cancellation boundary. A store
+        // fault is still diagnosed above, but it cannot rewrite the user's
+        // requested outcome into a run failure.
+        if let Some(error) = persistence_error {
+            eprintln!(
+                "nac: run {} remains cancelled despite snapshot persistence failure: {error}",
+                cancelling_run.snapshot.run_id
+            );
+        }
         self.event_bus.emit_with_context(
-            terminal_event,
+            SessionEvent::RunCancelled,
             Some(cancelling_run.snapshot.run_id.clone()),
             cancelling_run.snapshot.client_id.clone(),
         );
@@ -2078,6 +2085,12 @@ impl SessionService {
                 );
                 self.emit_steering_expired(expired);
             }
+        }
+
+        if !self.active_threads.begin_run() {
+            return Err(SessionSubmitError::Coordination {
+                message: SessionCoordinationError::local_agent_busy(),
+            });
         }
 
         let run_id = SessionRunId::new();
@@ -2271,19 +2284,6 @@ impl SessionService {
             Err(error) => {
                 eprintln!("nac: failed to expire orchestrator steering: {error:#}");
             }
-        }
-    }
-
-    fn close_active_thread_dispatches(&self) {
-        let Some(session_id) = self.metadata.session_id.as_deref() else {
-            return;
-        };
-        match self
-            .active_threads
-            .close_all(&self.metadata.store_path, session_id)
-        {
-            Ok(records) => self.emit_steering_expired(records),
-            Err(error) => eprintln!("nac: failed to close active worker steering: {error:#}"),
         }
     }
 
@@ -5397,6 +5397,66 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_run_stays_cancelled_when_snapshot_persistence_fails() {
+        let store_path = test_store_path("cancel_persist_failure");
+        let store_parent = store_path.parent().unwrap().to_path_buf();
+        crate::store::initialize(&store_path).unwrap();
+        let client = ModelClient::new_for_test();
+        let session_id = "session-cancel-persist-failure".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id,
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: snapshot.session_id.clone(),
+                store_path,
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_git: Some(GitTarget::local("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+
+        std::fs::remove_dir_all(&store_parent).unwrap();
+        std::fs::write(&store_parent, "not a directory").unwrap();
+        let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
+        parts.service.request_cancel(&active.run_id).await.unwrap();
+
+        let terminal_events = parts
+            .service
+            .recent_events(None, 32)
+            .into_iter()
+            .filter(|envelope| {
+                matches!(
+                    envelope.event,
+                    SessionEvent::RunCompleted { .. }
+                        | SessionEvent::RunFailed { .. }
+                        | SessionEvent::RunCancelled
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(terminal_events.len(), 1);
+        assert_eq!(terminal_events[0].event, SessionEvent::RunCancelled);
+        assert!(parts.service.active_run().is_none());
+        let _ = std::fs::remove_file(store_parent);
+    }
+
+    #[tokio::test]
     async fn subscribe_agent_events_filters_agent_envelopes() {
         let store_path = test_store_path("agent_event_adapter");
         let client = ModelClient::new_for_test();
@@ -5638,6 +5698,57 @@ pub(super) mod tests {
         let active_after_cancelling = parts.service.active_run().unwrap();
         assert_eq!(active_after_cancelling.run_id, active.run_id);
         assert!(active_after_cancelling.submitted_user_message.is_none());
+        let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn cancel_and_completion_race_has_exactly_one_terminal_owner() {
+        let parts = test_picker_service("cancel_completion_race");
+        let active = parts.service.try_begin_run(None, "race prompt").unwrap();
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+
+        let cancel_service = parts.service.clone();
+        let cancel_run_id = active.run_id.clone();
+        let cancel_barrier = barrier.clone();
+        let cancel = tokio::spawn(async move {
+            cancel_barrier.wait().await;
+            cancel_service.request_cancel(&cancel_run_id).await
+        });
+        let finish_service = parts.service.clone();
+        let finish_run_id = active.run_id.clone();
+        let finish_barrier = barrier.clone();
+        let finish = tokio::spawn(async move {
+            finish_barrier.wait().await;
+            finish_service
+                .finish_run_once(
+                    &finish_run_id,
+                    RunOutcome::Completed("done".to_string(), None),
+                )
+                .await
+        });
+        barrier.wait().await;
+        let _ = cancel.await.unwrap();
+        let _ = finish.await.unwrap();
+
+        let terminal_events = parts
+            .service
+            .recent_events(None, 16)
+            .into_iter()
+            .filter(|envelope| {
+                matches!(
+                    envelope.event,
+                    SessionEvent::RunCompleted { .. }
+                        | SessionEvent::RunFailed { .. }
+                        | SessionEvent::RunCancelled
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(terminal_events.len(), 1);
+        assert!(matches!(
+            terminal_events[0].event,
+            SessionEvent::RunCompleted { .. } | SessionEvent::RunCancelled
+        ));
+        assert!(parts.service.active_run().is_none());
         let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
     }
 
@@ -5910,18 +6021,22 @@ pub(super) mod tests {
             appended.event,
             SessionEvent::TranscriptAppended { transcript_len: 2 }
         );
-        assert!(matches!(
+        let steering_events = [
             events.recv().await.unwrap().event,
+            events.recv().await.unwrap().event,
+        ];
+        assert!(steering_events.iter().any(|event| matches!(
+            event,
             SessionEvent::Agent {
                 event: AgentEvent::OrchestratorSteeringExpired { .. }
             }
-        ));
-        assert!(matches!(
-            events.recv().await.unwrap().event,
+        )));
+        assert!(steering_events.iter().any(|event| matches!(
+            event,
             SessionEvent::Agent {
                 event: AgentEvent::ThreadSteeringExpired { .. }
             }
-        ));
+        )));
         // The cancellation marker is a transcript commit point: the live
         // signal fires before the snapshot save (the cancel path runs outside
         // send(), so it carries no run context).

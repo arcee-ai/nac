@@ -59,9 +59,9 @@ use nac_core::{
     },
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
-        MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
-        SessionSubmitError, ThreadEventPage,
+        MessagePageRequest, MessagesPageSnapshot, SessionCancelError, SessionCoordinationError,
+        SessionEventReceiver, SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
+        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
     ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
@@ -1675,14 +1675,16 @@ impl SessionManager {
 
     pub async fn cancel_active_run(&self, session_id: &str) -> Result<()> {
         let service = self.attach_session(session_id).await?;
-        let active = service
-            .active_run()
-            .ok_or_else(|| anyhow!("session has no active run"))?;
-        service
+        let Some(active) = service.active_run() else {
+            return Ok(());
+        };
+        match service
             .connect_client()
             .request_cancel(&active.run_id)
             .await
-            .map_err(|error| anyhow!(error.to_string()))
+        {
+            Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
+        }
     }
 
     /// Deletes a session and all related data (threads, episodes, worksets,
@@ -5702,6 +5704,67 @@ thread_timeout_secs = 7200
         assert_eq!(records[0].instruction, "change direction");
 
         manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn cancel_active_run_route_is_idempotent() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cancel_idempotent");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let manager = test_manager(&root);
+        let service = manager.attach_session("session").await.unwrap();
+        manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "begin the original task".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let app = router(manager);
+        let request = || {
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/session/cancel-active-run")
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        let (first, second) = tokio::join!(
+            app.clone().oneshot(request()),
+            app.clone().oneshot(request())
+        );
+        assert_eq!(first.unwrap().status(), StatusCode::ACCEPTED);
+        assert_eq!(second.unwrap().status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            app.clone().oneshot(request()).await.unwrap().status(),
+            StatusCode::ACCEPTED
+        );
+
+        let terminal_events = service
+            .recent_events(None, 64)
+            .into_iter()
+            .filter(|envelope| {
+                matches!(
+                    envelope.event,
+                    nac_core::events::SessionEvent::RunCompleted { .. }
+                        | nac_core::events::SessionEvent::RunFailed { .. }
+                        | nac_core::events::SessionEvent::RunCancelled
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(terminal_events.len(), 1);
+        assert_eq!(
+            terminal_events[0].event,
+            nac_core::events::SessionEvent::RunCancelled
+        );
+        assert!(service.active_run().is_none());
         endpoint.abort();
         let _ = std::fs::remove_dir_all(root);
     }
