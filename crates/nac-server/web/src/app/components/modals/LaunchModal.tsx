@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -195,16 +195,21 @@ function LaunchForm({
   // auto-suggested.
   const compactionRef = useRef("");
   const compactionAutoRef = useRef(true);
-  useEffect(() => {
+  const compactionPlaceholder = useMemo(() => {
     const resolved = resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model);
     const contextWindow = resolved.contextWindow;
-    if (contextWindow && (compactionRef.current === "" || compactionAutoRef.current)) {
+    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
+  }, [catalog.data, chosen?.backend, chosen?.model]);
+  useEffect(() => {
+    if (
+      compactionPlaceholder !== "auto" &&
+      (compactionRef.current === "" || compactionAutoRef.current)
+    ) {
       compactionAutoRef.current = true;
-      const suggested = String(Math.round(contextWindow * 0.7));
-      compactionRef.current = suggested;
-      setCompaction(suggested);
+      compactionRef.current = compactionPlaceholder;
+      setCompaction(compactionPlaceholder);
     }
-  }, [chosen?.backend, chosen?.model, catalog.data]);
+  }, [compactionPlaceholder]);
 
   const onCompactionChange = (value: string) => {
     setError(null);
@@ -537,7 +542,7 @@ function LaunchForm({
                     inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                     className="w-full md:w-[120px]"
                     inputClassName="md:text-right"
-                    placeholder="auto"
+                    placeholder={compactionPlaceholder}
                     inputMode="numeric"
                     value={compaction}
                     onChange={(e) => onCompactionChange(e.target.value)}

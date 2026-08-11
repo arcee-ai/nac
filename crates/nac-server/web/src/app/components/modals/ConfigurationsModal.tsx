@@ -236,20 +236,26 @@ function ConfigurationForm({
     REASONING_ITEMS,
   );
 
+  const compactionPlaceholder = useMemo(() => {
+    const resolved = resolveCatalogModel(catalog.data, backend, model);
+    const contextWindow = resolved.contextWindow;
+    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
+  }, [catalog.data, backend, model]);
+
   // Auto-suggest 70% of the selected model's context window as the compaction
   // threshold. A manually entered value is preserved across model changes —
   // the suggestion only fills the field when it is empty or was itself last
   // auto-suggested.
   useEffect(() => {
-    const resolved = resolveCatalogModel(catalog.data, backend, model);
-    const contextWindow = resolved.contextWindow;
-    if (contextWindow && (compactionRef.current === "" || compactionAutoRef.current)) {
+    if (
+      compactionPlaceholder !== "auto" &&
+      (compactionRef.current === "" || compactionAutoRef.current)
+    ) {
       compactionAutoRef.current = true;
-      const suggested = String(Math.round(contextWindow * 0.7));
-      compactionRef.current = suggested;
-      setCompaction(suggested);
+      compactionRef.current = compactionPlaceholder;
+      setCompaction(compactionPlaceholder);
     }
-  }, [backend, model, catalog.data]);
+  }, [compactionPlaceholder]);
   const { signedIn } = useManagedSignIn(backend);
   const debouncedKey = useDebouncedValue(apiKey.trim(), KEY_DEBOUNCE_MS);
   // A saved setup keeps its key on the server; only a key typed here is ours
@@ -615,7 +621,7 @@ function ConfigurationForm({
                 inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 className="w-full md:w-[105px]"
                 inputClassName="text-right"
-                placeholder="auto"
+                placeholder={compactionPlaceholder}
                 inputMode="numeric"
                 value={compaction}
                 onChange={(event) => {

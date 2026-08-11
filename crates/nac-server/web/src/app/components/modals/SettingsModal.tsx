@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -328,20 +328,26 @@ function SettingsForm({
     reasoning,
   );
 
+  const compactionPlaceholder = useMemo(() => {
+    const resolved = resolveCatalogModel(catalog.data, backend, model);
+    const contextWindow = resolved.contextWindow;
+    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
+  }, [catalog.data, backend, model]);
+
   // Auto-suggest 70% of the selected model's context window as the compaction
   // threshold. A manually entered value is preserved across model changes —
   // the suggestion only fills the field when it is empty or was itself last
   // auto-suggested.
   useEffect(() => {
-    const resolved = resolveCatalogModel(catalog.data, backend, model);
-    const contextWindow = resolved.contextWindow;
-    if (contextWindow && (compactionRef.current === "" || compactionAutoRef.current)) {
+    if (
+      compactionPlaceholder !== "auto" &&
+      (compactionRef.current === "" || compactionAutoRef.current)
+    ) {
       compactionAutoRef.current = true;
-      const suggested = String(Math.round(contextWindow * 0.7));
-      compactionRef.current = suggested;
-      setCompaction(suggested);
+      compactionRef.current = compactionPlaceholder;
+      setCompaction(compactionPlaceholder);
     }
-  }, [backend, model, catalog.data]);
+  }, [compactionPlaceholder]);
 
   const { provider, signedIn } = useManagedSignIn(kind);
   const loginQuery = useManagedProviderModels(
@@ -634,7 +640,7 @@ function SettingsForm({
           label="Compaction threshold"
           inputSize={isMobile ? InputSize.Large : InputSize.Medium}
           hintText="Context size that triggers compaction; 0 disables it. Blank auto-suggests 70% of the model's context window."
-          placeholder="auto"
+          placeholder={compactionPlaceholder}
           inputMode="numeric"
           value={compaction}
           onChange={(event) => {
