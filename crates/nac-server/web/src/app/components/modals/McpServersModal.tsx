@@ -57,13 +57,15 @@ const TRANSPORT_ITEMS = [
 ];
 
 /**
- * One header or env line of the form. `keepStored` marks a secret that lives
- * only on the server: the input shows the redacted preview as a placeholder,
- * and saving sends null so the stored value survives untouched.
+ * One header or env line of the form. `stored` marks a secret that lives on
+ * the server: the input shows the redacted preview as a placeholder, and an
+ * empty value sends null so the stored value survives untouched. A library
+ * template's auth row carries only a hint placeholder, not a stored secret.
  */
 interface KvRow {
   key: string;
   value: string;
+  stored: boolean;
   keepStored: boolean;
   placeholder?: string;
 }
@@ -72,18 +74,26 @@ function rowsFromRecord(map: Record<string, string>): KvRow[] {
   return Object.entries(map).map(([key, preview]) => ({
     key,
     value: "",
+    stored: true,
     keepStored: true,
     placeholder: preview,
   }));
 }
 
-/** Literal map for create/test payloads; null borrows the stored secret. */
+/**
+ * Literal map for create/test payloads; null borrows the stored secret. A
+ * blank value with nothing stored drops the row instead of sending "".
+ */
 function mapFromRows(rows: KvRow[]): Record<string, string | null> {
   const map: Record<string, string | null> = {};
   for (const row of rows) {
     const key = row.key.trim();
     if (!key) continue;
-    map[key] = row.keepStored && !row.value ? null : row.value;
+    if (!row.value) {
+      if (row.keepStored) map[key] = null;
+      continue;
+    }
+    map[key] = row.value;
   }
   return map;
 }
@@ -431,7 +441,7 @@ function KvEditor({
           ? {
               ...row,
               value,
-              keepStored: value === "" && row.placeholder !== undefined,
+              keepStored: value === "" && row.stored,
             }
           : row,
       ),
@@ -452,7 +462,7 @@ function KvEditor({
           <Input
             inputSize={InputSize.Medium}
             className="flex-1 min-w-0"
-            placeholder={row.keepStored ? row.placeholder : "value"}
+            placeholder={row.placeholder ?? "value"}
             value={row.value}
             onChange={(event) => updateValue(index, event.target.value)}
           />
@@ -472,7 +482,10 @@ function KvEditor({
         variant={ButtonVariant.Secondary}
         className="self-start"
         onClick={() =>
-          onChange([...rows, { key: "", value: "", keepStored: false }])
+          onChange([
+            ...rows,
+            { key: "", value: "", stored: false, keepStored: false },
+          ])
         }
       >
         <Icon iconName={IconName.Add} />
@@ -520,6 +533,7 @@ function McpServerForm({
         {
           key: template.auth_header,
           value: "",
+          stored: false,
           keepStored: false,
           placeholder: template.auth_hint ?? undefined,
         },
