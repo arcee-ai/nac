@@ -308,27 +308,27 @@ export const api = {
   // The MCP library is a curated catalog served by the binary; servers saved
   // here merge over config.toml when a session starts.
   getMcpLibrary: (signal?: AbortSignal) =>
-    request<McpLibraryResponse>("GET", "/mcp/library", { signal }),
+    request<McpLibraryResponse>("GET", "/mcp_library/library", { signal }),
 
   listMcpServers: (signal?: AbortSignal) =>
-    request<McpServerList>("GET", "/mcp/servers", { signal }),
+    request<McpServerList>("GET", "/mcp_library/servers", { signal }),
 
   createMcpServer: (payload: CreateMcpServerRequest) =>
-    request<McpServerView>("POST", "/mcp/servers", { body: payload }),
+    request<McpServerView>("POST", "/mcp_library/servers", { body: payload }),
 
   updateMcpServer: (configId: string, payload: UpdateMcpServerRequest) =>
     request<McpServerView>(
       "PATCH",
-      `/mcp/servers/${encodeURIComponent(configId)}`,
+      `/mcp_library/servers/${encodeURIComponent(configId)}`,
       { body: payload },
     ),
 
   deleteMcpServer: (configId: string) =>
-    request<void>("DELETE", `/mcp/servers/${encodeURIComponent(configId)}`),
+    request<void>("DELETE", `/mcp_library/servers/${encodeURIComponent(configId)}`),
 
   /** Connects and lists tools without saving anything. */
   testMcpServer: (payload: TestMcpServerRequest) =>
-    request<TestMcpServerResponse>("POST", "/mcp/servers/test", {
+    request<TestMcpServerResponse>("POST", "/mcp_library/servers/test", {
       body: payload,
     }),
 
