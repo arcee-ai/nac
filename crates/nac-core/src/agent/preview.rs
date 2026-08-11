@@ -160,7 +160,7 @@ pub(crate) fn key_arg_preview(
     }
 }
 
-pub(super) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
+pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
     let trimmed = result.content.trim();
     if trimmed.is_empty() && !result.is_error {
         return "ok".to_string();
@@ -244,27 +244,60 @@ pub(super) fn select_summary_line<'a>(_name: &str, lines: &'a [&'a str]) -> Opti
 
 pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
     let parsed = serde_json::from_str::<serde_json::Value>(content).ok()?;
-    let output = parsed
-        .get("output")
+    if let Some(preview) = parsed
+        .get("content_preview")
         .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim();
-    let output_lines: Vec<&str> = output
+    {
+        let preview = preview.trim();
+        if !preview.is_empty() {
+            let summary = preview.lines().last().unwrap_or(preview).trim();
+            return Some(
+                match parsed.get("exit_code").and_then(|value| value.as_i64()) {
+                    Some(code) if code != 0 => format!("exit {code}: {summary}"),
+                    _ => summary.to_string(),
+                },
+            );
+        }
+        if let Some(session) = parsed.get("session_name").and_then(|value| value.as_str()) {
+            return Some(format!("session {session}"));
+        }
+    }
+
+    let stdout = parsed
+        .get("stdout_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let stderr = parsed
+        .get("stderr_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let lines: Vec<&str> = stderr
         .lines()
+        .chain(stdout.lines())
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect();
-    let summary = select_summary_line("exec_command_output", &output_lines)
-        .or_else(|| output_lines.last().copied());
+    let summary =
+        select_summary_line("exec_command_output", &lines).or_else(|| lines.last().copied());
+    let status = parsed
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("completed");
     let exit_code = parsed.get("exit_code").and_then(|value| value.as_i64());
     let more = ellipsis(output_lines.len());
 
-    match (exit_code, summary) {
-        (Some(0), Some(summary)) => Some(format!("{summary}{more}")),
-        (Some(code), Some(summary)) => Some(format!("exit {code}: {summary}{more}")),
-        (Some(code), None) => Some(format!("exit {code}")),
-        (None, Some(summary)) => Some(format!("{summary}{more}")),
-        (None, None) => parsed
+    match (status, exit_code, summary) {
+        ("completed", Some(0), Some(summary)) => Some(format!("{summary}{more}")),
+        ("completed", Some(code), Some(summary)) => Some(format!("exit {code}: {summary}{more}")),
+        ("completed", Some(code), None) => Some(format!("exit {code}")),
+        ("timed_out", _, Some(summary)) => Some(format!("timed out: {summary}{more}")),
+        ("timed_out", _, None) => Some("timed out".to_string()),
+        ("cancelled", _, Some(summary)) => Some(format!("cancelled: {summary}{more}")),
+        ("cancelled", _, None) => Some("cancelled".to_string()),
+        ("spawn_error", _, Some(summary)) => Some(format!("spawn error: {summary}{more}")),
+        ("spawn_error", _, None) => Some("spawn error".to_string()),
+        (_, _, Some(summary)) => Some(format!("{summary}{more}")),
+        (_, _, None) => parsed
             .get("session_name")
             .and_then(|value| value.as_str())
             .map(|session| format!("session {session}")),

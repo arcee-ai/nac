@@ -1,41 +1,30 @@
-//! Terminal-backed command execution tools: `exec_command` and `write_stdin`.
+//! Terminal-backed command execution and retained output pagination tools.
 
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::PathBuf;
 
-use crate::tools::ToolRuntime;
+use crate::terminal::{
+    CommandStatus, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
+};
+use crate::tools::{ToolResult, ToolRuntime};
 use crate::types::{FunctionDef, ToolDefinition};
-
-// ============================================================================
-// exec_command
-// ============================================================================
 
 pub fn exec_command_definition() -> ToolDefinition {
     ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "exec_command".to_string(),
-            description: "Execute a shell command.\n\n\
-Use tty=false (default) as the non-interactive bash tool for one-shot shell commands like `cargo build`, `npm test`, `git status`, `ls`, etc. \
-The command runs to completion, returns output + exit code, and treats yield_time_ms as a timeout. \
-Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance.\n\n\
-Use tty=true when terminal interaction is required, and for:\n\
-- Interactive REPLs (python, node, etc.)\n\
-- Long-running multi-step workflows where you need shell state to persist across calls \
-(cd into a directory, set env vars, then run commands)\n\
-- When you need more than one command in the same shell session\n\n\
-When tty=true, yield_time_ms only controls how long to wait for output before returning; it does not kill the session.\n\n\
-When tty=true, you get a session_name back. Use write_stdin to continue interacting with that session."
+            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for an interactive or persistent terminal; continue it with write_stdin."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "cmd": { "type": "string", "description": "Shell command to execute" },
-                    "workdir": { "type": "string", "description": "Working directory for the command (default: project root)" },
-                    "tty": { "type": "boolean", "description": "Use false as the bash tool for one-shot shell commands; use true for an interactive/persistent PTY session (default: false)" },
-                    "yield_time_ms": { "type": "number", "description": "For tty=false, command timeout in milliseconds (default: 30000, max: 3600000 = 1 hour). For tty=true, maximum time to wait for terminal output without killing the session (default: 500, max: 3600000)." },
-                    "max_output_chars": { "type": "number", "description": "Maximum characters of output to return (default: 8000, head-tail truncated if exceeded)" }
+                    "workdir": { "type": "string", "description": "Working directory (default: project root)" },
+                    "tty": { "type": "boolean", "description": "Use a persistent PTY session (default: false)" },
+                    "yield_time_ms": { "type": "number", "description": "One-shot timeout or PTY poll duration in milliseconds (max: 3600000)" },
+                    "max_output_chars": { "type": "number", "description": "Shared concise preview budget (default: 8000); omitted bytes remain pageable" }
                 },
                 "required": ["cmd"]
             }),
@@ -43,20 +32,72 @@ When tty=true, you get a session_name back. Use write_stdin to continue interact
     }
 }
 
-pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> Result<String> {
+pub fn write_stdin_definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "write_stdin".to_string(),
+            description: "Send input to a persistent terminal from exec_command tty=true, or poll with empty chars. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text. Supports <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, and arrow-key notation."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
+                    "chars": { "type": "string", "description": "Input or key notation; empty polls output" },
+                    "yield_time_ms": { "type": "number", "description": "Maximum poll duration in milliseconds (default: 500, max: 3600000)" },
+                    "max_output_chars": { "type": "number", "description": "Concise preview budget (default: 8000)" }
+                },
+                "required": ["session_id"]
+            }),
+        },
+    }
+}
+
+pub fn read_command_output_definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "read_command_output".to_string(),
+            description: "Read retained command or PTY output without rerunning the command. Offsets and limits are raw bytes. Page combined (observed emission order), stdout, or stderr; PTYs support combined only. Continue with next_offset until eof. If overflowed=true, offset may advance to the earliest retained byte. Output remains available for the producing worker dispatch."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "output_id": { "type": "string", "description": "Output ID returned by exec_command or write_stdin" },
+                    "stream": { "type": "string", "enum": ["combined", "stdout", "stderr"], "default": "combined" },
+                    "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "Absolute byte offset" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": MAX_OUTPUT_PAGE_BYTES, "default": DEFAULT_OUTPUT_PAGE_BYTES }
+                },
+                "required": ["output_id"]
+            }),
+        },
+    }
+}
+
+pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> ToolResult {
+    match execute_exec_command_inner(args, runtime).await {
+        Ok((content, is_error)) => ToolResult { content, is_error },
+        Err(error) => ToolResult {
+            content: format!("Error: {error:#}"),
+            is_error: true,
+        },
+    }
+}
+
+async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Result<(String, bool)> {
     let manager = &runtime.terminal_manager;
     let cmd = require_str(args, "cmd")?;
-    let tty = args.get("tty").and_then(|v| v.as_bool()).unwrap_or(false);
+    let tty = args.get("tty").and_then(Value::as_bool).unwrap_or(false);
     let default_yield_ms = if tty { 500 } else { 30_000 };
     let yield_ms = clamp_yield(
         args.get("yield_time_ms")
-            .and_then(|v| v.as_u64())
+            .and_then(Value::as_u64)
             .unwrap_or(default_yield_ms),
     );
     let max_output = args
         .get("max_output_chars")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(8000) as usize;
+        .and_then(Value::as_u64)
+        .unwrap_or(8_000) as usize;
     let cwd = resolve_command_cwd(args, runtime)?;
 
     if !tty {
@@ -69,120 +110,135 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> Result
                 yield_ms,
                 max_output,
                 runtime.backend.as_ref(),
+                Some(&runtime.command_cancellation),
             )
-            .await?;
-        return Ok(serde_json::to_string_pretty(&output)?);
+            .await;
+        let is_error = output.status == CommandStatus::SpawnError;
+        return Ok((serde_json::to_string_pretty(&output)?, is_error));
     }
 
     let session_name = make_session_name();
-    let _info = manager
+    manager
         .create(session_name.clone(), cwd, 120, 40, &runtime.backend)
         .await?;
-
-    if cmd.trim().is_empty() {
-        let output = manager
-            .write_stdin(&session_name, "", 200, max_output)
-            .await?;
-        return Ok(serde_json::to_string_pretty(&output)?);
-    }
-
-    let output = manager
-        .write_stdin(&session_name, &format!("{}\r", cmd), yield_ms, max_output)
-        .await?;
-    Ok(serde_json::to_string_pretty(&output)?)
+    let output = if cmd.trim().is_empty() {
+        manager
+            .write_stdin(
+                &session_name,
+                "",
+                200,
+                max_output,
+                Some(&runtime.command_cancellation),
+            )
+            .await?
+    } else {
+        manager
+            .write_stdin(
+                &session_name,
+                &format!("{cmd}\r"),
+                yield_ms,
+                max_output,
+                Some(&runtime.command_cancellation),
+            )
+            .await?
+    };
+    Ok((serde_json::to_string_pretty(&output)?, false))
 }
 
-// ============================================================================
-// write_stdin
-// ============================================================================
+pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolResult {
+    let result = async {
+        let session_id = require_str(args, "session_id")?;
+        let chars = args.get("chars").and_then(Value::as_str).unwrap_or("");
+        let yield_ms = clamp_yield(
+            args.get("yield_time_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(500),
+        );
+        let max_output = args
+            .get("max_output_chars")
+            .and_then(Value::as_u64)
+            .unwrap_or(8_000) as usize;
+        if runtime.terminal_manager.get(&session_id).await.is_none() {
+            return Err(anyhow!(
+                "terminal session '{session_id}' not found - it may have been closed or expired"
+            ));
+        }
+        runtime
+            .terminal_manager
+            .write_stdin(
+                &session_id,
+                chars,
+                yield_ms,
+                max_output,
+                Some(&runtime.command_cancellation),
+            )
+            .await
+    }
+    .await;
 
-pub fn write_stdin_definition() -> ToolDefinition {
-    ToolDefinition {
-        def_type: "function".to_string(),
-        function: FunctionDef {
-            name: "write_stdin".to_string(),
-            description: "Send input to a persistent terminal session created by exec_command with tty=true. \
-Also use this to poll for output by sending empty input.\n\n\
-Supports key notation: <RET> (Enter), <C-c> (Ctrl+C), <C-d> (Ctrl+D), <TAB>, <BSPC> (Backspace), \
-<UP>/<DOWN>/<LEFT>/<RIGHT>."
-                .to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
-                    "chars": { "type": "string", "description": "Input to send to the terminal. Supports key notation: <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, <UP>/<DOWN>/<LEFT>/<RIGHT>. Leave empty to just poll for output." },
-                    "yield_time_ms": { "type": "number", "description": "Maximum time to wait for output in milliseconds (default: 500, max: 3600000 = 1 hour)" },
-                    "max_output_chars": { "type": "number", "description": "Maximum characters of output to return (default: 8000)" }
-                },
-                "required": ["session_id"]
-            }),
+    match result {
+        Ok(output) => ToolResult {
+            content: serde_json::to_string_pretty(&output)
+                .unwrap_or_else(|error| format!("Error serializing terminal output: {error}")),
+            is_error: false,
+        },
+        Err(error) => ToolResult {
+            content: format!("Error: {error:#}"),
+            is_error: true,
         },
     }
 }
 
-pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> Result<String> {
-    let manager = &runtime.terminal_manager;
-    let session_id = require_str(args, "session_id")?;
-    let chars = args.get("chars").and_then(|v| v.as_str()).unwrap_or("");
-    let yield_ms = clamp_yield(
-        args.get("yield_time_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(500),
-    );
-    let max_output = args
-        .get("max_output_chars")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(8000) as usize;
+pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolResult {
+    let result = (|| -> Result<String> {
+        let output_id = require_str(args, "output_id")?;
+        let stream = OutputStream::parse(args.get("stream").and_then(Value::as_str))?;
+        let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_OUTPUT_PAGE_BYTES as u64) as usize;
+        let page = runtime
+            .terminal_manager
+            .read_output(&output_id, stream, offset, limit)?;
+        Ok(serde_json::to_string_pretty(&page)?)
+    })();
 
-    if manager.get(&session_id).await.is_none() {
-        return Err(anyhow!(
-            "terminal session '{}' not found - it may have been closed or expired",
-            session_id
-        ));
+    match result {
+        Ok(content) => ToolResult {
+            content,
+            is_error: false,
+        },
+        Err(error) => ToolResult {
+            content: format!("Error: {error:#}"),
+            is_error: true,
+        },
     }
-
-    let output = manager
-        .write_stdin(&session_id, chars, yield_ms, max_output)
-        .await?;
-    Ok(serde_json::to_string_pretty(&output)?)
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
 fn resolve_command_cwd(args: &Value, runtime: &ToolRuntime) -> Result<Option<PathBuf>> {
-    let requested = args.get("workdir").and_then(|v| v.as_str());
+    let requested = args.get("workdir").and_then(Value::as_str);
     runtime.backend.resolve_terminal_cwd(requested)
 }
 
 fn require_str(args: &Value, key: &str) -> Result<String> {
     args.get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| anyhow!("missing required argument '{}'", key))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("missing required argument '{key}'"))
 }
 
-const MAX_YIELD_MS: u64 = 3_600_000; // 1 hour
+const MAX_YIELD_MS: u64 = 3_600_000;
 
 fn clamp_yield(ms: u64) -> u64 {
-    if ms > MAX_YIELD_MS {
-        MAX_YIELD_MS
-    } else {
-        ms
-    }
+    ms.min(MAX_YIELD_MS)
 }
 
 fn make_session_name() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(1);
-    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    format!("shell-{}", n)
+    format!("shell-{}", COUNTER.fetch_add(1, Ordering::SeqCst))
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -203,23 +259,20 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn test_runtime() -> ToolRuntime {
-        test_runtime_at(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-    }
-
-    fn test_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
-        let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         ToolRuntime {
-            config_cwd: workspace_cwd.clone(),
-            workspace_cwd,
+            config_cwd: cwd.clone(),
+            workspace_cwd: cwd.clone(),
             store_path: PathBuf::new(),
             session_id: None,
             worker_executable: None,
             active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
             event_sink: EventSink::none(),
-            backend,
+            backend: crate::sandbox::execution_backend_from_sandbox(None, &cwd),
             mcp: None,
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),
+            command_cancellation: crate::tools::ThreadCancellation::default(),
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         }
@@ -236,7 +289,7 @@ mod tests {
     }
 
     const PROMPT_POLICY_COMMAND: &str =
-        "printf '%s|%s|%s\\n' \"$GIT_TERMINAL_PROMPT\" \"$GCM_INTERACTIVE\" \"$GH_PROMPT_DISABLED\"";
+        "printf '%s|%s|%s\n' \"$GIT_TERMINAL_PROMPT\" \"$GCM_INTERACTIVE\" \"$GH_PROMPT_DISABLED\"";
 
     #[tokio::test]
     async fn prompt_policy_process_helper() {
@@ -253,8 +306,8 @@ mod tests {
             }),
             &runtime,
         )
-        .await
-        .unwrap();
+        .await;
+        assert!(!one_shot.is_error, "{}", one_shot.content);
         let pty = execute_exec_command(
             &json!({
                 "cmd": PROMPT_POLICY_COMMAND,
@@ -263,17 +316,12 @@ mod tests {
             }),
             &runtime,
         )
-        .await
-        .unwrap();
+        .await;
+        assert!(!pty.is_error, "{}", pty.content);
 
-        let one_shot: Value = serde_json::from_str(&one_shot).unwrap();
-        let pty: Value = serde_json::from_str(&pty).unwrap();
-        let session_name = pty["session_name"].as_str().unwrap().to_string();
-        runtime
-            .terminal_manager
-            .remove(&session_name)
-            .await
-            .unwrap();
+        let one_shot: Value = serde_json::from_str(&one_shot.content).unwrap();
+        let pty: Value = serde_json::from_str(&pty.content).unwrap();
+        runtime.terminal_manager.remove_all().await;
         std::fs::write(
             result_path,
             serde_json::to_vec(&json!({ "one_shot": one_shot, "pty": pty })).unwrap(),
@@ -330,9 +378,8 @@ mod tests {
             &json!({ "cmd": cmd, "tty": false, "yield_time_ms": 1000 }),
             &test_runtime(),
         )
-        .await
-        .unwrap();
-        std::fs::write(result_path, result).unwrap();
+        .await;
+        std::fs::write(result_path, result.content).unwrap();
     }
 
     #[cfg(unix)]
@@ -442,41 +489,44 @@ mod tests {
         (result, terminal_output)
     }
 
-    // ------------------------------------------------------------------
-    // exec_command
-    // ------------------------------------------------------------------
+    fn command_preview(value: &Value) -> String {
+        format!(
+            "{}{}",
+            value["stdout_preview"].as_str().unwrap_or_default(),
+            value["stderr_preview"].as_str().unwrap_or_default()
+        )
+    }
 
-    #[tokio::test]
-    async fn exec_command_definition_shape() {
-        let def = exec_command_definition();
-        assert_eq!(def.function.name, "exec_command");
-        assert!(def.function.description.contains("tty=true"));
-        assert!(def.function.description.contains("non-interactive"));
-        assert!(def
+    #[test]
+    fn worker_definitions_explain_recovery() {
+        assert!(exec_command_definition()
+            .function
+            .description
+            .contains("read_command_output"));
+        assert!(exec_command_definition()
+            .function
+            .description
+            .contains("non-interactively"));
+        assert!(exec_command_definition()
             .function
             .description
             .contains("terminal prompts are disabled"));
-        assert!(def
-            .function
-            .parameters
-            .get("required")
-            .and_then(|v| v.as_array())
-            .is_some());
+        assert_eq!(
+            read_command_output_definition().function.name,
+            "read_command_output"
+        );
     }
 
     #[test]
     fn one_shot_overrides_inherited_prompt_policy() {
         let result = run_prompt_policy_process_helper();
-        assert_eq!(
-            result["one_shot"]["output"].as_str().unwrap().trim(),
-            "0|0|1"
-        );
+        assert_eq!(result["one_shot"]["stdout_preview"], "0|0|1\n");
     }
 
     #[test]
     fn pty_preserves_inherited_prompt_policy() {
         let result = run_prompt_policy_process_helper();
-        let output = result["pty"]["output"].as_str().unwrap();
+        let output = result["pty"]["content_preview"].as_str().unwrap();
         assert!(
             output.contains("sentinel-git|sentinel-gcm|sentinel-gh"),
             "got: {output}"
@@ -492,13 +542,7 @@ mod tests {
             prompted_terminal.contains("Username for"),
             "negative control did not prompt on the controlling terminal: {prompted_terminal}"
         );
-        assert!(
-            prompted["output"]
-                .as_str()
-                .unwrap()
-                .contains("Command timed out"),
-            "negative control did not wait for terminal input: {prompted}"
-        );
+        assert_eq!(prompted["status"], "timed_out");
         assert!(prompted["exit_code"].is_null());
 
         let (blocked, blocked_terminal) = run_git_prompt_case(false);
@@ -506,421 +550,64 @@ mod tests {
             !blocked_terminal.contains("Username for"),
             "prompt leaked to the controlling terminal: {blocked_terminal}"
         );
-        let output = blocked["output"].as_str().unwrap();
+        let output = command_preview(&blocked);
         assert!(
             output.contains("terminal prompts disabled"),
-            "Git did not report prompt suppression: {output}"
+            "Git did not report prompt suppression: {blocked}"
         );
-        assert!(
-            !output.contains("Command timed out"),
-            "Git waited for terminal input: {output}"
-        );
+        assert_eq!(blocked["status"], "completed");
         assert!(blocked["exit_code"].as_i64().is_some_and(|code| code != 0));
     }
 
     #[tokio::test]
-    async fn exec_command_missing_cmd_fails() {
-        let result = execute_exec_command(&json!({}), &test_runtime()).await;
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("missing required argument"));
+    async fn short_command_is_complete_without_followup() {
+        let result = execute_exec_command(&json!({"cmd": "printf hello"}), &test_runtime()).await;
+        assert!(!result.is_error, "{}", result.content);
+        let value: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(value["status"], "completed");
+        assert_eq!(value["stdout_preview"], "hello");
+        assert_eq!(value["truncated"], false);
+        assert!(value["output_id"].as_str().is_some());
     }
 
     #[tokio::test]
-    async fn exec_command_defaults_to_workspace_cwd() {
-        let dir = unique_temp_dir("default_cwd");
-        let output = execute_exec_command(
-            &json!({ "cmd": "pwd", "tty": false, "yield_time_ms": 2000 }),
-            &test_runtime_at(dir.clone()),
-        )
-        .await
-        .unwrap();
-
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        let actual = PathBuf::from(parsed["output"].as_str().unwrap().trim())
-            .canonicalize()
-            .unwrap();
-        assert_eq!(actual, dir.canonicalize().unwrap());
-        let _ = std::fs::remove_dir_all(dir);
+    async fn nonzero_exit_is_completed_not_tool_error() {
+        let result =
+            execute_exec_command(&json!({"cmd": "printf fail >&2; exit 7"}), &test_runtime()).await;
+        assert!(!result.is_error);
+        let value: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(value["status"], "completed");
+        assert_eq!(value["exit_code"], 7);
+        assert_eq!(value["stderr_preview"], "fail");
     }
 
     #[tokio::test]
-    async fn exec_command_relative_workdir_resolves_under_workspace_cwd() {
-        let dir = unique_temp_dir("relative_workdir");
-        std::fs::create_dir_all(dir.join("subdir")).unwrap();
-        let output = execute_exec_command(
-            &json!({ "cmd": "pwd", "workdir": "subdir", "tty": false, "yield_time_ms": 2000 }),
-            &test_runtime_at(dir.clone()),
-        )
-        .await
-        .unwrap();
-
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        let actual = PathBuf::from(parsed["output"].as_str().unwrap().trim())
-            .canonicalize()
-            .unwrap();
-        assert_eq!(actual, dir.join("subdir").canonicalize().unwrap());
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[tokio::test]
-    async fn exec_command_one_shot_echo() {
+    async fn retained_output_is_pageable() {
+        let runtime = test_runtime();
         let result = execute_exec_command(
-            &json!({ "cmd": "echo hello-world", "tty": false, "yield_time_ms": 2000 }),
-            &test_runtime(),
+            &json!({"cmd": "python3 -c 'print(\"x\"*20000)'", "max_output_chars": 100}),
+            &runtime,
         )
         .await;
-        assert!(result.is_ok(), "error: {:?}", result.err());
-        let output = result.unwrap();
-        assert!(output.contains("hello-world"), "got: {}", output);
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        assert!(parsed["session_name"].is_null());
-        assert_eq!(parsed["exit_code"].as_i64(), Some(0));
-    }
-
-    #[tokio::test]
-    async fn exec_command_one_shot_multiline() {
-        let result = execute_exec_command(
-            &json!({ "cmd": "echo line1 && echo line2", "tty": false, "yield_time_ms": 2000 }),
-            &test_runtime(),
-        )
-        .await;
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert!(
-            output.contains("line1") && output.contains("line2"),
-            "got: {}",
-            output
+        let value: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(value["truncated"], true);
+        let output_id = value["output_id"].as_str().unwrap();
+        let page = execute_read_command_output(
+            &json!({"output_id": output_id, "stream": "stdout", "offset": 10_000, "limit": 64}),
+            &runtime,
         );
+        assert!(!page.is_error, "{}", page.content);
+        let page_value: Value = serde_json::from_str(&page.content).unwrap();
+        assert_eq!(page_value["content"].as_str().unwrap().len(), 64);
     }
 
-    #[tokio::test]
-    async fn exec_command_one_shot_nonzero_exit_code() {
-        let output = execute_exec_command(
-            &json!({ "cmd": "echo failure >&2; exit 7", "tty": false }),
+    #[test]
+    fn invalid_stream_is_a_tool_error() {
+        let result = execute_read_command_output(
+            &json!({"output_id": "missing", "stream": "wat"}),
             &test_runtime(),
-        )
-        .await
-        .unwrap();
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        assert!(parsed["output"].as_str().unwrap().contains("failure"));
-        assert_eq!(parsed["exit_code"].as_i64(), Some(7));
-        assert!(parsed["session_name"].is_null());
-    }
-
-    #[tokio::test]
-    async fn exec_command_one_shot_returns_on_early_exit() {
-        let start = std::time::Instant::now();
-        let output = execute_exec_command(
-            &json!({ "cmd": "sleep 0.05; echo done", "tty": false, "yield_time_ms": 30000 }),
-            &test_runtime(),
-        )
-        .await
-        .unwrap();
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(2),
-            "one-shot command waited for yield_time_ms"
         );
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(parsed["exit_code"].as_i64(), Some(0));
-        assert!(parsed["output"].as_str().unwrap().contains("done"));
-    }
-
-    #[tokio::test]
-    async fn exec_command_one_shot_yield_time_is_timeout() {
-        let start = std::time::Instant::now();
-        let output = execute_exec_command(
-            &json!({ "cmd": "echo before; sleep 5; echo SHOULD_NOT_PRINT", "tty": false, "yield_time_ms": 100 }),
-            &test_runtime(),
-        )
-        .await
-        .unwrap();
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(2),
-            "one-shot command did not time out promptly"
-        );
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        let text = parsed["output"].as_str().unwrap();
-        assert!(text.contains("timed out after 100ms"), "got: {}", text);
-        assert!(text.contains("before"), "got: {}", text);
-        assert!(!text.contains("SHOULD_NOT_PRINT"), "got: {}", text);
-        assert!(parsed["exit_code"].is_null(), "got: {}", output);
-        assert!(parsed["session_name"].is_null());
-    }
-
-    #[tokio::test]
-    async fn exec_command_one_shot_timeout_kills_child_processes() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let marker = std::env::temp_dir().join(format!("nac_exec_timeout_leak_{}", unique));
-        let cmd = format!("(sleep 1; touch {}) & wait", marker.display());
-
-        let output = execute_exec_command(
-            &json!({ "cmd": cmd, "tty": false, "yield_time_ms": 100 }),
-            &test_runtime(),
-        )
-        .await
-        .unwrap();
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        assert!(parsed["exit_code"].is_null(), "got: {}", output);
-
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        assert!(
-            !marker.exists(),
-            "timed-out command left a child process running"
-        );
-    }
-
-    #[tokio::test]
-    async fn exec_command_one_shot_large_output_keeps_tail() {
-        let output = execute_exec_command(
-            &json!({
-                "cmd": "for i in $(seq 1 120); do echo line$i; done",
-                "tty": false,
-                "max_output_chars": 200
-            }),
-            &test_runtime(),
-        )
-        .await
-        .unwrap();
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        let text = parsed["output"].as_str().unwrap();
-        assert!(text.contains("line1"), "got: {}", text);
-        assert!(text.contains("line120"), "got: {}", text);
-        assert_eq!(parsed["output_truncated"].as_bool(), Some(true));
-    }
-
-    #[tokio::test]
-    async fn exec_command_persistent_creates_session() {
-        let result = execute_exec_command(
-            &json!({ "cmd": "echo persistent-test", "tty": true, "yield_time_ms": 2000 }),
-            &test_runtime(),
-        )
-        .await;
-        assert!(result.is_ok(), "error: {:?}", result.err());
-        let output = result.unwrap();
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        let session_name = parsed["session_name"].as_str().unwrap();
-        assert!(session_name.starts_with("shell-"), "got: {}", session_name);
-        assert!(output.contains("persistent-test"), "got: {}", output);
-    }
-
-    #[tokio::test]
-    async fn exec_command_persistent_empty_cmd() {
-        let result = execute_exec_command(
-            &json!({ "cmd": "", "tty": true, "yield_time_ms": 2000 }),
-            &test_runtime(),
-        )
-        .await;
-        assert!(result.is_ok(), "error: {:?}", result.err());
-        let parsed: Value = serde_json::from_str(&result.unwrap()).unwrap();
-        assert!(parsed["session_name"].is_string());
-    }
-
-    // ------------------------------------------------------------------
-    // write_stdin
-    // ------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn write_stdin_definition_shape() {
-        let def = write_stdin_definition();
-        assert_eq!(def.function.name, "write_stdin");
-        let required = def
-            .function
-            .parameters
-            .get("required")
-            .and_then(|v| v.as_array())
-            .unwrap();
-        assert!(required.iter().any(|v| v.as_str() == Some("session_id")));
-    }
-
-    #[tokio::test]
-    async fn write_stdin_missing_session_id_fails() {
-        assert!(execute_write_stdin(&json!({}), &test_runtime())
-            .await
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn write_stdin_session_not_found() {
-        let result = execute_write_stdin(
-            &json!({ "session_id": "nonexistent", "chars": "echo hi<RET>" }),
-            &test_runtime(),
-        )
-        .await;
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn write_stdin_poll_output() {
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-poll".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        runtime
-            .terminal_manager
-            .write_stdin("test-poll", "echo poll-me\n", 2000, 8000)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-poll", "chars": "", "yield_time_ms": 500 }),
-            &runtime,
-        )
-        .await;
-        assert!(result.is_ok(), "error: {:?}", result.err());
-        runtime.terminal_manager.remove("test-poll").await.ok();
-    }
-
-    #[tokio::test]
-    async fn write_stdin_send_input() {
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-input".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-input", "chars": "echo from-stdin<RET>", "yield_time_ms": 2000 }),
-            &runtime,
-        ).await;
-        assert!(result.is_ok(), "error: {:?}", result.err());
-        assert!(result.unwrap().contains("from-stdin"));
-        runtime.terminal_manager.remove("test-input").await.ok();
-    }
-
-    #[tokio::test]
-    async fn write_stdin_allows_raw_text_without_terminator() {
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-raw".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-raw", "chars": "echo buffered", "yield_time_ms": 100 }),
-            &runtime,
-        )
-        .await;
-        assert!(result.is_ok(), "raw text was rejected: {:?}", result.err());
-        runtime.terminal_manager.remove("test-raw").await.ok();
-    }
-
-    #[tokio::test]
-    async fn write_stdin_allows_pure_control_key_c_c() {
-        // <C-c> is a signal, not buffered — must pass without terminator
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-ctrl".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-ctrl", "chars": "<C-c>", "yield_time_ms": 1000 }),
-            &runtime,
-        )
-        .await;
-        // <C-c> may kill the process, so output may vary; we just care that
-        // validation didn't reject it.
-        assert!(result.is_ok(), "validation error: {:?}", result.err());
-        runtime.terminal_manager.remove("test-ctrl").await.ok();
-    }
-
-    #[tokio::test]
-    async fn write_stdin_allows_pure_control_key_c_z() {
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-ctrz".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-ctrz", "chars": "<C-z>", "yield_time_ms": 1000 }),
-            &runtime,
-        )
-        .await;
-        assert!(result.is_ok(), "validation error: {:?}", result.err());
-        runtime.terminal_manager.remove("test-ctrz").await.ok();
-    }
-
-    #[tokio::test]
-    async fn write_stdin_allows_arrow_key_without_terminator() {
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-arrow".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-arrow", "chars": "<UP>", "yield_time_ms": 1000 }),
-            &runtime,
-        )
-        .await;
-        assert!(result.is_ok(), "validation error: {:?}", result.err());
-        runtime.terminal_manager.remove("test-arrow").await.ok();
-    }
-
-    #[tokio::test]
-    async fn write_stdin_allows_tab_without_terminator() {
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-tab".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-tab", "chars": "<TAB>", "yield_time_ms": 1000 }),
-            &runtime,
-        )
-        .await;
-        assert!(result.is_ok(), "validation error: {:?}", result.err());
-        runtime.terminal_manager.remove("test-tab").await.ok();
-    }
-
-    #[tokio::test]
-    async fn write_stdin_returns_exit_metadata_and_clears_session() {
-        let runtime = test_runtime();
-        runtime
-            .terminal_manager
-            .create("test-exit".to_string(), None, 120, 40, &runtime.backend)
-            .await
-            .unwrap();
-        let result = execute_write_stdin(
-            &json!({ "session_id": "test-exit", "chars": "exit<RET>", "yield_time_ms": 2000 }),
-            &runtime,
-        )
-        .await
-        .unwrap();
-        let parsed: Value = serde_json::from_str(&result).unwrap();
-        assert!(parsed["session_name"].is_null(), "got: {}", result);
-        assert_eq!(parsed["exit_code"].as_i64(), Some(0));
-        assert!(runtime.terminal_manager.get("test-exit").await.is_none());
-    }
-
-    // ------------------------------------------------------------------
-    // helpers
-    // ------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn clamp_yield_edge() {
-        assert_eq!(clamp_yield(0), 0);
-        assert_eq!(clamp_yield(15_000), 15_000);
-        assert_eq!(clamp_yield(60_000), 60_000);
-        assert_eq!(clamp_yield(3_600_000), 3_600_000);
-        assert_eq!(clamp_yield(7_200_000), 3_600_000);
-    }
-
-    #[tokio::test]
-    async fn make_session_name_increments() {
-        let a = make_session_name();
-        let b = make_session_name();
-        assert_ne!(a, b);
-        assert!(a.starts_with("shell-"));
-        assert!(b.starts_with("shell-"));
+        assert!(result.is_error);
+        assert!(result.content.contains("invalid stream"));
     }
 }

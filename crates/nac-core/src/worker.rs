@@ -2,11 +2,14 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::agent::Agent;
 use crate::skills::SkillRegistry;
 use crate::store::{self, WorkerContext};
 use crate::types::Message;
+
+pub(crate) const MANAGED_WORKER_CANCEL_ACK: &str = "__NAC_CANCEL_ACK__";
 
 pub struct ManagedWorkerRunConfig {
     pub(crate) agent: Agent,
@@ -94,7 +97,20 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
         action,
     } = run_config;
 
+    let command_cancellation = agent.command_cancellation();
+    let cancellation_listener = tokio::spawn(async move {
+        let mut lines = BufReader::new(tokio::io::stdin()).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if line.trim() == "cancel" {
+                eprintln!("{MANAGED_WORKER_CANCEL_ACK}");
+                command_cancellation.cancel();
+                break;
+            }
+        }
+    });
+
     let send_result = agent.send(&action).await;
+    cancellation_listener.abort();
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
     println!("{}", response);
@@ -159,6 +175,7 @@ mod tests {
         let agent = Agent::with_config(
             ModelClient::new_for_test(),
             AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
                 store_path: store::default_store_path(),
                 session_id: None,

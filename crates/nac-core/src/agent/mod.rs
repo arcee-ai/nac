@@ -17,7 +17,7 @@ use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
 mod dag;
-mod preview;
+pub(crate) mod preview;
 mod tool_exec;
 
 #[cfg(test)]
@@ -102,6 +102,7 @@ pub struct AgentConfig {
     pub extra_tool_defs: Vec<ToolDefinition>,
     pub agents_md_message: Option<String>,
     pub thread_timeout_secs: u64,
+    pub command_output_limits: crate::terminal::CommandOutputLimits,
 }
 
 pub struct Agent {
@@ -310,7 +311,9 @@ impl Agent {
             &local_paths,
         )?;
         let terminal_manager = match config.mode {
-            AgentMode::Worker => crate::terminal::TerminalManager::for_worker(),
+            AgentMode::Worker => crate::terminal::TerminalManager::for_worker_with_limits(
+                config.command_output_limits,
+            )?,
             AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
         };
         Ok(Self {
@@ -330,6 +333,7 @@ impl Agent {
                 mcp: config.mcp,
                 skills: config.skills,
                 terminal_manager,
+                command_cancellation: crate::tools::ThreadCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
             },
@@ -352,6 +356,7 @@ impl Agent {
         Self::with_config(
             client,
             AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
@@ -644,6 +649,16 @@ impl Agent {
             )
             .await;
 
+            if self.tool_runtime.command_cancellation.is_cancelled() {
+                let error = anyhow!("worker command cancelled");
+                self.emit(AgentEvent::Error {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
+                });
+                self.tool_runtime.terminal_manager.remove_all().await;
+                return Err(error);
+            }
+
             // Fold worker token usage (from thread dispatches) into the
             // orchestrator's accumulated usage. Only cost fields are summed;
             // orchestrator context stays ordinary-orchestrator-only.
@@ -676,6 +691,10 @@ impl Agent {
                 return Err(error);
             }
         }
+    }
+
+    pub(crate) fn command_cancellation(&self) -> crate::tools::ThreadCancellation {
+        self.tool_runtime.command_cancellation.clone()
     }
 
     #[cfg(test)]
