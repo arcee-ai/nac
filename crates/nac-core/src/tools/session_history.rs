@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -282,7 +280,7 @@ struct OpenRequest {
 
 fn parse_list_request(args: &Value) -> Result<ListRequest, ToolResult> {
     let object = object(args)?;
-    if let Some(cursor) = object.get("cursor") {
+    if let Some(cursor) = continuation_cursor(object) {
         ensure_only(object, &["cursor"])?;
         let HistoryCursor::SessionList {
             version,
@@ -308,7 +306,7 @@ fn parse_list_request(args: &Value) -> Result<ListRequest, ToolResult> {
             anchor: Some(anchor),
         });
     }
-    ensure_only(object, &["namespace", "limit"])?;
+    ensure_only(object, &["namespace", "limit", "cursor"])?;
     Ok(ListRequest {
         namespace: parse_namespace(object.get("namespace"))?,
         limit: parse_limit(object.get("limit"), DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)?,
@@ -318,7 +316,7 @@ fn parse_list_request(args: &Value) -> Result<ListRequest, ToolResult> {
 
 fn parse_open_request(args: &Value, current_session_id: &str) -> Result<OpenRequest, ToolResult> {
     let object = object(args)?;
-    if let Some(cursor) = object.get("cursor") {
+    if let Some(cursor) = continuation_cursor(object) {
         ensure_only(object, &["cursor"])?;
         let HistoryCursor::SessionOpen {
             version,
@@ -351,11 +349,17 @@ fn parse_open_request(args: &Value, current_session_id: &str) -> Result<OpenRequ
             phase,
         });
     }
-    ensure_only(object, &["namespace", "session_id", "stream", "limit"])?;
+    ensure_only(
+        object,
+        &["namespace", "session_id", "stream", "limit", "cursor"],
+    )?;
     let namespace = parse_namespace(object.get("namespace"))?;
     let session_id = match namespace {
         HistoryNamespace::Session => {
-            if object.contains_key("session_id") {
+            if object
+                .get("session_id")
+                .is_some_and(|value| !value.is_null())
+            {
                 return Err(error(
                     "invalid_request",
                     "session_id must be omitted in the containing session namespace",
@@ -376,7 +380,7 @@ fn parse_open_request(args: &Value, current_session_id: &str) -> Result<OpenRequ
     };
     validate_id(&session_id, "session_id", MAX_SESSION_ID_CHARS)?;
     let stream =
-        match object.get("stream") {
+        match object.get("stream").filter(|value| !value.is_null()) {
             Some(value) => serde_json::from_value::<HistoryEventStream>(value.clone()).map_err(
                 |error_value| error("invalid_request", &format!("invalid stream: {error_value}")),
             )?,
@@ -394,7 +398,7 @@ fn parse_open_request(args: &Value, current_session_id: &str) -> Result<OpenRequ
 
 fn parse_namespace(value: Option<&Value>) -> Result<HistoryNamespace, ToolResult> {
     match value {
-        None => Ok(HistoryNamespace::Session),
+        None | Some(Value::Null) => Ok(HistoryNamespace::Session),
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| {
             error(
                 "invalid_request",
@@ -405,7 +409,7 @@ fn parse_namespace(value: Option<&Value>) -> Result<HistoryNamespace, ToolResult
 }
 
 fn parse_limit(value: Option<&Value>, default: usize, maximum: usize) -> Result<usize, ToolResult> {
-    let Some(value) = value else {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
         return Ok(default);
     };
     let Some(value) = value.as_u64() else {
@@ -444,9 +448,19 @@ fn object(args: &Value) -> Result<&Map<String, Value>, ToolResult> {
         .ok_or_else(|| error("invalid_request", "tool arguments must be a JSON object"))
 }
 
+fn continuation_cursor(object: &Map<String, Value>) -> Option<&Value> {
+    object.get("cursor").filter(|value| match value {
+        Value::Null => false,
+        Value::String(cursor) => !cursor.trim().is_empty(),
+        _ => true,
+    })
+}
+
 fn ensure_only(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), ToolResult> {
-    let allowed: BTreeSet<&str> = allowed.iter().copied().collect();
-    if let Some(key) = object.keys().find(|key| !allowed.contains(key.as_str())) {
+    if let Some((key, _)) = object
+        .iter()
+        .find(|(key, value)| !value.is_null() && !allowed.contains(&key.as_str()))
+    {
         return Err(error(
             "invalid_request",
             &format!("unexpected argument '{key}'"),
@@ -599,6 +613,42 @@ mod tests {
         assert!(list.function.description.contains("store"));
     }
 
+    #[test]
+    fn model_style_omitted_optionals_stay_on_the_first_page() {
+        for cursor in [
+            Value::Null,
+            Value::String(String::new()),
+            Value::String("  ".into()),
+        ] {
+            let request = parse_list_request(&json!({
+                "namespace": "store",
+                "limit": 7,
+                "cursor": cursor
+            }))
+            .unwrap();
+            assert_eq!(request.namespace, HistoryNamespace::Store);
+            assert_eq!(request.limit, 7);
+            assert!(request.anchor.is_none());
+        }
+
+        let request = parse_open_request(
+            &json!({
+                "namespace": null,
+                "session_id": null,
+                "stream": null,
+                "limit": null,
+                "cursor": null
+            }),
+            "current",
+        )
+        .unwrap();
+        assert_eq!(request.namespace, HistoryNamespace::Session);
+        assert_eq!(request.session_id, "current");
+        assert_eq!(request.stream, HistoryEventStream::All);
+        assert_eq!(request.limit, DEFAULT_OPEN_LIMIT);
+        assert_eq!(request.phase, HistoryEventPhase::Events { before_id: None });
+    }
+
     #[tokio::test]
     async fn execute_tool_smoke_lists_and_opens_containing_workspace_and_store() {
         let path = temp_store("smoke");
@@ -641,15 +691,32 @@ mod tests {
         runtime.session_id = Some("current".to_string());
         let client = ModelClient::new_for_test();
 
-        let containing =
-            super::super::execute_tool("session_list", json!({}), &runtime, &client).await;
+        let containing = super::super::execute_tool(
+            "session_list",
+            json!({ "namespace": "session", "limit": 12, "cursor": null }),
+            &runtime,
+            &client,
+        )
+        .await;
         assert!(!containing.is_error, "{}", containing.content);
         println!("session_list default => {}", containing.content);
         let containing: Value = serde_json::from_str(&containing.content).unwrap();
         assert_eq!(containing["sessions"].as_array().unwrap().len(), 1);
         assert_eq!(containing["sessions"][0]["session_id"], "current");
 
-        let opened = super::super::execute_tool("session_open", json!({}), &runtime, &client).await;
+        let opened = super::super::execute_tool(
+            "session_open",
+            json!({
+                "namespace": null,
+                "session_id": null,
+                "stream": null,
+                "limit": null,
+                "cursor": null
+            }),
+            &runtime,
+            &client,
+        )
+        .await;
         assert!(!opened.is_error, "{}", opened.content);
         println!("session_open default => {}", opened.content);
         let opened: Value = serde_json::from_str(&opened.content).unwrap();

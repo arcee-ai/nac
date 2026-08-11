@@ -866,6 +866,8 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
                 "threads" => "list_threads",
                 "thread_read" => "read_thread",
                 "thread_delete" => "delete_thread",
+                "session_list" => "list_sessions",
+                "session_open" => "open_session",
                 _ => "invoke",
             }
             .to_string(),
@@ -911,6 +913,17 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
             copy_safe_u64(object, &mut safe, "timeout");
         }
         "thread_read" | "thread_delete" => copy_safe_string(object, &mut safe, "name"),
+        "session_list" => {
+            copy_safe_string(object, &mut safe, "namespace");
+            copy_safe_u64(object, &mut safe, "limit");
+            copy_string_length(object, &mut safe, "cursor", "cursor_chars");
+        }
+        "session_open" => {
+            copy_safe_string(object, &mut safe, "namespace");
+            copy_safe_string(object, &mut safe, "session_id");
+            copy_safe_u64(object, &mut safe, "limit");
+            copy_string_length(object, &mut safe, "cursor", "cursor_chars");
+        }
         _ => {}
     }
     serde_json::Value::Object(safe).to_string()
@@ -1953,6 +1966,21 @@ mod tests {
                 .to_string(),
             ),
         });
+        channel_sink.emit(AgentEvent::ToolCallStarted {
+            thread_name: Some("worker".to_string()),
+            call_id: "call-session-list".to_string(),
+            name: "session_list".to_string(),
+            args_preview: "{}".to_string(),
+            key_arg_preview: None,
+            args_detail: Some(
+                serde_json::json!({
+                    "namespace": "session",
+                    "limit": 12,
+                    "cursor": null
+                })
+                .to_string(),
+            ),
+        });
         bus_sink.emit(started);
         bus_sink.emit(AgentEvent::ToolCallFinished {
             thread_name: Some("worker".to_string()),
@@ -2002,6 +2030,13 @@ mod tests {
         assert!(args_preview.contains("/safe/file.txt"));
         assert!(args_preview.contains("\"content_chars\":12"));
         assert!(!args_preview.contains("CANARY"));
+        let AgentEvent::ToolCallStarted { args_preview, .. } = receiver.try_recv().unwrap() else {
+            panic!("expected sanitized session_list start");
+        };
+        assert!(args_preview.contains("\"operation\":\"list_sessions\""));
+        assert!(args_preview.contains("\"namespace\":\"session\""));
+        assert!(args_preview.contains("\"limit\":12"));
+        assert!(!args_preview.contains("cursor"));
 
         let records =
             crate::store::load_all_thread_events(&path, "session-safe-events", 20).unwrap();
