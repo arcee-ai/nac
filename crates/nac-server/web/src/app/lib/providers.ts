@@ -11,8 +11,8 @@ const PROVIDER_LABELS: Record<BackendKind, string> = {
   "deepseek-chat": "DeepSeek Chat",
   "fireworks-chat": "Fireworks Chat",
   "together-chat": "Together Chat",
-  "arcee-auth": "Arcee (stored login)",
-  "arcee-api": "Arcee API",
+  "arcee-auth": "Arcee API (Auth)",
+  "arcee-api": "Arcee API (Key)",
 };
 
 /** Display order shared by every provider list in the UI. */
