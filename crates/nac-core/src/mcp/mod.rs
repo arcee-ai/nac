@@ -33,7 +33,10 @@ mod result;
 mod transport;
 
 pub use config::{McpServerConfig, McpTransportConfig};
-pub use library::{library_entries, McpLibraryAuth, McpLibraryEntry};
+pub use library::{
+    embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
+    McpLibraryAuth, McpLibraryEntry,
+};
 pub use registry::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 
 /// A tool a probe discovered on a server, before anything is saved.

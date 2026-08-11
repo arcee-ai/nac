@@ -6,6 +6,7 @@
 //! value to keep what is stored.
 
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use axum::extract::{rejection::JsonRejection, Path as AxumPath, State};
 use axum::http::StatusCode;
@@ -20,21 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{ApiError, RequestField, SessionManager};
 
 #[derive(Debug, Clone, Serialize)]
-pub struct McpLibraryEntryView {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
-    pub transport: &'static str,
-    pub url: &'static str,
-    pub auth: mcp::McpLibraryAuth,
-    pub auth_header: Option<&'static str>,
-    pub auth_hint: Option<&'static str>,
-    pub docs_url: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct McpLibraryResponse {
-    pub entries: Vec<McpLibraryEntryView>,
+    pub entries: Vec<mcp::McpLibraryEntry>,
 }
 
 /// A stored server as the dashboard sees it: env and header values are
@@ -195,21 +183,34 @@ fn merge_map(
     Ok(merged)
 }
 
+/// How long a registry answer keeps serving before the next request refetches
+/// it. A failed fetch is also remembered, so an unreachable registry costs one
+/// attempt per interval rather than one per page load.
+const LIBRARY_CACHE_TTL: Duration = Duration::from_secs(15 * 60);
+
+static LIBRARY_CACHE: tokio::sync::Mutex<Option<(Instant, Vec<mcp::McpLibraryEntry>)>> =
+    tokio::sync::Mutex::const_new(None);
+
+/// The embedded catalog, extended by verified servers from the Smithery
+/// registry when it answers in time.
 pub async fn library_handler() -> Json<McpLibraryResponse> {
-    let entries = mcp::library_entries()
-        .iter()
-        .map(|entry| McpLibraryEntryView {
-            id: entry.id,
-            name: entry.name,
-            description: entry.description,
-            transport: entry.transport,
-            url: entry.url,
-            auth: entry.auth,
-            auth_header: entry.auth_header,
-            auth_hint: entry.auth_hint,
-            docs_url: entry.docs_url,
-        })
-        .collect();
+    let mut cache = LIBRARY_CACHE.lock().await;
+    if let Some((fetched_at, entries)) = cache.as_ref() {
+        if fetched_at.elapsed() < LIBRARY_CACHE_TTL {
+            return Json(McpLibraryResponse {
+                entries: entries.clone(),
+            });
+        }
+    }
+    let remote = match mcp::fetch_smithery_library_entries().await {
+        Ok(remote) => remote,
+        Err(error) => {
+            eprintln!("MCP library registry fetch failed; serving the embedded catalog: {error:#}");
+            Vec::new()
+        }
+    };
+    let entries = mcp::merge_library_entries(remote);
+    *cache = Some((Instant::now(), entries.clone()));
     Json(McpLibraryResponse { entries })
 }
 

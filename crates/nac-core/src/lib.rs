@@ -33,8 +33,9 @@ pub mod ssh_configurations {
 /// when adding one. Stored servers merge over `config.toml` at session start.
 pub mod mcp_configurations {
     pub use crate::mcp::{
-        library_entries, probe_mcp_server, McpLibraryAuth, McpLibraryEntry, McpProbedTool,
-        McpServerConfig, McpTransportConfig,
+        embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
+        probe_mcp_server, McpLibraryAuth, McpLibraryEntry, McpProbedTool, McpServerConfig,
+        McpTransportConfig,
     };
     pub use crate::store::{
         delete_mcp_server_configuration, insert_mcp_server_configuration,
