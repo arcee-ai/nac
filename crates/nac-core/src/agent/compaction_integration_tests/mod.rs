@@ -58,6 +58,22 @@ fn compaction_test_agent(
     .unwrap()
 }
 
+fn store_agent_snapshot(store_path: &std::path::Path, agent: &Agent) {
+    let connection = crate::store::open_runtime_connection(store_path).unwrap();
+    connection
+        .execute(
+            "UPDATE sessions
+             SET messages_json = ?1, visible_message_count = ?2, last_user_prompt = ?3
+             WHERE session_id = 'session'",
+            rusqlite::params![
+                serde_json::to_string(&agent.messages).unwrap(),
+                crate::sessions::visible_message_count(&agent.messages) as i64,
+                crate::sessions::last_user_prompt(&agent.messages)
+            ],
+        )
+        .unwrap();
+}
+
 fn compactable_messages() -> Vec<Message> {
     vec![
         Message::System {
