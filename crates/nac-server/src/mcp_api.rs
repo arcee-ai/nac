@@ -215,17 +215,22 @@ async fn library_entries() -> Vec<mcp::McpLibraryEntry> {
             return entries.clone();
         }
         // An expired catalog still answers this request; the refresh runs in
-        // the background for a later one.
-        if LIBRARY_REFRESH.try_lock().is_ok() {
-            tokio::spawn(refresh_library_cache());
+        // the background for a later one. The task carries the guard, so a
+        // second expired read cannot schedule another.
+        if let Ok(refresh) = LIBRARY_REFRESH.try_lock() {
+            tokio::spawn(async move {
+                refresh_library_cache(refresh).await;
+            });
         }
         return entries.clone();
     }
-    refresh_library_cache().await
+    let refresh = LIBRARY_REFRESH.lock().await;
+    refresh_library_cache(refresh).await
 }
 
-async fn refresh_library_cache() -> Vec<mcp::McpLibraryEntry> {
-    let _refresh = LIBRARY_REFRESH.lock().await;
+async fn refresh_library_cache(
+    _refresh: tokio::sync::MutexGuard<'static, ()>,
+) -> Vec<mcp::McpLibraryEntry> {
     if let Some((fetched_at, entries)) = LIBRARY_CACHE.lock().await.as_ref() {
         if fetched_at.elapsed() < LIBRARY_CACHE_TTL {
             return entries.clone();
@@ -235,10 +240,19 @@ async fn refresh_library_cache() -> Vec<mcp::McpLibraryEntry> {
         Ok(remote) => mcp::merge_library_entries(remote),
         Err(error) => {
             eprintln!("MCP library registry fetch failed: {error:#}");
-            match LIBRARY_CACHE.lock().await.take() {
-                Some((_, stale)) => stale,
-                None => mcp::embedded_library_entries(),
-            }
+            // The catalog is renewed in place so no reader sees it missing.
+            let mut cache = LIBRARY_CACHE.lock().await;
+            return match cache.as_mut() {
+                Some((fetched_at, stale)) => {
+                    *fetched_at = Instant::now();
+                    stale.clone()
+                }
+                None => {
+                    let embedded = mcp::embedded_library_entries();
+                    *cache = Some((Instant::now(), embedded.clone()));
+                    embedded
+                }
+            };
         }
     };
     *LIBRARY_CACHE.lock().await = Some((Instant::now(), entries.clone()));
