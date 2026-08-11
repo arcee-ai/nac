@@ -70,6 +70,22 @@ pub(super) struct GeneratedModel {
     pub(super) reasoning: bool,
     #[serde(default)]
     pub(super) thinking_level_map: super::ThinkingLevelMap,
+    /// Whether the model supports adaptive thinking. Populated by the
+    /// Anthropic API overlay; `false` in the checked-in baseline.
+    #[serde(default)]
+    pub(super) adaptive_thinking: bool,
+    /// Whether the model supports enabled thinking. Populated by the
+    /// Anthropic API overlay; `false` in the checked-in baseline.
+    #[serde(default)]
+    pub(super) enabled_thinking: bool,
+    /// Whether the model supports context management. Populated by the
+    /// Anthropic API overlay; `false` in the checked-in baseline.
+    #[serde(default)]
+    pub(super) context_management: bool,
+    /// Whether the model supports the `clear_thinking_20251015` context
+    /// management edit. Populated by the Anthropic API overlay.
+    #[serde(default)]
+    pub(super) clear_thinking: bool,
 }
 
 /// Sidecar manifest fields: the sha pins the embedded pair (tests), the
@@ -111,6 +127,10 @@ pub(super) fn hydrate_entry(
         thinking_level_map: entry.thinking_level_map,
         compat: compat.clone(),
         source,
+        adaptive_thinking: entry.adaptive_thinking,
+        enabled_thinking: entry.enabled_thinking,
+        context_management: entry.context_management,
+        clear_thinking: entry.clear_thinking,
     }
 }
 

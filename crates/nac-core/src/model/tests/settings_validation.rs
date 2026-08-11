@@ -566,6 +566,9 @@ fn adapters_translate_effort_through_the_catalog_map() {
         None,
         &custom,
         test_resolved(BackendKind::AnthropicMessages, "claude-opus-4-6").max_tokens,
+        false,
+        false,
+        false,
     )
     .unwrap();
     assert_eq!(anthropic["thinking"], json!({"type": "adaptive"}));

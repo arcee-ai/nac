@@ -151,6 +151,20 @@ pub struct ModelMetadata {
     /// Which catalog layer produced this metadata. Served by the `/models`
     /// listing (`api_listing`); the frontend badges non-baseline sources.
     pub source: ModelSource,
+    /// Whether the model supports adaptive thinking (`thinking: {type:
+    /// "adaptive"}`). Populated by the Anthropic API overlay; the request
+    /// builder uses it to decide whether to send `display: "summarized"`.
+    pub adaptive_thinking: bool,
+    /// Whether the model supports enabled thinking (`thinking: {type:
+    /// "enabled", budget_tokens}`). Populated by the Anthropic API overlay.
+    pub enabled_thinking: bool,
+    /// Whether the model supports context management. Populated by the
+    /// Anthropic API overlay; the request builder uses it to decide whether
+    /// to send `context_management` edits.
+    pub context_management: bool,
+    /// Whether the model supports the `clear_thinking_20251015` context
+    /// management edit. Populated by the Anthropic API overlay.
+    pub clear_thinking: bool,
 }
 
 impl ModelMetadata {
@@ -181,6 +195,10 @@ impl ModelMetadata {
             thinking_level_map: ThinkingLevelMap::default(),
             compat: Compat::default(),
             source,
+            adaptive_thinking: false,
+            enabled_thinking: false,
+            context_management: false,
+            clear_thinking: false,
         }
     }
 }

@@ -46,8 +46,8 @@ pub use backend::{
     validate_model_reasoning_effort,
 };
 pub use catalog::{
-    api_listing, provider_for_model, spawn_arcee_model_refresh, spawn_overlay_refresh,
-    ModelListing,
+    api_listing, provider_for_model, spawn_anthropic_model_refresh, spawn_arcee_model_refresh,
+    spawn_overlay_refresh, ModelListing,
 };
 pub(crate) use catalog::{Compat, CompletionsThinkingFormat, ModelMetadata, ThinkingLevelMap};
 pub use providers::{

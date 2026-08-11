@@ -25,6 +25,7 @@ export const REASONING_OPTIONS: SelectItem[] = [
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
   { id: "xhigh", label: "X-High" },
+  { id: "max", label: "Max" },
 ];
 
 /** The choices that are not an effort level, and so always apply. */

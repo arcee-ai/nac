@@ -348,6 +348,10 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
             cost,
             reasoning,
             thinking_level_map,
+            adaptive_thinking: false,
+            enabled_thinking: false,
+            context_management: false,
+            clear_thinking: false,
         },
     }
 }
@@ -389,6 +393,7 @@ fn parse_effort(s: &str) -> Option<ReasoningEffort> {
         "medium" => Some(ReasoningEffort::Medium),
         "high" => Some(ReasoningEffort::High),
         "xhigh" => Some(ReasoningEffort::Xhigh),
+        "max" => Some(ReasoningEffort::Max),
         _ => None,
     }
 }

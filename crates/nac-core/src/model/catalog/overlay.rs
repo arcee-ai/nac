@@ -712,6 +712,10 @@ fn map_model(
         cost: map_cost(model.cost.as_ref())?,
         reasoning: model.reasoning.unwrap_or(false),
         thinking_level_map: seed_thinking_map(baseline, provider, id),
+        adaptive_thinking: false,
+        enabled_thinking: false,
+        context_management: false,
+        clear_thinking: false,
     })
 }
 

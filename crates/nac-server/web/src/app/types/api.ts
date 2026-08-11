@@ -23,7 +23,8 @@ export type ReasoningEffort =
   | "low"
   | "medium"
   | "high"
-  | "xhigh";
+  | "xhigh"
+  | "max";
 
 export interface StoreInfo {
   root_cwd: string;
