@@ -206,13 +206,14 @@ function LaunchForm({
   }, []);
 
   // A resolved saved setup is authoritative for its mixed tiers — including
-  // an explicitly single-model one. Only without a saved setup is the last
-  // mixed setup a session launched with offered again. The key remounts the
-  // section when the seed changes.
+  // an explicitly single-model one (`null`). Sources with no mixed opinion
+  // (catalog and file launches, `undefined`) fall back to the last mixed
+  // setup a session launched with. The key remounts the section when the
+  // seed changes.
   const lastMixed = useMemo(() => loadLastMixed(), []);
   const savedMixed =
-    selection?.kind === "resolved"
-      ? (selection.mixed_models ?? null)
+    selection?.kind === "resolved" && selection.mixed_models !== undefined
+      ? selection.mixed_models
       : lastMixed;
   const savedMixedKey = JSON.stringify(savedMixed);
 
