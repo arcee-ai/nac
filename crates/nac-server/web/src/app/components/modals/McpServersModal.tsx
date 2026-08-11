@@ -306,10 +306,21 @@ function KvEditor({
   rows: KvRow[];
   onChange: (rows: KvRow[]) => void;
 }) {
-  const update = (index: number, patch: Partial<KvRow>) => {
+  const updateKey = (index: number, key: string) => {
+    onChange(rows.map((row, at) => (at === index ? { ...row, key } : row)));
+  };
+  // A cleared value falls back to keeping the stored secret when the row came
+  // from the server; only a typed literal replaces it.
+  const updateValue = (index: number, value: string) => {
     onChange(
       rows.map((row, at) =>
-        at === index ? { ...row, ...patch, keepStored: false } : row,
+        at === index
+          ? {
+              ...row,
+              value,
+              keepStored: value === "" && row.placeholder !== undefined,
+            }
+          : row,
       ),
     );
   };
@@ -323,14 +334,14 @@ function KvEditor({
             className="flex-1 min-w-0"
             placeholder={keyPlaceholder}
             value={row.key}
-            onChange={(event) => update(index, { key: event.target.value })}
+            onChange={(event) => updateKey(index, event.target.value)}
           />
           <Input
             inputSize={InputSize.Medium}
             className="flex-1 min-w-0"
             placeholder={row.keepStored ? row.placeholder : "value"}
             value={row.value}
-            onChange={(event) => update(index, { value: event.target.value })}
+            onChange={(event) => updateValue(index, event.target.value)}
           />
           <Button
             size={ButtonSize.Medium}
