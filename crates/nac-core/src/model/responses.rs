@@ -125,6 +125,11 @@ pub(super) fn parse_openai_responses_response(
             .and_then(|details| details.get("cache_write_tokens"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
+        let reasoning_tokens = u
+            .get("output_tokens_details")
+            .and_then(|d| d.get("reasoning_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         TokenUsage {
             input_tokens: input_tokens
                 .saturating_sub(cache_read)
@@ -132,7 +137,7 @@ pub(super) fn parse_openai_responses_response(
             output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
             cache_read_tokens: cache_read,
             cache_write_tokens: cache_write,
-            reasoning_tokens: 0,
+            reasoning_tokens,
             orchestrator_context_tokens: u
                 .get("total_tokens")
                 .and_then(|v| v.as_u64())

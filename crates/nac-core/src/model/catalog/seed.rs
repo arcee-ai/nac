@@ -62,6 +62,21 @@ fn all_levels() -> ThinkingLevelMap {
     ])
 }
 
+/// GPT-5.6 models: all six levels plus `max` (GPT-5.6-only tier above
+/// xhigh; models.dev confirms and OpenAI docs reserve it for the hardest
+/// quality-first workloads).
+fn all_levels_with_max() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Minimal, "minimal"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+        (ReasoningEffort::Max, "max"),
+    ])
+}
+
 /// Anthropic adaptive-with-max family (claude-opus-4-6): none through xhigh,
 /// with xhigh at the wire-level tier `max`.
 fn anthropic_adaptive_with_max_levels() -> ThinkingLevelMap {
@@ -151,7 +166,8 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
                  display_name: &str,
                  context_window: u64,
                  max_tokens: u64,
-                 cost: ModelCostRates| {
+                 cost: ModelCostRates,
+                 thinking_level_map: ThinkingLevelMap| {
         seeded_model(
             provider,
             id,
@@ -160,7 +176,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             max_tokens,
             cost,
             true,
-            all_levels(),
+            thinking_level_map,
             Compat::default(),
         )
     };
@@ -171,6 +187,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             1_050_000,
             128_000,
             rates(5.0, 30.0, 0.5, 6.25),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.6-terra",
@@ -178,6 +195,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             1_050_000,
             128_000,
             rates(2.0, 12.0, 0.2, 2.5),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.6-luna",
@@ -185,6 +203,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             1_050_000,
             128_000,
             rates(0.2, 1.2, 0.02, 0.25),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.6",
@@ -192,6 +211,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             1_050_000,
             128_000,
             rates(5.0, 30.0, 0.5, 6.25),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.3-codex-spark",
@@ -199,6 +219,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             128_000,
             32_000,
             rates(1.75, 14.0, 0.175, 0.0),
+            all_levels(),
         ),
     ]
 }

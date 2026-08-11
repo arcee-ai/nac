@@ -19,13 +19,14 @@ const ALL_PROVIDERS: [BackendKind; 8] = [
     BackendKind::ArceeApi,
 ];
 
-const ALL_EFFORTS: [ReasoningEffort; 6] = [
+const ALL_EFFORTS: [ReasoningEffort; 7] = [
     ReasoningEffort::None,
     ReasoningEffort::Minimal,
     ReasoningEffort::Low,
     ReasoningEffort::Medium,
     ReasoningEffort::High,
     ReasoningEffort::Xhigh,
+    ReasoningEffort::Max,
 ];
 
 #[test]
@@ -68,11 +69,12 @@ fn unknown_models_clone_provider_defaults_with_fallback_limits() {
     }
 }
 
-/// Independent transcription of the pre-S4 `backend.rs` validation matrix.
-/// Since S4, `validate_model_reasoning_effort` itself reads the catalog
-/// maps; the matrix guards compare against this hand-written reference so
-/// they keep proving the data reproduces the historical behavior instead of
-/// vacuously comparing the map against itself.
+/// Independent transcription of the pre-S4 `backend.rs` validation matrix,
+/// with one post-S4 extension: `Max` effort for GPT-5.6 models (OpenAI docs
+/// confirm GPT-5.6-only). Since S4, `validate_model_reasoning_effort` itself
+/// reads the catalog maps; the matrix guards compare against this hand-written
+/// reference so they keep proving the data reproduces the historical behavior
+/// instead of vacuously comparing the map against itself.
 fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEffort) -> bool {
     match provider {
         BackendKind::DeepSeekChat => matches!(
@@ -86,7 +88,16 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
                 | ReasoningEffort::Medium
                 | ReasoningEffort::High
         ),
-        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => true,
+        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => {
+            // `max` is a post-S4 addition: only GPT-5.6 models support it
+            // (OpenAI docs confirm GPT-5.6-only). Unknown models and
+            // non-5.6 models stay at the pre-S4 six levels.
+            if effort == ReasoningEffort::Max {
+                model.starts_with("gpt-5.6")
+            } else {
+                true
+            }
+        }
         BackendKind::AnthropicMessages => {
             // `none` (omission) was safe for every family, including models
             // whose adaptive thinking is always on.
@@ -328,13 +339,25 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
         assert_eq!(metadata.cost.output, output, "{id}");
         assert!(metadata.reasoning, "{id}");
         // Codex matrix behavior: every effort level, sent verbatim.
+        // GPT-5.6 models additionally support `max` (post-S4 addition);
+        // gpt-5.3-codex-spark does not.
+        let supports_max = id.starts_with("gpt-5.6");
         for effort in ALL_EFFORTS {
-            assert_eq!(
-                metadata.thinking_level_map.wire_value(effort),
-                Some(effort.as_str()),
-                "{id} {}",
-                effort.as_str()
-            );
+            if effort == ReasoningEffort::Max && !supports_max {
+                assert_eq!(
+                    metadata.thinking_level_map.wire_value(effort),
+                    None,
+                    "{id} {} should not be supported",
+                    effort.as_str()
+                );
+            } else {
+                assert_eq!(
+                    metadata.thinking_level_map.wire_value(effort),
+                    Some(effort.as_str()),
+                    "{id} {}",
+                    effort.as_str()
+                );
+            }
         }
     }
 

@@ -11,7 +11,7 @@
 #   deepseek-chat:            none, high, xhigh (wire "max")
 #   fireworks-chat:           none, low, medium, high
 #   together-chat:            none, low, medium, high
-#   openai-responses:         all six levels, verbatim
+#   openai-responses:         all six levels, verbatim (GPT-5.6 adds `max`)
 #   anthropic-messages:       per-family (below); unknown → none only
 #
 # `default_thinking_levels` replaces the models.dev-derived seed map of
@@ -58,6 +58,20 @@ default_base_url = "https://api.together.xyz/v1"
 [providers."openai-responses"]
 default_thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh" }
 default_base_url = "https://api.openai.com/v1"
+
+# GPT-5.6 family (incl. dated snapshots): supports the `max` effort tier
+# above xhigh (models.dev lists it; OpenAI docs confirm GPT-5.6-only).
+[providers."openai-responses".models."gpt-5.6"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-sol"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-terra"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-luna"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
 
 # anthropic: conservative none-only for every model (including families
 # newer than the matrix — opus-4-7/4-8, sonnet-5, fable-5 — whose thinking

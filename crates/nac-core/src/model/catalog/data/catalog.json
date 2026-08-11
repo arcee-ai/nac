@@ -1072,6 +1072,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
@@ -1092,6 +1093,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
@@ -1112,6 +1114,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
@@ -1132,6 +1135,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
