@@ -544,6 +544,20 @@ impl TranscriptLogWriter {
         Ok(times)
     }
 
+    /// Read the snapshot prefix currently stored on the session row.
+    pub(crate) fn read_snapshot_messages(&self, session_id: &str) -> Result<Vec<Message>> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let messages_json: String = connection.query_row(
+            "SELECT messages_json FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )?;
+        serde_json::from_str(&messages_json).context("failed to parse stored session messages")
+    }
+
     /// Read committed entries with `idx >= from_idx`, in log (append) order.
     /// A row under the reserved name that does not decode as a transcript
     /// entry is corruption and fails the read loudly.

@@ -637,9 +637,24 @@ async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
     // turn and this restore sees neither a gap nor a log tail.
     assert!(read_log(&store_path, "session").is_empty());
 
+    let held_lease =
+        crate::sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
     let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let error = agent
+        .restore_messages_merging_log_tail(blob.clone(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error.downcast_ref::<crate::sessions::SessionOperationLeaseError>(),
+            Some(crate::sessions::SessionOperationLeaseError::Busy(session_id))
+                if session_id == "session"
+        ),
+        "an unleased no-gap snapshot repair must respect the held operation lease: {error:#}"
+    );
+
     let repaired = agent
-        .restore_messages_merging_log_tail(blob, None)
+        .restore_messages_merging_log_tail(blob, Some(&held_lease))
         .await
         .unwrap()
         .expect("a dangling turn in the blob must still rewrite the snapshot");
@@ -672,6 +687,54 @@ async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
         .await
         .unwrap();
     assert_eq!(read_log(&store_path, "session")[0].0, 6);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() {
+    let store_path = test_store_path("merge_stale_snapshot_before_lease");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let stale_blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+        user_message("second prompt"),
+        plain_assistant("second answer"),
+        user_message("third prompt"),
+        tool_call_assistant(&["stale-call"]),
+    ];
+    store_snapshot_messages(&store_path, &stale_blob[..6]);
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_batch(
+            "session",
+            6,
+            &[user_message("new prompt"), plain_assistant("new answer")],
+        )
+        .unwrap();
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let refreshed_blob = agent
+        .restore_messages_merging_log_tail(stale_blob, None)
+        .await
+        .unwrap()
+        .expect("automatic lease acquisition must report the reloaded snapshot");
+
+    assert_eq!(refreshed_blob.len(), 6);
+    assert_eq!(agent.messages.len(), 8);
+    assert!(matches!(&agent.messages[6], Message::User { content } if content == "new prompt"));
+    assert!(
+        matches!(&agent.messages[7], Message::Assistant { content: Some(content), .. } if content == "new answer")
+    );
+    assert_eq!(
+        read_log(&store_path, "session").len(),
+        2,
+        "rows committed before automatic lease acquisition must remain intact"
+    );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
