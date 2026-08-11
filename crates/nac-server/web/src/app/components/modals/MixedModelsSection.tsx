@@ -10,16 +10,13 @@ import {
   type SelectItem,
   Separator,
 } from "@/app/atoms";
-import {
-  CatalogModelPicker,
-  type CatalogPick,
-} from "@/app/components/modals/CatalogModelPicker";
+import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import {
   EFFORT_LEVEL_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
-import { resolveCatalogModel } from "@/app/lib/catalog";
+import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import { useModelCatalog } from "@/app/services/queries";
 import { MIXED_TIERS } from "@/app/types/api";
 import type {
