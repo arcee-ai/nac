@@ -797,6 +797,7 @@ export interface McpLibraryEntry {
   auth_header: string | null;
   auth_hint: string | null;
   docs_url: string;
+  icon_url: string | null;
 }
 
 export interface McpLibraryResponse {

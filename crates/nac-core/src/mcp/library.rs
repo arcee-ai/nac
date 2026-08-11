@@ -44,6 +44,8 @@ pub struct McpLibraryEntry {
     /// Hint shown next to the header input, e.g. the expected value shape.
     pub auth_hint: Option<String>,
     pub docs_url: String,
+    /// Thumbnail shown next to the entry in the picker.
+    pub icon_url: Option<String>,
 }
 
 /// The curated entries embedded in the binary: available offline, and the
@@ -56,6 +58,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
         auth: McpLibraryAuth,
         auth_prompt: Option<(&str, &str)>,
         docs_url: &str,
+        icon_url: &str,
     ) -> McpLibraryEntry {
         McpLibraryEntry {
             id: name.to_string(),
@@ -67,6 +70,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             auth_header: auth_prompt.map(|(header, _)| header.to_string()),
             auth_hint: auth_prompt.map(|(_, hint)| hint.to_string()),
             docs_url: docs_url.to_string(),
+            icon_url: Some(icon_url.to_string()),
         }
     }
 
@@ -78,6 +82,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             McpLibraryAuth::OptionalHeader,
             Some(("x-api-key", "Exa API key; anonymous use is rate limited")),
             "https://docs.exa.ai/reference/exa-mcp",
+            "https://exa.ai/favicon.ico",
         ),
         entry(
             "context7",
@@ -89,6 +94,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
                 "Context7 API key; anonymous use is rate limited",
             )),
             "https://github.com/upstash/context7",
+            "https://context7.com/favicon.ico",
         ),
         entry(
             "deepwiki",
@@ -97,6 +103,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             McpLibraryAuth::None,
             None,
             "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+            "https://deepwiki.com/favicon.ico",
         ),
         entry(
             "grep_app",
@@ -105,6 +112,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             McpLibraryAuth::None,
             None,
             "https://vercel.com/blog/grep-a-million-github-repositories-via-mcp",
+            "https://vercel.com/favicon.ico",
         ),
         entry(
             "github",
@@ -113,6 +121,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             McpLibraryAuth::RequiredHeader,
             Some(("Authorization", "Bearer <personal access token>")),
             "https://github.com/github/github-mcp-server",
+            "https://github.githubassets.com/favicons/favicon-dark.png",
         ),
         entry(
             "huggingface",
@@ -124,6 +133,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
                 "Bearer <hf token>; anonymous use is limited",
             )),
             "https://huggingface.co/settings/mcp",
+            "https://huggingface.co/favicon.ico",
         ),
         entry(
             "cloudflare_docs",
@@ -132,6 +142,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             McpLibraryAuth::None,
             None,
             "https://github.com/cloudflare/mcp-server-cloudflare",
+            "https://www.cloudflare.com/favicon.ico",
         ),
     ]
 }
@@ -162,6 +173,8 @@ struct SmitheryListedServer {
     use_count: u64,
     #[serde(default)]
     homepage: Option<String>,
+    #[serde(default)]
+    icon_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -253,6 +266,7 @@ pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
                     docs_url: server.homepage.unwrap_or_else(|| {
                         format!("https://smithery.ai/servers/{}", server.qualified_name)
                     }),
+                    icon_url: server.icon_url,
                 },
             ))
         });
@@ -306,6 +320,7 @@ mod tests {
                 auth_header: None,
                 auth_hint: None,
                 docs_url: "https://smithery.ai/servers/exa".to_string(),
+                icon_url: None,
             },
             McpLibraryEntry {
                 id: "smithery:acme/tool".to_string(),
@@ -317,6 +332,7 @@ mod tests {
                 auth_header: None,
                 auth_hint: None,
                 docs_url: "https://smithery.ai/servers/acme/tool".to_string(),
+                icon_url: None,
             },
         ];
         let merged = merge_library_entries(remote);

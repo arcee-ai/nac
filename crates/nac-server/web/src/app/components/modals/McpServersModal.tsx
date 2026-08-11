@@ -267,6 +267,7 @@ function LibraryPicker({
             size={TabButtonSize.Large}
             onClick={() => onPick(entry)}
           >
+            <EntryThumbnail entry={entry} />
             <div className="flex flex-col items-start text-left min-w-0 flex-grow py-1">
               <div className="flex items-center gap-2">
                 <span className="code code-small text-basic-primary">
@@ -289,6 +290,30 @@ function LibraryPicker({
           <span className="text-left flex-grow">Custom server</span>
         </TabButton>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The entry's icon when it has one and it loads; its first letter otherwise.
+ */
+function EntryThumbnail({ entry }: { entry: McpLibraryEntry }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="flex items-center justify-center size-8 shrink-0 rounded-md bg-divider-muted overflow-hidden">
+      {entry.icon_url && !broken ? (
+        <img
+          src={entry.icon_url}
+          alt=""
+          className="size-5 object-contain"
+          loading="lazy"
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <span className="text-small text-basic-muted uppercase">
+          {entry.name.charAt(0)}
+        </span>
+      )}
     </div>
   );
 }
