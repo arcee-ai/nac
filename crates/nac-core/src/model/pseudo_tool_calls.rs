@@ -439,10 +439,14 @@ mod tests {
 
     #[test]
     fn strip_tags_survives_multibyte_characters_after_an_angle_bracket() {
-        // A `<` followed by a multi-byte character (em dash) used to panic in
-        // `find_tag`: the candidate name slice ended inside the character.
-        let text = "cost <— note <tool_call>payload</tool_call> tail <—";
-        assert_eq!(strip_native_tool_format_tags(text), "cost <— note  tail <—");
+        // A `<` followed by a run of multi-byte characters (em dashes) used to
+        // panic in `find_tag`: the candidate name slice for an 8-byte tag name
+        // like `function` ended inside the third 3-byte dash.
+        let text = "cost <——— note <tool_call>payload</tool_call> tail <———";
+        assert_eq!(
+            strip_native_tool_format_tags(text),
+            "cost <——— note  tail <———"
+        );
     }
 
     #[test]
