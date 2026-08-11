@@ -106,6 +106,56 @@ function literalsOnly(
   return literals;
 }
 
+/**
+ * A footer action: a sticky bar button on mobile, a large button on desktop
+ * (where the neutral action renders as a ghost button).
+ */
+function FooterButton({
+  isMobile,
+  variant,
+  content,
+  className,
+  disabled,
+  onClick,
+  children,
+}: {
+  isMobile: boolean;
+  variant: ButtonVariant;
+  content?: ButtonContent;
+  className?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  if (isMobile) {
+    return (
+      <StickyButton
+        variant={variant}
+        content={content ?? ButtonContent.Text}
+        className={className}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        {children}
+      </StickyButton>
+    );
+  }
+  return (
+    <Button
+      size={ButtonSize.Large}
+      variant={
+        variant === ButtonVariant.Secondary ? ButtonVariant.Ghost : variant
+      }
+      content={content}
+      className={className}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
 function splitArgs(text: string): string[] {
   return text
     .split("\n")
@@ -282,23 +332,13 @@ function LibraryPicker({
 
   useLayoutEffect(() => {
     setFooter(
-      isMobile ? (
-        <StickyButton
-          variant={ButtonVariant.Secondary}
-          content={ButtonContent.Text}
-          onClick={onClose}
-        >
-          Close
-        </StickyButton>
-      ) : (
-        <Button
-          size={ButtonSize.Large}
-          variant={ButtonVariant.Ghost}
-          onClick={onClose}
-        >
-          Close
-        </Button>
-      ),
+      <FooterButton
+        isMobile={isMobile}
+        variant={ButtonVariant.Secondary}
+        onClick={onClose}
+      >
+        Close
+      </FooterButton>,
     );
     return () => setFooter(null);
   }, [isMobile, onClose, setFooter]);
@@ -644,65 +684,32 @@ function McpServerForm({
     setFooter(
       <>
         {record ? (
-          isMobile ? (
-            <StickyButton
-              variant={ButtonVariant.SecondaryDestructive}
-              content={ButtonContent.Icon}
-              className="mr-auto"
-              disabled={busy}
-              onClick={() => void removeRef.current()}
-            >
-              <Icon iconName={IconName.Trash} />
-            </StickyButton>
-          ) : (
-            <Button
-              size={ButtonSize.Large}
-              variant={ButtonVariant.SecondaryDestructive}
-              content={ButtonContent.Icon}
-              className="mr-auto"
-              disabled={busy}
-              onClick={() => void removeRef.current()}
-            >
-              <Icon iconName={IconName.Trash} />
-            </Button>
-          )
+          <FooterButton
+            isMobile={isMobile}
+            variant={ButtonVariant.SecondaryDestructive}
+            content={ButtonContent.Icon}
+            className="mr-auto"
+            disabled={busy}
+            onClick={() => void removeRef.current()}
+          >
+            <Icon iconName={IconName.Trash} />
+          </FooterButton>
         ) : null}
-        {isMobile ? (
-          <StickyButton
-            variant={ButtonVariant.Secondary}
-            content={ButtonContent.Text}
-            onClick={onClose}
-          >
-            Cancel
-          </StickyButton>
-        ) : (
-          <Button
-            size={ButtonSize.Large}
-            variant={ButtonVariant.Ghost}
-            onClick={onClose}
-          >
-            Cancel
-          </Button>
-        )}
-        {isMobile ? (
-          <StickyButton
-            variant={ButtonVariant.Primary}
-            content={ButtonContent.Text}
-            disabled={busy}
-            onClick={() => void saveRef.current()}
-          >
-            Save
-          </StickyButton>
-        ) : (
-          <Button
-            size={ButtonSize.Large}
-            variant={ButtonVariant.Primary}
-            disabled={busy}
-            onClick={() => void saveRef.current()}
-          >
-            Save
-          </Button>
-        )}
+        <FooterButton
+          isMobile={isMobile}
+          variant={ButtonVariant.Secondary}
+          onClick={onClose}
+        >
+          Cancel
+        </FooterButton>
+        <FooterButton
+          isMobile={isMobile}
+          variant={ButtonVariant.Primary}
+          disabled={busy}
+          onClick={() => void saveRef.current()}
+        >
+          Save
+        </FooterButton>
       </>,
     );
     return () => setFooter(null);
