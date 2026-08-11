@@ -31,7 +31,6 @@ const REMOTE_FILE_LOCK_BUSY_EXIT_CODE: i32 = 75;
 const REMOTE_FILE_LOCK_BUSY_MARKER: &str = "NAC_FILE_LOCK_BUSY";
 
 mod discovery;
-mod discovery_native;
 pub mod edit;
 pub mod exec_command;
 pub mod glob;
