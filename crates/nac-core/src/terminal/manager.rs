@@ -16,6 +16,12 @@ use super::keyparse::parse_keys;
 use super::session::{terminal_env_owned, TerminalSession};
 use super::{TerminalInfo, TerminalOutput};
 
+const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
+    ("GIT_TERMINAL_PROMPT", "0"),
+    ("GCM_INTERACTIVE", "0"),
+    ("GH_PROMPT_DISABLED", "1"),
+];
+
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
@@ -294,7 +300,13 @@ async fn run_pipe_command(
     backend: &ExecutionBackend,
     should_isolate_process_group: bool,
 ) -> Result<PipeCommandOutcome> {
-    let envs = terminal_env_owned();
+    let mut envs = terminal_env_owned();
+    envs.reserve(NONINTERACTIVE_PROMPT_ENV.len());
+    envs.extend(
+        NONINTERACTIVE_PROMPT_ENV
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string())),
+    );
     let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
     if should_isolate_process_group {
         isolate_process_group(&mut command);
