@@ -16,7 +16,12 @@ import {
   EFFORT_LEVEL_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
-import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
+import {
+  catalogBaseUrl,
+  catalogProviderForModel,
+  resolveCatalogModel,
+  type CatalogPick,
+} from "@/app/lib/catalog";
 import { useModelCatalog } from "@/app/services/queries";
 import { MIXED_TIERS } from "@/app/types/api";
 import type {
@@ -64,15 +69,27 @@ interface TierState {
   apiKeyEnv: string | null;
 }
 
-function tierStateFrom(settings: MixedTierSettings | undefined): TierState {
-  if (!settings?.model || !settings.backend) {
+/**
+ * A stored tier may omit `backend` and `base_url`, leaving them to the same
+ * inference the runtime runs (`provider_for_model`, managed base URL); the
+ * catalog answers both here so such a tier still opens filled in.
+ */
+function tierStateFrom(
+  settings: MixedTierSettings | undefined,
+  catalog: ModelCatalog | undefined,
+): TierState {
+  const backend =
+    settings?.backend ??
+    (settings?.model ? catalogProviderForModel(catalog, settings.model) : null);
+  if (!settings?.model || !backend) {
     return { pick: null, effort: "", apiKeyEnv: null };
   }
+  const provider = resolveCatalogModel(catalog, backend, settings.model).provider;
   return {
     pick: {
-      backend: settings.backend as CatalogPick["backend"],
+      backend,
       model: settings.model,
-      baseUrl: settings.base_url ?? "",
+      baseUrl: settings.base_url ?? (provider ? catalogBaseUrl(provider) : ""),
     },
     effort: settings.reasoning_effort ?? "",
     apiKeyEnv: settings.api_key_env ?? null,
@@ -80,11 +97,11 @@ function tierStateFrom(settings: MixedTierSettings | undefined): TierState {
 }
 
 function tierSettings(state: TierState): MixedTierSettings | null {
-  if (!state.pick || !state.pick.baseUrl) return null;
+  if (!state.pick) return null;
   return {
     model: state.pick.model,
     backend: state.pick.backend,
-    base_url: state.pick.baseUrl,
+    base_url: state.pick.baseUrl || null,
     api_key_env: state.apiKeyEnv,
     reasoning_effort: state.effort || null,
   };
@@ -162,16 +179,6 @@ function TierModelRow({
   );
 }
 
-function initialTiers(
-  initial: MixedModels | null | undefined,
-): Record<Tier, TierState> {
-  return {
-    easy: tierStateFrom(initial?.easy),
-    medium: tierStateFrom(initial?.medium),
-    hard: tierStateFrom(initial?.hard),
-  };
-}
-
 /**
  * The Single | Mixed switch and, in mixed mode, the three tier model rows.
  * Owns its form state and reports every change upward through `onChange`.
@@ -186,8 +193,17 @@ export function MixedModelsSection({
 }) {
   const catalog = useModelCatalog();
   const [mode, setMode] = useState<MixedMode>(initial ? "mixed" : "single");
-  const [tiers, setTiers] = useState<Record<Tier, TierState>>(
-    initialTiers(initial),
+  // Only the user's edits are state; an untouched tier stays derived from the
+  // seed, so a tier whose backend the catalog infers fills in once the
+  // catalog arrives instead of opening blank.
+  const [edits, setEdits] = useState<Partial<Record<Tier, TierState>>>({});
+  const tiers = useMemo<Record<Tier, TierState>>(
+    () => ({
+      easy: edits.easy ?? tierStateFrom(initial?.easy, catalog.data),
+      medium: edits.medium ?? tierStateFrom(initial?.medium, catalog.data),
+      hard: edits.hard ?? tierStateFrom(initial?.hard, catalog.data),
+    }),
+    [edits, initial, catalog.data],
   );
 
   const selection = useMemo<MixedSelection>(() => {
@@ -242,7 +258,7 @@ export function MixedModelsSection({
                 loading={catalog.isLoading}
                 failed={catalog.isError}
                 onChange={(next) =>
-                  setTiers((current) => ({ ...current, [tier]: next }))
+                  setEdits((current) => ({ ...current, [tier]: next }))
                 }
               />
             </div>
