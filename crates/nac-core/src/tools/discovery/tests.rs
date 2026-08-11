@@ -1410,3 +1410,103 @@ async fn exact_match_cap_does_not_hide_later_files() {
     assert!(errors.iter().all(|error| error["code"] != "match_limit"));
     fs::remove_dir_all(root).expect("remove fixture");
 }
+
+#[tokio::test]
+async fn per_file_match_cap_does_not_hide_later_files() {
+    let (runtime, root) = fixture_runtime();
+    fs::write(root.join("src/cap-a.txt"), "needle\n".repeat(10_001))
+        .expect("write over-cap match fixture");
+    fs::write(root.join("src/cap-z.txt"), "needle\n").expect("write later match fixture");
+    let mut cursor = None;
+    let mut paths = Vec::new();
+    let mut errors = Vec::new();
+    loop {
+        let mut request = json!({
+            "pattern": "needle",
+            "regex": false,
+            "globs": ["src/cap-*.txt"],
+            "limit": 1000
+        });
+        if let Some(value) = cursor.take() {
+            request["cursor"] = Value::String(value);
+        }
+        let output = parsed(execute("grep", request, &runtime).await);
+        paths.extend(
+            output["matches"]
+                .as_array()
+                .expect("matches")
+                .iter()
+                .map(|entry| entry["path"].as_str().expect("path").to_string()),
+        );
+        errors.extend(output["errors"].as_array().expect("errors").iter().cloned());
+        cursor = output["next_cursor"].as_str().map(str::to_string);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(paths.len(), 10_001);
+    assert_eq!(paths.last().map(String::as_str), Some("src/cap-z.txt"));
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| { error["code"] == "match_limit" && error["path"] == "src/cap-a.txt" })
+            .count(),
+        1
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[tokio::test]
+async fn aggregate_record_cap_stays_bounded_after_per_file_caps() {
+    let (runtime, root) = fixture_runtime();
+    fs::write(root.join("src/cap-a.txt"), "needle\n".repeat(10_001))
+        .expect("write first dense fixture");
+    fs::write(root.join("src/cap-b.txt"), "needle\n".repeat(10_000))
+        .expect("write second dense fixture");
+    fs::write(root.join("src/cap-z.txt"), "needle\n").expect("write later match fixture");
+    let mut cursor = None;
+    let mut paths = Vec::new();
+    let mut errors = Vec::new();
+    loop {
+        let mut request = json!({
+            "pattern": "needle",
+            "regex": false,
+            "globs": ["src/cap-*.txt"],
+            "limit": 1000
+        });
+        if let Some(value) = cursor.take() {
+            request["cursor"] = Value::String(value);
+        }
+        let output = parsed(execute("grep", request, &runtime).await);
+        paths.extend(
+            output["matches"]
+                .as_array()
+                .expect("matches")
+                .iter()
+                .map(|entry| entry["path"].as_str().expect("path").to_string()),
+        );
+        errors.extend(output["errors"].as_array().expect("errors").iter().cloned());
+        cursor = output["next_cursor"].as_str().map(str::to_string);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(paths.len() + errors.len(), 20_000);
+    assert_eq!(paths.len(), 19_998);
+    assert!(paths.iter().all(|path| path != "src/cap-z.txt"));
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| { error["code"] == "match_limit" && error["path"] == "src/cap-a.txt" })
+            .count(),
+        1
+    );
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| { error["code"] == "record_limit" && error["path"] == "src/cap-b.txt" })
+            .count(),
+        1
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}

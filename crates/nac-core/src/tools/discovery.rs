@@ -1289,15 +1289,15 @@ async fn run_grep(
         )
         .await;
         total_bytes += read_bytes;
-        let stop = found.iter().any(|entry| {
+        let query_limit_hit = found.iter().any(|entry| {
             matches!(
                 entry.get("code").and_then(Value::as_str),
-                Some("match_limit" | "materialized_limit")
+                Some("record_limit" | "materialized_limit")
             )
         });
         found.truncate(remaining);
         records.extend(found);
-        if stop {
+        if query_limit_hit {
             break;
         }
     }
@@ -1735,6 +1735,7 @@ fn search_bytes(
     let line_ranges = line_ranges(bytes);
     let line_starts: Vec<usize> = line_ranges.iter().map(|range| range.0).collect();
     let effective_limit = MAX_MATCHES.min(match_budget.max(1));
+    let record_limited = match_budget <= MAX_MATCHES;
     let probe_limit = effective_limit.saturating_add(1);
     let mut matches = Vec::<(usize, usize, usize, bool)>::new();
 
@@ -1870,11 +1871,18 @@ fn search_bytes(
         found.push(Record::Match(value));
     }
     if hit_limit {
-        found.push(diagnostic(
-            "match_limit",
-            &format!("search exceeded {effective_limit} matches in this bounded unit"),
-            Some(path),
-        ));
+        let (code, message) = if record_limited {
+            (
+                "record_limit",
+                format!("search exceeded {MAX_RECORDS} structured records"),
+            )
+        } else {
+            (
+                "match_limit",
+                format!("search exceeded {effective_limit} matches in this bounded unit"),
+            )
+        };
+        found.push(diagnostic(code, &message, Some(path)));
     }
     (found, raw.len())
 }
