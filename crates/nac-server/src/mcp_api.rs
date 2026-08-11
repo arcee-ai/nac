@@ -208,7 +208,7 @@ pub async fn library_handler() -> Json<McpLibraryResponse> {
             eprintln!("MCP library registry fetch failed: {error:#}");
             match cache.take() {
                 Some((_, stale)) => stale,
-                None => mcp::merge_library_entries(Vec::new()),
+                None => mcp::embedded_library_entries(),
             }
         }
     };
