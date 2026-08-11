@@ -3,6 +3,11 @@ use serde_json::Value;
 
 use crate::model::BackendKind;
 
+/// Prefix every tool result that exists only because the user stopped the run
+/// carries. The transcript stays valid provider history and the web client can
+/// tell a cancelled call apart from one that produced a real answer.
+pub const TOOL_CALL_CANCELLED_MARKER: &str = "[tool call cancelled by user]";
+
 fn serialize_nullable_content<S>(value: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,

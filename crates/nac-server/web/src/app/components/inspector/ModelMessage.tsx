@@ -24,12 +24,12 @@ import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import type { ModelTurn } from "@/app/lib/transcript";
+import {
+  RUN_CANCELLED_MARKER,
+  type ModelTurn,
+} from "@/app/lib/transcript";
 import type { WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-
-/** Exact assistant marker written by the agent on session cancel. */
-const RUN_CANCELLED_MARKER = "[run cancelled by user]";
 
 /**
  * "Thinking" for reasoning that is still arriving, so the badge names what the
@@ -123,6 +123,13 @@ export const ModelMessage = memo(function ModelMessage({
   const canRefresh = onRefresh != null && userMessageIndex != null;
   const canRevert = onRevert != null && userMessageIndex != null;
   const copyText = modelCopyText(turn);
+  // The stop applies to the whole turn, including the files its runs had
+  // already written, so it closes the turn below the snapshot rather than
+  // sitting wherever the marker happens to fall between the blocks.
+  const cancelled = turn.blocks.some(
+    (block) =>
+      block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
+  );
   const isMobile = useIsMobile();
   return (
     <div
@@ -174,15 +181,7 @@ export const ModelMessage = memo(function ModelMessage({
                   />
                 );
               case "text":
-                if (block.text.trim() === RUN_CANCELLED_MARKER) {
-                  return (
-                    <ChatSessionMessage
-                      key={block.key}
-                      variant={ChatSessionMessageVariant.Danger}
-                      title="Run cancelled by user"
-                    />
-                  );
-                }
+                if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
                 return (
                   <Markdown key={block.key} streaming={active}>
                     {block.text}
@@ -225,6 +224,12 @@ export const ModelMessage = memo(function ModelMessage({
           })}
           {snapshotRevision && filesPanel ? (
             <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
+          ) : null}
+          {cancelled ? (
+            <ChatSessionMessage
+              variant={ChatSessionMessageVariant.Danger}
+              title="Run cancelled by user"
+            />
           ) : null}
         </div>
 

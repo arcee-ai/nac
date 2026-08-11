@@ -61,6 +61,15 @@ export type LaunchModelSelection =
       extra_headers: Record<string, string> | null;
     };
 
+export interface ConfigurationsPanelInitial {
+  backend: BackendKind;
+  model: string;
+  base_url: string;
+  api_key_env: string | null;
+  reasoning_effort: string | null;
+  extra_headers: Record<string, string>;
+}
+
 /** A base URL the user writes by hand, for a gateway nac has no defaults for. */
 const CUSTOM = "custom";
 type ProviderChoice = BackendKind | typeof CUSTOM;
@@ -88,12 +97,15 @@ export function ConfigurationsPanel({
   invalid,
   errorText,
   onChange,
+  initial,
   children,
 }: {
   /** The launch attempt failed on something the box owns. */
   invalid: boolean;
   errorText?: string;
   onChange: (selection: LaunchModelSelection | null) => void;
+  /** Existing session setup to preserve until another source is selected. */
+  initial?: ConfigurationsPanelInitial;
   /** Advanced section, which the design nests at the bottom of the box. */
   children?: React.ReactNode;
 }) {
@@ -109,13 +121,16 @@ export function ConfigurationsPanel({
   // Null until the user picks a model out of the catalog, which leaves the
   // default below in place.
   const [pickedModel, setPickedModel] = useState<CatalogPick | null>(null);
-  const [provider, setProvider] = useState<ProviderChoice>("arcee-api");
-  const [protocol, setProtocol] = useState<BackendKind>("arcee-api");
+  const initialProvider = initial?.backend ?? "arcee-api";
+  const [provider, setProvider] = useState<ProviderChoice>(
+    PROVIDER_KINDS.includes(initialProvider) ? initialProvider : CUSTOM,
+  );
+  const [protocol, setProtocol] = useState<BackendKind>(initialProvider);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
-  const [modelDraft, setModelDraft] = useState("");
-  const [baseUrlDraft, setBaseUrlDraft] = useState("");
-  const [defaultModel, setDefaultModel] = useState("");
+  const [modelDraft, setModelDraft] = useState(initial?.model ?? "");
+  const [baseUrlDraft, setBaseUrlDraft] = useState(initial?.base_url ?? "");
+  const [defaultModel, setDefaultModel] = useState(initial?.model ?? "");
   const [filePath, setFilePath] = useState("");
   const [picking, setPicking] = useState(false);
   // Layered over a resolved configuration; null follows what was saved.
@@ -128,12 +143,25 @@ export function ConfigurationsPanel({
   // Launching usually means reusing the setup from last time, so the newest
   // saved configuration opens selected. With nothing saved yet the catalog is
   // the only source that asks for nothing up front, so it opens instead.
+  const initialSaved = initial
+    ? configurations.find(
+        (entry) =>
+          entry.backend === initial.backend &&
+          entry.model === initial.model &&
+          entry.base_url === initial.base_url &&
+          entry.api_key_env === initial.api_key_env,
+      )
+    : null;
   const latestSaved = configurations.at(-1);
   const source: Source =
     picked ??
-    (latestSaved
-      ? { kind: "saved", configId: latestSaved.config_id }
-      : { kind: "catalog" });
+    (initial
+      ? initialSaved
+        ? { kind: "saved", configId: initialSaved.config_id }
+        : { kind: "new" }
+      : latestSaved
+        ? { kind: "saved", configId: latestSaved.config_id }
+        : { kind: "catalog" });
 
   // The catalog opens on nac's default model rather than on an empty picker,
   // which is what makes a first session — nothing saved, so this is the source
@@ -249,7 +277,7 @@ export function ConfigurationsPanel({
     ? defaultModel
     : models.some((model) => model.id === configuredModel)
       ? configuredModel
-      : (models[0]?.id ?? modelOverride ?? configuredModel);
+      : (models[0]?.id ?? modelOverride ?? (defaultModel || configuredModel));
 
   /** Passing null hands the choice back to the default above. */
   const switchSource = (next: Source | null) => {
@@ -268,7 +296,34 @@ export function ConfigurationsPanel({
     ? (configurations.find((entry) => entry.config_id === configId) ?? null)
     : null;
 
+  // The session's own provider, endpoint and credential, none of them touched.
+  // The model is deliberately not part of this: pointing the session at another
+  // model the same provider serves is a change the existing setup absorbs,
+  // rather than one that makes the form ask for a credential all over again.
+  const preservesInitial = Boolean(
+    initial &&
+    picked === null &&
+    source.kind === "new" &&
+    backend === initial.backend &&
+    baseUrlDraft.trim() === initial.base_url &&
+    !apiKey.trim(),
+  );
+
   const selection = useMemo<LaunchModelSelection | null>(() => {
+    if (initial && preservesInitial) {
+      const model = provider === CUSTOM ? modelDraft.trim() : chosenModel;
+      if (!model) return null;
+      return {
+        kind: "resolved",
+        backend: initial.backend,
+        model,
+        base_url: initial.base_url,
+        api_key_env: initial.api_key_env,
+        reasoning_effort: initial.reasoning_effort,
+        extra_headers: initial.extra_headers,
+      };
+    }
+
     if (source.kind === "catalog") {
       if (!catalogPick || !catalogPick.baseUrl) return null;
       if (catalogCredential) {
@@ -280,7 +335,7 @@ export function ConfigurationsPanel({
           backend: catalogPick.backend,
           model: catalogPick.model,
           base_url: catalogPick.baseUrl,
-          api_key_env: null,
+          api_key_env: needsKey ? (catalogProvider?.auth_hint ?? null) : null,
           reasoning_effort: null,
           extra_headers: null,
         };
@@ -360,8 +415,12 @@ export function ConfigurationsPanel({
     };
   }, [
     source.kind,
+    initial,
+    preservesInitial,
+    picked,
     catalogPick,
     catalogCredential,
+    catalogProvider,
     name,
     apiKey,
     needsKey,
@@ -405,8 +464,9 @@ export function ConfigurationsPanel({
    * A hand-written setup has no credential to settle: its URL and model are the
    * fields being filled in, so having them is the equivalent milestone.
    */
-  const credentialReady =
-    source.kind === "catalog"
+  const credentialReady = preservesInitial
+    ? true
+    : source.kind === "catalog"
       ? Boolean(catalogPick) && (catalogCredential || keyValidated)
       : source.kind === "new"
         ? provider === CUSTOM

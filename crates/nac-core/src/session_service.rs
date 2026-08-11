@@ -2498,11 +2498,11 @@ impl SessionService {
 
     async fn append_cancellation_message(&self) -> Option<crate::model::TokenUsage> {
         let mut agent = self.agent.lock().await;
-        // Trims any dangling tool turn from the transcript AND the transcript
-        // log tail, then appends and logs the cancellation marker. A log
-        // failure must not fail the cancel; the next restore re-normalizes
-        // the stale tail (see Agent::append_cancellation_marker).
-        if let Err(error) = agent.append_cancellation_marker().await {
+        // Close unfinished tool calls with cancellation results so their
+        // thread cards remain in the transcript, then append the marker. A log
+        // failure must not fail the cancel; the next restore normalizes any
+        // stale tail.
+        if let Err(error) = agent.append_cancellation_marker_preserving_tools().await {
             eprintln!("nac: failed to normalize transcript log for cancellation: {error:#}");
         }
         agent.invalidate_context_sample();

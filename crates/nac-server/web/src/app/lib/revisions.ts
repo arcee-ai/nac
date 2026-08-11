@@ -15,8 +15,13 @@ export const revisionTitle = (ordinal: number) => `Snapshot ${ordinal}`;
 export const revisionOrdinal = (index: number, total: number) => total - index;
 
 /**
- * The revision each model turn was captured by, keyed by turn, leaving out the
- * runs that changed nothing — most of them, in a session that mostly talks.
+ * The revision each model turn was captured by, keyed by the turn's message
+ * index, leaving out the runs that changed nothing — most of them, in a session
+ * that mostly talks.
+ *
+ * Keyed by the message rather than by the turn so that a turn which is still
+ * only a stream, and has no message to place it by, cannot read a revision at
+ * all: it has nothing to look up with, whatever it happens to be keyed as.
  *
  * Walked in step rather than searched per turn so a revision is claimed once:
  * a run that finished without writing a message — a failure before the model
@@ -26,8 +31,8 @@ export const revisionOrdinal = (index: number, total: number) => total - index;
 export function revisionsByTurn(
   turns: TranscriptTurn[],
   revisions: WorkspaceRevision[] | undefined,
-): Map<string, WorkspaceRevision> {
-  const result = new Map<string, WorkspaceRevision>();
+): Map<number, WorkspaceRevision> {
+  const result = new Map<number, WorkspaceRevision>();
   if (!revisions?.length) return result;
 
   // Rows captured before the backend kept the transcript length cannot be
@@ -46,7 +51,7 @@ export function revisionsByTurn(
     }
     if (next >= ordered.length) break;
     const revision = ordered[next];
-    if (revision.changed_files > 0) result.set(turn.key, revision);
+    if (revision.changed_files > 0) result.set(start, revision);
     next += 1;
   }
 

@@ -29,6 +29,8 @@ export interface RuntimeEvent {
 export interface RuntimeThread {
   name: string;
   status: "running" | "finished";
+  /** The active dispatch ended because the parent run was stopped. */
+  cancelled: boolean;
   action: string;
   exitCode: number | null;
   isError: boolean;
@@ -190,6 +192,7 @@ function pushEvent(
 const emptyThread = (name: string): RuntimeThread => ({
   name,
   status: "running",
+  cancelled: false,
   action: "",
   exitCode: null,
   isError: false,
@@ -204,6 +207,18 @@ function updateThread(name: string, patch: Partial<RuntimeThread>) {
       [name]: { ...(state.threads[name] ?? emptyThread(name)), ...patch },
     },
   }));
+}
+
+/** Records which threads a stop interrupted, before they are terminalized. */
+function flagCancelledThreads(
+  threads: Record<string, RuntimeThread>,
+): Record<string, RuntimeThread> {
+  return Object.fromEntries(
+    Object.entries(threads).map(([name, thread]) => [
+      name,
+      thread.status === "running" ? { ...thread, cancelled: true } : thread,
+    ]),
+  );
 }
 
 /** Identifies the log lines whose events carry no id of their own. */
@@ -307,7 +322,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         error: null,
         modelError: null,
         streamSettled: true,
-        threads: terminalizeThreads(state.threads),
+        threads: terminalizeThreads(flagCancelledThreads(state.threads)),
       }));
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
       return "snapshot";
@@ -374,6 +389,7 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
       });
       updateThread(event.name, {
         status: "running",
+        cancelled: false,
         action: event.action,
         exitCode: null,
         isError: false,

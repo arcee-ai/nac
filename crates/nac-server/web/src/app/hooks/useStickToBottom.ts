@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   STICK_TOLERANCE_PX,
@@ -48,6 +54,12 @@ export interface StickToBottomOptions {
    * session URLs to the same element, so nothing here would otherwise unmount.
    */
   resetKey?: string | null;
+  /**
+   * Layout boundary that must preserve the bottom edge without animation.
+   * Streaming deltas still glide; run transitions and snapshot commits pin
+   * before paint so their differently shaped representations cannot flash.
+   */
+  pinKey?: string | null;
 }
 
 export interface StickToBottom {
@@ -80,6 +92,7 @@ export interface StickToBottom {
  */
 export function useStickToBottom({
   resetKey = null,
+  pinKey = null,
 }: StickToBottomOptions = {}): StickToBottom {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -143,6 +156,15 @@ export function useStickToBottom({
       followFrame.current = null;
     }
   }, []);
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !stuck.current) return;
+    cancelFollow();
+    beginProgrammaticScroll();
+    scrollToBottomInstantly(element);
+    endProgrammaticScroll();
+  }, [pinKey, beginProgrammaticScroll, cancelFollow, endProgrammaticScroll]);
 
   useEffect(() => {
     const element = scrollRef.current;
