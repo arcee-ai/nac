@@ -266,6 +266,13 @@ function SettingsForm({
   });
   const [error, setError] = useState("");
 
+  // A malformed stored mixed config loads as null with only a diagnostic; the
+  // server then refuses patches that omit mixed_models, so saving must always
+  // send an explicit repair or clear.
+  const mixedNeedsRepair = diagnostics.some((diagnostic) =>
+    diagnostic.startsWith("malformed stored mixed models"),
+  );
+
   const kind = backend as BackendKind;
   const managedUrl = managedLaunchBaseUrl(backend);
   const locked = Boolean(managedUrl);
@@ -438,10 +445,10 @@ function SettingsForm({
         apiKeyEnv || null,
         initial.api_key_env,
       );
-      if (!sameMixedModels(finalMixed, initialMixed)) {
+      if (mixedNeedsRepair || !sameMixedModels(finalMixed, initialMixed)) {
         patch.mixed_models = finalMixed;
       }
-    } else if (initialMixed) {
+    } else if (initialMixed || mixedNeedsRepair) {
       patch.mixed_models = null;
     }
 

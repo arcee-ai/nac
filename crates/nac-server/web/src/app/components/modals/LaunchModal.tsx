@@ -205,13 +205,15 @@ function LaunchForm({
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
 
-  // A saved setup carrying mixed tiers reopens with them; without one, the
-  // last mixed setup a session launched with is offered again. The key
-  // remounts the section when the seed changes.
+  // A resolved saved setup is authoritative for its mixed tiers — including
+  // an explicitly single-model one. Only without a saved setup is the last
+  // mixed setup a session launched with offered again. The key remounts the
+  // section when the seed changes.
   const lastMixed = useMemo(() => loadLastMixed(), []);
   const savedMixed =
-    (selection?.kind === "resolved" ? selection.mixed_models : null) ??
-    lastMixed;
+    selection?.kind === "resolved"
+      ? (selection.mixed_models ?? null)
+      : lastMixed;
   const savedMixedKey = JSON.stringify(savedMixed);
 
   /** Paths belong to whichever machine runs the session, so they do not carry over. */
