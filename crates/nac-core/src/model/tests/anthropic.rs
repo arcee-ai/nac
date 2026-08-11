@@ -67,6 +67,21 @@ fn anthropic_request_with_1h_ttl_sets_ttl_on_all_breakpoints() {
             Message::User {
                 content: "hello".to_string(),
             },
+            Message::Assistant {
+                content: Some("working".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+            Message::User {
+                content: "next tool results".to_string(),
+            },
+            Message::User {
+                content: "late steering".to_string(),
+            },
         ],
         &[ToolDefinition {
             def_type: "function".to_string(),
@@ -88,9 +103,21 @@ fn anthropic_request_with_1h_ttl_sets_ttl_on_all_breakpoints() {
     // Tool breakpoint has 1h TTL.
     assert_eq!(request["tools"][0]["cache_control"]["type"], "ephemeral");
     assert_eq!(request["tools"][0]["cache_control"]["ttl"], "1h");
-    // Last message breakpoint has 1h TTL.
+    // The stable user boundary before the last assistant and the current tip
+    // retain 1h markers. An intervening tool-result/steering-shaped user does
+    // not displace the prior provider-request boundary.
     assert_eq!(
         request["messages"][0]["content"][0]["cache_control"]["ttl"],
+        "1h"
+    );
+    assert!(request["messages"][1]["content"][0]
+        .get("cache_control")
+        .is_none());
+    assert!(request["messages"][2]["content"][0]
+        .get("cache_control")
+        .is_none());
+    assert_eq!(
+        request["messages"][3]["content"][0]["cache_control"]["ttl"],
         "1h"
     );
 }
@@ -144,6 +171,7 @@ fn summary_shaped_requests_preserve_all_systems_and_omit_tools() {
         &messages,
         &[],
         &test_resolved(BackendKind::OpenAiResponses, "model").thinking_level_map,
+        None,
     );
     assert_eq!(openai["input"], serde_json::to_value(&messages).unwrap());
     assert!(openai.get("tools").is_none());

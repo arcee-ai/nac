@@ -197,6 +197,7 @@ pub(crate) fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
 
 impl Agent {
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
+        let client = client.with_prompt_cache_key(config.session_id.clone());
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
         let mode = config.mode;
@@ -275,6 +276,10 @@ impl Agent {
             &config.workspace_cwd,
             &local_paths,
         )?;
+        let terminal_manager = match config.mode {
+            AgentMode::Worker => crate::terminal::TerminalManager::for_worker(),
+            AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
+        };
         Ok(Self {
             client,
             messages,
@@ -291,7 +296,7 @@ impl Agent {
                 backend,
                 mcp: config.mcp,
                 skills: config.skills,
-                terminal_manager: crate::terminal::TerminalManager::new(),
+                terminal_manager,
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
                 mixed_clients: config.mixed_clients,

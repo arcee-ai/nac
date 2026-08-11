@@ -10,12 +10,13 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use fs2::FileExt;
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::events::EventSink;
 use crate::mcp::McpRegistry;
@@ -47,28 +48,122 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
+pub(crate) struct ThreadCancellation {
+    cancelled: Arc<AtomicBool>,
+    activity: Arc<Notify>,
+}
+
+impl ThreadCancellation {
+    fn cancel(&self) {
+        if !self.cancelled.swap(true, Ordering::AcqRel) {
+            self.activity.notify_waiters();
+        }
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        loop {
+            let notified = self.activity.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ActiveThreadDispatchState {
+    Pending,
+    Running,
+}
+
+struct ActiveThreadDispatch {
+    dispatch_id: String,
+    state: ActiveThreadDispatchState,
+}
+
+struct ActiveThreadState {
+    dispatches: HashMap<String, ActiveThreadDispatch>,
+    cancellation: ThreadCancellation,
+    accepting: bool,
+}
+
+impl Default for ActiveThreadState {
+    fn default() -> Self {
+        Self {
+            dispatches: HashMap::new(),
+            cancellation: ThreadCancellation::default(),
+            accepting: true,
+        }
+    }
+}
+
 pub struct ActiveThreadRegistry {
-    dispatches: StdMutex<HashMap<String, String>>,
+    state: StdMutex<ActiveThreadState>,
+    activity: Notify,
+}
+
+impl Default for ActiveThreadRegistry {
+    fn default() -> Self {
+        Self {
+            state: StdMutex::new(ActiveThreadState::default()),
+            activity: Notify::new(),
+        }
+    }
 }
 
 impl ActiveThreadRegistry {
     pub fn names(&self) -> Vec<String> {
-        self.lock().keys().cloned().collect()
+        self.lock().dispatches.keys().cloned().collect()
     }
 
     pub fn is_active(&self, thread_name: &str) -> bool {
-        self.lock().contains_key(thread_name)
+        self.lock().dispatches.contains_key(thread_name)
+    }
+
+    pub fn begin_run(&self) -> bool {
+        let mut state = self.lock();
+        if !state.dispatches.is_empty() {
+            return false;
+        }
+        state.cancellation = ThreadCancellation::default();
+        state.accepting = true;
+        true
     }
 
     pub fn mark(&self, thread_name: &str, dispatch_id: &str) -> bool {
-        let mut dispatches = self.lock();
-        if dispatches.contains_key(thread_name) {
-            false
-        } else {
-            dispatches.insert(thread_name.to_string(), dispatch_id.to_string());
-            true
+        let mut state = self.lock();
+        if !state.accepting || state.dispatches.contains_key(thread_name) {
+            return false;
         }
+        state.dispatches.insert(
+            thread_name.to_string(),
+            ActiveThreadDispatch {
+                dispatch_id: dispatch_id.to_string(),
+                state: ActiveThreadDispatchState::Pending,
+            },
+        );
+        true
+    }
+
+    pub(crate) fn start(&self, thread_name: &str, dispatch_id: &str) -> Option<ThreadCancellation> {
+        let mut state = self.lock();
+        if !state.accepting || state.cancellation.is_cancelled() {
+            return None;
+        }
+        let dispatch = state.dispatches.get_mut(thread_name)?;
+        if dispatch.dispatch_id != dispatch_id
+            || dispatch.state != ActiveThreadDispatchState::Pending
+        {
+            return None;
+        }
+        dispatch.state = ActiveThreadDispatchState::Running;
+        Some(state.cancellation.clone())
     }
 
     pub fn queue(
@@ -78,15 +173,15 @@ impl ActiveThreadRegistry {
         thread_name: &str,
         instruction: &str,
     ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
-        let dispatches = self.lock();
-        let Some(dispatch_id) = dispatches.get(thread_name) else {
+        let state = self.lock();
+        let Some(dispatch) = state.dispatches.get(thread_name) else {
             return Ok(None);
         };
         crate::store::queue_thread_steering(
             store_path,
             session_id,
             thread_name,
-            dispatch_id,
+            &dispatch.dispatch_id,
             instruction,
         )
         .map(Some)
@@ -99,13 +194,66 @@ impl ActiveThreadRegistry {
         thread_name: &str,
         dispatch_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut dispatches = self.lock();
-        if dispatches.get(thread_name).map(String::as_str) != Some(dispatch_id) {
+        let mut state = self.lock();
+        if state
+            .dispatches
+            .get(thread_name)
+            .map(|dispatch| dispatch.dispatch_id.as_str())
+            != Some(dispatch_id)
+        {
             return Ok(Vec::new());
         }
-        let expired = crate::store::expire_thread_steering(store_path, session_id, dispatch_id)?;
-        dispatches.remove(thread_name);
-        Ok(expired)
+        state.dispatches.remove(thread_name);
+        drop(state);
+        self.activity.notify_waiters();
+        crate::store::expire_thread_steering(store_path, session_id, dispatch_id)
+    }
+
+    pub async fn cancel_and_drain(
+        &self,
+        steering_store: Option<(&Path, &str)>,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        let (cancellation, targets) = {
+            let mut state = self.lock();
+            state.accepting = false;
+            let cancellation = state.cancellation.clone();
+            let targets = state
+                .dispatches
+                .values()
+                .map(|dispatch| dispatch.dispatch_id.clone())
+                .collect::<Vec<_>>();
+            state
+                .dispatches
+                .retain(|_, dispatch| dispatch.state == ActiveThreadDispatchState::Running);
+            (cancellation, targets)
+        };
+        cancellation.cancel();
+        self.activity.notify_waiters();
+
+        let mut expired = Vec::new();
+        let mut steering_error = None;
+        if let Some((store_path, session_id)) = steering_store {
+            for dispatch_id in &targets {
+                match crate::store::expire_thread_steering(store_path, session_id, dispatch_id) {
+                    Ok(records) => expired.extend(records),
+                    Err(error) if steering_error.is_none() => steering_error = Some(error),
+                    Err(_) => {}
+                }
+            }
+        }
+
+        loop {
+            let notified = self.activity.notified();
+            if self.lock().dispatches.is_empty() {
+                break;
+            }
+            notified.await;
+        }
+
+        match steering_error {
+            Some(error) => Err(error),
+            None => Ok(expired),
+        }
     }
 
     pub fn close_all(
@@ -113,10 +261,13 @@ impl ActiveThreadRegistry {
         store_path: &Path,
         session_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut dispatches = self.lock();
-        let targets = dispatches
+        let mut state = self.lock();
+        state.accepting = false;
+        state.cancellation.cancel();
+        let targets = state
+            .dispatches
             .iter()
-            .map(|(name, dispatch_id)| (name.clone(), dispatch_id.clone()))
+            .map(|(name, dispatch)| (name.clone(), dispatch.dispatch_id.clone()))
             .collect::<Vec<_>>();
         let mut expired = Vec::new();
         for (name, dispatch_id) in targets {
@@ -125,17 +276,88 @@ impl ActiveThreadRegistry {
                 session_id,
                 &dispatch_id,
             )?);
-            if dispatches.get(&name) == Some(&dispatch_id) {
-                dispatches.remove(&name);
+            if state
+                .dispatches
+                .get(&name)
+                .is_some_and(|dispatch| dispatch.dispatch_id == dispatch_id)
+            {
+                state.dispatches.remove(&name);
             }
         }
+        drop(state);
+        self.activity.notify_waiters();
         Ok(expired)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
-        self.dispatches
+    fn lock(&self) -> std::sync::MutexGuard<'_, ActiveThreadState> {
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod active_thread_registry_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancellation_drains_running_dispatches_and_rejects_pending_work() {
+        let registry = Arc::new(ActiveThreadRegistry::default());
+        assert!(registry.begin_run());
+        assert!(registry.mark("a", "dispatch-a"));
+        assert!(registry.mark("b", "dispatch-b"));
+        assert!(registry.mark("dependent", "dispatch-c"));
+        let cancellation_a = registry.start("a", "dispatch-a").unwrap();
+        let cancellation_b = registry.start("b", "dispatch-b").unwrap();
+
+        let cancelling_registry = registry.clone();
+        let cancelling = tokio::spawn(async move {
+            cancelling_registry.cancel_and_drain(None).await.unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            cancellation_a.cancelled().await;
+            cancellation_b.cancelled().await;
+        })
+        .await
+        .expect("running dispatches did not receive cancellation");
+
+        assert!(registry.start("dependent", "dispatch-c").is_none());
+        assert!(!registry.is_active("dependent"));
+        assert!(!cancelling.is_finished());
+
+        let missing = Path::new("/store/does/not/exist");
+        assert!(registry
+            .close(missing, "session", "a", "dispatch-a")
+            .is_err());
+        assert!(registry
+            .close(missing, "session", "b", "dispatch-b")
+            .is_err());
+        tokio::time::timeout(Duration::from_secs(1), cancelling)
+            .await
+            .expect("cancellation did not drain")
+            .unwrap();
+
+        assert!(registry.names().is_empty());
+        registry.cancel_and_drain(None).await.unwrap();
+    }
+
+    #[test]
+    fn stale_close_cannot_remove_same_name_replacement() {
+        let registry = ActiveThreadRegistry::default();
+        assert!(registry.begin_run());
+        assert!(registry.mark("worker", "dispatch-old"));
+        let missing = Path::new("/store/does/not/exist");
+        assert!(registry
+            .close(missing, "session", "worker", "dispatch-old")
+            .is_err());
+
+        assert!(registry.begin_run());
+        assert!(registry.mark("worker", "dispatch-new"));
+        assert!(registry
+            .close(missing, "session", "worker", "dispatch-old")
+            .unwrap()
+            .is_empty());
+        assert!(registry.is_active("worker"));
     }
 }
 

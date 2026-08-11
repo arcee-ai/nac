@@ -210,18 +210,69 @@ pub(super) fn completions_chat_request(
     request
 }
 
+fn supports_explicit_openai_prompt_cache(model: &str) -> bool {
+    let Some(version) = model.strip_prefix("gpt-") else {
+        return false;
+    };
+    let mut parts = version.split(['.', '-']);
+    let Some(major) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<u64>().ok())
+        .unwrap_or(0);
+    major > 5 || (major == 5 && minor >= 6)
+}
+
+fn mark_stable_system_cache_prefix(input: &mut [Value]) -> bool {
+    let leading_systems = input
+        .iter()
+        .take_while(|item| item.get("role").and_then(Value::as_str) == Some("system"))
+        .count();
+    let Some(system) = leading_systems
+        .checked_sub(1)
+        .and_then(|index| input.get_mut(index))
+    else {
+        return false;
+    };
+    let Some(content) = system.get_mut("content") else {
+        return false;
+    };
+    let Some(text) = content.as_str().map(str::to_owned) else {
+        return false;
+    };
+    *content = json!([{
+        "type": "input_text",
+        "text": text,
+        "prompt_cache_breakpoint": {"mode": "explicit"},
+    }]);
+    true
+}
+
 pub(super) fn openai_responses_request(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
     messages: &[Message],
     tools: &[ToolDefinition],
     thinking_levels: &ThinkingLevelMap,
+    prompt_cache_key: Option<&str>,
 ) -> Value {
+    let mut input = responses_input_items(messages);
+    let explicit_cache = prompt_cache_key.is_some()
+        && supports_explicit_openai_prompt_cache(model)
+        && mark_stable_system_cache_prefix(&mut input);
     let mut request = json!({
         "model": model,
-        "input": responses_input_items(messages),
+        "input": input,
         "store": false,
     });
+    if let Some(key) = prompt_cache_key {
+        request["prompt_cache_key"] = Value::String(key.to_owned());
+    }
+    if explicit_cache {
+        request["prompt_cache_options"] = json!({"mode": "explicit"});
+    }
     if !tools.is_empty() {
         request["tools"] = Value::Array(
             tools

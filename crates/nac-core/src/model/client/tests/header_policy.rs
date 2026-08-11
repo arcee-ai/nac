@@ -95,6 +95,7 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         )]),
         arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
         cache_ttl: None,
+        prompt_cache_key: None,
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "test-model"),
     };
 
@@ -153,7 +154,11 @@ async fn arcee_api_builtin_headers_defer_to_configured_extra_headers() {
         ("User-Agent".to_string(), "custom-agent/9".to_string()),
         ("X-Arcee-Client".to_string(), "custom-client".to_string()),
     ]);
-    let client = test_model_client(BackendKind::ArceeApi, server.base_url.clone(), extra_headers);
+    let client = test_model_client(
+        BackendKind::ArceeApi,
+        server.base_url.clone(),
+        extra_headers,
+    );
 
     client
         .send_completions_chat(Vec::new(), Vec::new(), None)

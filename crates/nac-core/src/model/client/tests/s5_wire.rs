@@ -78,7 +78,9 @@ async fn same_model_history_replays_thinking_blocks_on_anthropic() {
     assert_eq!(
         body["messages"],
         json!([
-            {"role": "user", "content": "first"},
+            {"role": "user", "content": [
+                {"type": "text", "text": "first", "cache_control": {"type": "ephemeral"}}
+            ]},
             {"role": "assistant", "content": [
                 {"type": "thinking", "thinking": "prior thinking", "signature": "sig-abc"},
                 {"type": "text", "text": "prior answer"},
@@ -176,7 +178,9 @@ async fn cross_model_history_strips_foreign_reasoning_on_anthropic() {
     assert_eq!(
         body["messages"],
         json!([
-            {"role": "user", "content": "first"},
+            {"role": "user", "content": [
+                {"type": "text", "text": "first", "cache_control": {"type": "ephemeral"}}
+            ]},
             {"role": "assistant", "content": [
                 {"type": "text", "text": "prior answer"},
                 {"type": "tool_use", "id": "call-1", "name": "read", "input": {}}
