@@ -286,11 +286,29 @@ export function PanelRow({
   );
 }
 
-/** Placeholder for an empty or not-yet-selected panel. */
-export function PanelEmpty({ children }: { children: ReactNode }) {
+/**
+ * Placeholder for an empty or not-yet-selected panel. Given a `title` it takes
+ * the design's two-line form — what is missing above why it is — in the same
+ * monospace as the panel body it stands in for.
+ */
+export function PanelEmpty({
+  title,
+  children,
+}: {
+  title?: string;
+  children: ReactNode;
+}) {
+  if (title === undefined) {
+    return (
+      <div className="flex flex-1 flex-col min-h-0 overflow-auto p-6 label-small text-basic-muted [&>*]:shrink-0">
+        {children}
+      </div>
+    );
+  }
   return (
-    <div className="flex flex-1 flex-col min-h-0 overflow-auto p-6 label-small text-basic-muted [&>*]:shrink-0">
-      {children}
+    <div className="flex flex-1 flex-col min-h-0 overflow-auto p-4 code code-small [&>*]:shrink-0">
+      <p className="text-basic-tertiary">{title}</p>
+      <p className="text-basic-muted">{children}</p>
     </div>
   );
 }

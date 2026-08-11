@@ -11,7 +11,7 @@ import {
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
-import { errorMessage } from "@/app/providers/ToastProvider";
+import { humanErrorText } from "@/app/lib/providerError";
 import {
   useManagedLogout,
   useManagedProviderModels,
@@ -125,7 +125,7 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
           {control}
           {failed || expired ? (
             <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] text-right pt-1 opacity-70">
-              {failed ? state.message : errorMessage(reach.error)}
+              {humanErrorText(failed ? state.message : reach.error, backend)}
             </p>
           ) : null}
         </div>

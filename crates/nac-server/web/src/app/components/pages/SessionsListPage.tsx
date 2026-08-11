@@ -26,6 +26,7 @@ import {
   type SessionReorderStart,
 } from "@/app/components/sessions/SessionCard";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
+import { SessionsEmptyState } from "@/app/components/sessions/SessionsEmptyState";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
@@ -491,6 +492,10 @@ export default function SessionsListPage() {
       <SessionFilters sessions={all} />
     </BoxSurface>
   );
+
+  if (!isLoading && !error && all.length === 0) {
+    return <SessionsEmptyState mobile={isMobile} onStart={actions.launch} />;
+  }
 
   const showPinDropZone =
     isDefaultSort &&

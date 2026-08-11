@@ -5,12 +5,11 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
+  ChatSessionMessage,
+  ChatSessionMessageVariant,
   CopyButton,
   Icon,
   IconName,
-  MessageBox,
-  MessageBoxSize,
-  MessageBoxVariant,
   ModelPill,
   Tooltip,
   TooltipPosition,
@@ -177,12 +176,10 @@ export const ModelMessage = memo(function ModelMessage({
               case "text":
                 if (block.text.trim() === RUN_CANCELLED_MARKER) {
                   return (
-                    <MessageBox
+                    <ChatSessionMessage
                       key={block.key}
-                      variant={MessageBoxVariant.Danger}
-                      size={MessageBoxSize.Medium}
+                      variant={ChatSessionMessageVariant.Danger}
                       title="Run cancelled by user"
-                      className="w-fit"
                     />
                   );
                 }

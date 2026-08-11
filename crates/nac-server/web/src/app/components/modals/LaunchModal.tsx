@@ -42,6 +42,7 @@ import {
   nullable,
   serializeExtraHeaders,
 } from "@/app/lib/modelConfig";
+import { humanErrorText } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
@@ -196,7 +197,11 @@ function LaunchForm({
   const compactionRef = useRef("");
   const compactionAutoRef = useRef(true);
   const compactionPlaceholder = useMemo(() => {
-    const resolved = resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model);
+    const resolved = resolveCatalogModel(
+      catalog.data,
+      chosen?.backend,
+      chosen?.model,
+    );
     const contextWindow = resolved.contextWindow;
     return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
   }, [catalog.data, chosen?.backend, chosen?.model]);
@@ -298,7 +303,7 @@ function LaunchForm({
     } catch (saveError) {
       setError({
         field: "config",
-        message: `The configuration could not be saved: ${errorMessage(saveError)}`,
+        message: `The configuration could not be saved: ${humanErrorText(saveError)}`,
       });
       return;
     }
@@ -367,7 +372,7 @@ function LaunchForm({
           await api.submitRun(newId, prompt);
         } catch (runError) {
           toast.error(
-            `Session created, but the initial run failed: ${errorMessage(runError)}`,
+            `Session created, but the initial run failed: ${humanErrorText(runError, backend)}`,
           );
         }
       }
@@ -375,7 +380,10 @@ function LaunchForm({
       if (newId) navigate(routes.session(newId));
       onClose();
     } catch (createError) {
-      setError({ field: "config", message: errorMessage(createError) });
+      setError({
+        field: "config",
+        message: humanErrorText(createError, backend),
+      });
     }
   };
 
