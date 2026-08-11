@@ -28,15 +28,11 @@ export function catalogBaseUrl(provider: CatalogProvider): string {
 }
 
 /**
- * Models to open on, best first, and the providers serving them. Only the
- * Trinity ids are seeded into the server's catalog; the passthrough models
- * arrive with the live Arcee overlay, so Trinity stays behind the preferred
- * pick as the fallback for a catalog that has not been refreshed yet.
+ * The model the catalog opens on. Arcee only reports passthrough models through
+ * its authenticated live index, so keep the exact provider id here even while
+ * the local catalog still contains only its embedded seed.
  */
-const DEFAULT_PICK_MODELS = [
-  "deepseek/deepseek-v4-flash-latest",
-  "trinity-large-thinking",
-];
+const DEFAULT_PICK_MODEL = "deepseek/deepseek-v4-flash-latest";
 const DEFAULT_PICK_BACKENDS: BackendKind[] = ["arcee-auth", "arcee-api"];
 
 /**
@@ -48,21 +44,21 @@ const DEFAULT_PICK_BACKENDS: BackendKind[] = ["arcee-auth", "arcee-api"];
 export function defaultCatalogPick(
   catalog: ModelCatalog | undefined,
 ): CatalogPick | null {
-  for (const model of DEFAULT_PICK_MODELS) {
-    const candidates = DEFAULT_PICK_BACKENDS.flatMap((backend) => {
-      const provider = findProvider(catalog, backend);
-      if (!provider?.models.some((entry) => entry.id === model)) return [];
-      const baseUrl = catalogBaseUrl(provider);
-      return baseUrl ? [{ provider, baseUrl }] : [];
-    });
-    const chosen =
-      candidates.find((entry) => entry.provider.auth_status === "ready") ??
-      candidates[0];
-    if (chosen) {
-      return { backend: chosen.provider.id, model, baseUrl: chosen.baseUrl };
-    }
-  }
-  return null;
+  const candidates = DEFAULT_PICK_BACKENDS.flatMap((backend) => {
+    const provider = findProvider(catalog, backend);
+    if (!provider) return [];
+    const baseUrl = catalogBaseUrl(provider);
+    return baseUrl ? [{ provider, baseUrl }] : [];
+  });
+  const chosen =
+    candidates.find((entry) => entry.provider.auth_status === "ready") ??
+    candidates[0];
+  if (!chosen) return null;
+  return {
+    backend: chosen.provider.id,
+    model: DEFAULT_PICK_MODEL,
+    baseUrl: chosen.baseUrl,
+  };
 }
 
 /** What the catalog knows about the model a session is actually running. */
