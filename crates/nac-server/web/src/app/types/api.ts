@@ -822,6 +822,7 @@ export interface McpLibraryEntry {
   auth_hint: string | null;
   docs_url: string;
   icon_url: string | null;
+  category: string;
 }
 
 export interface McpLibraryResponse {

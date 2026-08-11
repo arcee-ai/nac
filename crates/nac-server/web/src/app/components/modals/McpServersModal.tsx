@@ -211,15 +211,31 @@ function LibraryPicker({
 }) {
   const { data } = useMcpLibrary();
   const [query, setQuery] = useState("");
-  const entries = useMemo(() => {
+  // Grouped by category before a search; a flat filtered list while typing.
+  const sections = useMemo(() => {
     const all = data?.entries ?? [];
     const needle = query.trim().toLowerCase();
-    if (!needle) return all;
-    return all.filter(
-      (entry) =>
-        entry.name.toLowerCase().includes(needle) ||
-        entry.description.toLowerCase().includes(needle),
-    );
+    if (needle) {
+      const matches = all.filter(
+        (entry) =>
+          entry.name.toLowerCase().includes(needle) ||
+          entry.description.toLowerCase().includes(needle),
+      );
+      return matches.length > 0 ? [{ category: null, entries: matches }] : [];
+    }
+    const grouped: { category: string | null; entries: McpLibraryEntry[] }[] =
+      [];
+    for (const entry of all) {
+      const section = grouped.find(
+        (candidate) => candidate.category === entry.category,
+      );
+      if (section) {
+        section.entries.push(entry);
+      } else {
+        grouped.push({ category: entry.category, entries: [entry] });
+      }
+    }
+    return grouped;
   }, [data, query]);
 
   useLayoutEffect(() => {
@@ -261,28 +277,40 @@ function LibraryPicker({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        {entries.map((entry) => (
-          <TabButton
-            key={entry.id}
-            size={TabButtonSize.Large}
-            onClick={() => onPick(entry)}
+        {sections.map((section) => (
+          <div
+            key={section.category ?? "search"}
+            className="flex flex-col gap-2 [&>*]:shrink-0"
           >
-            <EntryThumbnail entry={entry} />
-            <div className="flex flex-col items-start text-left min-w-0 flex-grow py-1">
-              <div className="flex items-center gap-2">
-                <span className="code code-small text-basic-primary">
-                  {entry.name}
-                </span>
-                {entry.auth === "required_header" ? (
-                  <Badge text="Key required" color={BadgeColor.Yellow} />
-                ) : null}
-              </div>
-              <span className="text-small text-basic-muted truncate w-full">
-                {entry.description}
+            {section.category !== null ? (
+              <span className="text-micro text-basic-muted uppercase tracking-wide pt-2 px-1">
+                {section.category}
               </span>
-            </div>
-            <Icon iconName={IconName.Right} className="shrink-0" />
-          </TabButton>
+            ) : null}
+            {section.entries.map((entry) => (
+              <TabButton
+                key={entry.id}
+                size={TabButtonSize.Large}
+                onClick={() => onPick(entry)}
+              >
+                <EntryThumbnail entry={entry} />
+                <div className="flex flex-col items-start text-left min-w-0 flex-grow py-1">
+                  <div className="flex items-center gap-2">
+                    <span className="code code-small text-basic-primary">
+                      {entry.name}
+                    </span>
+                    {entry.auth === "required_header" ? (
+                      <Badge text="Key required" color={BadgeColor.Yellow} />
+                    ) : null}
+                  </div>
+                  <span className="text-small text-basic-muted truncate w-full">
+                    {entry.description}
+                  </span>
+                </div>
+                <Icon iconName={IconName.Right} className="shrink-0" />
+              </TabButton>
+            ))}
+          </div>
         ))}
         <Separator />
         <TabButton size={TabButtonSize.Large} onClick={onCustom}>

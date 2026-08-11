@@ -46,12 +46,18 @@ pub struct McpLibraryEntry {
     pub docs_url: String,
     /// Thumbnail shown next to the entry in the picker.
     pub icon_url: Option<String>,
+    /// Section the picker groups the entry under before a search.
+    pub category: String,
 }
+
+/// Category of every registry-sourced entry; curated entries carry their own.
+pub const REGISTRY_CATEGORY: &str = "Popular on Smithery";
 
 /// The curated entries embedded in the binary: available offline, and the
 /// only place auth headers and hints are known.
 pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
     fn entry(
+        category: &str,
         name: &str,
         description: &str,
         url: &str,
@@ -71,11 +77,13 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             auth_hint: auth_prompt.map(|(_, hint)| hint.to_string()),
             docs_url: docs_url.to_string(),
             icon_url: Some(icon_url.to_string()),
+            category: category.to_string(),
         }
     }
 
     vec![
         entry(
+            "Web search",
             "exa",
             "Web search and content extraction built for agents.",
             "https://mcp.exa.ai/mcp",
@@ -85,6 +93,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             "https://exa.ai/favicon.ico",
         ),
         entry(
+            "Docs & reference",
             "context7",
             "Up-to-date documentation and code examples for libraries.",
             "https://mcp.context7.com/mcp",
@@ -97,6 +106,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             "https://context7.com/favicon.ico",
         ),
         entry(
+            "Code & repositories",
             "deepwiki",
             "Ask questions about public GitHub repositories.",
             "https://mcp.deepwiki.com/mcp",
@@ -106,6 +116,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             "https://deepwiki.com/favicon.ico",
         ),
         entry(
+            "Code & repositories",
             "grep_app",
             "Search code across a million public GitHub repositories.",
             "https://mcp.grep.app",
@@ -115,6 +126,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             "https://vercel.com/favicon.ico",
         ),
         entry(
+            "Code & repositories",
             "github",
             "Repositories, issues and pull requests on GitHub.",
             "https://api.githubcopilot.com/mcp/",
@@ -124,6 +136,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             "https://github.githubassets.com/favicons/favicon-dark.png",
         ),
         entry(
+            "Data & ML",
             "huggingface",
             "Models, datasets and Spaces on the Hugging Face Hub.",
             "https://huggingface.co/mcp",
@@ -136,6 +149,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             "https://huggingface.co/favicon.ico",
         ),
         entry(
+            "Docs & reference",
             "cloudflare_docs",
             "Search the Cloudflare developer documentation.",
             "https://docs.mcp.cloudflare.com/mcp",
@@ -267,6 +281,7 @@ pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
                         format!("https://smithery.ai/servers/{}", server.qualified_name)
                     }),
                     icon_url: server.icon_url,
+                    category: REGISTRY_CATEGORY.to_string(),
                 },
             ))
         });
@@ -321,6 +336,7 @@ mod tests {
                 auth_hint: None,
                 docs_url: "https://smithery.ai/servers/exa".to_string(),
                 icon_url: None,
+                category: REGISTRY_CATEGORY.to_string(),
             },
             McpLibraryEntry {
                 id: "smithery:acme/tool".to_string(),
@@ -333,6 +349,7 @@ mod tests {
                 auth_hint: None,
                 docs_url: "https://smithery.ai/servers/acme/tool".to_string(),
                 icon_url: None,
+                category: REGISTRY_CATEGORY.to_string(),
             },
         ];
         let merged = merge_library_entries(remote);
