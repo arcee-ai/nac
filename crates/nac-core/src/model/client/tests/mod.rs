@@ -67,7 +67,9 @@ async fn send_provider_test_request(client: &ModelClient, url: &str) -> Result<V
     let body = json!({"prompt": "sensitive prompt must not replay"});
     match client.backend {
         BackendKind::OpenAiResponses => client.post_json_with_retry(url, &body).await,
-        BackendKind::AnthropicMessages => client.post_anthropic_json_with_retry(url, &body).await,
+        BackendKind::AnthropicMessages => {
+            client.post_anthropic_json_with_retry(url, &body, false).await
+        }
         backend => panic!("unsupported test backend: {backend}"),
     }
 }

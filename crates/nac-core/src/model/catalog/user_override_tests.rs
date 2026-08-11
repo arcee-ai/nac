@@ -26,8 +26,8 @@ fn user_override_patches_an_exact_model() {
             "overrides": [
                 {
                     "provider": "deepseek-chat",
-                    "model": "deepseek-chat",
-                    "set": { "max_tokens": 65_536, "display_name": "DeepSeek Chat (patched)" }
+                    "model": "deepseek-v4-flash",
+                    "set": { "max_tokens": 65_536, "display_name": "DeepSeek V4 Flash (patched)" }
                 }
             ]
         }),
@@ -36,13 +36,13 @@ fn user_override_patches_an_exact_model() {
     let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
 
     assert!(warnings.is_empty(), "{warnings:?}");
-    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.source, ModelSource::UserOverride);
     assert_eq!(metadata.max_tokens, 65_536);
     assert_eq!(
         metadata.display_name.as_deref(),
-        Some("DeepSeek Chat (patched)")
-    );
+        Some("DeepSeek V4 Flash (patched)"
+    ));
     // Untouched fields keep the baseline values.
     assert_eq!(metadata.context_window, 1_000_000);
     assert_eq!(metadata.cost.input, 0.14);
@@ -192,7 +192,7 @@ fn user_override_patches_the_provider_default() {
     assert_eq!(unknown.context_window, 64_000);
     assert_eq!(unknown.max_tokens, 8_000);
     // Concrete baseline entries are untouched by the default patch.
-    let known = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let known = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(known.source, ModelSource::Baseline);
     assert_eq!(known.context_window, 1_000_000);
 }
@@ -209,7 +209,7 @@ fn malformed_models_json_keeps_the_baseline_with_a_warning() {
         matches!(warnings[0], CatalogWarning::UserOverridesMalformed { .. }),
         "{warnings:?}"
     );
-    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.source, ModelSource::Baseline);
     assert_eq!(metadata.context_window, 1_000_000);
 }
@@ -222,9 +222,9 @@ fn invalid_override_entries_are_skipped_individually() {
         serde_json::json!({
             "overrides": [
                 { "provider": "not-a-provider", "model": "x", "set": {} },
-                { "provider": "deepseek-chat", "model": "deepseek-chat", "set": { "context_window": 100 } },
-                { "provider": "deepseek-chat", "model": "deepseek-chat", "set": { "cost": { "input": -1.0 } } },
-                { "provider": "deepseek-chat", "model": "deepseek-chat", "set": { "max_tokens": 12_345 } },
+                { "provider": "deepseek-chat", "model": "deepseek-v4-flash", "set": { "context_window": 100 } },
+                { "provider": "deepseek-chat", "model": "deepseek-v4-flash", "set": { "cost": { "input": -1.0 } } },
+                { "provider": "deepseek-chat", "model": "deepseek-v4-flash", "set": { "max_tokens": 12_345 } },
                 { "provider": "deepseek-chat", "set": {} }
             ]
         }),
@@ -250,7 +250,7 @@ fn invalid_override_entries_are_skipped_individually() {
         matches!(&warnings[3], CatalogWarning::UserOverrideSkipped { index, .. } if *index == 4),
         "{warnings:?}"
     );
-    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.source, ModelSource::UserOverride);
     assert_eq!(metadata.max_tokens, 12_345);
     assert_eq!(metadata.context_window, 1_000_000);

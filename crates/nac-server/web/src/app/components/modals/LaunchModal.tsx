@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -215,6 +215,35 @@ function LaunchForm({
       ? (selection.mixed_models ?? null)
       : lastMixed;
   const savedMixedKey = JSON.stringify(savedMixed);
+
+  // Auto-suggest 70% of the selected model's context window as the compaction
+  // threshold. A manually entered value is preserved across model changes —
+  // the suggestion only fills the field when it is empty or was itself last
+  // auto-suggested.
+  const compactionRef = useRef("");
+  const compactionAutoRef = useRef(true);
+  const compactionPlaceholder = useMemo(() => {
+    const resolved = resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model);
+    const contextWindow = resolved.contextWindow;
+    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
+  }, [catalog.data, chosen?.backend, chosen?.model]);
+  useEffect(() => {
+    if (
+      compactionPlaceholder !== "auto" &&
+      (compactionRef.current === "" || compactionAutoRef.current)
+    ) {
+      compactionAutoRef.current = true;
+      compactionRef.current = compactionPlaceholder;
+      setCompaction(compactionPlaceholder);
+    }
+  }, [compactionPlaceholder]);
+
+  const onCompactionChange = (value: string) => {
+    setError(null);
+    compactionAutoRef.current = false;
+    compactionRef.current = value;
+    setCompaction(value);
+  };
 
   /** Paths belong to whichever machine runs the session, so they do not carry over. */
   const changeMode = (next: Mode) => {
@@ -550,8 +579,34 @@ function LaunchForm({
               />
               <Separator />
               <ConfigRow
+                label="Reasoning effort"
+                hint="Reasoning effort passed to the model."
+                control={smallSelect(
+                  reasoningItems,
+                  reasoning,
+                  edit(setReasoning),
+                )}
+              />
+              <Separator />
+              <ConfigRow
+                label="Compaction threshold"
+                hint="Context size that triggers compaction; 0 disables it."
+                control={
+                  <Input
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    className="w-full md:w-[120px]"
+                    inputClassName="md:text-right"
+                    placeholder={compactionPlaceholder}
+                    inputMode="numeric"
+                    value={compaction}
+                    onChange={(e) => onCompactionChange(e.target.value)}
+                  />
+                }
+              />
+              <Separator />
+              <ConfigRow
                 label="Advanced Configurations"
-                hint="Reasoning, compaction, extra headers and a first message."
+                hint="Extra headers and a first message."
                 control={
                   <Switch
                     checked={advanced}
@@ -563,37 +618,6 @@ function LaunchForm({
 
               {advanced ? (
                 <>
-                  <Separator />
-                  <ConfigRow
-                    label="Reasoning"
-                    hint="Reasoning effort passed to the model."
-                    control={smallSelect(
-                      reasoningItems,
-                      reasoning,
-                      edit(setReasoning),
-                    )}
-                  />
-                  <Separator />
-                  <ConfigRow
-                    label="Orchestrator compaction threshold"
-                    verticalOnMobile
-                    hint="Context size that triggers compaction; 0 disables it."
-                    labelClassName="pt-2 md:pt-0"
-                    control={
-                      <Input
-                        inputSize={
-                          isMobile ? InputSize.Large : InputSize.Medium
-                        }
-                        className="w-full md:w-[105px] pb-3 md:pb-0"
-                        inputClassName="md:text-right"
-                        placeholder="config.toml"
-                        inputMode="numeric"
-                        value={compaction}
-                        onChange={(e) => edit(setCompaction)(e.target.value)}
-                      />
-                    }
-                  />
-
                   {mode === "sandbox" ? (
                     <>
                       <Separator />

@@ -355,7 +355,7 @@ pub struct CreateSessionRequest {
     /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
-    /// Omitted inherits `[compaction].threshold_tokens`; null or zero disables.
+    /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
     /// Mixed-mode tier models; omitted or null launches single-model.
@@ -424,7 +424,7 @@ pub struct CreateModelConfigurationRequest {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub extra_headers: Option<BTreeMap<String, String>>,
     /// Compaction budget sessions started from this setup inherit; absent or
-    /// zero leaves them on `[compaction].threshold_tokens`.
+    /// zero leaves them on the 70%-of-context default.
     pub orchestrator_compaction_threshold: Option<u64>,
     /// Message the launch modal pre-fills when this setup is chosen.
     pub initial_prompt: Option<String>,

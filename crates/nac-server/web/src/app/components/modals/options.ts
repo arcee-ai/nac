@@ -24,6 +24,7 @@ export const EFFORT_LEVEL_OPTIONS: SelectItem[] = [
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
   { id: "xhigh", label: "X-High" },
+  { id: "max", label: "Max" },
 ];
 
 export const REASONING_OPTIONS: SelectItem[] = [

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -117,6 +117,9 @@ function initialFromMetadata(meta: SessionMetadata): SettingsInitialValues {
     reasoning_effort: meta.reasoning_effort || null,
     api_key_env: meta.api_key_env || null,
     extra_headers: meta.extra_headers ?? {},
+    // SessionMetadata does not carry the compaction threshold; the config
+    // row does, and is merged in by the caller when available.
+    orchestrator_compaction_threshold: null,
   };
 }
 
@@ -128,6 +131,7 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
     reasoning_effort: config.reasoning_effort || null,
     api_key_env: config.api_key_env || null,
     extra_headers: parseHeadersJson(config.extra_headers_json),
+    orchestrator_compaction_threshold: config.orchestrator_compaction_threshold,
   };
 }
 
@@ -193,7 +197,13 @@ export function SettingsModal({
 
   const meta = snapshot?.metadata;
   const initial = meta
-    ? initialFromMetadata(meta)
+    ? {
+        ...initialFromMetadata(meta),
+        // Metadata lacks the compaction threshold, but the config row (always
+        // fetched) carries it, so the field shows the live value.
+        orchestrator_compaction_threshold:
+          config?.orchestrator_compaction_threshold ?? null,
+      }
     : config
       ? initialFromConfig(config)
       : null;
@@ -260,6 +270,22 @@ function SettingsForm({
   const [reasoning, setReasoning] = useState(initial.reasoning_effort ?? "");
   const [baseUrl, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
+  const [compaction, setCompaction] = useState(
+    initial.orchestrator_compaction_threshold != null
+      ? String(initial.orchestrator_compaction_threshold)
+      : "",
+  );
+  // Track whether the compaction value was auto-suggested (vs. user-entered)
+  // so model changes don't clobber a manual value. The ref mirrors the state
+  // so the auto-suggest effect can read it without depending on the state.
+  const compactionRef = useRef(
+    initial.orchestrator_compaction_threshold != null
+      ? String(initial.orchestrator_compaction_threshold)
+      : "",
+  );
+  const compactionAutoRef = useRef(
+    initial.orchestrator_compaction_threshold == null,
+  );
   // Null while the session keeps the key it already has. A string is a
   // replacement being typed, and an empty one means the key was taken away.
   const [keyDraft, setKeyDraft] = useState<string | null>(null);
@@ -326,6 +352,27 @@ function SettingsForm({
     resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
     reasoning,
   );
+
+  const compactionPlaceholder = useMemo(() => {
+    const resolved = resolveCatalogModel(catalog.data, backend, model);
+    const contextWindow = resolved.contextWindow;
+    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
+  }, [catalog.data, backend, model]);
+
+  // Auto-suggest 70% of the selected model's context window as the compaction
+  // threshold. A manually entered value is preserved across model changes —
+  // the suggestion only fills the field when it is empty or was itself last
+  // auto-suggested.
+  useEffect(() => {
+    if (
+      compactionPlaceholder !== "auto" &&
+      (compactionRef.current === "" || compactionAutoRef.current)
+    ) {
+      compactionAutoRef.current = true;
+      compactionRef.current = compactionPlaceholder;
+      setCompaction(compactionPlaceholder);
+    }
+  }, [compactionPlaceholder]);
 
   const { provider, signedIn } = useManagedSignIn(kind);
   const loginQuery = useManagedProviderModels(
@@ -404,6 +451,7 @@ function SettingsForm({
       credential_mode: credentialMode,
       api_key_env: apiKeyEnv,
       extra_headers: headers,
+      orchestrator_compaction_threshold: compaction,
     });
 
     // Nothing is filed away until the rest of the form is known to be good, so
@@ -630,6 +678,20 @@ function SettingsForm({
             />
           </InputWrapper>
         </div>
+
+        <Input
+          label="Compaction threshold"
+          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+          hintText="Context size that triggers compaction; 0 disables it. Blank auto-suggests 70% of the model's context window."
+          placeholder={compactionPlaceholder}
+          inputMode="numeric"
+          value={compaction}
+          onChange={(event) => {
+            compactionAutoRef.current = false;
+            compactionRef.current = event.target.value;
+            setCompaction(event.target.value);
+          }}
+        />
 
         <Separator />
 

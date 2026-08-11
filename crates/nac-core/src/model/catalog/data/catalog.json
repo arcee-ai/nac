@@ -212,40 +212,6 @@
       "credential_env_var": "DEEPSEEK_API_KEY",
       "default_base_url": "https://api.deepseek.com",
       "models": {
-        "deepseek-chat": {
-          "display_name": "DeepSeek Chat",
-          "context_window": 1000000,
-          "max_tokens": 384000,
-          "cost": {
-            "input": 0.14,
-            "output": 0.28,
-            "cache_read": 0.0028,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "none": "none",
-            "xhigh": "max"
-          }
-        },
-        "deepseek-reasoner": {
-          "display_name": "DeepSeek Reasoner",
-          "context_window": 1000000,
-          "max_tokens": 384000,
-          "cost": {
-            "input": 0.14,
-            "output": 0.28,
-            "cache_read": 0.0028,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "none": "none",
-            "xhigh": "max"
-          }
-        },
         "deepseek-v4-flash": {
           "display_name": "DeepSeek V4 Flash",
           "context_window": 1000000,
@@ -259,6 +225,7 @@
           "reasoning": true,
           "thinking_level_map": {
             "high": "high",
+            "low": "low",
             "none": "none",
             "xhigh": "max"
           }
@@ -276,6 +243,7 @@
           "reasoning": true,
           "thinking_level_map": {
             "high": "high",
+            "low": "low",
             "none": "none",
             "xhigh": "max"
           }
@@ -301,7 +269,8 @@
             "high": "high",
             "low": "low",
             "medium": "medium",
-            "none": "none"
+            "none": "none",
+            "xhigh": "max"
           }
         },
         "accounts/fireworks/models/deepseek-v4-flash-0731": {
@@ -319,7 +288,8 @@
             "high": "high",
             "low": "low",
             "medium": "medium",
-            "none": "none"
+            "none": "none",
+            "xhigh": "max"
           }
         },
         "accounts/fireworks/models/deepseek-v4-pro": {
@@ -337,7 +307,8 @@
             "high": "high",
             "low": "low",
             "medium": "medium",
-            "none": "none"
+            "none": "none",
+            "xhigh": "max"
           }
         },
         "accounts/fireworks/models/glm-5p2": {
@@ -355,7 +326,8 @@
             "high": "high",
             "low": "low",
             "medium": "medium",
-            "none": "none"
+            "none": "none",
+            "xhigh": "max"
           }
         },
         "accounts/fireworks/models/gpt-oss-120b": {
@@ -372,8 +344,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none"
+            "medium": "medium"
           }
         },
         "accounts/fireworks/models/gpt-oss-20b": {
@@ -390,8 +361,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none"
+            "medium": "medium"
           }
         },
         "accounts/fireworks/models/kimi-k2p6": {
@@ -462,8 +432,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none"
+            "medium": "medium"
           }
         },
         "accounts/fireworks/models/minimax-m3": {
@@ -480,8 +449,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none"
+            "medium": "medium"
           }
         },
         "accounts/fireworks/models/qwen3p7-plus": {
@@ -517,7 +485,8 @@
             "high": "high",
             "low": "low",
             "medium": "medium",
-            "none": "none"
+            "none": "none",
+            "xhigh": "max"
           }
         },
         "accounts/fireworks/routers/kimi-k2p6-fast": {
@@ -1072,6 +1041,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
@@ -1092,6 +1062,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
@@ -1112,6 +1083,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
@@ -1132,6 +1104,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "minimal": "minimal",
             "none": "none",
@@ -1231,12 +1204,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
+          "thinking_level_map": {}
         },
         "Qwen/Qwen3.5-9B": {
           "display_name": "Qwen3.5 9B",
@@ -1285,12 +1253,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
+          "thinking_level_map": {}
         },
         "deepseek-ai/DeepSeek-V4-Flash-0731": {
           "display_name": "DeepSeek V4 Flash 0731",
@@ -1324,6 +1287,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "none": "none"
           }
@@ -1357,12 +1321,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none"
-          }
+          "thinking_level_map": {}
         },
         "moonshotai/Kimi-K2.6": {
           "display_name": "Kimi K2.6",
@@ -1492,7 +1451,7 @@
         },
         "zai-org/GLM-5.2": {
           "display_name": "GLM-5.2",
-          "context_window": 262144,
+          "context_window": 524288,
           "max_tokens": 164000,
           "cost": {
             "input": 1.4,
@@ -1504,6 +1463,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
+            "max": "max",
             "medium": "medium",
             "none": "none"
           }
