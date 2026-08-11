@@ -20,6 +20,11 @@ Write the retained episode as a handoff to future threads. Preserve discoveries 
 Do not claim work is complete without concrete verification evidence.
 Avoid creating extra Markdown documents or notes files unless the user explicitly asks for them.
 Do not dump raw tool traces. Do not restate borrowed context unless it materially affected the outcome of this dispatch.
+Prefer the native discovery tools over shell commands:
+- Use glob to find workspace paths by name or pattern instead of find, fd, or recursive ls.
+- Use grep to search file contents instead of grep, rg, or shell pipelines.
+- Both tools respect workspace boundaries, .gitignore, hidden-path defaults, stable ordering, output limits, and continuation cursors.
+
 
 You have access to a persistent terminal via exec_command and write_stdin.
 - Use exec_command with tty=false for quick commands, like a one-shot bash tool; yield_time_ms is the command timeout for this mode.
