@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -260,7 +260,7 @@ pub(super) async fn run_worker(
         let mut output = String::new();
         let mut worker_usage = TokenUsage::default();
         let mut model_error = None;
-        while let Ok(Some(line)) = lines.next_line().await {
+        while let Some(line) = next_pipe_line(&mut lines).await {
             if stderr_cancellation.is_cancelled() {
                 break;
             }
@@ -311,7 +311,7 @@ pub(super) async fn run_worker(
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut output = String::new();
-        while let Ok(Some(line)) = lines.next_line().await {
+        while let Some(line) = next_pipe_line(&mut lines).await {
             if stdout_cancellation.is_cancelled() {
                 break;
             }
@@ -393,6 +393,19 @@ pub(super) async fn run_worker(
         usage: worker_usage,
         model_error,
     })
+}
+
+/// Next line of a worker pipe. A line that does not decode as UTF-8 (a
+/// subprocess writing raw bytes to the inherited pipe) is skipped rather than
+/// ending the pump, so the worker's remaining events still reach the UI.
+async fn next_pipe_line<R: AsyncBufRead + Unpin>(lines: &mut Lines<R>) -> Option<String> {
+    loop {
+        match lines.next_line().await {
+            Ok(line) => return line,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(_) => return None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -653,6 +666,56 @@ exit 0
         assert_eq!(run.model_error.as_deref(), Some("x".repeat(600).as_str()));
         assert_eq!(run.stderr, "pid file already exists\nMCP unavailable");
         assert!(!run.stderr.contains(crate::events::STDERR_EVENT_PREFIX));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn worker_keeps_pumping_events_past_a_non_utf8_stderr_line() {
+        let root = std::env::temp_dir().join(format!("nac_worker_utf8_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker.sh");
+        let after = serde_json::to_string(&AgentEvent::ModelError {
+            thread_name: Some("worker".to_string()),
+            message: "seen after raw bytes".to_string(),
+        })
+        .unwrap();
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' 'before' >&2\n\
+             printf '\\375\\376\\377\\n' >&2\n\
+             printf '%s\\n' '{prefix}{after}' >&2\n\
+             printf '%s\\n' 'after' >&2\nexit 0\n",
+            prefix = crate::events::STDERR_EVENT_PREFIX,
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let run = run_worker(
+            &runtime,
+            &ModelClient::new_for_test(),
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(run.exit_code, 0);
+        assert_eq!(run.model_error.as_deref(), Some("seen after raw bytes"));
+        assert_eq!(run.stderr, "before\nafter");
         let _ = std::fs::remove_dir_all(root);
     }
 

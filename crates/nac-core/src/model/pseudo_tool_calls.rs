@@ -343,9 +343,12 @@ fn find_tag(text: &str, name: &str, kind: TagKind) -> Option<(usize, usize)> {
             TagKind::Either => true,
         };
         let name_end = after + name.len();
+        // `get` rather than indexing: `name_end` is a byte offset that can land
+        // inside a multi-byte character following the `<`.
         if matches_kind
-            && name_end <= text.len()
-            && text[after..name_end].eq_ignore_ascii_case(name)
+            && text
+                .get(after..name_end)
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
             && tag_name_boundary(&text[name_end..])
         {
             if let Some(gt) = text[name_end..].find('>') {
@@ -427,5 +430,28 @@ impl<'text> Cursor<'text> {
         let end = rest.find(tag)?;
         self.at += end + tag.len();
         Some(&rest[..end])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_tags_survives_multibyte_characters_after_an_angle_bracket() {
+        // A `<` followed by a run of multi-byte characters (em dashes) used to
+        // panic in `find_tag`: the candidate name slice for an 8-byte tag name
+        // like `function` ended inside the third 3-byte dash.
+        let text = "cost <——— note <tool_call>payload</tool_call> tail <———";
+        assert_eq!(
+            strip_native_tool_format_tags(text),
+            "cost <——— note  tail <———"
+        );
+    }
+
+    #[test]
+    fn strip_tags_removes_paired_and_stray_tags() {
+        let text = "before <function=thread>x</function> mid </tool_call> after";
+        assert_eq!(strip_native_tool_format_tags(text), "before  mid  after");
     }
 }
