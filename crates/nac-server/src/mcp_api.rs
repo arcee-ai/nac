@@ -205,9 +205,28 @@ pub async fn warm_library_cache() {
     let _ = library_entries().await;
 }
 
+/// Serializes refreshes without holding `LIBRARY_CACHE` across the fetch, so
+/// readers keep getting the cached catalog while a refresh is in flight.
+static LIBRARY_REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn library_entries() -> Vec<mcp::McpLibraryEntry> {
-    let mut cache = LIBRARY_CACHE.lock().await;
-    if let Some((fetched_at, entries)) = cache.as_ref() {
+    if let Some((fetched_at, entries)) = LIBRARY_CACHE.lock().await.as_ref() {
+        if fetched_at.elapsed() < LIBRARY_CACHE_TTL {
+            return entries.clone();
+        }
+        // An expired catalog still answers this request; the refresh runs in
+        // the background for a later one.
+        if LIBRARY_REFRESH.try_lock().is_ok() {
+            tokio::spawn(refresh_library_cache());
+        }
+        return entries.clone();
+    }
+    refresh_library_cache().await
+}
+
+async fn refresh_library_cache() -> Vec<mcp::McpLibraryEntry> {
+    let _refresh = LIBRARY_REFRESH.lock().await;
+    if let Some((fetched_at, entries)) = LIBRARY_CACHE.lock().await.as_ref() {
         if fetched_at.elapsed() < LIBRARY_CACHE_TTL {
             return entries.clone();
         }
@@ -216,13 +235,13 @@ async fn library_entries() -> Vec<mcp::McpLibraryEntry> {
         Ok(remote) => mcp::merge_library_entries(remote),
         Err(error) => {
             eprintln!("MCP library registry fetch failed: {error:#}");
-            match cache.take() {
+            match LIBRARY_CACHE.lock().await.take() {
                 Some((_, stale)) => stale,
                 None => mcp::embedded_library_entries(),
             }
         }
     };
-    *cache = Some((Instant::now(), entries.clone()));
+    *LIBRARY_CACHE.lock().await = Some((Instant::now(), entries.clone()));
     entries
 }
 
