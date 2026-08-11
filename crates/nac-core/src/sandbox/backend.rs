@@ -11,7 +11,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use super::ssh_command::SshConnection;
-use super::{HostMountPath, SandboxSession};
+use super::{HostPathResolution, SandboxSession};
 use crate::paths::PathContext;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,14 +51,6 @@ impl ExecutionBackend {
         }
     }
 
-    pub fn remote_io_label(&self) -> &'static str {
-        match self {
-            Self::Local { .. } => "local workspace",
-            Self::Sandbox(_) => "sandbox",
-            Self::Ssh(_) => "remote host",
-        }
-    }
-
     pub async fn ensure_ready(&self) -> Result<()> {
         match self {
             Self::Local { .. } => Ok(()),
@@ -82,14 +74,13 @@ impl ExecutionBackend {
         }
     }
 
-    /// Returns the host-visible identity for a sandbox path backed by a mount.
-    ///
-    /// File mutation tools use this to coordinate locks on the host rather than
-    /// relying on advisory-lock propagation through a VM or container mount.
-    pub(crate) fn host_path_for_remote_file(&self, resolved_path: &Path) -> Option<HostMountPath> {
+    /// Classifies a remote path as safely host-mapped, mounted but unsafe for
+    /// host traversal, or unmounted. Mutation tools retain read-only policy
+    /// even when an unsafe mounted path must fall back to remote execution.
+    pub(crate) fn host_path_for_remote_file(&self, resolved_path: &Path) -> HostPathResolution {
         match self {
-            Self::Sandbox(session) => session.host_path_for_guest(resolved_path),
-            Self::Local { .. } | Self::Ssh(_) => None,
+            Self::Sandbox(session) => session.host_path_resolution_for_guest(resolved_path),
+            Self::Local { .. } | Self::Ssh(_) => HostPathResolution::Unmounted,
         }
     }
 

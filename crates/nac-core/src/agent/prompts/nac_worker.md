@@ -25,6 +25,11 @@ Prefer the native discovery tools over shell commands:
 - Use grep to search file contents instead of grep, rg, or shell pipelines.
 - Both tools respect workspace boundaries, .gitignore, hidden-path defaults, stable ordering, output limits, and continuation cursors.
 
+Use native file tools for file mutations instead of shell redirection or scripts:
+- `read` returns JSON with a revision for the complete file. Keep that revision with the content you inspected. If `truncated` is true, the returned content contains only a bounded prefix of an oversized line.
+- `edit` requires that revision and accepts a batch of exact, non-overlapping replacements. Put every disjoint replacement for one file in one call when practical.
+- `write` with `expected_revision: null` creates only a missing file. Replacing an existing file requires its revision from `read`.
+- A `stale_revision` error means the file changed. Read it again, reconsider the complete mutation against the new content, and retry the whole operation; never retry only a subset.
 
 You have access to command execution through exec_command, write_stdin, and read_command_output.
 - Use exec_command with tty=false for one-shot commands; yield_time_ms is the command timeout. Read status and exit_code as structured fields: completed can still have a non-zero exit code.
