@@ -34,7 +34,11 @@ pub struct MixedModeConfig {
     pub hard: MixedTierSettings,
 }
 
-fn resolve_tier_client(tier: &MixedTierSettings, label: &str) -> Result<ModelClient> {
+fn resolve_tier_client(
+    tier: &MixedTierSettings,
+    label: &str,
+    session_headers: &BTreeMap<String, String>,
+) -> Result<ModelClient> {
     let backend = tier
         .backend
         .or_else(|| provider_for_model(tier.model.as_str()));
@@ -49,26 +53,30 @@ fn resolve_tier_client(tier: &MixedTierSettings, label: &str) -> Result<ModelCli
         base_url,
         tier.reasoning_effort,
         tier.api_key_env.clone(),
-        BTreeMap::new(),
+        session_headers.clone(),
     )
     .and_then(ModelClient::from_effective_settings)
     .with_context(|| format!("invalid {label} tier model settings"))
 }
 
 /// Resolve all mixed tiers at launch or resume, so invalid settings fail
-/// before the first dispatch.
-pub(crate) fn resolve_dispatch_clients(mixed: &MixedModeConfig) -> Result<MixedDispatchClients> {
+/// before the first dispatch. Tier clients carry the session's extra
+/// headers, matching how single-mode workers inherit them.
+pub(crate) fn resolve_dispatch_clients(
+    mixed: &MixedModeConfig,
+    session_headers: &BTreeMap<String, String>,
+) -> Result<MixedDispatchClients> {
     Ok(MixedDispatchClients {
-        easy: resolve_tier_client(&mixed.easy, "easy")?,
-        medium: resolve_tier_client(&mixed.medium, "medium")?,
-        hard: resolve_tier_client(&mixed.hard, "hard")?,
+        easy: resolve_tier_client(&mixed.easy, "easy", session_headers)?,
+        medium: resolve_tier_client(&mixed.medium, "medium", session_headers)?,
+        hard: resolve_tier_client(&mixed.hard, "hard", session_headers)?,
     })
 }
 
 /// Validate a mixed configuration through the same resolution path used by
 /// launch and resume.
-pub fn validate(mixed: &MixedModeConfig) -> Result<()> {
-    resolve_dispatch_clients(mixed).map(|_| ())
+pub fn validate(mixed: &MixedModeConfig, session_headers: &BTreeMap<String, String>) -> Result<()> {
+    resolve_dispatch_clients(mixed, session_headers).map(|_| ())
 }
 
 #[cfg(test)]
@@ -109,19 +117,22 @@ mod tests {
             medium: tier("gpt-5", None),
             hard: tier("claude-fable-5", None),
         };
-        let clients = resolve_dispatch_clients(&mixed).unwrap();
+        let headers = BTreeMap::from([("X-Proxy-Org".to_string(), "arcee".to_string())]);
+        let clients = resolve_dispatch_clients(&mixed, &headers).unwrap();
         assert_eq!(clients.easy.model, "gpt-5-mini");
         assert_eq!(clients.easy.reasoning_effort(), Some(ReasoningEffort::Low));
         assert_eq!(clients.medium.model, "gpt-5");
         assert_eq!(clients.hard.model, "claude-fable-5");
         assert_eq!(clients.hard.backend(), BackendKind::AnthropicMessages);
+        assert_eq!(clients.easy.extra_headers(), &headers);
+        assert_eq!(clients.hard.extra_headers(), &headers);
 
         let mixed = MixedModeConfig {
             easy: tier("gpt-5-mini", None),
             medium: tier("gpt-5", None),
             hard: tier("claude-fable-5", Some(ReasoningEffort::High)),
         };
-        let error = resolve_dispatch_clients(&mixed)
+        let error = resolve_dispatch_clients(&mixed, &BTreeMap::new())
             .map(|_| ())
             .unwrap_err()
             .to_string();

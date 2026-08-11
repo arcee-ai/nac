@@ -794,7 +794,7 @@ pub async fn build_run_config(
     let mixed_models = options.model.mixed.clone();
     let mixed_clients = mixed_models
         .as_ref()
-        .map(resolve_dispatch_clients)
+        .map(|mixed| resolve_dispatch_clients(mixed, &settings.extra_headers))
         .transpose()?
         .map(std::sync::Arc::new);
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
@@ -1196,7 +1196,7 @@ async fn build_resume_config_from_snapshot(
     let mixed_clients = snapshot
         .mixed_models
         .as_ref()
-        .map(resolve_dispatch_clients)
+        .map(|mixed| resolve_dispatch_clients(mixed, &snapshot.extra_headers))
         .transpose()
         .map_err(|error| {
             anyhow::anyhow!(

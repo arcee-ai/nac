@@ -1879,7 +1879,7 @@ impl SessionManager {
         )?;
         // Fail a broken mixed tier here, not at the session's next launch.
         if let Some(mixed) = prospective.mixed_models.as_ref() {
-            nac_core::mixed_mode::validate(mixed)
+            nac_core::mixed_mode::validate(mixed, &extra_headers)
                 .map_err(|error| request_configuration_error(format!("{error:#}")))?;
         }
         validate_model_configuration(
