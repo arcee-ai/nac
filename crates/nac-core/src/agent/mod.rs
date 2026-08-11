@@ -197,6 +197,7 @@ pub(crate) fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
 
 impl Agent {
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
+        let client = client.with_prompt_cache_key(config.session_id.clone());
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
         let mode = config.mode;

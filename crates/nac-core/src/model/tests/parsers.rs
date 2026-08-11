@@ -140,7 +140,10 @@ fn parses_openai_responses_usage_with_cached_tokens() {
                 "input_tokens": 100,
                 "output_tokens": 50,
                 "total_tokens": 150,
-                "input_tokens_details": {"cached_tokens": 80},
+                "input_tokens_details": {
+                    "cached_tokens": 60,
+                    "cache_write_tokens": 20
+                },
                 "output_tokens_details": {"reasoning_tokens": 10}
             }
         }),
@@ -149,30 +152,30 @@ fn parses_openai_responses_usage_with_cached_tokens() {
     .unwrap();
 
     let usage = parsed.usage.expect("usage should be parsed");
-    assert_eq!(usage.input_tokens, 20); // 100 - 80 cached
+    assert_eq!(usage.input_tokens, 20); // 100 - 60 cached - 20 written
     assert_eq!(usage.output_tokens, 50);
-    assert_eq!(usage.cache_read_tokens, 80);
-    assert_eq!(usage.cache_write_tokens, 0);
+    assert_eq!(usage.cache_read_tokens, 60);
+    assert_eq!(usage.cache_write_tokens, 20);
     assert_eq!(usage.orchestrator_context_tokens, 150);
 
     // Parsers never bill; the client attaches cost from catalog rates.
     assert_eq!(usage.cost, TokenCostMicros::default());
-    // gpt-5.2 catalog rates ($/1M): 1.75 / 14 / 0.175 / 0.
+    // gpt-5.6 catalog rates ($/1M): 5 / 30 / 0.5 / 6.25.
     let cost = calculate_cost(
         &catalog::ModelCostRates {
-            input: 1.75,
-            output: 14.0,
-            cache_read: 0.175,
-            cache_write: 0.0,
+            input: 5.0,
+            output: 30.0,
+            cache_read: 0.5,
+            cache_write: 6.25,
         },
         None,
         &usage,
     );
-    assert_eq!(cost.input, 35);
-    assert_eq!(cost.output, 700);
-    assert_eq!(cost.cache_read, 14);
-    assert_eq!(cost.cache_write, 0);
-    assert_eq!(cost.total, 749);
+    assert_eq!(cost.input, 100);
+    assert_eq!(cost.output, 1_500);
+    assert_eq!(cost.cache_read, 30);
+    assert_eq!(cost.cache_write, 125);
+    assert_eq!(cost.total, 1_755);
 }
 
 #[test]
@@ -231,7 +234,8 @@ fn parses_chat_completions_usage_with_cached_tokens() {
                 "prompt_tokens": 100,
                 "completion_tokens": 50,
                 "total_tokens": 150,
-                "prompt_tokens_details": {"cached_tokens": 60},
+                "prompt_cache_hit_tokens": 60,
+                "prompt_cache_miss_tokens": 40,
                 "completion_tokens_details": {"reasoning_tokens": 5}
             }
         }),
@@ -264,6 +268,35 @@ fn parses_chat_completions_usage_with_cached_tokens() {
     assert_eq!(cost.output, 14);
     assert_eq!(cost.cache_read, 0, "0.168 micros rounds to 0");
     assert_eq!(cost.total, 20);
+}
+
+#[test]
+fn parses_chat_completions_cache_write_tokens_when_reported() {
+    let parsed = parse_completions_response(
+        &json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": "done", "tool_calls": null}
+            }],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 10,
+                "total_tokens": 110,
+                "prompt_tokens_details": {
+                    "cached_tokens": 60,
+                    "cache_write_tokens": 20
+                }
+            }
+        }),
+        "https://compatible.example/chat/completions",
+        "reasoning_content",
+    )
+    .unwrap();
+
+    let usage = parsed.usage.expect("usage should be parsed");
+    assert_eq!(usage.input_tokens, 20);
+    assert_eq!(usage.cache_read_tokens, 60);
+    assert_eq!(usage.cache_write_tokens, 20);
 }
 
 #[test]

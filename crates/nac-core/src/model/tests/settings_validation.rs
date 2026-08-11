@@ -545,8 +545,14 @@ fn adapters_translate_effort_through_the_catalog_map() {
     assert_eq!(together["reasoning"], json!({"enabled": true}));
     assert_eq!(together["reasoning_effort"], "tier-three");
 
-    let openai =
-        openai_responses_request("m", Some(ReasoningEffort::Xhigh), &messages, &[], &custom);
+    let openai = openai_responses_request(
+        "m",
+        Some(ReasoningEffort::Xhigh),
+        &messages,
+        &[],
+        &custom,
+        None,
+    );
     assert_eq!(openai["reasoning"]["effort"], "tier-four");
 
     // claude-opus-4-6 supports xhigh in the baseline catalog, so the

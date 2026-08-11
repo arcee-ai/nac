@@ -116,16 +116,22 @@ pub(super) fn parse_openai_responses_response(
 
     let usage = value.get("usage").map(|u| {
         let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cached = u
-            .get("input_tokens_details")
-            .and_then(|d| d.get("cached_tokens"))
+        let input_details = u.get("input_tokens_details");
+        let cache_read = input_details
+            .and_then(|details| details.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_write = input_details
+            .and_then(|details| details.get("cache_write_tokens"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         TokenUsage {
-            input_tokens: input_tokens.saturating_sub(cached),
+            input_tokens: input_tokens
+                .saturating_sub(cache_read)
+                .saturating_sub(cache_write),
             output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-            cache_read_tokens: cached,
-            cache_write_tokens: 0,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: cache_write,
             reasoning_tokens: 0,
             orchestrator_context_tokens: u
                 .get("total_tokens")

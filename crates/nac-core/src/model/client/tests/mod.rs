@@ -58,6 +58,7 @@ fn test_model_client(
         extra_headers,
         arcee_credential_source: None,
         cache_ttl: None,
+        prompt_cache_key: None,
         resolved_model: catalog::resolve(backend, "test-model"),
     }
 }

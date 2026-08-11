@@ -425,20 +425,36 @@ pub async fn send_responses(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     thinking_levels: &ThinkingLevelMap,
+    prompt_cache_key: Option<&str>,
     on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse> {
     let url = codex_responses_url(base_url)?;
-    let request =
-        codex_responses_request(model, reasoning_effort, &messages, &tools, thinking_levels);
+    let request = codex_responses_request(
+        model,
+        reasoning_effort,
+        &messages,
+        &tools,
+        thinking_levels,
+        prompt_cache_key,
+    );
     let auth = fresh_auth(client).await?;
 
-    match post_codex_json_with_retry(client, &url, &request, &auth, on_delta).await {
+    match post_codex_json_with_retry(client, &url, &request, &auth, prompt_cache_key, on_delta)
+        .await
+    {
         Ok(value) => parse_openai_responses_response(&value, &url),
         Err(error) if error.status == Some(StatusCode::UNAUTHORIZED) => {
             let refreshed = force_refresh_auth(client).await?;
-            let value = post_codex_json_with_retry(client, &url, &request, &refreshed, on_delta)
-                .await
-                .map_err(anyhow::Error::new)?;
+            let value = post_codex_json_with_retry(
+                client,
+                &url,
+                &request,
+                &refreshed,
+                prompt_cache_key,
+                on_delta,
+            )
+            .await
+            .map_err(anyhow::Error::new)?;
             parse_openai_responses_response(&value, &url)
         }
         Err(error) => Err(anyhow::Error::new(error)),
@@ -807,6 +823,7 @@ fn codex_responses_request(
     messages: &[Message],
     tools: &[ToolDefinition],
     thinking_levels: &ThinkingLevelMap,
+    prompt_cache_key: Option<&str>,
 ) -> Value {
     let (instructions, input) = codex_instructions_and_input(messages);
     let mut request = json!({
@@ -821,6 +838,9 @@ fn codex_responses_request(
 
     if let Some(instructions) = instructions {
         request["instructions"] = Value::String(instructions);
+    }
+    if let Some(key) = prompt_cache_key {
+        request["prompt_cache_key"] = Value::String(key.to_owned());
     }
 
     if !tools.is_empty() {
@@ -869,11 +889,24 @@ fn codex_instructions_and_input(messages: &[Message]) -> (Option<String>, Vec<Va
     (instructions, responses_input_items(&input_messages))
 }
 
+fn apply_codex_session_headers(
+    mut request: reqwest::RequestBuilder,
+    prompt_cache_key: Option<&str>,
+) -> reqwest::RequestBuilder {
+    if let Some(key) = prompt_cache_key {
+        request = request
+            .header("session-id", key)
+            .header("x-client-request-id", key);
+    }
+    request
+}
+
 async fn post_codex_json_with_retry(
     client: &Client,
     url: &str,
     body: &Value,
     auth: &StoredCodexAuth,
+    prompt_cache_key: Option<&str>,
     on_delta: DeltaSink<'_>,
 ) -> std::result::Result<Value, CodexRequestError> {
     let mut last_error = CodexRequestError {
@@ -882,7 +915,7 @@ async fn post_codex_json_with_retry(
     };
 
     for attempt in 0..10 {
-        let response = match client
+        let request = client
             .post(url)
             .header("Authorization", format!("Bearer {}", auth.access))
             .header("ChatGPT-Account-Id", auth.account_id.as_str())
@@ -890,7 +923,8 @@ async fn post_codex_json_with_retry(
             .header("User-Agent", codex_user_agent())
             .header("OpenAI-Beta", "responses=experimental")
             .header(header::ACCEPT, "text/event-stream")
-            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::CONTENT_TYPE, "application/json");
+        let response = match apply_codex_session_headers(request, prompt_cache_key)
             .json(body)
             .send()
             .await
@@ -1956,7 +1990,8 @@ mod tests {
         ];
         let levels =
             catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.5").thinking_level_map;
-        let absent = codex_responses_request("gpt-5.5", None, &messages, &[], &levels);
+        let absent =
+            codex_responses_request("gpt-5.5", None, &messages, &[], &levels, Some("session-1"));
         assert_eq!(absent["model"], "gpt-5.5");
         assert_eq!(
             absent["instructions"],
@@ -1969,6 +2004,7 @@ mod tests {
         // The summary is requested unconditionally; only the effort is opt-in.
         assert_eq!(absent["reasoning"], json!({"summary": "auto"}));
         assert_eq!(absent["include"], json!(["reasoning.encrypted_content"]));
+        assert_eq!(absent["prompt_cache_key"], "session-1");
         assert!(absent.get("tools").is_none());
         assert!(absent.get("tool_choice").is_none());
         assert!(absent.get("parallel_tool_calls").is_none());
@@ -1986,6 +2022,7 @@ mod tests {
                 },
             }],
             &levels,
+            Some("session-1"),
         );
         assert!(with_tools.get("tools").is_some());
         assert_eq!(with_tools["tool_choice"], "auto");
@@ -1999,7 +2036,8 @@ mod tests {
             ReasoningEffort::High,
             ReasoningEffort::Xhigh,
         ] {
-            let request = codex_responses_request("gpt-5.5", Some(effort), &messages, &[], &levels);
+            let request =
+                codex_responses_request("gpt-5.5", Some(effort), &messages, &[], &levels, None);
             assert_eq!(request["reasoning"]["effort"], effort.as_str());
             assert_eq!(request["include"][0], "reasoning.encrypted_content");
         }
@@ -2015,8 +2053,21 @@ mod tests {
             &messages,
             &[],
             &custom,
+            None,
         );
         assert_eq!(request["reasoning"]["effort"], "tier-four");
+    }
+
+    #[test]
+    fn codex_session_headers_share_the_prompt_cache_key() {
+        let request = apply_codex_session_headers(
+            Client::new().post("https://chatgpt.com/backend-api/codex/responses"),
+            Some("session-1"),
+        )
+        .build()
+        .unwrap();
+        assert_eq!(request.headers()["session-id"], "session-1");
+        assert_eq!(request.headers()["x-client-request-id"], "session-1");
     }
 
     #[test]
@@ -2082,6 +2133,7 @@ mod tests {
                 &format!("http://{address}"),
                 &json!({"stream": true}),
                 &stored_codex_auth("access-token"),
+                None,
                 None,
             ),
         )
