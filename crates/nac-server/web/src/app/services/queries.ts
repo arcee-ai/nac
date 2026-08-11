@@ -53,6 +53,7 @@ import type {
   ManagedAuthProvider,
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
+  SlashCommandDefinition,
   SessionSummarySnapshot,
   ThreadEventPage,
   SshConfigurationList,
@@ -104,6 +105,7 @@ export const queryKeys = {
     ["managed-provider-models", backend] as const,
   managedProviderModelsAll: ["managed-provider-models"] as const,
   modelCatalog: ["model-catalog"] as const,
+  slashCommands: ["slash-commands"] as const,
   resolvedModelConfig: (configId: string) =>
     ["model-config-resolved", configId] as const,
   resolvedModelConfigsAll: ["model-config-resolved"] as const,
@@ -455,6 +457,16 @@ export function useModelCatalog(enabled = true) {
     queryFn: ({ signal }) => api.getModelCatalog(signal),
     enabled,
     staleTime: 10 * 60_000,
+    retry: false,
+  });
+}
+
+/** Static slash-command metadata served from the core command registry. */
+export function useSlashCommands() {
+  return useQuery<SlashCommandDefinition[]>({
+    queryKey: queryKeys.slashCommands,
+    queryFn: ({ signal }) => api.listCommands(signal),
+    staleTime: Infinity,
     retry: false,
   });
 }
