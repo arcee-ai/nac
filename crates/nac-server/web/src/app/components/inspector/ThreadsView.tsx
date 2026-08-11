@@ -107,12 +107,11 @@ const ToolCallView = memo(function ToolCallView({
   running,
 }: {
   entry: ToolCallEntry;
+  /** Whether the thread is still running — a call with no result in a
+   * finished thread is history, not something in flight. */
   running: boolean;
 }) {
-  // A missing result event must not leave completed history looking active.
-  // The terminal refetch normally supplies the pair; this is the defensive
-  // rendering fallback for a truncated page, replay gap or persistence fault.
-  const pending = running && entry.status === "pending";
+  const pending = entry.status === "pending" && running;
   return (
     <div className="pt-1">
       <p
@@ -189,9 +188,8 @@ const LogEntryView = memo(function LogEntryView({
   entry: LogEntry;
   running: boolean;
 }) {
-  if (entry.kind === "tool_call") {
+  if (entry.kind === "tool_call")
     return <ToolCallView entry={entry} running={running} />;
-  }
   return <StandaloneView entry={entry} />;
 });
 

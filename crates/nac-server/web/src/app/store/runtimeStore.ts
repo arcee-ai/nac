@@ -209,6 +209,18 @@ function updateThread(name: string, patch: Partial<RuntimeThread>) {
   }));
 }
 
+/** Records which threads a stop interrupted, before they are terminalized. */
+function flagCancelledThreads(
+  threads: Record<string, RuntimeThread>,
+): Record<string, RuntimeThread> {
+  return Object.fromEntries(
+    Object.entries(threads).map(([name, thread]) => [
+      name,
+      thread.status === "running" ? { ...thread, cancelled: true } : thread,
+    ]),
+  );
+}
+
 /** Identifies the log lines whose events carry no id of their own. */
 let logSequence = 0;
 
@@ -226,6 +238,20 @@ function pushThreadLog(name: string | undefined, event: AgentEvent) {
     const log = [...thread.log, line].slice(-THREAD_LOG_LIMIT);
     return { threads: { ...state.threads, [name]: { ...thread, log } } };
   });
+}
+
+/** Marks every still-running thread finished once the run itself is over. */
+function terminalizeThreads(
+  threads: Record<string, RuntimeThread>,
+): Record<string, RuntimeThread> {
+  return Object.fromEntries(
+    Object.entries(threads).map(([name, thread]) => [
+      name,
+      thread.status === "running"
+        ? { ...thread, status: "finished", exitCode: null, isError: false }
+        : thread,
+    ]),
+  );
 }
 
 export type RefreshKind = "none" | "messages" | "snapshot" | "replace-snapshot";
@@ -259,26 +285,30 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
       return "snapshot";
     case "run_completed":
       // The run's own answer is the authoritative version of whatever the
-      // stream last held, so it takes over until the snapshot lands.
-      setState({
+      // stream last held, so it takes over until the snapshot lands. The run
+      // outlives every worker it dispatched, so a thread still marked running
+      // here only means its own finish event never arrived.
+      setState((state) => ({
         running: false,
         activity: "",
         streamText: event.response,
         streamReasoning: "",
         streamSettled: true,
-      });
+        threads: terminalizeThreads(state.threads),
+      }));
       pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
       return "snapshot";
     case "run_failed": {
       // The terminal message is a constant; a provider refusal seen earlier in
       // this run explains the same failure and says something useful.
       const message = getState().modelError ?? event.message;
-      setState({
+      setState((state) => ({
         running: false,
         activity: "",
         error: message,
         streamSettled: true,
-      });
+        threads: terminalizeThreads(state.threads),
+      }));
       pushEvent({ seq, kind: "error", text: message, isError: true });
       return "snapshot";
     }
@@ -292,20 +322,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         error: null,
         modelError: null,
         streamSettled: true,
-        threads: Object.fromEntries(
-          Object.entries(state.threads).map(([name, thread]) => [
-            name,
-            thread.status === "running"
-              ? {
-                  ...thread,
-                  status: "finished",
-                  cancelled: true,
-                  exitCode: null,
-                  isError: false,
-                }
-              : thread,
-          ]),
-        ),
+        threads: terminalizeThreads(flagCancelledThreads(state.threads)),
       }));
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
       return "snapshot";
