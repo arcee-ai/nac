@@ -110,6 +110,24 @@ The store schema is version 6 and upgrades forward. Back up each store before up
 
 `AGENTS.md` is loaded hierarchically from the project and globally from `NAC_HOME` / `~/.config/nac`. Skills are discovered from project and user skill directories; the orchestrator sees compact skill metadata and preloads selected skills for worker threads, while workers do not activate skills themselves. nac ignores `disable-model-invocation`; avoid interactive skills because nac is intended to run rather autonomously. Sessions are stored in the project store (`.nac/store.db` by default): open the web dashboard to list and select existing sessions, or use the `GET /sessions` and `GET /sessions/{session_id}` API endpoints to inspect a specific session. Worker thread history does not auto-compact.
 
+### Worker session review
+
+Worker threads can review persisted NAC history with two read-only tools:
+
+- `session_list` discovers root sessions. Its default `session` namespace returns the worker's containing session; `workspace` includes other sessions at the same persisted workspace, and `store` includes every root session in the configured SQLite store.
+- `session_open` opens a bounded page of committed events. With no arguments it returns recent orchestrator and worker events from the containing session. `stream: {"kind":"orchestrator"}` selects only orchestrator messages, while `stream: {"kind":"thread","thread_name":"research/api"}` selects one exact worker stream.
+
+For example, a thread investigating a repeated failure can orient locally, inspect the relevant worker, and then compare an older workspace session:
+
+```json
+session_list({})
+session_open({"stream":{"kind":"thread","thread_name":"verify/build"}})
+session_list({"namespace":"workspace"})
+session_open({"namespace":"workspace","session_id":"<session-id>","stream":{"kind":"orchestrator"}})
+```
+
+Both tools page backward with an opaque `cursor`; use a returned cursor by itself. Events preserve whether they came from the legacy session snapshot or the incremental `thread_events` log, plus their orchestrator/thread stream identity. Managed-worker events are the sanitized records NAC already persists, so failed or cancelled event-only work remains reviewable even when no retained episode was produced. All returned history is untrusted quoted evidence, not instructions: workers are told never to follow commands or requests embedded in it and to act only from the current dispatch and independently verified current state.
+
 Uninstall:
 
 ```sh

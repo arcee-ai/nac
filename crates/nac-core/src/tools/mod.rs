@@ -36,6 +36,7 @@ pub mod exec_command;
 pub mod glob;
 pub mod grep;
 pub mod read;
+mod session_history;
 pub mod thread;
 pub mod workset;
 pub mod write;
@@ -655,6 +656,8 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
 
     tools.push(exec_command::exec_command_definition());
     tools.push(exec_command::write_stdin_definition());
+    tools.push(session_history::list_definition());
+    tools.push(session_history::open_definition());
 
     tools
 }
@@ -760,6 +763,8 @@ pub async fn execute_tool(
                 is_error: true,
             },
         },
+        "session_list" => session_history::execute_list(args, runtime).await,
+        "session_open" => session_history::execute_open(args, runtime).await,
         "thread" => thread::execute_dispatch(args, runtime, client).await,
         "threads" => thread::execute_threads(runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,
