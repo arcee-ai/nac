@@ -506,8 +506,24 @@ function LaunchForm({
               />
               <Separator />
               <ConfigRow
+                label="Compaction threshold"
+                hint="Context size that triggers compaction; 0 disables it."
+                control={
+                  <Input
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    className="w-full md:w-[120px]"
+                    inputClassName="md:text-right"
+                    placeholder="config.toml"
+                    inputMode="numeric"
+                    value={compaction}
+                    onChange={(e) => edit(setCompaction)(e.target.value)}
+                  />
+                }
+              />
+              <Separator />
+              <ConfigRow
                 label="Advanced Configurations"
-                hint="Reasoning, compaction, extra headers and a first message."
+                hint="Extra headers and a first message."
                 control={
                   <Switch
                     checked={advanced}
@@ -519,27 +535,6 @@ function LaunchForm({
 
               {advanced ? (
                 <>
-                  <Separator />
-                  <ConfigRow
-                    label="Orchestrator compaction threshold"
-                    verticalOnMobile
-                    hint="Context size that triggers compaction; 0 disables it."
-                    labelClassName="pt-2 md:pt-0"
-                    control={
-                      <Input
-                        inputSize={
-                          isMobile ? InputSize.Large : InputSize.Medium
-                        }
-                        className="w-full md:w-[105px] pb-3 md:pb-0"
-                        inputClassName="md:text-right"
-                        placeholder="config.toml"
-                        inputMode="numeric"
-                        value={compaction}
-                        onChange={(e) => edit(setCompaction)(e.target.value)}
-                      />
-                    }
-                  />
-
                   {mode === "sandbox" ? (
                     <>
                       <Separator />
