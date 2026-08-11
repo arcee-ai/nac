@@ -25,6 +25,7 @@ import {
   TabButtonVariant,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { catalogBaseUrl } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { formatTokensCompact } from "@/app/lib/format";
 import { providerLabel, providerOrder } from "@/app/lib/providers";
@@ -48,11 +49,6 @@ export interface CatalogPick {
 interface Row {
   provider: CatalogProvider;
   model: CatalogModel;
-}
-
-/** Where a session on this provider sends its requests. */
-function catalogBaseUrl(provider: CatalogProvider): string {
-  return provider.managed_base_url ?? provider.default_base_url ?? "";
 }
 
 const EMPTY_COST: ModelCostRates = {

@@ -25,6 +25,11 @@ export interface ResolvedCatalogModel {
   estimated: boolean;
 }
 
+/** Where a session on this provider sends its requests. */
+export function catalogBaseUrl(provider: CatalogProvider): string {
+  return provider.managed_base_url ?? provider.default_base_url ?? "";
+}
+
 const EMPTY: ResolvedCatalogModel = {
   provider: null,
   model: null,
