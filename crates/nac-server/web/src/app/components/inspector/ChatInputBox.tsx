@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   Button,
@@ -10,6 +17,8 @@ import {
   Loader,
   LoaderSize,
   StickyButton,
+  Popover,
+  PopoverPlacement,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
@@ -38,6 +47,7 @@ import {
   useModelCatalog,
   useSshConnect,
   useSubmitRun,
+  useSlashCommands,
 } from "@/app/services/queries";
 import { pushLocalEvent, useRunning } from "@/app/store/runtimeStore";
 import {
@@ -47,6 +57,7 @@ import {
   useSshConnectionStatus,
 } from "@/app/store/sshConnectionStore";
 import type {
+  SlashCommandDefinition,
   ManagedSessionSummary,
   SessionSnapshotResponse,
 } from "@/app/types/api";
@@ -56,6 +67,38 @@ const ROW_PX = { mobile: 40, wide: 48 };
 
 /** How far the field grows before it starts scrolling instead. */
 const MAX_HEIGHT_PX = { mobile: 128, wide: 200 };
+
+interface SlashCommandQuery {
+  leadingWhitespace: string;
+  prefix: string;
+}
+
+function slashCommandQuery(value: string): SlashCommandQuery | null {
+  const match = /^(\s*)\/(\S*)$/u.exec(value);
+  if (!match || match[0] !== value) return null;
+  const prefix = match[2];
+  if (prefix.includes("/") || prefix.includes("\\")) return null;
+  return { leadingWhitespace: match[1], prefix };
+}
+
+function submittedSlashCommand(
+  value: string,
+  definitions: SlashCommandDefinition[],
+): SlashCommandDefinition | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/")) return null;
+  const body = trimmed.slice(1);
+  const nameEnd = body.search(/\s/u);
+  const name = nameEnd === -1 ? body : body.slice(0, nameEnd);
+  const argumentsText = nameEnd === -1 ? "" : body.slice(nameEnd).trim();
+  return (
+    definitions.find(
+      (definition) =>
+        definition.name === name &&
+        (definition.accepts_arguments || !argumentsText),
+    ) ?? null
+  );
+}
 
 /**
  * TopBar's HeaderSurface upside down. The phone composer floats over the
@@ -155,6 +198,10 @@ export function ChatInputBox({
   // A phone keeps the message on one truncated line until the field is focused,
   // then grows the pill over the transcript.
   const [focused, setFocused] = useState(false);
+  const [dismissedSuggestionValue, setDismissedSuggestionValue] = useState<
+    string | null
+  >(null);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
   const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
@@ -163,7 +210,15 @@ export function ChatInputBox({
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
   const compactSession = useCompactSession();
+  const {
+    data: commandDefinitions,
+    isError: commandsFailed,
+    refetch: refetchCommands,
+  } = useSlashCommands();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const submitInFlight = useRef(false);
+  const listboxId = useId();
 
   const metrics = runMetrics(snapshot, entry);
   const catalog = useModelCatalog();
@@ -194,6 +249,54 @@ export function ChatInputBox({
     el.style.height = `${rowPx}px`;
     el.style.height = `${Math.min(el.scrollHeight, maxHeightPx)}px`;
   }, [rowPx, maxHeightPx]);
+
+  const commandQuery = useMemo(() => slashCommandQuery(value), [value]);
+  const filteredCommands = useMemo(() => {
+    if (!commandQuery || !commandDefinitions) return [];
+    const prefix = commandQuery.prefix.toLocaleLowerCase();
+    return commandDefinitions.filter((definition) =>
+      definition.name.toLocaleLowerCase().startsWith(prefix),
+    );
+  }, [commandDefinitions, commandQuery]);
+  const suggestionsOpen =
+    focused &&
+    commandQuery !== null &&
+    dismissedSuggestionValue !== value;
+  const activeOptionId =
+    suggestionsOpen && filteredCommands[activeSuggestion]
+      ? `${listboxId}-option-${activeSuggestion}`
+      : undefined;
+
+
+  useEffect(() => {
+    if (!suggestionsOpen) return;
+    optionRefs.current[activeSuggestion]?.scrollIntoView({
+      block: "nearest",
+    });
+  }, [activeSuggestion, suggestionsOpen, filteredCommands]);
+
+  const dismissSuggestions = useCallback(() => {
+    setDismissedSuggestionValue(value);
+  }, [value]);
+
+  const completeCommand = useCallback(
+    (definition: SlashCommandDefinition) => {
+      if (!commandQuery) return;
+      const completed = `${commandQuery.leadingWhitespace}/${definition.name}${
+        definition.accepts_arguments ? " " : ""
+      }`;
+      setValue(completed);
+      setDismissedSuggestionValue(completed);
+      requestAnimationFrame(() => {
+        const textarea = ref.current;
+        if (!textarea) return;
+        resize();
+        textarea.focus();
+        textarea.setSelectionRange(completed.length, completed.length);
+      });
+    },
+    [commandQuery, resize],
+  );
 
   // A collapsed field is one line whatever it holds, which is a height it
   // cannot work out for itself; leaving the collapse restores the content's.
@@ -238,31 +341,64 @@ export function ChatInputBox({
 
   const submit = useCallback(async () => {
     const prompt = value.trim();
-    if (!prompt || busy) return;
-    if (prompt === "/compact") {
+    if (!prompt || busy || submitInFlight.current) return;
+    submitInFlight.current = true;
+
+    try {
+      let definitions = commandDefinitions;
+      if (value.trimStart().startsWith("/") && definitions === undefined) {
+        const result = await refetchCommands();
+        definitions = result.data;
+        if (definitions === undefined) {
+          toast.error("Unable to load slash commands");
+          return;
+        }
+      }
+
+      const command = definitions
+        ? submittedSlashCommand(value, definitions)
+        : null;
+      if (command?.command === "compact") {
+        try {
+          await compactSession.mutateAsync(sessionId);
+          pushLocalEvent("compaction", "▶ compacting context…");
+          setValue("");
+          if (ref.current) ref.current.style.height = `${rowPx}px`;
+        } catch (error) {
+          const message = errorMessage(error);
+          pushLocalEvent("error", `compact failed: ${message}`, true);
+          toast.error(`Failed to compact: ${message}`);
+        }
+        return;
+      }
+      if (command) {
+        toast.error(`Unsupported slash command: /${command.name}`);
+        return;
+      }
       try {
-        await compactSession.mutateAsync(sessionId);
-        pushLocalEvent("compaction", "▶ compacting context…");
+        await submitRun.mutateAsync({ id: sessionId, prompt });
+        pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
         setValue("");
         if (ref.current) ref.current.style.height = `${rowPx}px`;
       } catch (error) {
         const message = errorMessage(error);
-        pushLocalEvent("error", `compact failed: ${message}`, true);
-        toast.error(`Failed to compact: ${message}`);
+        pushLocalEvent("error", `submit failed: ${message}`, true);
+        toast.error(`Failed to send: ${message}`);
       }
-      return;
+    } finally {
+      submitInFlight.current = false;
     }
-    try {
-      await submitRun.mutateAsync({ id: sessionId, prompt });
-      pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
-      setValue("");
-      if (ref.current) ref.current.style.height = `${rowPx}px`;
-    } catch (error) {
-      const message = errorMessage(error);
-      pushLocalEvent("error", `submit failed: ${message}`, true);
-      toast.error(`Failed to send: ${message}`);
-    }
-  }, [value, busy, sessionId, submitRun, compactSession, toast, rowPx]);
+  }, [
+    value,
+    busy,
+    commandDefinitions,
+    refetchCommands,
+    sessionId,
+    submitRun,
+    compactSession,
+    toast,
+    rowPx,
+  ]);
 
   const stop = useCallback(async () => {
     const summary = entry?.summary;
@@ -334,6 +470,24 @@ export function ChatInputBox({
       )}
     >
       <div className="relative flex-1 min-w-0">
+      <span
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {suggestionsOpen
+          ? commandDefinitions === undefined
+            ? commandsFailed
+              ? "Slash commands unavailable"
+              : "Loading slash commands"
+            : filteredCommands.length
+              ? `${filteredCommands.length} slash ${
+                  filteredCommands.length === 1 ? "command" : "commands"
+                } available`
+              : "No matching commands"
+          : ""}
+      </span>
         <textarea
           ref={ref}
           className={cn(
@@ -344,22 +498,58 @@ export function ChatInputBox({
             collapsed && "opacity-0 pointer-events-none",
           )}
           rows={1}
+          role="combobox"
+          aria-label="Message"
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+          aria-expanded={suggestionsOpen}
+          aria-controls={suggestionsOpen ? listboxId : undefined}
+          aria-activedescendant={activeOptionId}
           placeholder="Send a message"
           spellCheck={false}
           value={value}
           style={{ minHeight: `${rowPx}px`, maxHeight: `${maxHeightPx}px` }}
           onChange={(e) => {
+            if (e.target.value !== value) setDismissedSuggestionValue(null);
+            setActiveSuggestion(0);
             setValue(e.target.value);
             resize();
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (suggestionsOpen && !e.shiftKey) {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                dismissSuggestions();
+                return;
+              }
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                if (!filteredCommands.length) return;
+                setActiveSuggestion((current) =>
+                  e.key === "ArrowDown"
+                    ? Math.min(current + 1, filteredCommands.length - 1)
+                    : Math.max(current - 1, 0),
+                );
+                return;
+              }
+              if (e.key === "Tab" && filteredCommands[activeSuggestion]) {
+                e.preventDefault();
+                completeCommand(filteredCommands[activeSuggestion]);
+                return;
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                const selected = filteredCommands[activeSuggestion];
+                if (selected) completeCommand(selected);
+                return;
+              }
+            }
             if (e.key !== "Enter") return;
             // Shift+Enter inserts a newline; a bare Enter (or Cmd/Ctrl+Enter) sends.
             if (e.shiftKey) return;
-            // Enter also commits an in-flight IME composition, so it must not send.
-            if (e.nativeEvent.isComposing) return;
             e.preventDefault();
             void submit();
           }}
@@ -390,6 +580,67 @@ export function ChatInputBox({
     </div>
   );
 
+  const suggestions = (
+    <div id={listboxId} role="listbox" aria-label="Slash commands">
+      {commandDefinitions === undefined ? (
+        <div className="px-3 py-2 text-small text-basic-secondary">
+          {commandsFailed ? "Slash commands unavailable" : "Loading commands…"}
+        </div>
+      ) : filteredCommands.length ? (
+        filteredCommands.map((definition, index) => (
+          <button
+            key={definition.command}
+            id={`${listboxId}-option-${index}`}
+            ref={(element) => {
+              optionRefs.current[index] = element;
+            }}
+            type="button"
+            role="option"
+            aria-selected={index === activeSuggestion}
+            tabIndex={-1}
+            className={cn(
+              "flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left",
+              index === activeSuggestion
+                ? "btn-ghost-highlighted"
+                : "btn-ghost",
+            )}
+            onPointerDown={(event) => event.preventDefault()}
+            onPointerMove={() => setActiveSuggestion(index)}
+            onClick={() => completeCommand(definition)}
+          >
+            <span className="code code-small shrink-0 text-basic-primary">
+              /{definition.name}
+            </span>
+            <span className="min-w-0 text-small text-basic-secondary">
+              {definition.description}
+            </span>
+          </button>
+        ))
+      ) : (
+        <div className="px-3 py-2 text-small text-basic-secondary">
+          No matching commands
+        </div>
+      )}
+    </div>
+  );
+
+  const fieldWithSuggestions = (
+    <Popover
+      open={suggestionsOpen}
+      onClose={dismissSuggestions}
+      content={suggestions}
+      placement={PopoverPlacement.TopRight}
+      sticky
+      closeOnEscape={false}
+      sheetOnMobile={false}
+      className={isMobile ? "flex-1 min-w-0" : "w-full"}
+      size="w-[min(400px,calc(100vw-16px))]"
+      panelClassName="max-h-[min(40vh,320px)] overflow-y-auto"
+    >
+      {field}
+    </Popover>
+  );
+
   return (
     <form
       className={cn(
@@ -408,11 +659,11 @@ export function ChatInputBox({
     >
       {isMobile ? (
         <div className="flex items-end gap-2">
-          {field}
+          {fieldWithSuggestions}
           {sendButton}
         </div>
       ) : (
-        field
+        fieldWithSuggestions
       )}
 
       {/* The status line wraps rather than letting its `shrink-0` chips run
