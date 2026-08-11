@@ -100,6 +100,21 @@ fn read_log(store_path: &std::path::Path, session_id: &str) -> Vec<(u64, Message
         .unwrap()
 }
 
+fn store_snapshot_messages(store_path: &std::path::Path, messages: &[Message]) {
+    let messages_json = serde_json::to_string(messages).unwrap();
+    let visible_count = crate::sessions::visible_message_count(messages) as i64;
+    let last_user_prompt = crate::sessions::last_user_prompt(messages);
+    let connection = rusqlite::Connection::open(store_path).unwrap();
+    connection
+        .execute(
+            "UPDATE sessions
+             SET messages_json = ?1, visible_message_count = ?2, last_user_prompt = ?3
+             WHERE session_id = 'session'",
+            rusqlite::params![messages_json, visible_count, last_user_prompt],
+        )
+        .unwrap();
+}
+
 fn canonical(message: &Message) -> Vec<u8> {
     serde_json::to_vec(message).unwrap()
 }
@@ -232,6 +247,7 @@ async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
     ]);
     let mut agent =
         orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(&store_path, &agent.messages);
     // The agent starts with exactly one (system) message, so the prompt lands
     // at absolute idx 1.
     assert_eq!(agent.messages.len(), 1);
@@ -293,6 +309,7 @@ async fn steering_delivery_is_logged_after_the_ack() {
     )]);
     let mut agent =
         orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(&store_path, &agent.messages);
 
     assert_eq!(agent.send("current").await.unwrap(), "steered answer");
     server.finish();
@@ -327,6 +344,14 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
     let store_path = test_store_path("merge");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("old prompt"),
+        plain_assistant("old answer"),
+    ];
+    store_snapshot_messages(&store_path, &blob);
 
     // Crash scenario: the blob is the pre-run snapshot; the log holds the
     // full crashed run appended after it.
@@ -346,16 +371,12 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
             ],
         )
         .unwrap();
-
     let mut agent = orchestrator_agent(store_path.clone(), "session", None);
-    let blob = vec![
-        Message::System {
-            content: "stored system".to_string(),
-        },
-        user_message("old prompt"),
-        plain_assistant("old answer"),
-    ];
-    agent.restore_messages_merging_log_tail(blob).await.unwrap();
+
+    agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap();
 
     assert_eq!(agent.messages.len(), 7);
     match &agent.messages[0] {
@@ -396,9 +417,10 @@ async fn restore_with_no_log_tail_matches_the_plain_blob_path() {
         user_message("already snapshotted"),
         plain_assistant("answer"),
     ];
+    store_snapshot_messages(&store_path, &blob);
     let mut merging = orchestrator_agent(store_path.clone(), "session", None);
     merging
-        .restore_messages_merging_log_tail(blob.clone())
+        .restore_messages_merging_log_tail(blob.clone(), None)
         .await
         .unwrap();
 
@@ -419,6 +441,13 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
     let store_path = test_store_path("merge_trim");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("old prompt"),
+    ];
+    store_snapshot_messages(&store_path, &blob);
 
     // The crashed run logged a dangling assistant tool call and a partial
     // tool result: call-2's result never arrived.
@@ -436,15 +465,12 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
             ],
         )
         .unwrap();
-
     let mut agent = orchestrator_agent(store_path.clone(), "session", None);
-    let blob = vec![
-        Message::System {
-            content: "stored system".to_string(),
-        },
-        user_message("old prompt"),
-    ];
-    agent.restore_messages_merging_log_tail(blob).await.unwrap();
+
+    agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap();
 
     assert_eq!(agent.messages.len(), 2);
     assert!(
@@ -456,28 +482,124 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
 }
 
 #[tokio::test]
-async fn restore_fails_loudly_on_a_non_contiguous_log_tail() {
+async fn restore_recovers_a_non_contiguous_log_tail() {
     let store_path = test_store_path("merge_gap");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
-    writer
-        .append("session", 5, &user_message("orphaned tail"))
-        .unwrap();
-
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
     let blob = vec![
         Message::System {
             content: "stored system".to_string(),
         },
-        user_message("old prompt"),
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+        user_message("second prompt"),
+        plain_assistant("second answer"),
+        user_message("third prompt"),
+        plain_assistant("third answer"),
     ];
-    let error = agent
-        .restore_messages_merging_log_tail(blob)
+    store_snapshot_messages(&store_path, &blob);
+    for (idx, content) in [(8, "orphaned tail"), (9, "later orphan")] {
+        crate::store::append_thread_event(
+            &store_path,
+            "session",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            &crate::store::encode_transcript_log_entry(idx, &user_message(content)).unwrap(),
+        )
+        .unwrap();
+    }
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent
+        .restore_messages_merging_log_tail(blob, None)
         .await
-        .unwrap_err();
-    assert!(error.to_string().contains("not contiguous"));
+        .unwrap();
+
+    assert_eq!(agent.messages.len(), 7);
+    let warning = agent
+        .transcript_recovery_warning()
+        .expect("gap recovery must produce a warning");
+    assert!(warning.contains("index 7"), "{warning}");
+    assert!(
+        warning.contains("2 untrusted transcript log rows"),
+        "{warning}"
+    );
+    assert!(!warning.contains("orphaned tail"), "{warning}");
+    assert!(read_log(&store_path, "session").is_empty());
+    let summary = crate::sessions::list_sessions(&store_path)
+        .unwrap()
+        .remove(0);
+    assert_eq!(summary.visible_message_count, 6);
+    assert_eq!(summary.last_user_prompt.as_deref(), Some("third prompt"));
+
+    agent
+        .push_and_log_for_test(user_message("next prompt"))
+        .await
+        .unwrap();
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].0, 7);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
+    let store_path = test_store_path("merge_gap_snapshot_tool_turn");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+        user_message("second prompt"),
+        plain_assistant("second answer"),
+        user_message("third prompt"),
+        tool_call_assistant(&["call-1"]),
+    ];
+    store_snapshot_messages(&store_path, &blob);
+    crate::store::append_thread_event(
+        &store_path,
+        "session",
+        crate::store::ORCHESTRATOR_STEERING_TARGET,
+        &crate::store::encode_transcript_log_entry(8, &user_message("orphaned tail")).unwrap(),
+    )
+    .unwrap();
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap();
+
+    assert_eq!(agent.messages.len(), 6);
+    assert!(agent.transcript_recovery_warning().is_some());
+    assert!(read_log(&store_path, "session").is_empty());
+    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    let persisted_json: String = connection
+        .query_row(
+            "SELECT messages_json FROM sessions WHERE session_id = 'session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let persisted: Vec<Message> = serde_json::from_str(&persisted_json).unwrap();
+    assert_eq!(persisted.len(), 6);
+    assert_eq!(
+        crate::sessions::list_sessions(&store_path)
+            .unwrap()
+            .remove(0)
+            .last_user_prompt
+            .as_deref(),
+        Some("third prompt")
+    );
+
+    agent
+        .push_and_log_for_test(user_message("next prompt"))
+        .await
+        .unwrap();
+    assert_eq!(read_log(&store_path, "session")[0].0, 6);
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -673,6 +795,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     )]);
     let mut agent =
         orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(&store_path, &agent.messages);
 
     let error = agent.send("current").await.unwrap_err();
     assert!(
@@ -720,9 +843,12 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     // loudly and bricked re-attach).
     let mut restored = orchestrator_agent(store_path.clone(), "session", None);
     restored
-        .restore_messages_merging_log_tail(vec![Message::System {
-            content: "stored system".to_string(),
-        }])
+        .restore_messages_merging_log_tail(
+            vec![Message::System {
+                content: "stored system".to_string(),
+            }],
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(restored.messages.len(), 4);
@@ -756,6 +882,7 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     ]);
     let mut agent =
         orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(&store_path, &agent.messages);
     let bus = crate::events::SessionEventBus::with_thread_event_store(
         Some("session".to_string()),
         store_path.clone(),
@@ -812,6 +939,7 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
     )]);
     let mut agent =
         orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(&store_path, &agent.messages);
 
     assert_eq!(agent.send("current").await.unwrap(), "stamped answer");
     server.finish();
@@ -871,6 +999,7 @@ async fn errored_turns_never_enter_the_transcript() {
     )]);
     let mut agent =
         orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(&store_path, &agent.messages);
 
     let error = agent
         .send("current")

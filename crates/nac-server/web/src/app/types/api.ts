@@ -594,6 +594,8 @@ export interface MessagesPageResponse {
 export interface SessionFrontendSnapshot {
   metadata: SessionMetadata;
   messages: Message[];
+  /** Present for the lifetime of a service that repaired a transcript gap. */
+  transcript_recovery_warning?: string;
   /**
    * One entry per message, or absent entirely on a snapshot that has no
    * transcript log. `null` where the message predates the log.

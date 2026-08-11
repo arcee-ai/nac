@@ -44,15 +44,16 @@
 //! # Invariants
 //!
 //! - Single writer per session (the session operation lease serializes runs).
-//! - Append-only except `TranscriptLogWriter::delete_from`, which truncates a
-//!   tail range (`idx >= from_idx`) for crash/cancel normalization.
 //! - `idx` values are contiguous and increase by one per append. The agent
 //!   maintains this by construction (`idx` = `messages.len()` at push time,
-//!   log-first so the vec never holds an undurable message); the restore
-//!   merge verifies the tail is contiguous with the snapshot blob and fails
-//!   loudly otherwise. The log's first row is NOT necessarily idx 0: the
-//!   initial system prompt(s) enter the vec at construction, before any
-//!   logging, and are carried by the snapshot blob.
+//!   log-first so the vec never holds an undurable message), and the writer
+//!   verifies the requested start index inside the append transaction.
+//! - Restore repairs a validly encoded non-contiguous tail by keeping its
+//!   longest contiguous prefix and atomically deleting the untrusted physical
+//!   suffix. Normal store-backed readers remain strict so corruption cannot
+//!   silently reach the agent or UI.
+//! - The log's first row is not necessarily index 0: initial system prompts
+//!   enter the vector before logging and are carried by the snapshot blob.
 //!
 //! # Load path (step 2)
 //!
@@ -164,6 +165,14 @@ pub struct TranscriptLogEntry {
     pub kind: TranscriptMessageKind,
     #[serde(rename = "message")]
     pub message_json: String,
+}
+
+/// Sanitized facts about one repaired non-contiguous transcript-log tail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptLogRecovery {
+    pub expected_idx: u64,
+    pub found_idx: u64,
+    pub discarded_rows: usize,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -334,6 +343,46 @@ impl TranscriptLogWriter {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let blob_len = transaction.query_row(
+            "SELECT json_array_length(messages_json)
+             FROM sessions
+             WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let blob_len =
+            u64::try_from(blob_len).context("stored session transcript length was negative")?;
+        let last_row = transaction
+            .query_row(
+                "SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2
+                 ORDER BY id DESC
+                 LIMIT 1",
+                params![session_id, ORCHESTRATOR_STEERING_TARGET],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let log_next_idx = match last_row {
+            None => 0,
+            Some((id, event_json)) => {
+                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                    anyhow!(
+                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    )
+                })?;
+                entry
+                    .idx
+                    .checked_add(1)
+                    .context("transcript log index overflowed")?
+            }
+        };
+        let expected_start_idx = blob_len.max(log_next_idx);
+        if start_idx != expected_start_idx {
+            return Err(anyhow!(
+                "transcript log append is not contiguous: expected start idx {expected_start_idx}, found {start_idx}"
+            ));
+        }
         for (offset, message) in messages.iter().enumerate() {
             let event_json = encode_transcript_log_entry(start_idx + offset as u64, message)?;
             transaction.execute(
@@ -533,6 +582,90 @@ impl TranscriptLogWriter {
         Ok(entries)
     }
 
+    /// Read the trusted log tail and atomically repair a validly encoded index
+    /// gap. Rows covered by the snapshot remain untouched. At the first tail
+    /// index mismatch, that physical row and every later reserved row are
+    /// deleted in the same IMMEDIATE transaction that refreshes the session
+    /// summary. Malformed or foreign reserved rows fail before any mutation.
+    pub fn read_tail_repairing_gap(
+        &self,
+        session_id: &str,
+        blob_len: u64,
+    ) -> Result<(Vec<(u64, Message)>, Option<TranscriptLogRecovery>)> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let decoded_rows = {
+            let mut statement = transaction.prepare(
+                "SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2
+                 ORDER BY id ASC",
+            )?;
+            let rows = statement
+                .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?;
+            let mut decoded = Vec::new();
+            for row in rows {
+                let (id, event_json) = row?;
+                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                    anyhow!(
+                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    )
+                })?;
+                let message: Message =
+                    serde_json::from_str(&entry.message_json).with_context(|| {
+                        format!("thread_events row {id} holds an undecodable transcript message")
+                    })?;
+                decoded.push((id, entry, message));
+            }
+            decoded
+        };
+
+        let mut expected_idx = blob_len;
+        let mut boundary = None;
+        for (position, (_, entry, _)) in decoded_rows.iter().enumerate() {
+            if entry.idx < blob_len {
+                continue;
+            }
+            if entry.idx != expected_idx {
+                boundary = Some((position, expected_idx, entry.idx));
+                break;
+            }
+            expected_idx = expected_idx
+                .checked_add(1)
+                .context("transcript log index overflowed")?;
+        }
+
+        let trusted_end = boundary
+            .as_ref()
+            .map_or(decoded_rows.len(), |(position, _, _)| *position);
+        let trusted_tail = decoded_rows[..trusted_end]
+            .iter()
+            .filter(|(_, entry, _)| entry.idx >= blob_len)
+            .map(|(_, entry, message)| (entry.idx, message.clone()))
+            .collect();
+        let recovery = if let Some((position, expected_idx, found_idx)) = boundary {
+            for (id, _, _) in &decoded_rows[position..] {
+                transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
+            }
+            refresh_session_summary(&transaction, session_id)?;
+            Some(TranscriptLogRecovery {
+                expected_idx,
+                found_idx,
+                discarded_rows: decoded_rows.len() - position,
+            })
+        } else {
+            None
+        };
+        transaction.commit()?;
+        Ok((trusted_tail, recovery))
+    }
+
     /// Delete committed entries with `idx >= from_idx` (tail truncation for
     /// crash/cancel normalization). Returns the number of deleted rows.
     /// Infrequent path: the idx values live inside the JSON payloads, so this
@@ -575,6 +708,67 @@ impl TranscriptLogWriter {
         if !row_ids.is_empty() {
             refresh_session_summary(&transaction, session_id)?;
         }
+        transaction.commit()?;
+        Ok(row_ids.len())
+    }
+
+    /// Replace the legacy snapshot prefix and delete every committed log row
+    /// at or beyond its new length in one transaction. This is reserved for
+    /// recovery when dangling-tool normalization trims into the otherwise
+    /// write-once snapshot blob.
+    pub fn replace_snapshot_and_delete_from(
+        &self,
+        session_id: &str,
+        messages: &[Message],
+    ) -> Result<usize> {
+        let messages_json =
+            serde_json::to_string(messages).context("failed to serialize repaired transcript")?;
+        let from_idx =
+            u64::try_from(messages.len()).context("repaired transcript length overflowed")?;
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let row_ids = {
+            let mut statement = transaction.prepare(
+                "SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2
+                 ORDER BY id ASC",
+            )?;
+            let rows = statement
+                .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?;
+            let mut row_ids = Vec::new();
+            for row in rows {
+                let (id, event_json) = row?;
+                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                    anyhow!(
+                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    )
+                })?;
+                if entry.idx >= from_idx {
+                    row_ids.push(id);
+                }
+            }
+            row_ids
+        };
+        let updated = transaction.execute(
+            "UPDATE sessions SET messages_json = ?1 WHERE session_id = ?2",
+            params![messages_json, session_id],
+        )?;
+        if updated != 1 {
+            return Err(anyhow!(
+                "transcript snapshot repair expected one session row, updated {updated}"
+            ));
+        }
+        for id in &row_ids {
+            transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
+        }
+        refresh_session_summary(&transaction, session_id)?;
         transaction.commit()?;
         Ok(row_ids.len())
     }
@@ -621,6 +815,23 @@ mod tests {
         std::env::temp_dir()
             .join(format!("nac_transcript_{label}_{unique}"))
             .join("store.db")
+    }
+
+    fn set_snapshot_messages(path: &Path, session_id: &str, messages: &[Message]) {
+        let connection = open_connection(path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions
+                 SET messages_json = ?1, visible_message_count = ?2, last_user_prompt = ?3
+                 WHERE session_id = ?4",
+                params![
+                    serde_json::to_string(messages).unwrap(),
+                    crate::sessions::visible_message_count(messages) as i64,
+                    crate::sessions::last_user_prompt(messages),
+                    session_id
+                ],
+            )
+            .unwrap();
     }
 
     fn canonical(message: &Message) -> Vec<u8> {
@@ -778,9 +989,27 @@ mod tests {
         let path = temp_store_path("append_batch");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
+        set_snapshot_messages(
+            &path,
+            "session-a",
+            &[
+                Message::System {
+                    content: "covered 0".to_string(),
+                },
+                Message::System {
+                    content: "covered 1".to_string(),
+                },
+                Message::System {
+                    content: "covered 2".to_string(),
+                },
+                Message::System {
+                    content: "covered 3".to_string(),
+                },
+            ],
+        );
 
         let writer = TranscriptLogWriter::new(&path).unwrap();
-        writer.append_batch("session-a", 0, &[]).unwrap();
+        writer.append_batch("session-a", 99, &[]).unwrap();
         assert!(writer.read_from("session-a", 0).unwrap().is_empty());
 
         let messages = sample_messages();
@@ -791,6 +1020,33 @@ mod tests {
             assert_eq!(*idx as usize, 4 + position);
             assert_eq!(canonical(read), canonical(expected));
         }
+
+        let summary_before_rejection = crate::sessions::list_sessions(&path).unwrap().remove(0);
+        for rejected_start in [3, 9] {
+            let error = writer
+                .append_batch(
+                    "session-a",
+                    rejected_start,
+                    &[Message::User {
+                        content: "must not persist".to_string(),
+                    }],
+                )
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("expected start idx 8"),
+                "{error:#}"
+            );
+        }
+        assert_eq!(writer.read_from("session-a", 0).unwrap().len(), 4);
+        let summary_after_rejection = crate::sessions::list_sessions(&path).unwrap().remove(0);
+        assert_eq!(
+            summary_after_rejection.visible_message_count,
+            summary_before_rejection.visible_message_count
+        );
+        assert_eq!(
+            summary_after_rejection.last_user_prompt,
+            summary_before_rejection.last_user_prompt
+        );
 
         // A follow-up batch continues from the end of the previous one.
         writer
@@ -808,6 +1064,113 @@ mod tests {
         let summary = crate::sessions::list_sessions(&path).unwrap().remove(0);
         assert_eq!(summary.visible_message_count, 2);
         assert_eq!(summary.last_user_prompt.as_deref(), Some("tail"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
+        let path = temp_store_path("gap_repair");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        crate::store::insert_test_session(&path, "session-b");
+        set_snapshot_messages(
+            &path,
+            "session-a",
+            &[
+                Message::System {
+                    content: "system".to_string(),
+                },
+                Message::User {
+                    content: "blob prompt".to_string(),
+                },
+            ],
+        );
+        for (idx, content) in [
+            (0, "covered"),
+            (2, "trusted tail"),
+            (4, "first orphan"),
+            (5, "later orphan"),
+        ] {
+            crate::store::append_thread_event(
+                &path,
+                "session-a",
+                ORCHESTRATOR_STEERING_TARGET,
+                &encode_transcript_log_entry(
+                    idx,
+                    &Message::User {
+                        content: content.to_string(),
+                    },
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append(
+                "session-b",
+                0,
+                &Message::User {
+                    content: "other session".to_string(),
+                },
+            )
+            .unwrap();
+
+        let (tail, recovery) = writer.read_tail_repairing_gap("session-a", 2).unwrap();
+        assert_eq!(tail.len(), 1);
+        assert_eq!(tail[0].0, 2);
+        let recovery = recovery.expect("the gap must be repaired");
+        assert_eq!(recovery.expected_idx, 3);
+        assert_eq!(recovery.found_idx, 4);
+        assert_eq!(recovery.discarded_rows, 2);
+        let remaining = writer.read_from("session-a", 0).unwrap();
+        assert_eq!(
+            remaining.iter().map(|(idx, _)| *idx).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        assert_eq!(writer.read_from("session-b", 0).unwrap().len(), 1);
+        let summary = crate::sessions::list_sessions(&path)
+            .unwrap()
+            .into_iter()
+            .find(|summary| summary.session_id == "session-a")
+            .unwrap();
+        assert_eq!(summary.visible_message_count, 2);
+        assert_eq!(summary.last_user_prompt.as_deref(), Some("trusted tail"));
+        let (_, clean_recovery) = writer.read_tail_repairing_gap("session-a", 2).unwrap();
+        assert!(clean_recovery.is_none());
+
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            &encode_transcript_log_entry(
+                4,
+                &Message::User {
+                    content: "new orphan".to_string(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            "{\"type\":\"run_started\"}",
+        )
+        .unwrap();
+        assert!(writer.read_tail_repairing_gap("session-a", 2).is_err());
+        let connection = open_connection(&path).unwrap();
+        let row_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM thread_events
+                 WHERE session_id = 'session-a' AND thread_name = ?1",
+                params![ORCHESTRATOR_STEERING_TARGET],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_count, 4, "decode failure must roll back the repair");
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -1096,6 +1459,13 @@ mod tests {
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
         crate::store::insert_test_session(&path, "session-b");
+        set_snapshot_messages(
+            &path,
+            "session-a",
+            &[Message::System {
+                content: "covered system".to_string(),
+            }],
+        );
 
         let tool_call = crate::types::ToolCall {
             id: "call-1".to_string(),

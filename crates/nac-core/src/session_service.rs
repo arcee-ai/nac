@@ -170,6 +170,8 @@ pub struct SessionServiceInit {
 pub struct SessionFrontendSnapshot {
     pub metadata: SessionMetadata,
     pub messages: Vec<Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript_recovery_warning: Option<String>,
     /// When each message was written to the transcript log, aligned with
     /// `messages`. `None` for messages carried by the snapshot blob, which
     /// predates the log and stores no per-message time.
@@ -487,6 +489,7 @@ pub struct SessionService {
     workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
+    transcript_recovery_warning: Arc<Option<String>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
     /// go through the same connection as the agent's appends, so store-backed
     /// transcript reads serialize against commit points (step 3).
@@ -619,6 +622,10 @@ impl SessionService {
         let store_path = run_config.session.store_path();
         let session_id = run_config.session.session_id().map(str::to_string);
         let restored_messages = run_config.agent.messages.clone();
+        let transcript_recovery_warning = run_config
+            .agent
+            .transcript_recovery_warning()
+            .map(str::to_owned);
         let response_timing =
             ResponseTimingSnapshot::from_session_snapshot(match &run_config.session {
                 OrchestratorSession::Active { snapshot, .. } => Some(snapshot),
@@ -674,6 +681,7 @@ impl SessionService {
             workspace_git,
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
+            transcript_recovery_warning: Arc::new(transcript_recovery_warning),
             transcript_log,
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
@@ -1179,6 +1187,7 @@ impl SessionService {
             metadata,
             messages: loaded_messages.messages,
             message_created_at: loaded_messages.created_at,
+            transcript_recovery_warning: (*self.transcript_recovery_warning).clone(),
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
@@ -2468,7 +2477,10 @@ impl SessionService {
             let Some(snapshot) = snapshot.as_mut() else {
                 return Ok(());
             };
-            let mut unattributed = snapshot.unattributed_token_usage.clone().unwrap_or_default();
+            let mut unattributed = snapshot
+                .unattributed_token_usage
+                .clone()
+                .unwrap_or_default();
             unattributed.replace_context(projected_context);
             snapshot.apply_run_state(sessions::SessionRunState {
                 last_response_duration_ms: snapshot.last_response_duration_ms,
@@ -3143,7 +3155,22 @@ pub(super) mod tests {
             .as_mut()
             .unwrap()
             .messages = messages.clone();
-        parts.service.agent.lock().await.messages = messages;
+        parts.service.agent.lock().await.messages = messages.clone();
+        let connection =
+            crate::store::open_runtime_connection(&parts.service.metadata.store_path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions
+                 SET messages_json = ?1, visible_message_count = ?2, last_user_prompt = ?3
+                 WHERE session_id = ?4",
+                rusqlite::params![
+                    serde_json::to_string(&messages).unwrap(),
+                    sessions::visible_message_count(&messages) as i64,
+                    sessions::last_user_prompt(&messages),
+                    parts.service.metadata.session_id.as_deref().unwrap()
+                ],
+            )
+            .unwrap();
     }
 
     /// Append to the transcript log tail exactly like a commit point (the

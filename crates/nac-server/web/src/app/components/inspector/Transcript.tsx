@@ -81,6 +81,25 @@ interface TranscriptProps {
   } | null;
 }
 
+export function TranscriptRecoveryNotice({
+  warning,
+}: {
+  warning?: string | null;
+}) {
+  if (!warning) return null;
+  return (
+    <MessageBox
+      role="status"
+      variant={MessageBoxVariant.Info}
+      size={MessageBoxSize.Medium}
+      title="Session recovered"
+      className="mb-4 w-fit max-w-full"
+    >
+      {warning}
+    </MessageBox>
+  );
+}
+
 /** Index of the user turn that produced the newest model reply, if any. */
 function lastAnsweredUserIndex(turns: TranscriptTurn[]): number | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
@@ -368,6 +387,10 @@ export function Transcript({
           {!snapshot && !errorNotice ? (
             <div className="text-basic-muted label-small">Loading…</div>
           ) : null}
+
+          <TranscriptRecoveryNotice
+            warning={snapshot?.transcript_recovery_warning}
+          />
 
           {snapshot?.message_page?.total === 0 &&
           !running &&

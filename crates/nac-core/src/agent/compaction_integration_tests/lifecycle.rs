@@ -64,6 +64,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
             content: "recent".to_string(),
         },
     ];
+    store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("current").await.unwrap(), "ordinary fallback");
     let requests = server.finish();
@@ -251,6 +252,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
     agent.messages = messages;
+    store_agent_snapshot(&store_path, &agent);
     agent.restore_compaction_checkpoint().unwrap();
     let agent = Arc::new(tokio::sync::Mutex::new(agent));
     let task_agent = agent.clone();
@@ -363,6 +365,7 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
             content: "recent".to_string(),
         },
     ];
+    store_agent_snapshot(&store_path, &agent);
     let agent = Arc::new(tokio::sync::Mutex::new(agent));
     let task_agent = agent.clone();
     let task = tokio::spawn(async move { task_agent.lock().await.send("current").await });
