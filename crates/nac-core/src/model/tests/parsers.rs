@@ -125,6 +125,7 @@ fn parses_openai_responses_output() {
     assert_eq!(usage.output_tokens, 20);
     assert_eq!(usage.cache_read_tokens, 0);
     assert_eq!(usage.cache_write_tokens, 0);
+    assert_eq!(usage.reasoning_tokens, 7);
     assert_eq!(usage.orchestrator_context_tokens, 30);
 }
 
@@ -156,6 +157,7 @@ fn parses_openai_responses_usage_with_cached_tokens() {
     assert_eq!(usage.output_tokens, 50);
     assert_eq!(usage.cache_read_tokens, 60);
     assert_eq!(usage.cache_write_tokens, 20);
+    assert_eq!(usage.reasoning_tokens, 10);
     assert_eq!(usage.orchestrator_context_tokens, 150);
 
     // Parsers never bill; the client attaches cost from catalog rates.

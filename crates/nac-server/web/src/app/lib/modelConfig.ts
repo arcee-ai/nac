@@ -157,6 +157,7 @@ export interface ModelFormValues {
   credential_mode: CredentialMode;
   api_key_env: string;
   extra_headers: string;
+  orchestrator_compaction_threshold: string;
 }
 
 export interface SettingsInitialValues {
@@ -166,6 +167,7 @@ export interface SettingsInitialValues {
   reasoning_effort: string | null;
   api_key_env: string | null;
   extra_headers: Record<string, string>;
+  orchestrator_compaction_threshold: number | null;
   /** Forces an extra-headers patch even when the parsed maps look equal. */
   extra_headers_invalid?: boolean;
 }
@@ -219,5 +221,17 @@ export function buildSettingsPatch(
   ) {
     patch.extra_headers = headers;
   }
+
+  // Compaction threshold: empty clears it (null), a number sets it. Left
+  // untouched when it matches the initial value so a save never rewrites it.
+  const compactionRaw = values.orchestrator_compaction_threshold.trim();
+  if (compactionRaw !== "" && !/^\d+$/.test(compactionRaw)) {
+    throw new Error("Compaction threshold must be a non-negative integer");
+  }
+  const compactionValue = compactionRaw === "" ? null : Number(compactionRaw);
+  if (compactionValue !== initial.orchestrator_compaction_threshold) {
+    patch.orchestrator_compaction_threshold = compactionValue;
+  }
+
   return patch;
 }

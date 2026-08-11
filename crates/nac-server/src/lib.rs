@@ -1,6 +1,7 @@
 mod compaction;
 mod filesystem;
 mod managed_auth;
+mod mcp;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -351,7 +352,7 @@ pub struct CreateSessionRequest {
     /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
     #[serde(default)]
     pub extra_headers: RequestField<HeadersRequest>,
-    /// Omitted inherits `[compaction].threshold_tokens`; null or zero disables.
+    /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
@@ -417,7 +418,7 @@ pub struct CreateModelConfigurationRequest {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub extra_headers: Option<BTreeMap<String, String>>,
     /// Compaction budget sessions started from this setup inherit; absent or
-    /// zero leaves them on `[compaction].threshold_tokens`.
+    /// zero leaves them on the 70%-of-context default.
     pub orchestrator_compaction_threshold: Option<u64>,
     /// Message the launch modal pre-fills when this setup is chosen.
     pub initial_prompt: Option<String>,
@@ -2127,6 +2128,7 @@ fn api_router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
+        .nest_service("/mcp", mcp::streamable_http_service(manager.clone()))
         .with_state(manager)
 }
 
@@ -6263,7 +6265,7 @@ threshold_tokens = 64000
         assert_eq!(stored.base_url, "https://api.openai.com/v1");
         assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
         assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-        assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
+        assert_eq!(stored.orchestrator_compaction_threshold, Some(280_000));
         assert_eq!(
             stored.extra_headers,
             BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
@@ -6276,7 +6278,7 @@ threshold_tokens = 64000
             config.extra_headers_json.as_deref(),
             Some("{\"X-Config\":\"yes\"}")
         );
-        assert_eq!(config.orchestrator_compaction_threshold, Some(64_000));
+        assert_eq!(config.orchestrator_compaction_threshold, Some(280_000));
         assert!(manager
             .snapshot(&inherited_id)
             .await

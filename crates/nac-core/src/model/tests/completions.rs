@@ -27,8 +27,9 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
     );
     assert!(absent.get("thinking").is_none());
     assert!(absent.get("reasoning_effort").is_none());
-    // DeepSeek's compat omits an explicit temperature.
-    assert!(absent.get("temperature").is_none());
+    // DeepSeek's compat sends temperature 0.0 (V4 models accept it; the
+    // old "rejects temperature on reasoning models" note was R1-specific).
+    assert_eq!(absent["temperature"], json!(0.0));
     assert_eq!(
         absent["messages"][0]["reasoning_content"],
         "need current context"
@@ -106,10 +107,11 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
                 user,
                 {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
             ],
+            "temperature": 0.0,
             "thinking": {"type": "enabled"},
             "reasoning_effort": "high"
         }),
-        "DeepSeek: thinking dialect, no explicit temperature"
+        "DeepSeek: thinking dialect, temperature 0.0"
     );
 
     let fireworks = completions_chat_request(
@@ -161,8 +163,10 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         "Together: reasoning.enabled dialect, reasoning replay field"
     );
 
-    // Arcee accepts no explicit effort levels (its map is empty), so the
-    // effort-free shape is the only reachable one.
+    // Arcee's _default has the Arcee thinking format (bare reasoning_effort),
+    // but "m" is an unknown model with an empty thinking_level_map, so
+    // validation rejects every explicit effort. The effort-free shape is the
+    // only reachable one for unknown models.
     let arcee = completions_chat_request(
         "m",
         None,
@@ -182,8 +186,65 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
             ],
             "temperature": 0.0
         }),
-        "Arcee: no thinking dialect"
+        "Arcee: effort-free shape (bare reasoning_effort dialect)"
     );
+
+    // Arcee passthrough models: the Arcee format sends bare
+    // `reasoning_effort` — no `thinking`, `reasoning_history`, or
+    // `chat_template_kwargs` wrapper objects. The wire value comes from the
+    // catalog map (xhigh → "max" for deepseek/glm passthrough models).
+    let arcee_passthrough_levels = ThinkingLevelMap(std::collections::BTreeMap::from([
+        (ReasoningEffort::None, Some("none".to_string())),
+        (ReasoningEffort::Low, Some("low".to_string())),
+        (ReasoningEffort::Medium, Some("medium".to_string())),
+        (ReasoningEffort::High, Some("high".to_string())),
+        (ReasoningEffort::Xhigh, Some("max".to_string())),
+    ]));
+    let arcee_compat = Compat {
+        completions_thinking_format: Some(CompletionsThinkingFormat::Arcee),
+        completions_reasoning_field: Some("reasoning_content".to_string()),
+        completions_temperature: Some(0.0),
+    };
+    let arcee_none = completions_chat_request(
+        "deepseek-ai/deepseek-v4-pro",
+        Some(ReasoningEffort::None),
+        &messages,
+        &[],
+        &arcee_passthrough_levels,
+        &arcee_compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(arcee_none["reasoning_effort"], "none");
+    assert!(arcee_none.get("thinking").is_none());
+    assert!(arcee_none.get("reasoning_history").is_none());
+    assert!(arcee_none.get("chat_template_kwargs").is_none());
+    assert!(arcee_none.get("reasoning").is_none());
+
+    let arcee_high = completions_chat_request(
+        "deepseek-ai/deepseek-v4-pro",
+        Some(ReasoningEffort::High),
+        &messages,
+        &[],
+        &arcee_passthrough_levels,
+        &arcee_compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(arcee_high["reasoning_effort"], "high");
+    assert!(arcee_high.get("thinking").is_none());
+    assert!(arcee_high.get("reasoning_history").is_none());
+    assert!(arcee_high.get("chat_template_kwargs").is_none());
+    assert!(arcee_high.get("reasoning").is_none());
+
+    let arcee_xhigh = completions_chat_request(
+        "deepseek-ai/deepseek-v4-pro",
+        Some(ReasoningEffort::Xhigh),
+        &messages,
+        &[],
+        &arcee_passthrough_levels,
+        &arcee_compat,
+        CompletionsMessageShape::Standard,
+    );
+    assert_eq!(arcee_xhigh["reasoning_effort"], "max");
 }
 
 #[test]

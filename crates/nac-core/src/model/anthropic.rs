@@ -6,6 +6,19 @@ pub(super) const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// models.dev `limit.output` for known models (e.g. 128k for claude-opus-4-6,
 /// 64k for claude-opus-4-5/claude-haiku-4-5, 32k for claude-opus-4-1), the
 /// conservative 16_384 fallback for unknown ones.
+///
+/// `adaptive_thinking` — whether the model supports `thinking: {type:
+/// "adaptive"}`. When true and a non-none effort is requested, the thinking
+/// object includes `display: "summarized"` so reasoning text is visible on
+/// gen-5+ models (where the default is `"omitted"`). Harmless on models that
+/// return thinking by default.
+///
+/// `context_management` / `clear_thinking` — when both are true AND thinking
+/// is active (non-none effort), the request includes a `context_management`
+/// edit that preserves thinking blocks across turns
+/// (`clear_thinking_20251015` with `keep: "all"`). The edit requires
+/// `thinking` to be enabled or adaptive in the same request, so it is
+/// omitted when the effort is `None`.
 pub(super) fn anthropic_messages_request(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
@@ -14,6 +27,9 @@ pub(super) fn anthropic_messages_request(
     cache_ttl: Option<&str>,
     thinking_levels: &ThinkingLevelMap,
     max_tokens: u64,
+    adaptive_thinking: bool,
+    context_management: bool,
+    clear_thinking: bool,
 ) -> Result<Value> {
     super::backend::validate_model_reasoning_effort_with_map(
         BackendKind::AnthropicMessages,
@@ -31,11 +47,29 @@ pub(super) fn anthropic_messages_request(
         // `none` means omission on Anthropic; it is safe for every family.
         None | Some(ReasoningEffort::None) => {}
         Some(effort) => {
-            request["thinking"] = json!({"type": "adaptive"});
+            // `display: "summarized"` is harmless on models that return
+            // thinking by default and necessary on gen-5+ models where the
+            // default is "omitted" (thinking text arrives empty without it).
+            let mut thinking = json!({"type": "adaptive"});
+            if adaptive_thinking {
+                thinking["display"] = json!("summarized");
+            }
+            request["thinking"] = thinking;
             // Wire tiers come from the catalog map (the adaptive-with-max
             // families map NAC's `xhigh` to Anthropic's wire tier `max`).
             request["output_config"] =
                 json!({"effort": validated_wire_effort(thinking_levels, effort)});
+
+            // Context management: preserve thinking blocks across turns.
+            // Only send when the model supports both context_management and
+            // the clear_thinking_20251015 edit — and only when thinking is
+            // actually active, because the edit requires `thinking` to be
+            // enabled or adaptive in the same request.
+            if context_management && clear_thinking {
+                request["context_management"] = json!({
+                    "edits": [{"type": "clear_thinking_20251015", "keep": "all"}]
+                });
+            }
         }
     }
 

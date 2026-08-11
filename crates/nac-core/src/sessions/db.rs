@@ -1067,6 +1067,7 @@ fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>
         Some("medium") => Ok(Some(ReasoningEffort::Medium)),
         Some("high") => Ok(Some(ReasoningEffort::High)),
         Some("xhigh") => Ok(Some(ReasoningEffort::Xhigh)),
+        Some("max") => Ok(Some(ReasoningEffort::Max)),
         Some(other) => Err(anyhow!(
             "unsupported stored reasoning effort '{}'; session settings repair required: select a supported reasoning effort or clear it",
             other
