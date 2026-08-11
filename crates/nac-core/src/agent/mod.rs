@@ -118,6 +118,9 @@ pub struct Agent {
     /// store/transcript.rs). Present only for orchestrator agents with a
     /// session id — workers (separate `__worker` processes) never log.
     transcript_log: Option<TranscriptLogSink>,
+    /// User-facing notice set only when restore repaired a validly encoded
+    /// non-contiguous transcript tail.
+    transcript_recovery_warning: Option<String>,
     /// Token usage from the most recent `send()` call, updated after each
     /// model call; `None` if the provider omitted usage.
     pub last_usage: Option<crate::model::TokenUsage>,
@@ -128,6 +131,7 @@ pub struct Agent {
 struct TranscriptLogSink {
     writer: Arc<crate::store::TranscriptLogWriter>,
     session_id: String,
+    store_path: PathBuf,
 }
 
 fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
@@ -145,7 +149,13 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
 /// batch). Shared by the session cancel path and the transcript-log restore
 /// merge, which also removes the matching log tail.
 pub(crate) fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
-    let Some(index) = messages.iter().rposition(|message| {
+    if let Some(index) = incomplete_tool_turn_index(messages) {
+        messages.truncate(index);
+    }
+}
+
+fn incomplete_tool_turn_index(messages: &[Message]) -> Option<usize> {
+    let index = messages.iter().rposition(|message| {
         matches!(
             message,
             Message::Assistant {
@@ -153,15 +163,13 @@ pub(crate) fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
                 ..
             } if !tool_calls.is_empty()
         )
-    }) else {
-        return;
-    };
+    })?;
     let Message::Assistant {
         tool_calls: Some(tool_calls),
         ..
     } = &messages[index]
     else {
-        return;
+        return None;
     };
     let expected = tool_calls
         .iter()
@@ -174,9 +182,26 @@ pub(crate) fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
             _ => None,
         })
         .collect::<HashSet<_>>();
-    if !expected.is_subset(&observed) {
-        messages.truncate(index);
-    }
+    (!expected.is_subset(&observed)).then_some(index)
+}
+
+fn transcripts_match(left: &[Message], right: &[Message]) -> Result<bool> {
+    Ok(serde_json::to_vec(left)? == serde_json::to_vec(right)?)
+}
+
+async fn acquire_transcript_operation_lease_and_snapshot(
+    store_path: PathBuf,
+    writer: Arc<crate::store::TranscriptLogWriter>,
+    session_id: String,
+) -> Result<(crate::sessions::SessionOperationLease, Vec<Message>)> {
+    tokio::task::spawn_blocking(move || -> Result<_> {
+        let lease = crate::sessions::SessionOperationLease::try_acquire(&store_path, &session_id)
+            .map_err(anyhow::Error::new)?;
+        let messages = writer.read_snapshot_messages(&session_id)?;
+        Ok((lease, messages))
+    })
+    .await
+    .map_err(|error| anyhow!("transcript log operation lease task failed: {error}"))?
 }
 
 impl Agent {
@@ -204,6 +229,7 @@ impl Agent {
             (AgentMode::Orchestrator, Some(session_id)) => Some(TranscriptLogSink {
                 writer: Arc::new(crate::store::TranscriptLogWriter::new(&config.store_path)?),
                 session_id,
+                store_path: config.store_path.clone(),
             }),
             _ => None,
         };
@@ -283,6 +309,7 @@ impl Agent {
             steering_dispatch_id: config.dispatch_id,
             appended_steering_ids: HashSet::new(),
             transcript_log,
+            transcript_recovery_warning: None,
             last_usage: None,
         })
     }
@@ -651,6 +678,10 @@ impl Agent {
         self.transcript_log.as_ref().map(|sink| sink.writer.clone())
     }
 
+    pub(crate) fn transcript_recovery_warning(&self) -> Option<&str> {
+        self.transcript_recovery_warning.as_deref()
+    }
+
     #[cfg(test)]
     pub(crate) async fn push_and_log_for_test(&mut self, message: Message) -> Result<()> {
         self.push_and_log(message).await
@@ -672,52 +703,168 @@ impl Agent {
     /// Restore from a snapshot blob, then merge any transcript-log tail (rows
     /// with `idx >= blob.len()`) left behind by a crashed run, and normalize
     /// a dangling tool turn in both the restored transcript and the log
-    /// (crash-resume normalization). An empty log tail is exactly
-    /// [`Agent::restore_messages`] — the pre-log behavior.
+    /// (crash-resume normalization). An empty log tail over a clean blob is
+    /// exactly [`Agent::restore_messages`] — the pre-log behavior.
     ///
-    /// The merge fails loudly when the tail is not contiguous with the blob:
-    /// appends are log-first and `idx` is the absolute Vec index, so a gap
-    /// means the log and the snapshot disagree about the transcript.
+    /// A validly encoded index gap is repaired under the session operation
+    /// lease by retaining the longest contiguous prefix and atomically
+    /// deleting the untrusted physical suffix. Decode failures remain fatal.
+    ///
+    /// Returns the current snapshot blob whenever automatic lease acquisition
+    /// reloads it or dangling-turn normalization rewrites it, so a caller
+    /// holding the pre-lease snapshot can refresh its copy; `None` when the
+    /// blob was loaded under the supplied lease and left untouched.
     pub async fn restore_messages_merging_log_tail(
         &mut self,
         messages: Vec<Message>,
-    ) -> Result<()> {
+        operation_lease: Option<&crate::sessions::SessionOperationLease>,
+    ) -> Result<Option<Vec<Message>>> {
+        self.transcript_recovery_warning = None;
         let Some(sink) = &self.transcript_log else {
             self.restore_messages(messages);
-            return Ok(());
+            return Ok(None);
         };
-        let blob_len = messages.len();
-        let tail = {
-            let writer = sink.writer.clone();
-            let session_id = sink.session_id.clone();
-            tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len as u64))
-                .await
-                .map_err(|error| anyhow!("transcript log read task failed: {error}"))??
-        };
-        if tail.is_empty() {
-            self.restore_messages(messages);
-            return Ok(());
+        let mut blob_len = messages.len() as u64;
+        let mut blob_len_usize = messages.len();
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        if let Some(operation_lease) = operation_lease {
+            operation_lease
+                .validate(&sink.store_path, &session_id)
+                .map_err(anyhow::Error::new)?;
         }
 
-        let mut merged = messages;
-        let mut expected_idx = blob_len as u64;
-        for (idx, message) in tail {
-            if idx != expected_idx {
-                return Err(anyhow!(
-                    "transcript log tail is not contiguous with the snapshot: expected idx {expected_idx}, found {idx}"
-                ));
+        let mut snapshot_messages = messages;
+        let mut refreshed_blob = None;
+        let mut _acquired_operation_lease = None;
+        loop {
+            let mut tail = {
+                let writer = writer.clone();
+                let session_id = session_id.clone();
+                tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len))
+                    .await
+                    .map_err(|error| anyhow!("transcript log read task failed: {error}"))??
+            };
+
+            let mut expected_idx = blob_len;
+            let mut gap = None;
+            for (idx, _) in &tail {
+                if *idx != expected_idx {
+                    gap = Some((expected_idx, *idx));
+                    break;
+                }
+                expected_idx = expected_idx
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
             }
-            merged.push(message);
-            expected_idx += 1;
-        }
 
-        let merged_len = merged.len();
-        truncate_incomplete_tool_turn(&mut merged);
-        if merged.len() < merged_len {
-            self.delete_log_tail(merged.len() as u64).await?;
+            if gap.is_some() && operation_lease.is_none() && _acquired_operation_lease.is_none() {
+                let (lease, refreshed_messages) = acquire_transcript_operation_lease_and_snapshot(
+                    sink.store_path.clone(),
+                    writer.clone(),
+                    session_id.clone(),
+                )
+                .await?;
+                if !transcripts_match(&snapshot_messages, &refreshed_messages)? {
+                    refreshed_blob = Some(refreshed_messages.clone());
+                }
+                blob_len_usize = refreshed_messages.len();
+                blob_len = blob_len_usize as u64;
+                snapshot_messages = refreshed_messages;
+                _acquired_operation_lease = Some(lease);
+                // Both the snapshot and log may have changed before the lease
+                // was acquired. Re-read them under the lease before deciding
+                // what physical suffix to drop.
+                continue;
+            }
+
+            if gap.is_some() {
+                let repair_writer = writer.clone();
+                let repair_session_id = session_id.clone();
+                let (repaired_tail, recovery) = tokio::task::spawn_blocking(move || {
+                    repair_writer.read_tail_repairing_gap(&repair_session_id, blob_len)
+                })
+                .await
+                .map_err(|error| anyhow!("transcript log repair task failed: {error}"))??;
+                tail = repaired_tail;
+                if let Some(recovery) = recovery {
+                    let row_label = if recovery.discarded_rows == 1 {
+                        "row"
+                    } else {
+                        "rows"
+                    };
+                    self.transcript_recovery_warning = Some(format!(
+                        "Recovered this session to its last valid message because transcript index {} was missing. Discarded {} untrusted transcript log {row_label} beginning at index {}.",
+                        recovery.expected_idx, recovery.discarded_rows, recovery.found_idx
+                    ));
+                }
+            }
+
+            let mut merged = snapshot_messages;
+            let mut expected_idx = blob_len;
+            for (idx, message) in tail {
+                if idx != expected_idx {
+                    return Err(anyhow!(
+                        "transcript log tail is not contiguous with the snapshot: expected idx {expected_idx}, found {idx}"
+                    ));
+                }
+                merged.push(message);
+                expected_idx = expected_idx
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
+            }
+
+            let incomplete_turn = incomplete_tool_turn_index(&merged);
+            if incomplete_turn.is_some()
+                && operation_lease.is_none()
+                && _acquired_operation_lease.is_none()
+            {
+                let (lease, refreshed_messages) = acquire_transcript_operation_lease_and_snapshot(
+                    sink.store_path.clone(),
+                    writer.clone(),
+                    session_id.clone(),
+                )
+                .await?;
+                if !transcripts_match(&merged[..blob_len_usize], &refreshed_messages)? {
+                    refreshed_blob = Some(refreshed_messages.clone());
+                }
+                blob_len_usize = refreshed_messages.len();
+                blob_len = blob_len_usize as u64;
+                snapshot_messages = refreshed_messages;
+                _acquired_operation_lease = Some(lease);
+                // A concurrent operation may have changed both the snapshot
+                // and tail before releasing the lease. Re-read both instead of
+                // deleting its newly committed rows from stale boundaries.
+                continue;
+            }
+
+            if let Some(incomplete_turn) = incomplete_turn {
+                merged.truncate(incomplete_turn);
+                // Trimming below the blob length means the dangling turn lives
+                // in the write-once snapshot itself, so rewrite the snapshot
+                // and tail together while the operation lease is held.
+                if merged.len() < blob_len_usize {
+                    let repair_writer = writer.clone();
+                    let repair_session_id = session_id.clone();
+                    let repaired_messages = merged.clone();
+                    tokio::task::spawn_blocking(move || {
+                        repair_writer.replace_snapshot_and_delete_from(
+                            &repair_session_id,
+                            &repaired_messages,
+                        )
+                    })
+                    .await
+                    .map_err(|error| {
+                        anyhow!("transcript snapshot repair task failed: {error}")
+                    })??;
+                    refreshed_blob = Some(merged.clone());
+                } else {
+                    self.delete_log_tail(merged.len() as u64).await?;
+                }
+            }
+            self.restore_messages(merged);
+            return Ok(refreshed_blob);
         }
-        self.restore_messages(merged);
-        Ok(())
     }
 
     /// Trim a dangling tool turn from the transcript AND the transcript log

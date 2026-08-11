@@ -16,6 +16,9 @@ import {
   ChatSessionMessageVariant,
   Icon,
   IconName,
+  MessageBox,
+  MessageBoxSize,
+  MessageBoxVariant,
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
@@ -82,6 +85,25 @@ interface TranscriptProps {
    * paired with whatever can be done about it.
    */
   errorNotice?: ErrorNotice | null;
+}
+
+export function TranscriptRecoveryNotice({
+  warning,
+}: {
+  warning?: string | null;
+}) {
+  if (!warning) return null;
+  return (
+    <MessageBox
+      role="status"
+      variant={MessageBoxVariant.Info}
+      size={MessageBoxSize.Medium}
+      title="Session recovered"
+      className="mb-4 w-fit max-w-full"
+    >
+      {warning}
+    </MessageBox>
+  );
 }
 
 /** Index of the user turn that produced the newest model reply, if any. */
@@ -399,6 +421,10 @@ export function Transcript({
           {!snapshot && !errorNotice ? (
             <div className="text-basic-muted label-small">Loading…</div>
           ) : null}
+
+          <TranscriptRecoveryNotice
+            warning={snapshot?.transcript_recovery_warning}
+          />
 
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {

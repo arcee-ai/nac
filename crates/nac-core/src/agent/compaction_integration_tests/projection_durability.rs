@@ -78,6 +78,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
             content: "recent user".to_string(),
         },
     ];
+    store_agent_snapshot(&store_path, &agent);
     let canonical_before = serde_json::to_value(&agent.messages).unwrap();
 
     assert_eq!(agent.send("current user").await.unwrap(), "ordinary answer");
@@ -281,6 +282,7 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
             content: "newly aged turn".to_string(),
         },
     ];
+    store_agent_snapshot(&store_path, &agent);
     let prompt = "current long turn ".repeat(200);
 
     assert_eq!(agent.send(&prompt).await.unwrap(), "final answer");

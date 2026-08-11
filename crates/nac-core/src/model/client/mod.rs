@@ -861,7 +861,9 @@ impl ModelClient {
             .send_with_retry_headers(url, body, apply_headers)
             .await
             .map_err(|error| anyhow!(error.message))?;
-        read_sse_response(url, response, fold).await
+        read_sse_response(url, response, fold)
+            .await
+            .map_err(anyhow::Error::new)
     }
 
     /// Whether the configured extra_headers already set `name` (case-insensitive).

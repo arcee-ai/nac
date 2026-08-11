@@ -75,6 +75,7 @@ async fn threshold_not_reached_sends_one_ordinary_canonical_request() {
         );
         agent.set_steering_dispatch_id(Some("run".to_string()));
         agent.messages = compactable_messages();
+        store_agent_snapshot(&store_path, &agent);
 
         assert_eq!(agent.send("current").await.unwrap(), "ordinary");
         let requests = server.finish();
@@ -153,6 +154,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
             content: "recent".to_string(),
         },
     ];
+    store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("current").await.unwrap(), "fallback answer");
     let requests = server.finish();
@@ -278,6 +280,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
             content: "recent".to_string(),
         },
     ];
+    store_agent_snapshot(&store_path, &agent);
     let sampled_len = agent.messages.len();
     agent.compaction.as_mut().unwrap().record_ordinary_context(
         &agent.messages.clone(),
@@ -348,6 +351,7 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
         EventSink::channel(events_tx),
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
+    store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("only user").await.unwrap(), "ordinary");
     let requests = server.finish();
@@ -445,6 +449,7 @@ async fn automatic_summary_request_failure_emits_failed_and_falls_back_to_ordina
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
     agent.messages = compactable_messages();
+    store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("next user").await.unwrap(), "ordinary fallback");
     let requests = server.finish();
@@ -542,6 +547,7 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
     agent.messages = compactable_messages();
+    store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("retry after tool").await.unwrap(), "done");
     let requests = server.finish();
