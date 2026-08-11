@@ -104,10 +104,14 @@ type ListKind = "pending" | "running" | "done";
  */
 const ToolCallView = memo(function ToolCallView({
   entry,
+  running,
 }: {
   entry: ToolCallEntry;
+  /** Whether the thread is still running — a call with no result in a
+   * finished thread is history, not something in flight. */
+  running: boolean;
 }) {
-  const pending = entry.status === "pending";
+  const pending = entry.status === "pending" && running;
   return (
     <div className="pt-1">
       <p
@@ -179,10 +183,13 @@ const StandaloneView = memo(function StandaloneView({
  */
 const LogEntryView = memo(function LogEntryView({
   entry,
+  running,
 }: {
   entry: LogEntry;
+  running: boolean;
 }) {
-  if (entry.kind === "tool_call") return <ToolCallView entry={entry} />;
+  if (entry.kind === "tool_call")
+    return <ToolCallView entry={entry} running={running} />;
   return <StandaloneView entry={entry} />;
 });
 
@@ -292,6 +299,7 @@ function LogScroller({
               entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key
             }
             entry={entry}
+            running={running}
           />
         ))}
         {thinking ? (
