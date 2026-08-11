@@ -19,8 +19,6 @@ import type {
   ToolCall,
 } from "@/app/types/api";
 
-/** Long sessions would otherwise mount thousands of markdown blocks. */
-const MAX_TURNS = 40;
 
 /**
  * Orchestrator tools that only read back state the side panel already shows.
@@ -284,6 +282,7 @@ function toolResultsForAssistant(
 function describeThread(
   call: ToolCall,
   episode: number,
+  identity: string,
   ctx: BuildContext,
   results: Map<string, string>,
   batchNames: Set<string>,
@@ -318,7 +317,7 @@ function describeThread(
         : "running";
 
   return {
-    key: `${name}#${episode}`,
+    key: identity,
     name,
     action,
     summary: result || action,
@@ -422,8 +421,7 @@ export function withStreamedOutput(
   }
   if (!appended) return turns;
 
-  const next = live ? [...turns.slice(0, -1), turn] : [...turns, turn];
-  return next.length > MAX_TURNS ? next.slice(-MAX_TURNS) : next;
+  return live ? [...turns.slice(0, -1), turn] : [...turns, turn];
 }
 
 /**
@@ -437,47 +435,64 @@ export function buildTranscript(
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
   const createdAt = snapshot?.message_created_at ?? [];
+  const windowStart = snapshot?.message_page?.start ?? 0;
 
+  const windowDispatchCounts = countThreadDispatches(messages);
+  const persistedDispatchCounts = new Map(
+    (snapshot?.threads ?? []).map((thread) => [
+      thread.name,
+      thread.episode_count,
+    ]),
+  );
+  const activeNames = new Set(snapshot?.active_threads ?? []);
+  const dispatchCounts: Record<string, number> = {};
+  const dispatchesSeen: Record<string, number> = {};
+  for (const [name, visibleCount] of Object.entries(windowDispatchCounts)) {
+    const persistedCount = persistedDispatchCounts.get(name) ?? 0;
+    const totalCount = Math.max(
+      visibleCount,
+      persistedCount + (activeNames.has(name) ? 1 : 0),
+    );
+    dispatchCounts[name] = totalCount;
+    dispatchesSeen[name] = Math.max(0, totalCount - visibleCount);
+  }
   const ctx: BuildContext = {
     liveThreads,
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
-    dispatchCounts: countThreadDispatches(messages),
+    dispatchCounts,
   };
-  /** Dispatches of a name walked past, which is what numbers each card's episode. */
-  const dispatchesSeen: Record<string, number> = {};
 
   const turns: TranscriptTurn[] = [];
   let current: ModelTurn | null = null;
-  // The backend times whole runs, and one run answers one prompt, so the
-  // durations line up with model turns rather than assistant messages.
-  let modelTurnIndex = -1;
 
   messages.forEach((message, index) => {
+    const absoluteIndex = windowStart + index;
     if (message.role === "system" || message.role === "tool") return;
 
     if (message.role === "user") {
       current = null;
       turns.push({
         kind: "user",
-        key: `user-${index}`,
+        key: `user-${absoluteIndex}`,
         text: displayPromptFromMessageText(message.content),
-        messageIndex: index,
+        messageIndex: absoluteIndex,
         createdAt: createdAt[index] ?? null,
       });
       return;
     }
 
     if (!current) {
-      modelTurnIndex += 1;
       current = {
         kind: "model",
-        key: `model-${modelTurnIndex}`,
+        key: `model-${absoluteIndex}`,
         blocks: [],
-        durationMs: durations[modelTurnIndex] ?? null,
-        messageIndex: index,
+        durationMs: null,
+        messageIndex: absoluteIndex,
       };
       turns.push(current);
     }
+    current.key = `model-${absoluteIndex}`;
+    current.messageIndex = absoluteIndex;
     const blocks = current.blocks;
 
     const reasoning = stripNativeToolMarkup(message.reasoning_text ?? "").trim();
@@ -506,7 +521,7 @@ export function buildTranscript(
     const threadCalls: ToolCall[] = [];
     (message.tool_calls ?? []).forEach((call, callIndex) => {
       const name = call.function?.name ?? "tool";
-      const key = `${name}-${index}-${callIndex}`;
+      const key = `${name}-${absoluteIndex}-${callIndex}`;
       if (name === "thread") {
         threadCalls.push(call);
       } else if (name === "workset_define") {
@@ -552,6 +567,7 @@ export function buildTranscript(
           return describeThread(
             call,
             episode,
+            `${dispatched}@${absoluteIndex}:${call.id}`,
             ctx,
             results,
             batchNames,
@@ -559,9 +575,23 @@ export function buildTranscript(
           );
         }),
       );
-      blocks.push({ kind: "wave", key: `wave-${index}`, rows });
+      blocks.push({ kind: "wave", key: `wave-${absoluteIndex}`, rows });
     }
   });
 
-  return turns.length > MAX_TURNS ? turns.slice(-MAX_TURNS) : turns;
+  let durationIndex = durations.length - 1;
+  let skipActiveTurn =
+    Boolean(snapshot?.active_run) && turns[turns.length - 1]?.kind === "model";
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn.kind !== "model") continue;
+    if (skipActiveTurn) {
+      skipActiveTurn = false;
+      continue;
+    }
+    turn.durationMs = durations[durationIndex] ?? null;
+    durationIndex -= 1;
+  }
+
+  return turns;
 }
