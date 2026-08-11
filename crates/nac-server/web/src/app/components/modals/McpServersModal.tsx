@@ -210,7 +210,20 @@ function LibraryPicker({
   isMobile: boolean;
 }) {
   const { data } = useMcpLibrary();
+  const { data: serverData } = useMcpServers();
   const [query, setQuery] = useState("");
+  // Entries already saved as a server: matched by the recorded library id,
+  // or by name for servers created before the id was recorded.
+  const installed = useMemo(() => {
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    for (const server of serverData?.servers ?? []) {
+      if (server.library_id) ids.add(server.library_id);
+      names.add(server.name);
+    }
+    return (entry: McpLibraryEntry) =>
+      ids.has(entry.id) || names.has(entry.name);
+  }, [serverData]);
   // Grouped by category before a search; a flat filtered list while typing.
   const sections = useMemo(() => {
     const all = data?.entries ?? [];
@@ -287,29 +300,38 @@ function LibraryPicker({
                 {section.category}
               </span>
             ) : null}
-            {section.entries.map((entry) => (
-              <TabButton
-                key={entry.id}
-                size={TabButtonSize.Large}
-                onClick={() => onPick(entry)}
-              >
-                <EntryThumbnail entry={entry} />
-                <div className="flex flex-col items-start text-left min-w-0 flex-grow py-1">
-                  <div className="flex items-center gap-2">
-                    <span className="code code-small text-basic-primary">
-                      {entry.name}
+            {section.entries.map((entry) => {
+              const added = installed(entry);
+              return (
+                <TabButton
+                  key={entry.id}
+                  size={TabButtonSize.Large}
+                  disabled={added}
+                  className={cn(added && "opacity-50")}
+                  onClick={() => onPick(entry)}
+                >
+                  <EntryThumbnail entry={entry} />
+                  <div className="flex flex-col items-start text-left min-w-0 flex-grow py-1">
+                    <div className="flex items-center gap-2">
+                      <span className="code code-small text-basic-primary">
+                        {entry.name}
+                      </span>
+                      {added ? (
+                        <Badge text="Added" color={BadgeColor.Green} />
+                      ) : entry.auth === "required_header" ? (
+                        <Badge text="Key required" color={BadgeColor.Yellow} />
+                      ) : null}
+                    </div>
+                    <span className="text-small text-basic-muted truncate w-full">
+                      {entry.description}
                     </span>
-                    {entry.auth === "required_header" ? (
-                      <Badge text="Key required" color={BadgeColor.Yellow} />
-                    ) : null}
                   </div>
-                  <span className="text-small text-basic-muted truncate w-full">
-                    {entry.description}
-                  </span>
-                </div>
-                <Icon iconName={IconName.Right} className="shrink-0" />
-              </TabButton>
-            ))}
+                  {added ? null : (
+                    <Icon iconName={IconName.Right} className="shrink-0" />
+                  )}
+                </TabButton>
+              );
+            })}
           </div>
         ))}
         <Separator />
