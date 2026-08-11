@@ -788,6 +788,7 @@ mod tests {
             scheduled_skills: Vec::new(),
             session_id: "test-session".to_string(),
             timeout_secs: 30,
+            complexity: None,
         };
         assert!(mark_thread_active(&runtime, "worker", "dispatch"));
 
