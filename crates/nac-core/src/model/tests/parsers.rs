@@ -55,28 +55,34 @@ fn parses_deepseek_chat_output() {
 
 #[test]
 fn parses_openai_responses_output() {
+    let output = vec![
+        json!({
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "thought summary"}],
+            "encrypted_content": "encrypted"
+        }),
+        json!({
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_1",
+            "name": "read",
+            "arguments": "{\"path\":\"src/main.rs\"}",
+            "status": "completed"
+        }),
+        json!({
+            "type": "message",
+            "id": "msg_1",
+            "status": "completed",
+            "content": [
+                {"type": "output_text", "text": "hello world"}
+            ]
+        }),
+    ];
     let parsed = parse_openai_responses_response(
         &json!({
             "status": "completed",
-            "output": [
-                {
-                    "type": "reasoning",
-                    "id": "rs_1",
-                    "summary": [{"type": "summary_text", "text": "thought summary"}]
-                },
-                {
-                    "type": "function_call",
-                    "call_id": "call_1",
-                    "name": "read",
-                    "arguments": "{\"path\":\"src/main.rs\"}"
-                },
-                {
-                    "type": "message",
-                    "content": [
-                        {"type": "output_text", "text": "hello world"}
-                    ]
-                }
-            ],
+            "output": output.clone(),
             "usage": {
                 "input_tokens": 10,
                 "output_tokens": 20,
@@ -103,6 +109,16 @@ fn parses_openai_responses_output() {
             .expect("tool calls should be parsed")
             .len(),
         1
+    );
+    assert_eq!(
+        stored_responses_output(
+            parsed
+                .assistant
+                .reasoning_details
+                .as_ref()
+                .expect("Responses output state should be retained")
+        ),
+        Some(output.as_slice())
     );
     let usage = parsed.usage.expect("usage should be parsed");
     assert_eq!(usage.input_tokens, 10);
