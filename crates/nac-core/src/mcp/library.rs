@@ -224,7 +224,7 @@ pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
             let detail: SmitheryServerDetail = client
                 .get(format!(
                     "{SMITHERY_REGISTRY}/servers/{}",
-                    server.qualified_name
+                    server.qualified_name.replace('/', "%2F")
                 ))
                 .send()
                 .await

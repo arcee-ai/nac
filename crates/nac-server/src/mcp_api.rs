@@ -184,8 +184,8 @@ fn merge_map(
 }
 
 /// How long a registry answer keeps serving before the next request refetches
-/// it. A failed fetch is also remembered, so an unreachable registry costs one
-/// attempt per interval rather than one per page load.
+/// it. A failed refetch keeps the previous answer and resets the clock, so an
+/// unreachable registry costs one attempt per interval, never the catalog.
 const LIBRARY_CACHE_TTL: Duration = Duration::from_secs(15 * 60);
 
 static LIBRARY_CACHE: tokio::sync::Mutex<Option<(Instant, Vec<mcp::McpLibraryEntry>)>> =
@@ -202,14 +202,16 @@ pub async fn library_handler() -> Json<McpLibraryResponse> {
             });
         }
     }
-    let remote = match mcp::fetch_smithery_library_entries().await {
-        Ok(remote) => remote,
+    let entries = match mcp::fetch_smithery_library_entries().await {
+        Ok(remote) => mcp::merge_library_entries(remote),
         Err(error) => {
-            eprintln!("MCP library registry fetch failed; serving the embedded catalog: {error:#}");
-            Vec::new()
+            eprintln!("MCP library registry fetch failed: {error:#}");
+            match cache.take() {
+                Some((_, stale)) => stale,
+                None => mcp::merge_library_entries(Vec::new()),
+            }
         }
     };
-    let entries = mcp::merge_library_entries(remote);
     *cache = Some((Instant::now(), entries.clone()));
     Json(McpLibraryResponse { entries })
 }
