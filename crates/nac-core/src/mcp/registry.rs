@@ -135,10 +135,18 @@ impl McpRegistry {
         root_policy: McpRootPolicy,
     ) -> Result<Option<Arc<Self>>> {
         // `config.toml` is the baseline; servers stored by the dashboard merge
-        // over it and override a file server with the same name.
+        // over it and override a file server with the same name. A stored
+        // server the policy disallows is dropped before the merge so it never
+        // displaces a usable file server of the same name.
         let mut servers = file_servers_for_policy(paths, transport_policy);
         if let Some(store_path) = store_path {
             for (name, config) in stored_servers(store_path) {
+                if !transport_policy.allows(&config.transport) {
+                    eprintln!(
+                        "Skipping stored MCP server '{name}': transport is disabled by policy"
+                    );
+                    continue;
+                }
                 servers.insert(name, config);
             }
         }
