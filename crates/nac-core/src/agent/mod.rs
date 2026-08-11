@@ -43,11 +43,16 @@ const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
 const WORKER_SYSTEM_PROMPT: &str = include_str!("prompts/nac_worker.md");
 const ORCHESTRATOR_SYSTEM_PROMPT: &str = include_str!("prompts/nac_orchestrator.md");
 
-fn render_worker_system_prompt(working_directory: &str) -> String {
-    let (prefix, suffix) = WORKER_SYSTEM_PROMPT
+fn render_worker_system_prompt(working_directory: &str, thread_name: Option<&str>) -> String {
+    let (prefix, remainder) = WORKER_SYSTEM_PROMPT
         .split_once("{working_directory}")
         .expect("worker system prompt must contain {working_directory}");
-    format!("{prefix}{working_directory}{suffix}")
+    let (middle, suffix) = remainder
+        .split_once("{thread_name}")
+        .expect("worker system prompt must contain {thread_name}");
+    let thread_name = serde_json::to_string(thread_name.unwrap_or("unavailable"))
+        .expect("serializing a thread name cannot fail");
+    format!("{prefix}{working_directory}{middle}{thread_name}{suffix}")
 }
 
 fn render_orchestrator_system_prompt(working_directory: &str, thread_timeout_secs: u64) -> String {
@@ -265,7 +270,7 @@ impl Agent {
 
         let (system_prompt, mut tool_defs) = match config.mode {
             AgentMode::Worker => (
-                render_worker_system_prompt(&cwd),
+                render_worker_system_prompt(&cwd, config.thread_name.as_deref()),
                 tools::worker_tool_definitions(),
             ),
             AgentMode::Orchestrator => (

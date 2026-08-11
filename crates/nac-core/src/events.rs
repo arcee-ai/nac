@@ -712,14 +712,19 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             key_arg_preview: existing_key,
             args_detail,
         } => {
-            // Preserve an existing key_arg_preview from a prior sanitization
-            // pass so the human-readable cmd snippet survives double
-            // sanitization (emit → bus).  Only compute when absent or when
-            // the existing value is clearly not a human-readable preview
-            // (empty string or raw JSON from an older code version).
-            let key = existing_key
-                .filter(|k| !k.is_empty() && !k.starts_with('{') && !k.starts_with('['))
-                .unwrap_or_else(|| key_arg_preview(&name, args_detail.as_deref(), &args_preview));
+            // Preserve a human-readable preview through the emit → bus
+            // sanitization passes. Session-history tools always recompute
+            // their preview from allowlisted metadata so malformed raw
+            // arguments cannot become durable history.
+            let key = if matches!(name.as_str(), "session_list" | "session_open") {
+                key_arg_preview(&name, args_detail.as_deref(), &args_preview)
+            } else {
+                existing_key
+                    .filter(|key| !key.is_empty() && !key.starts_with('{') && !key.starts_with('['))
+                    .unwrap_or_else(|| {
+                        key_arg_preview(&name, args_detail.as_deref(), &args_preview)
+                    })
+            };
             let safe_args = safe_tool_arguments(&name, args_detail.as_deref(), &args_preview);
             AgentEvent::ToolCallStarted {
                 thread_name,
@@ -923,6 +928,7 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
             copy_safe_string(object, &mut safe, "session_id");
             copy_safe_u64(object, &mut safe, "limit");
             copy_string_length(object, &mut safe, "cursor", "cursor_chars");
+            copy_safe_session_stream(object, &mut safe);
         }
         _ => {}
     }
@@ -944,6 +950,24 @@ fn copy_safe_string(
             .take(512)
             .collect();
         target.insert(key.to_string(), serde_json::Value::String(value));
+    }
+}
+
+fn copy_safe_session_stream(
+    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    target: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let Some(stream) = source
+        .and_then(|source| source.get("stream"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return;
+    };
+    let mut safe_stream = serde_json::Map::new();
+    copy_safe_string(Some(stream), &mut safe_stream, "kind");
+    copy_safe_string(Some(stream), &mut safe_stream, "thread_name");
+    if !safe_stream.is_empty() {
+        target.insert("stream".to_string(), serde_json::Value::Object(safe_stream));
     }
 }
 
@@ -1981,6 +2005,35 @@ mod tests {
                 .to_string(),
             ),
         });
+        channel_sink.emit(AgentEvent::ToolCallStarted {
+            thread_name: Some("worker".to_string()),
+            call_id: "call-session-open".to_string(),
+            name: "session_open".to_string(),
+            args_preview: "{}".to_string(),
+            key_arg_preview: None,
+            args_detail: Some(
+                serde_json::json!({
+                    "namespace": "store",
+                    "session_id": "historical-session",
+                    "stream": {
+                        "kind": "thread",
+                        "thread_name": "history-search/shard-3"
+                    },
+                    "limit": 20
+                })
+                .to_string(),
+            ),
+        });
+        let malformed_session_call = AgentEvent::ToolCallStarted {
+            thread_name: Some("worker".to_string()),
+            call_id: "call-malformed-session-open".to_string(),
+            name: "session_open".to_string(),
+            args_preview: "\"CANARY_SESSION_SECRET\"".to_string(),
+            key_arg_preview: Some("\"CANARY_SESSION_SECRET\"".to_string()),
+            args_detail: Some("\"CANARY_SESSION_SECRET\"".to_string()),
+        };
+        channel_sink.emit(malformed_session_call.clone());
+        bus_sink.emit(malformed_session_call);
         bus_sink.emit(started);
         bus_sink.emit(AgentEvent::ToolCallFinished {
             thread_name: Some("worker".to_string()),
@@ -2037,10 +2090,31 @@ mod tests {
         assert!(args_preview.contains("\"namespace\":\"session\""));
         assert!(args_preview.contains("\"limit\":12"));
         assert!(!args_preview.contains("cursor"));
+        let AgentEvent::ToolCallStarted { args_preview, .. } = receiver.try_recv().unwrap() else {
+            panic!("expected sanitized session_open start");
+        };
+        let args: serde_json::Value = serde_json::from_str(&args_preview).unwrap();
+        assert_eq!(args["operation"], "open_session");
+        assert_eq!(args["namespace"], "store");
+        assert_eq!(args["session_id"], "historical-session");
+        assert_eq!(args["stream"]["kind"], "thread");
+        assert_eq!(args["stream"]["thread_name"], "history-search/shard-3");
+        assert_eq!(args["limit"], 20);
+        let AgentEvent::ToolCallStarted {
+            args_preview,
+            key_arg_preview,
+            ..
+        } = receiver.try_recv().unwrap()
+        else {
+            panic!("expected sanitized malformed session_open start");
+        };
+        assert_eq!(args_preview, r#"{"operation":"open_session"}"#);
+        assert_eq!(key_arg_preview.as_deref(), Some("containing session"));
+        assert!(!args_preview.contains("CANARY"));
 
         let records =
             crate::store::load_all_thread_events(&path, "session-safe-events", 20).unwrap();
-        assert_eq!(records["worker"].len(), 5);
+        assert_eq!(records["worker"].len(), 6);
         let serialized = records["worker"]
             .iter()
             .map(|record| record.event_json.as_str())

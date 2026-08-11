@@ -126,6 +126,12 @@ pub(crate) fn key_arg_preview(
             get_str("name").unwrap_or_else(|| truncate_string(args_preview, 120))
         }
         "threads" => "list".to_string(),
+        "session_list" => get_str("namespace")
+            .map(|namespace| format!("namespace={}", truncate_string(&namespace, 40)))
+            .unwrap_or_else(|| "containing sessions".to_string()),
+        "session_open" => get_str("session_id")
+            .map(|session_id| format!("session={}", truncate_string(&session_id, 64)))
+            .unwrap_or_else(|| "containing session".to_string()),
         "workset_define" => {
             let id = get_str("id").unwrap_or_default();
             let goal = get_str("goal").unwrap_or_default();

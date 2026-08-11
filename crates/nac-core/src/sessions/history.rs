@@ -39,7 +39,6 @@ pub(crate) struct HistorySessionItem {
 pub(crate) struct HistorySessionPage {
     pub sessions: Vec<HistorySessionItem>,
     pub next_anchor: Option<HistorySessionAnchor>,
-    pub scan_exhausted: bool,
     pub warnings: Vec<String>,
 }
 
@@ -189,7 +188,6 @@ pub(crate) fn list_history_sessions(
         return Ok(HistorySessionPage {
             sessions: vec![current.into_item()?],
             next_anchor: None,
-            scan_exhausted: false,
             warnings: Vec::new(),
         });
     }
@@ -239,8 +237,8 @@ pub(crate) fn list_history_sessions(
         }
     }
 
-    let scan_exhausted = !reached_end && scanned >= HISTORY_MAX_CANDIDATES;
-    let has_more = visible.len() > limit || scan_exhausted;
+    let scan_limit_reached = !reached_end && scanned >= HISTORY_MAX_CANDIDATES;
+    let has_more = visible.len() > limit || scan_limit_reached;
     if visible.len() > limit {
         visible.truncate(limit);
     }
@@ -255,7 +253,6 @@ pub(crate) fn list_history_sessions(
     Ok(HistorySessionPage {
         sessions: visible.into_iter().map(|(item, _)| item).collect(),
         next_anchor,
-        scan_exhausted,
         warnings,
     })
 }

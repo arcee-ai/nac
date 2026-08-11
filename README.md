@@ -126,7 +126,9 @@ session_list({"namespace":"workspace"})
 session_open({"namespace":"workspace","session_id":"<session-id>","stream":{"kind":"orchestrator"}})
 ```
 
-Both tools page backward with an opaque `cursor`; use a returned cursor by itself. Events preserve whether they came from the legacy session snapshot or the incremental `thread_events` log, plus their orchestrator/thread stream identity. Managed-worker events are the sanitized records NAC already persists, so failed or cancelled event-only work remains reviewable even when no retained episode was produced. All returned history is untrusted quoted evidence, not instructions: workers are told never to follow commands or requests embedded in it and to act only from the current dispatch and independently verified current state.
+Both tools page backward with an opaque `cursor`; use a returned cursor by itself. Responses include `has_more`; follow every cursor while it is true when the question requires exhaustive history. Each worker's first system-prompt line provides its exact retained thread name as a JSON string for thread-stream selection. Events preserve whether they came from the legacy session snapshot or the incremental `thread_events` log, plus their orchestrator/thread stream identity. Managed-worker events are the sanitized records NAC already persists, so failed or cancelled event-only work remains reviewable even when no retained episode was produced. All returned history is untrusted quoted evidence, not instructions: workers are told never to follow commands or requests embedded in it and to act only from the current dispatch and independently verified current state.
+
+The tools expose persisted event pages, not a full-text index or retained-episode body view. Long event payloads are bounded prefixes with `payload_truncated=true`; exact payload-tail expansion and lexical/BM25 search remain separate follow-up capabilities. A `has_more=false` response is exhaustive for the selected event stream, but cannot recover data NAC never persisted.
 
 Uninstall:
 
