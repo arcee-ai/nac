@@ -344,9 +344,7 @@ export function SshConnectionBox({
               >
                 <div className="flex flex-col shrink-0 [&>*]:shrink-0">
                   <TabButton
-                    size={
-                      isMobile ? TabButtonSize.Large : TabButtonSize.Medium
-                    }
+                    size={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
                     variant={
                       selectedId === CREATE_NEW
                         ? TabButtonVariant.Accent

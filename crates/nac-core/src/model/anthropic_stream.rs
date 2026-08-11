@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
-use super::sse::StreamFold;
+use super::sse::{StreamFold, StreamFoldError};
 use super::stream::{DeltaSink, ModelStreamDelta};
 
 /// Rebuilds an Anthropic Messages response out of its event stream.
@@ -57,7 +57,7 @@ impl<'sink> AnthropicStreamFold<'sink> {
 }
 
 impl StreamFold for AnthropicStreamFold<'_> {
-    fn push(&mut self, event: &Value) -> Result<(), String> {
+    fn push(&mut self, event: &Value) -> Result<(), StreamFoldError> {
         let event_type = event.get("type").and_then(Value::as_str);
         match event_type {
             Some("error") => {
@@ -66,7 +66,7 @@ impl StreamFold for AnthropicStreamFold<'_> {
                     .and_then(|error| error.get("message"))
                     .and_then(Value::as_str)
                     .unwrap_or("Anthropic stream reported an error");
-                return Err(message.to_string());
+                return Err(StreamFoldError::permanent(message));
             }
             Some("message_start") => {
                 self.saw_message = true;
@@ -143,10 +143,11 @@ impl StreamFold for AnthropicStreamFold<'_> {
         }
         Ok(())
     }
-
-    fn finish(self) -> Result<Value, String> {
+    fn finish(self) -> Result<Value, StreamFoldError> {
         if !self.saw_message {
-            return Err("stream ended without a message_start event".to_string());
+            return Err(StreamFoldError::permanent(
+                "stream ended without a message_start event",
+            ));
         }
 
         let content = self

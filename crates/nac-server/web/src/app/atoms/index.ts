@@ -10,6 +10,10 @@ export {
 export { default as CopyButton } from "./button/CopyButton";
 export { default as StickyButton } from "./button/StickyButton";
 export { default as ChatLoader, ChatLoaderSize } from "./chat-loader";
+export {
+  default as ChatSessionMessage,
+  ChatSessionMessageVariant,
+} from "./chat-session-message";
 export { default as Checkbox } from "./checkbox";
 export { default as CodeBlock, CodeBlockSize } from "./code-block";
 export { default as CoverBackground } from "./cover-background";
@@ -32,6 +36,7 @@ export {
 } from "./horizontal-tabs-item";
 export { default as HoverHint, HoverHintSize } from "./hover-hint";
 export { default as Icon, IconName, mapIconName } from "./icon";
+export { default as InitialPromptBox } from "./initial-prompt-box";
 export {
   default as Input,
   InputLeading,
@@ -45,11 +50,7 @@ export {
 } from "./input/StickyInput";
 export { default as TextArea, TextAreaSize } from "./input/TextArea";
 export { default as KeyboardShortcut } from "./keyboard-shortcut";
-export {
-  default as Label,
-  type HoverHintConfig,
-  LabelSize,
-} from "./label";
+export { default as Label, type HoverHintConfig, LabelSize } from "./label";
 export { default as Loader, LoaderSize, LoaderVariant } from "./loader";
 export {
   default as CircularLoader,
@@ -67,16 +68,13 @@ export { default as Modal, ModalSize } from "./modal";
 export { default as ModelPill, ModelPillSize } from "./model-pill";
 export { default as NumberInput } from "./number-input";
 export { default as Pagination } from "./pagination";
-export {
-  default as Popover,
-  PopoverPlacement,
-  PopoverSize,
-} from "./popover";
+export { default as Popover, PopoverPlacement, PopoverSize } from "./popover";
 export { default as BottomSheet } from "./popover/BottomSheet";
 export { default as Radio } from "./radio";
 export { default as RangeInput } from "./range-input";
 export { default as Select, type SelectItem } from "./select";
 export { default as SessionAvatar, sessionAvatarColor } from "./session-avatar";
+export { default as SessionIllustration } from "./session-illustration";
 export { default as Separator } from "./separator";
 export { default as Switch, SwitchSize } from "./switch";
 export {

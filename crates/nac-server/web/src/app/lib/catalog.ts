@@ -14,6 +14,53 @@ import type {
   ReasoningEffort,
 } from "@/app/types/api";
 
+/** A model chosen out of the catalog, together with where it is served. */
+export interface CatalogPick {
+  backend: BackendKind;
+  model: string;
+  /** The endpoint the catalog names for this provider, managed one first. */
+  baseUrl: string;
+}
+
+/** Where a session on this provider sends its requests. */
+export function catalogBaseUrl(provider: CatalogProvider): string {
+  return provider.managed_base_url ?? provider.default_base_url ?? "";
+}
+
+/**
+ * The model the catalog opens on. Arcee only reports passthrough models through
+ * its authenticated live index, so keep the exact provider id here even while
+ * the local catalog still contains only its embedded seed.
+ */
+const DEFAULT_PICK_MODEL = "deepseek/deepseek-v4-flash-latest";
+const DEFAULT_PICK_BACKENDS: BackendKind[] = ["arcee-auth", "arcee-api"];
+
+/**
+ * What the catalog opens on while nothing has been picked, so a first session —
+ * the case with no saved configuration to fall back on — is one click away. A
+ * provider the server can already authenticate as wins; otherwise the stored
+ * login one opens and asks for its login.
+ */
+export function defaultCatalogPick(
+  catalog: ModelCatalog | undefined,
+): CatalogPick | null {
+  const candidates = DEFAULT_PICK_BACKENDS.flatMap((backend) => {
+    const provider = findProvider(catalog, backend);
+    if (!provider) return [];
+    const baseUrl = catalogBaseUrl(provider);
+    return baseUrl ? [{ provider, baseUrl }] : [];
+  });
+  const chosen =
+    candidates.find((entry) => entry.provider.auth_status === "ready") ??
+    candidates[0];
+  if (!chosen) return null;
+  return {
+    backend: chosen.provider.id,
+    model: DEFAULT_PICK_MODEL,
+    baseUrl: chosen.baseUrl,
+  };
+}
+
 /** What the catalog knows about the model a session is actually running. */
 export interface ResolvedCatalogModel {
   provider: CatalogProvider | null;

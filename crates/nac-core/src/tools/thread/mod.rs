@@ -343,13 +343,8 @@ pub async fn execute_parsed_dispatch(
                 timeout_reason: None,
                 usage: run.usage.clone(),
             });
-            let details = if !run.stderr.trim().is_empty() {
-                run.stderr.trim().to_string()
-            } else if !run.stdout.trim().is_empty() {
-                run.stdout.trim().to_string()
-            } else {
-                "no output".to_string()
-            };
+            let details =
+                worker_failure_details(run.model_error.as_deref(), &run.stderr, &run.stdout);
             ToolResult {
                 content: format!(
                     "Thread '{}' failed (exit {}):\n{}",
@@ -371,6 +366,26 @@ pub async fn execute_parsed_dispatch(
                 is_error: false,
             }
         }
+    }
+}
+
+fn worker_failure_details(model_error: Option<&str>, stderr: &str, stdout: &str) -> String {
+    let model_error = model_error
+        .map(str::trim)
+        .filter(|message| !message.is_empty());
+    let stderr = stderr.trim();
+    if let Some(model_error) = model_error {
+        if stderr.is_empty() {
+            return model_error.to_string();
+        }
+        return format!("{model_error}\n\nWorker diagnostics:\n{stderr}");
+    }
+    if !stderr.is_empty() {
+        stderr.to_string()
+    } else if !stdout.trim().is_empty() {
+        stdout.trim().to_string()
+    } else {
+        "no output".to_string()
     }
 }
 
@@ -708,6 +723,99 @@ mod tests {
             unavailable.content,
             "Error: no skills are available for thread dispatch"
         );
+    }
+
+    #[test]
+    fn worker_failure_prioritizes_model_error_and_preserves_diagnostics() {
+        assert_eq!(
+            worker_failure_details(
+                Some("provider overloaded"),
+                "pid file already exists\nMCP unavailable",
+                "partial stdout",
+            ),
+            "provider overloaded\n\nWorker diagnostics:\npid file already exists\nMCP unavailable"
+        );
+        assert_eq!(
+            worker_failure_details(Some("  provider overloaded  "), " \n", "partial stdout"),
+            "provider overloaded"
+        );
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_dispatch_reports_latest_model_error_before_ordered_diagnostics() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("nac_dispatch_error_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker.sh");
+        let model_started = serde_json::to_string(&AgentEvent::ModelCallStarted {
+            thread_name: Some("worker".to_string()),
+            iteration: 2,
+        })
+        .unwrap();
+        let first = serde_json::to_string(&AgentEvent::ModelError {
+            thread_name: Some("worker".to_string()),
+            message: "first provider error".to_string(),
+        })
+        .unwrap();
+        let second = serde_json::to_string(&AgentEvent::ModelError {
+            thread_name: Some("worker".to_string()),
+            message: "latest provider error\nrequest-id: safe".to_string(),
+        })
+        .unwrap();
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' '{prefix}{model_started}' >&2\n\
+             printf '%s\\n' '{prefix}{first}' >&2\n\
+             printf '%s\\n' 'pid file already exists' >&2\n\
+             printf '%s\\n' '{prefix}{second}' >&2\n\
+             printf '%s\\n' 'MCP unavailable' >&2\n\
+             printf '%s\\n' 'partial stdout'\nexit 1\n",
+            prefix = crate::events::STDERR_EVENT_PREFIX,
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        let params = ParsedDispatchParams {
+            thread_name: "worker".to_string(),
+            dispatch_id: "dispatch".to_string(),
+            action: "fail".to_string(),
+            source_threads: Vec::new(),
+            scheduled_skills: Vec::new(),
+            session_id: "test-session".to_string(),
+            timeout_secs: 30,
+        };
+        assert!(mark_thread_active(&runtime, "worker", "dispatch"));
+
+        let result = execute_parsed_dispatch(params, &runtime, &ModelClient::new_for_test()).await;
+
+        assert!(result.is_error);
+        assert_eq!(
+            result.content,
+            "Thread 'worker' failed (exit 1):\n\
+             latest provider error\nrequest-id: safe\n\n\
+             Worker diagnostics:\npid file already exists\nMCP unavailable"
+        );
+        assert!(!result.content.contains(crate::events::STDERR_EVENT_PREFIX));
+        assert!(!is_thread_active(&runtime, "worker"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn worker_failure_preserves_existing_output_fallbacks() {
+        assert_eq!(
+            worker_failure_details(None, " stderr details ", "stdout details"),
+            "stderr details"
+        );
+        assert_eq!(
+            worker_failure_details(None, " \n", " stdout details "),
+            "stdout details"
+        );
+        assert_eq!(worker_failure_details(None, "", ""), "no output");
     }
 
     #[test]

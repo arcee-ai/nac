@@ -40,6 +40,7 @@ import {
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { perfRender } from "@/app/lib/perfDebug";
+import { humanErrorText } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
@@ -49,6 +50,7 @@ import {
   useSubmitRun,
   useSlashCommands,
 } from "@/app/services/queries";
+import { consumePromptRequests } from "@/app/store/composerStore";
 import { pushLocalEvent, useRunning } from "@/app/store/runtimeStore";
 import {
   markSshConnected,
@@ -61,6 +63,8 @@ import type {
   ManagedSessionSummary,
   SessionSnapshotResponse,
 } from "@/app/types/api";
+
+const PLACEHOLDER = "Ask anything…";
 
 /** One line of the field, which is also its collapsed height. */
 const ROW_PX = { mobile: 40, wide: 48 };
@@ -221,6 +225,7 @@ export function ChatInputBox({
   const listboxId = useId();
 
   const metrics = runMetrics(snapshot, entry);
+  const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
   const context = contextGauge(
     metrics.usage?.total_tokens ?? null,
@@ -259,14 +264,11 @@ export function ChatInputBox({
     );
   }, [commandDefinitions, commandQuery]);
   const suggestionsOpen =
-    focused &&
-    commandQuery !== null &&
-    dismissedSuggestionValue !== value;
+    focused && commandQuery !== null && dismissedSuggestionValue !== value;
   const activeOptionId =
     suggestionsOpen && filteredCommands[activeSuggestion]
       ? `${listboxId}-option-${activeSuggestion}`
       : undefined;
-
 
   useEffect(() => {
     if (!suggestionsOpen) return;
@@ -339,66 +341,92 @@ export function ChatInputBox({
     }
   }, [sshTarget, connectSsh, toast]);
 
-  const submit = useCallback(async () => {
-    const prompt = value.trim();
-    if (!prompt || busy || submitInFlight.current) return;
-    submitInFlight.current = true;
-
-    try {
-      let definitions = commandDefinitions;
-      if (value.trimStart().startsWith("/") && definitions === undefined) {
-        const result = await refetchCommands();
-        definitions = result.data;
-        if (definitions === undefined) {
-          toast.error("Unable to load slash commands");
-          return;
-        }
-      }
-
-      const command = definitions
-        ? submittedSlashCommand(value, definitions)
-        : null;
-      if (command?.command === "compact") {
-        try {
-          await compactSession.mutateAsync(sessionId);
-          pushLocalEvent("compaction", "▶ compacting context…");
-          setValue("");
-          if (ref.current) ref.current.style.height = `${rowPx}px`;
-        } catch (error) {
-          const message = errorMessage(error);
-          pushLocalEvent("error", `compact failed: ${message}`, true);
-          toast.error(`Failed to compact: ${message}`);
-        }
-        return;
-      }
-      if (command) {
-        toast.error(`Unsupported slash command: /${command.name}`);
-        return;
-      }
-      try {
-        await submitRun.mutateAsync({ id: sessionId, prompt });
-        pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
+  /**
+   * Sends `text`, or whatever the field holds when called without one. A
+   * starter prompt arrives as an argument and leaves the field alone, so an
+   * unsent draft survives being overtaken by one.
+   */
+  const submit = useCallback(
+    async (text: string = value) => {
+      const prompt = text.trim();
+      if (!prompt || busy || submitInFlight.current) return;
+      const fromField = text === value;
+      const clearField = () => {
+        if (!fromField) return;
         setValue("");
         if (ref.current) ref.current.style.height = `${rowPx}px`;
-      } catch (error) {
-        const message = errorMessage(error);
-        pushLocalEvent("error", `submit failed: ${message}`, true);
-        toast.error(`Failed to send: ${message}`);
+      };
+      submitInFlight.current = true;
+
+      try {
+        let definitions = commandDefinitions;
+        if (text.trimStart().startsWith("/") && definitions === undefined) {
+          const result = await refetchCommands();
+          definitions = result.data;
+          if (definitions === undefined) {
+            toast.error("Unable to load slash commands");
+            return;
+          }
+        }
+
+        const command = definitions
+          ? submittedSlashCommand(text, definitions)
+          : null;
+        if (command?.command === "compact") {
+          try {
+            await compactSession.mutateAsync(sessionId);
+            pushLocalEvent("compaction", "▶ compacting context…");
+            clearField();
+          } catch (error) {
+            pushLocalEvent(
+              "error",
+              `compact failed: ${errorMessage(error)}`,
+              true,
+            );
+            toast.error(`Failed to compact: ${humanErrorText(error, backend)}`);
+          }
+          return;
+        }
+        if (command) {
+          toast.error(`Unsupported slash command: /${command.name}`);
+          return;
+        }
+        try {
+          await submitRun.mutateAsync({ id: sessionId, prompt });
+          pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
+          clearField();
+        } catch (error) {
+          pushLocalEvent(
+            "error",
+            `submit failed: ${errorMessage(error)}`,
+            true,
+          );
+          toast.error(`Failed to send: ${humanErrorText(error, backend)}`);
+        }
+      } finally {
+        submitInFlight.current = false;
       }
-    } finally {
-      submitInFlight.current = false;
-    }
-  }, [
-    value,
-    busy,
-    commandDefinitions,
-    refetchCommands,
-    sessionId,
-    submitRun,
-    compactSession,
-    toast,
-    rowPx,
-  ]);
+    },
+    [
+      value,
+      backend,
+      busy,
+      commandDefinitions,
+      refetchCommands,
+      sessionId,
+      submitRun,
+      compactSession,
+      toast,
+      rowPx,
+    ],
+  );
+
+  // A starter prompt goes out on its own; it is already a whole instruction,
+  // and the field is where it would otherwise have to be confirmed.
+  useEffect(
+    () => consumePromptRequests((prompt) => void submit(prompt)),
+    [submit],
+  );
 
   const stop = useCallback(async () => {
     const summary = entry?.summary;
@@ -470,24 +498,24 @@ export function ChatInputBox({
       )}
     >
       <div className="relative flex-1 min-w-0">
-      <span
-        className="sr-only"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {suggestionsOpen
-          ? commandDefinitions === undefined
-            ? commandsFailed
-              ? "Slash commands unavailable"
-              : "Loading slash commands"
-            : filteredCommands.length
-              ? `${filteredCommands.length} slash ${
-                  filteredCommands.length === 1 ? "command" : "commands"
-                } available`
-              : "No matching commands"
-          : ""}
-      </span>
+        <span
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {suggestionsOpen
+            ? commandDefinitions === undefined
+              ? commandsFailed
+                ? "Slash commands unavailable"
+                : "Loading slash commands"
+              : filteredCommands.length
+                ? `${filteredCommands.length} slash ${
+                    filteredCommands.length === 1 ? "command" : "commands"
+                  } available`
+                : "No matching commands"
+            : ""}
+        </span>
         <textarea
           ref={ref}
           className={cn(
@@ -505,7 +533,7 @@ export function ChatInputBox({
           aria-expanded={suggestionsOpen}
           aria-controls={suggestionsOpen ? listboxId : undefined}
           aria-activedescendant={activeOptionId}
-          placeholder="Send a message"
+          placeholder={PLACEHOLDER}
           spellCheck={false}
           value={value}
           style={{ minHeight: `${rowPx}px`, maxHeight: `${maxHeightPx}px` }}
@@ -565,7 +593,7 @@ export function ChatInputBox({
                 value ? "text-input" : "text-input-placeholder",
               )}
             >
-              {value || "Send a message"}
+              {value || PLACEHOLDER}
             </span>
           </div>
         ) : null}

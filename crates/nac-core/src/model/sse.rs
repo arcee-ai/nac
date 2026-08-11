@@ -9,20 +9,101 @@
 //! `data: [DONE]` is left to the caller: it is a wire-only sentinel that only
 //! the OpenAI-shaped backends send.
 
+use std::fmt;
 use std::pin::Pin;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use reqwest::Response;
 use serde_json::Value;
+
+#[derive(Debug)]
+pub(super) struct StreamFoldError {
+    message: String,
+    retryable: bool,
+}
+
+impl StreamFoldError {
+    pub(super) fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retryable: false,
+        }
+    }
+
+    pub(super) fn retryable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retryable: true,
+        }
+    }
+
+    pub(super) fn is_retryable(&self) -> bool {
+        self.retryable
+    }
+}
+
+impl fmt::Display for StreamFoldError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StreamFoldError {}
+
+#[derive(Debug)]
+pub(super) struct SseError {
+    message: String,
+    retryable: bool,
+    observable_delta: bool,
+}
+
+impl SseError {
+    fn permanent(message: impl Into<String>, observable_delta: bool) -> Self {
+        Self {
+            message: message.into(),
+            retryable: false,
+            observable_delta,
+        }
+    }
+
+    fn fold(url: &str, error: StreamFoldError, observable_delta: bool) -> Self {
+        Self {
+            message: format!("model stream from {url} failed: {error}"),
+            retryable: error.retryable,
+            observable_delta,
+        }
+    }
+
+    pub(super) fn is_retryable(&self) -> bool {
+        self.retryable
+    }
+
+    pub(super) fn has_observable_delta(&self) -> bool {
+        self.observable_delta
+    }
+}
+
+impl fmt::Display for SseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SseError {}
 
 /// Rebuilds the response body a provider's buffered endpoint would have returned
 /// out of the events its streaming endpoint sends, so the existing parsers stay
 /// the single place that understands each provider's response shape.
 pub(super) trait StreamFold {
     /// Fold one event. `Err` is terminal and carries a user-facing reason.
-    fn push(&mut self, event: &Value) -> std::result::Result<(), String>;
+    fn push(&mut self, event: &Value) -> std::result::Result<(), StreamFoldError>;
+
+    /// Whether a non-empty model delta has reached a live observer.
+    fn has_observable_delta(&self) -> bool {
+        false
+    }
 
     /// Whether a protocol-level terminal event has been folded. Streaming
     /// callers can stop here instead of waiting for the provider to close an
@@ -31,7 +112,7 @@ pub(super) trait StreamFold {
         false
     }
 
-    fn finish(self) -> std::result::Result<Value, String>;
+    fn finish(self) -> std::result::Result<Value, StreamFoldError>;
 }
 
 /// Read an SSE body to completion, folding it into a response value.
@@ -39,28 +120,39 @@ pub(super) async fn read_sse_response<F: StreamFold>(
     url: &str,
     response: Response,
     mut fold: F,
-) -> Result<Value> {
+) -> std::result::Result<Value, SseError> {
     let mut reader = SseReader::new(response);
 
     while let Some(frame) = reader.next_frame().await {
-        let frame = frame.with_context(|| format!("model stream from {url} failed"))?;
+        let frame = frame.map_err(|error| {
+            SseError::permanent(
+                format!("model stream from {url} failed: {error:#}"),
+                fold.has_observable_delta(),
+            )
+        })?;
         if frame.is_done() {
             break;
         }
         if frame.data.trim().is_empty() {
             continue;
         }
-        let event: Value = serde_json::from_str(&frame.data)
-            .with_context(|| format!("invalid SSE event from {url}: {}", frame.data))?;
-        fold.push(&event)
-            .map_err(|message| anyhow!("model stream from {url} failed: {message}"))?;
+        let event: Value = serde_json::from_str(&frame.data).map_err(|error| {
+            SseError::permanent(
+                format!("invalid SSE event from {url}: {}\n{error}", frame.data),
+                fold.has_observable_delta(),
+            )
+        })?;
+        if let Err(error) = fold.push(&event) {
+            return Err(SseError::fold(url, error, fold.has_observable_delta()));
+        }
         if fold.is_complete() {
             break;
         }
     }
 
+    let observable_delta = fold.has_observable_delta();
     fold.finish()
-        .map_err(|message| anyhow!("model stream from {url} failed: {message}"))
+        .map_err(|error| SseError::fold(url, error, observable_delta))
 }
 
 /// One dispatched SSE event. Only the payload is kept: providers that also name

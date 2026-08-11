@@ -89,15 +89,6 @@ fn resolve_arcee_api_credentials(
     Ok((base_url.to_string(), api_key, ArceeCredentialSource::ApiKey))
 }
 
-fn validate_backend_model(backend: BackendKind, model: &str) -> Result<()> {
-    if backend == BackendKind::ArceeAuth && model != "trinity-large-thinking" {
-        return Err(model_configuration_error(format!(
-            "invalid model configuration: backend 'arcee-auth' supports only model 'trinity-large-thinking', not '{model}'"
-        )));
-    }
-    Ok(())
-}
-
 /// Validates the effective model configuration without issuing a model request.
 pub fn validate_model_configuration(
     backend: BackendKind,
@@ -127,7 +118,6 @@ pub fn validate_model_configuration(
                 .map_err(classify_model_configuration_error)?;
         }
     }
-    validate_backend_model(backend, model)?;
     match backend {
         BackendKind::ArceeAuth => {
             resolve_arcee_auth_base_url(base_url)?;
@@ -239,7 +229,6 @@ impl ModelClient {
             arcee::validate_approved_base_url(&settings.base_url)
                 .map_err(classify_model_configuration_error)?;
         }
-        validate_backend_model(backend, &settings.model)?;
         let (api_key, arcee_credential_source) = match backend {
             BackendKind::ArceeAuth => {
                 resolve_arcee_auth_base_url(Some(&settings.base_url))?;
@@ -878,7 +867,9 @@ impl ModelClient {
             .send_with_retry_headers(url, body, apply_headers)
             .await
             .map_err(|error| anyhow!(error.message))?;
-        read_sse_response(url, response, fold).await
+        read_sse_response(url, response, fold)
+            .await
+            .map_err(anyhow::Error::new)
     }
 
     /// Whether the configured extra_headers already set `name` (case-insensitive).

@@ -56,16 +56,17 @@ export function providerUsesApiKey(backend: BackendKind): boolean {
  * The browser login a backend authenticates through. Mirrors
  * `ManagedAuthProvider::for_backend` in `crates/nac-core/src/model/mod.rs`.
  */
-const MANAGED_AUTH_PROVIDERS: Partial<Record<BackendKind, ManagedAuthProvider>> =
-  {
-    "arcee-auth": "arcee",
-    "chatgpt-codex-responses": "codex",
-  };
+const MANAGED_AUTH_PROVIDERS: Partial<
+  Record<BackendKind, ManagedAuthProvider>
+> = {
+  "arcee-auth": "arcee",
+  "chatgpt-codex-responses": "codex",
+};
 
 export function managedAuthProvider(
-  backend: BackendKind,
+  backend: string,
 ): ManagedAuthProvider | null {
-  return MANAGED_AUTH_PROVIDERS[backend] ?? null;
+  return MANAGED_AUTH_PROVIDERS[backend as BackendKind] ?? null;
 }
 
 function isBackendKind(backend: string): backend is BackendKind {

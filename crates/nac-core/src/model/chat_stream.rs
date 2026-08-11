@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
-use super::sse::StreamFold;
+use super::sse::{StreamFold, StreamFoldError};
 use super::stream::{DeltaSink, ModelStreamDelta};
 
 /// Rebuilds a chat-completions response out of its stream chunks, so the
@@ -76,13 +76,13 @@ impl<'sink> ChatStreamFold<'sink> {
 }
 
 impl StreamFold for ChatStreamFold<'_> {
-    fn push(&mut self, event: &Value) -> Result<(), String> {
+    fn push(&mut self, event: &Value) -> Result<(), StreamFoldError> {
         if let Some(message) = event
             .get("error")
             .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
         {
-            return Err(message.to_string());
+            return Err(StreamFoldError::permanent(message));
         }
 
         if let Some(usage) = event.get("usage").filter(|usage| !usage.is_null()) {
@@ -123,10 +123,11 @@ impl StreamFold for ChatStreamFold<'_> {
 
         Ok(())
     }
-
-    fn finish(self) -> Result<Value, String> {
+    fn finish(self) -> Result<Value, StreamFoldError> {
         if !self.saw_choice {
-            return Err("stream ended without any completion chunk".to_string());
+            return Err(StreamFoldError::permanent(
+                "stream ended without any completion chunk",
+            ));
         }
 
         let mut message = json!({
