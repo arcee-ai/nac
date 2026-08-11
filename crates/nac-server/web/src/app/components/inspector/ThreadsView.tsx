@@ -104,10 +104,15 @@ type ListKind = "pending" | "running" | "done";
  */
 const ToolCallView = memo(function ToolCallView({
   entry,
+  running,
 }: {
   entry: ToolCallEntry;
+  running: boolean;
 }) {
-  const pending = entry.status === "pending";
+  // A missing result event must not leave completed history looking active.
+  // The terminal refetch normally supplies the pair; this is the defensive
+  // rendering fallback for a truncated page, replay gap or persistence fault.
+  const pending = running && entry.status === "pending";
   return (
     <div className="pt-1">
       <p
@@ -179,10 +184,14 @@ const StandaloneView = memo(function StandaloneView({
  */
 const LogEntryView = memo(function LogEntryView({
   entry,
+  running,
 }: {
   entry: LogEntry;
+  running: boolean;
 }) {
-  if (entry.kind === "tool_call") return <ToolCallView entry={entry} />;
+  if (entry.kind === "tool_call") {
+    return <ToolCallView entry={entry} running={running} />;
+  }
   return <StandaloneView entry={entry} />;
 });
 
@@ -292,6 +301,7 @@ function LogScroller({
               entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key
             }
             entry={entry}
+            running={running}
           />
         ))}
         {thinking ? (

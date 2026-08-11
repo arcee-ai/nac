@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -24,45 +24,41 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { SshBadge } from "@/app/components/SshBadge";
-import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
-  BACKEND_OPTIONS,
-  reasoningOptionsFor,
-} from "@/app/components/modals/options";
+  ConfigurationsPanel,
+  type LaunchModelSelection,
+} from "@/app/components/modals/ConfigurationsPanel";
+import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
+import { KeyStatus } from "@/app/components/modals/KeyStatus";
+import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
-import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import {
   isGeneratedCredentialName,
-  KEY_DEBOUNCE_MS,
   MASKED_KEY,
-  modelItems,
   type Validation,
 } from "@/app/lib/apiKey";
 import {
   buildSettingsPatch,
   managedLaunchBaseUrl,
-  type CredentialMode,
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
-import { providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
 import {
   useManagedLogout,
   useManagedProviderModels,
+  useCreateModelConfig,
   useModelCatalog,
-  useProviderModels,
   useSessionConfig,
   useSessionSnapshot,
   useSessionSummary,
-  useStoreGeneratedCredential,
-  useStoredKeyProviderModels,
   useUpdateConfig,
   useUpdatePresentation,
 } from "@/app/services/queries";
@@ -78,9 +74,6 @@ import type {
   SshTarget,
 } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-
-/** Stands in for the name a key gets while the form is only being checked. */
-const PENDING_KEY_NAME = "NAC_CONFIG_pending";
 
 function headersToText(headers: Record<string, string>): string {
   return Object.keys(headers).length === 0
@@ -246,16 +239,16 @@ function SettingsForm({
   const isMobile = useIsMobile();
   const toast = useToast();
   const updateConfig = useUpdateConfig();
+  const createModelConfig = useCreateModelConfig();
   const [openingSummary] = useState(summary);
   const updatePresentation = useUpdatePresentation();
-  const storeKey = useStoreGeneratedCredential();
 
   const initialTitle = openingSummary.title ?? "";
   const [title, setTitle] = useState(initialTitle);
   const [model, setModel] = useState(initial.model);
   const [backend, setBackend] = useState(initial.backend);
   const [reasoning, setReasoning] = useState(initial.reasoning_effort ?? "");
-  const [baseUrl, setBaseUrl] = useState(initial.base_url);
+  const [, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
   const [compaction, setCompaction] = useState(
     initial.orchestrator_compaction_threshold != null
@@ -273,53 +266,27 @@ function SettingsForm({
   const compactionAutoRef = useRef(
     initial.orchestrator_compaction_threshold == null,
   );
-  // Null while the session keeps the key it already has. A string is a
-  // replacement being typed, and an empty one means the key was taken away.
-  const [keyDraft, setKeyDraft] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
+  const [advanced, setAdvanced] = useState(false);
 
-  const kind = backend as BackendKind;
-  const managedUrl = managedLaunchBaseUrl(backend);
-  const locked = Boolean(managedUrl);
-  const displayBaseUrl = managedUrl ?? baseUrl;
-  const usesKey = providerUsesApiKey(kind);
-  // A session with nothing on file has nothing to show either, so the row opens
-  // ready for a key rather than displaying a stand-in for one that is not there.
-  const editingKey = keyDraft !== null || !initial.api_key_env;
-  const draftKey = (keyDraft ?? "").trim();
-  const storedKeyEnv = editingKey ? "" : (initial.api_key_env ?? "");
-
-  // A pasted key is checked against the provider, and one already on file is
-  // checked by name — either way by listing the models it reaches, so the same
-  // answer says whether the credential works and what the session may run.
-  const debouncedKey = useDebouncedValue(draftKey, KEY_DEBOUNCE_MS);
-  const debouncedBaseUrl = useDebouncedValue(baseUrl.trim(), KEY_DEBOUNCE_MS);
-  const draftQuery = useProviderModels(
-    kind,
-    debouncedKey,
-    debouncedBaseUrl || null,
-    usesKey && editingKey,
+  const onConfigurationChange = useCallback(
+    (next: LaunchModelSelection | null) => {
+      setSelection(next);
+      if (!next) return;
+      const values = next.kind === "resolved" ? next : next.request;
+      setBackend(values.backend);
+      setModel(values.model);
+      setBaseUrl(
+        values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "",
+      );
+      if (next.kind === "resolved") {
+        setReasoning(next.reasoning_effort ?? "");
+        setHeaders(headersToText(next.extra_headers ?? {}));
+      }
+    },
+    [],
   );
-  const storedQuery = useStoredKeyProviderModels(
-    kind,
-    storedKeyEnv,
-    debouncedBaseUrl || null,
-    usesKey && !editingKey,
-  );
-  const keyQuery = editingKey ? draftQuery : storedQuery;
-  const validation: Validation = !usesKey
-    ? { status: "idle" }
-    : keyQuery.isFetching
-      ? { status: "validating" }
-      : keyQuery.isError
-        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
-        : keyQuery.data
-          ? {
-              status: "ready",
-              models: keyQuery.data.models,
-              baseUrl: keyQuery.data.base_url,
-            }
-          : { status: "idle" };
 
   // Only the levels this model actually accepts: the backend rejects the rest,
   // so offering them would only produce a save that fails.
@@ -350,33 +317,11 @@ function SettingsForm({
     }
   }, [compactionPlaceholder]);
 
-  const { provider, signedIn } = useManagedSignIn(kind);
-  const loginQuery = useManagedProviderModels(
-    kind,
-    Boolean(provider) && signedIn,
-  );
-  const models =
-    (usesKey
-      ? validation.status === "ready"
-        ? validation.models
-        : []
-      : loginQuery.data?.models) ?? [];
-
-  // The provider decides the mode: a managed backend authenticates from its
-  // stored login, and everywhere else a named key is the only other source.
-  const credentialMode: CredentialMode = usesKey ? "variable" : "none";
-  // What blocks a save is a credential known to be unusable, not one that has
-  // merely not been checked: an unreachable provider should never stand between
-  // the user and renaming their session.
-  const missingKey = usesKey && editingKey && draftKey.length === 0;
-  const blocked =
-    missingKey ||
-    validation.status === "error" ||
-    Boolean(provider && !signedIn);
+  const blocked = !selection;
   const busy =
     updateConfig.isPending ||
     updatePresentation.isPending ||
-    storeKey.isPending;
+    createModelConfig.isPending;
 
   const seedTarget = sshTargetFromSummary(openingSummary);
   const sshStatus = useSshConnectionStatus(seedTarget);
@@ -417,45 +362,48 @@ function SettingsForm({
   };
 
   const submit = async () => {
-    if (busy || blocked) return;
+    if (busy || !selection) return;
 
-    const valuesWith = (apiKeyEnv: string) => ({
-      model,
-      backend,
-      base_url: baseUrl,
-      reasoning_effort: reasoning,
-      credential_mode: credentialMode,
-      api_key_env: apiKeyEnv,
-      extra_headers: headers,
-      orchestrator_compaction_threshold: compaction,
-    });
-
-    // Nothing is filed away until the rest of the form is known to be good, so
-    // a rejected header map cannot leave an orphaned key behind. The stand-in
-    // only stands where the generated name will, and never reaches the server.
+    let selected: {
+      backend: BackendKind;
+      model: string;
+      base_url: string;
+      api_key_env: string | null;
+    };
     try {
-      buildSettingsPatch(
-        valuesWith(draftKey ? PENDING_KEY_NAME : storedKeyEnv),
-        initial,
-      );
-    } catch (validationError) {
-      setError(errorMessage(validationError));
-      return;
-    }
-
-    let apiKeyEnv = storedKeyEnv;
-    if (usesKey && draftKey) {
-      try {
-        apiKeyEnv = (await storeKey.mutateAsync(draftKey)).name;
-      } catch (storeError) {
-        setError(`The key was not stored: ${errorMessage(storeError)}`);
-        return;
+      if (selection.kind === "save") {
+        const record = await createModelConfig.mutateAsync(selection.request);
+        selected = {
+          backend: record.backend as BackendKind,
+          model: record.model,
+          base_url: record.base_url,
+          api_key_env: record.api_key_env,
+        };
+      } else {
+        selected = selection;
       }
+    } catch (saveError) {
+      setError(
+        `The configuration could not be saved: ${humanErrorText(saveError)}`,
+      );
+      return;
     }
 
     let patch;
     try {
-      patch = buildSettingsPatch(valuesWith(apiKeyEnv), initial);
+      patch = buildSettingsPatch(
+        {
+          model: selected.model,
+          backend: selected.backend,
+          base_url: selected.base_url,
+          reasoning_effort: reasoning,
+          credential_mode: selected.api_key_env ? "variable" : "none",
+          api_key_env: selected.api_key_env ?? "",
+          extra_headers: headers,
+          orchestrator_compaction_threshold: compaction,
+        },
+        initial,
+      );
     } catch (validationError) {
       setError(errorMessage(validationError));
       return;
@@ -577,91 +525,87 @@ function SettingsForm({
           onChange={(event) => setTitle(event.target.value)}
         />
 
-        <Separator />
-
-        <div className="flex flex-col gap-6 md:grid md:grid-cols-2 md:gap-4">
-          <InputWrapper label="Provider">
-            <Select
-              items={BACKEND_OPTIONS}
-              value={backend}
-              onValueChange={setBackend}
-              className="w-full"
-              triggerClassName="w-full"
-              panelClassName="max-h-64 overflow-auto"
-              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            />
-          </InputWrapper>
-          <Input
-            label="Base URL"
-            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-            value={displayBaseUrl}
-            isDisabled={locked}
-            hintText={locked ? "Managed by the selected provider." : undefined}
-            onChange={(event) => setBaseUrl(event.target.value)}
-          />
-        </div>
-
-        {usesKey ? (
-          <ApiKeyField
-            editing={editingKey}
-            draft={keyDraft ?? ""}
-            stored={initial.api_key_env ?? ""}
-            validation={validation}
-            onDraft={setKeyDraft}
-            onClear={() => setKeyDraft("")}
-            onRestore={() => setKeyDraft(null)}
-          />
-        ) : (
-          <AuthenticationField backend={kind} />
-        )}
-
-        {/* Touch-sized controls need the whole width, so the pair stacks until
-            the dialog has a desktop column to split. */}
-        <div className="flex flex-col gap-6 md:grid md:grid-cols-2 md:gap-4">
-          <ModelField
-            value={model}
-            models={modelItems(models)}
-            available={!blocked}
-            onChange={setModel}
-          />
-          <InputWrapper label="Reasoning effort">
-            <Select
-              items={reasoningItems}
-              value={reasoning}
-              onValueChange={setReasoning}
-              className="w-full"
-              triggerClassName="w-full"
-              panelClassName="max-h-64 overflow-auto"
-              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            />
-          </InputWrapper>
-        </div>
-
-        <Input
-          label="Compaction threshold"
-          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-          hintText="Context size that triggers compaction; 0 disables it. Blank auto-suggests 70% of the model's context window."
-          placeholder={compactionPlaceholder}
-          inputMode="numeric"
-          value={compaction}
-          onChange={(event) => {
-            compactionAutoRef.current = false;
-            compactionRef.current = event.target.value;
-            setCompaction(event.target.value);
+        <ConfigurationsPanel
+          invalid={Boolean(error)}
+          errorText={error || undefined}
+          initial={{
+            backend: initial.backend as BackendKind,
+            model: initial.model,
+            base_url: initial.base_url,
+            api_key_env: initial.api_key_env,
+            reasoning_effort: initial.reasoning_effort,
+            extra_headers: initial.extra_headers,
           }}
-        />
-
-        <Separator />
-
-        <TextArea
-          label="Extra headers (JSON object)"
-          textAreaSize={isMobile ? TextAreaSize.Large : TextAreaSize.Medium}
-          hintText="Blank sends none; header values must be strings."
-          placeholder='{ "X-Title": "nac" }'
-          value={headers}
-          onChange={(event) => setHeaders(event.target.value)}
-          textAreaClassName="h-[160px] resize-none font-mono"
-        />
+          onChange={onConfigurationChange}
+        >
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              className="btn-ghost flex w-full items-center gap-1.5 rounded-[4px] p-2 text-btn-secondary"
+              aria-expanded={advanced}
+              onClick={() => setAdvanced((value) => !value)}
+            >
+              <Icon iconName={IconName.Gear} size={20} />
+              <span className="label-small flex-1 text-left">
+                Advanced Configurations
+              </span>
+              <Icon
+                iconName={advanced ? IconName.Down : IconName.Right}
+                size={20}
+              />
+            </button>
+            {advanced ? (
+              <>
+                <Separator />
+                <ConfigRow
+                  label="Reasoning"
+                  hint="Reasoning effort passed to the model."
+                  control={
+                    <SmallSelect
+                      items={reasoningItems}
+                      value={reasoning}
+                      onValueChange={setReasoning}
+                    />
+                  }
+                />
+                <Separator />
+                <ConfigRow
+                  label="Orchestrator compaction threshold"
+                  hint="Context size that triggers compaction; 0 disables it."
+                  control={
+                    <Input
+                      inputSize={
+                        isMobile ? InputSize.Large : InputSize.Medium
+                      }
+                      className={CONTROL_WIDTH}
+                      inputClassName="md:text-right"
+                      placeholder={compactionPlaceholder}
+                      inputMode="numeric"
+                      value={compaction}
+                      onChange={(event) => {
+                        compactionAutoRef.current = false;
+                        compactionRef.current = event.target.value;
+                        setCompaction(event.target.value);
+                      }}
+                    />
+                  }
+                />
+                <Separator />
+                <TextArea
+                  label="Extra headers (JSON object)"
+                  textAreaSize={
+                    isMobile ? TextAreaSize.Large : TextAreaSize.Medium
+                  }
+                  hintText="Blank sends none; header values must be strings."
+                  placeholder='{ "X-Title": "nac" }'
+                  value={headers}
+                  onChange={(event) => setHeaders(event.target.value)}
+                  textAreaClassName="h-[160px] resize-none font-mono"
+                />
+              </>
+            ) : null}
+          </div>
+        </ConfigurationsPanel>
 
         {error ? (
           <p className="text-error-primary text-micro">{error}</p>
@@ -933,3 +877,9 @@ function ModelField({
     </InputWrapper>
   );
 }
+
+// Kept temporarily as implementation references while the shared configuration
+// panel owns the active settings UI.
+void ApiKeyField;
+void AuthenticationField;
+void ModelField;

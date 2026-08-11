@@ -24,12 +24,12 @@ import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import type { ModelTurn } from "@/app/lib/transcript";
+import {
+  RUN_CANCELLED_MARKER,
+  type ModelTurn,
+} from "@/app/lib/transcript";
 import type { WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-
-/** Exact assistant marker written by the agent on session cancel. */
-const RUN_CANCELLED_MARKER = "[run cancelled by user]";
 
 /**
  * "Thinking" for reasoning that is still arriving, so the badge names what the

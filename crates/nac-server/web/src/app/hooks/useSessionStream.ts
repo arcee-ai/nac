@@ -182,6 +182,22 @@ export function useSessionStream(sessionId: string | null): void {
 
     const dispose = subscribeToSessionEvents(id, {
       onEnvelope: (envelope) => {
+        if (
+          envelope.event.type === "agent" &&
+          envelope.event.event.type === "thread_finished"
+        ) {
+          // The paged command log is intentionally cached forever while live
+          // SSE events extend it. Once the worker exits, refetch its newest
+          // page so a final tool result cannot remain live-only (or missing
+          // after runtime state is cleared during snapshot replacement).
+          void client.invalidateQueries({
+            queryKey: queryKeys.threadEvents(
+              id,
+              envelope.event.event.name,
+            ),
+            exact: true,
+          });
+        }
         const refresh = applyEnvelope(envelope);
         if (refresh === "messages") {
           scheduleTail(

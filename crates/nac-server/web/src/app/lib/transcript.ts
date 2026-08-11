@@ -19,6 +19,14 @@ import type {
   ToolCall,
 } from "@/app/types/api";
 
+/** Exact assistant marker written after any partial response on cancellation. */
+export const RUN_CANCELLED_MARKER = "[run cancelled by user]";
+/**
+ * Prefix the backend puts on every tool result that exists only because the
+ * user stopped the run — both the synthetic result that closes a call the run
+ * never reached and the one a worker returns when its dispatch is drained.
+ */
+const TOOL_CALL_CANCELLED_MARKER = "[tool call cancelled by user]";
 
 /**
  * Orchestrator tools that only read back state the side panel already shows.
@@ -32,7 +40,12 @@ const SILENT_TOOLS = new Set([
   "workset_list",
 ]);
 
-export type ThreadState = "running" | "pending" | "done" | "error";
+export type ThreadState =
+  | "running"
+  | "pending"
+  | "done"
+  | "cancelled"
+  | "error";
 
 export interface TranscriptThread {
   /**
@@ -308,13 +321,18 @@ function describeThread(
     (event) => event.type === "thread_finished",
   );
   const finishedLive = live?.status === "finished";
-  const state: ThreadState = live?.isError
-    ? "error"
-    : result != null || finishedLive || finishedPersisted
-      ? "done"
-      : waitingOnBatchDep
-        ? "pending"
-        : "running";
+  const cancelled =
+    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
+    Boolean(live?.cancelled);
+  const state: ThreadState = cancelled
+    ? "cancelled"
+    : live?.isError
+      ? "error"
+      : result != null || finishedLive || finishedPersisted
+        ? "done"
+        : waitingOnBatchDep
+          ? "pending"
+          : "running";
 
   return {
     key: identity,
@@ -340,7 +358,16 @@ function lastBlockText(
 ): string | null {
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index];
-    if (block.kind === kind) return block.text;
+    if (
+      block.kind === kind &&
+      !(
+        kind === "text" &&
+        block.kind === "text" &&
+        block.text.trim() === RUN_CANCELLED_MARKER
+      )
+    ) {
+      return block.text;
+    }
   }
   return null;
 }

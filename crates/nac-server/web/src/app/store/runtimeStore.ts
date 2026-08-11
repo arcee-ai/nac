@@ -29,6 +29,8 @@ export interface RuntimeEvent {
 export interface RuntimeThread {
   name: string;
   status: "running" | "finished";
+  /** The active dispatch ended because the parent run was stopped. */
+  cancelled: boolean;
   action: string;
   exitCode: number | null;
   isError: boolean;
@@ -190,6 +192,7 @@ function pushEvent(
 const emptyThread = (name: string): RuntimeThread => ({
   name,
   status: "running",
+  cancelled: false,
   action: "",
   exitCode: null,
   isError: false,
@@ -293,7 +296,13 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
           Object.entries(state.threads).map(([name, thread]) => [
             name,
             thread.status === "running"
-              ? { ...thread, status: "finished", exitCode: null, isError: false }
+              ? {
+                  ...thread,
+                  status: "finished",
+                  cancelled: true,
+                  exitCode: null,
+                  isError: false,
+                }
               : thread,
           ]),
         ),
@@ -363,6 +372,7 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
       });
       updateThread(event.name, {
         status: "running",
+        cancelled: false,
         action: event.action,
         exitCode: null,
         isError: false,
