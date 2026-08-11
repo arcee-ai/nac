@@ -29,6 +29,22 @@ pub mod ssh_configurations {
     };
 }
 
+/// Named MCP servers the dashboard manages, plus the library catalog it offers
+/// when adding one. Stored servers merge over `config.toml` at session start.
+pub mod mcp_configurations {
+    pub use crate::mcp::{
+        library_entries, probe_mcp_server, McpLibraryAuth, McpLibraryEntry, McpProbedTool,
+        McpServerConfig, McpTransportConfig,
+    };
+    pub use crate::store::{
+        delete_mcp_server_configuration, insert_mcp_server_configuration,
+        list_mcp_server_configurations, load_mcp_server_configuration,
+        update_mcp_server_configuration, McpServerConfigurationRecord,
+        McpServerConfigurationStoreError, NewMcpServerConfiguration, MCP_TRANSPORT_STDIO,
+        MCP_TRANSPORT_STREAMABLE_HTTP,
+    };
+}
+
 mod paths;
 mod process;
 pub mod runtime;

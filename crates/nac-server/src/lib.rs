@@ -1,6 +1,7 @@
 mod compaction;
 mod filesystem;
 mod managed_auth;
+mod mcp_api;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -8,6 +9,10 @@ pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,
+};
+pub use mcp_api::{
+    CreateMcpServerRequest, McpLibraryResponse, McpServerList, McpServerView, TestMcpServerRequest,
+    TestMcpServerResponse, UpdateMcpServerRequest,
 };
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
@@ -763,6 +768,14 @@ pub struct ReplayGapEvent {
 }
 
 impl SessionManager {
+    pub(crate) fn store_path(&self) -> &std::path::Path {
+        &self.inner.store_path
+    }
+
+    pub(crate) fn root_cwd(&self) -> &std::path::Path {
+        &self.inner.root_cwd
+    }
+
     pub fn new(options: ServerOptions) -> Result<Self> {
         let root_cwd = canonicalize_dir(options.root_cwd)?;
         let config = NacConfig::load_without_model_from_cwd(&root_cwd)?;
@@ -2014,6 +2027,16 @@ fn api_router(manager: SessionManager) -> Router {
         .route(
             "/ssh-configs/{config_id}",
             patch(update_ssh_config_handler).delete(delete_ssh_config_handler),
+        )
+        .route("/mcp/library", get(mcp_api::library_handler))
+        .route(
+            "/mcp/servers",
+            get(mcp_api::list_servers_handler).post(mcp_api::create_server_handler),
+        )
+        .route("/mcp/servers/test", post(mcp_api::test_server_handler))
+        .route(
+            "/mcp/servers/{config_id}",
+            patch(mcp_api::update_server_handler).delete(mcp_api::delete_server_handler),
         )
         .route("/auth", get(managed_auth::list_handler))
         .route("/auth/{provider}", delete(managed_auth::logout_handler))
@@ -3608,6 +3631,16 @@ fn canonicalize_file(path: PathBuf) -> Result<PathBuf> {
 pub struct ApiError {
     status: StatusCode,
     message: String,
+}
+
+impl ApiError {
+    pub(crate) fn new(status: StatusCode, message: String) -> Self {
+        Self { status, message }
+    }
+
+    pub(crate) fn bad_request(message: String) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, message)
+    }
 }
 
 impl From<JsonRejection> for ApiError {

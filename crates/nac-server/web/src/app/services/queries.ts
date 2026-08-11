@@ -58,6 +58,11 @@ import type {
   SshConfigurationList,
   CreateSshConfigurationRequest,
   UpdateSshConfigurationRequest,
+  McpLibraryResponse,
+  McpServerList,
+  CreateMcpServerRequest,
+  UpdateMcpServerRequest,
+  TestMcpServerRequest,
   SshTarget,
   StoredCredentialList,
   StoreInfo,
@@ -83,6 +88,8 @@ export const queryKeys = {
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
   sshConfigs: ["ssh-configs"] as const,
+  mcpLibrary: ["mcp-library"] as const,
+  mcpServers: ["mcp-servers"] as const,
   browse: (path: string, kind: BrowseKind, hidden: boolean) =>
     ["fs-browse", { path, kind, hidden }] as const,
   sshBrowse: (target: SshTarget, path: string, hidden = false) =>
@@ -329,6 +336,69 @@ export function useDeleteSshConfig() {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
     },
+  });
+}
+
+export function useMcpLibrary() {
+  return useQuery<McpLibraryResponse>({
+    queryKey: queryKeys.mcpLibrary,
+    queryFn: ({ signal }) => api.getMcpLibrary(signal),
+    // The catalog is embedded in the binary, so it cannot change underneath
+    // the page.
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function useMcpServers() {
+  return useQuery<McpServerList>({
+    queryKey: queryKeys.mcpServers,
+    queryFn: ({ signal }) => api.listMcpServers(signal),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useCreateMcpServer() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateMcpServerRequest) =>
+      api.createMcpServer(payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
+    },
+  });
+}
+
+export function useUpdateMcpServer() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      configId,
+      payload,
+    }: {
+      configId: string;
+      payload: UpdateMcpServerRequest;
+    }) => api.updateMcpServer(configId, payload),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
+    },
+  });
+}
+
+export function useDeleteMcpServer() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (configId: string) => api.deleteMcpServer(configId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
+    },
+  });
+}
+
+export function useTestMcpServer() {
+  return useMutation({
+    mutationFn: (payload: TestMcpServerRequest) => api.testMcpServer(payload),
   });
 }
 

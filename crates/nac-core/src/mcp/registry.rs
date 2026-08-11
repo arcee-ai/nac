@@ -41,7 +41,71 @@ struct McpServer {
 
 #[derive(Clone)]
 pub(super) struct NacMcpClientHandler {
-    roots: Vec<Root>,
+    pub(super) roots: Vec<Root>,
+}
+
+/// Servers defined in `config.toml`, or an empty map when the file is absent,
+/// unreadable or invalid. A broken file only disables the file-defined
+/// servers; stored ones still load.
+fn file_servers_for_policy(
+    paths: &PathContext,
+    transport_policy: McpTransportPolicy,
+) -> BTreeMap<String, McpServerConfig> {
+    let Some(path) = default_config_path(paths) else {
+        return BTreeMap::new();
+    };
+    if !path.exists() {
+        return BTreeMap::new();
+    }
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            eprintln!(
+                "MCP config at '{}' could not be read; its servers will be skipped: {:#}",
+                path.display(),
+                error
+            );
+            return BTreeMap::new();
+        }
+    };
+    match mcp_config_for_policy(&raw, transport_policy) {
+        Ok(config) => config.mcp_servers,
+        Err(error) => {
+            eprintln!(
+                "MCP config at '{}' is invalid; its servers will be skipped: {:#}",
+                path.display(),
+                error
+            );
+            BTreeMap::new()
+        }
+    }
+}
+
+/// Servers saved through the dashboard. A store that cannot be read only
+/// costs its own servers, never the file-defined ones.
+fn stored_servers(store_path: &Path) -> BTreeMap<String, McpServerConfig> {
+    let records = match crate::store::list_mcp_server_configurations(store_path) {
+        Ok(records) => records,
+        Err(error) => {
+            eprintln!("Stored MCP servers could not be read and will be skipped: {error}");
+            return BTreeMap::new();
+        }
+    };
+    let mut servers = BTreeMap::new();
+    for record in records {
+        match server_config_from_record(&record) {
+            Ok(config) => {
+                servers.insert(record.name, config);
+            }
+            Err(error) => {
+                eprintln!(
+                    "Stored MCP server '{}' is malformed and will be skipped: {:#}",
+                    record.name, error
+                );
+            }
+        }
+    }
+    servers
 }
 
 impl McpRegistry {
@@ -49,11 +113,13 @@ impl McpRegistry {
         cwd: &Path,
         sandbox: Option<&SandboxSession>,
         paths: &PathContext,
+        store_path: Option<&Path>,
     ) -> Result<Option<Arc<Self>>> {
         Self::load_with_policy(
             cwd,
             sandbox,
             paths,
+            store_path,
             McpTransportPolicy::All,
             McpRootPolicy::Workspace,
         )
@@ -64,38 +130,21 @@ impl McpRegistry {
         cwd: &Path,
         sandbox: Option<&SandboxSession>,
         paths: &PathContext,
+        store_path: Option<&Path>,
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
     ) -> Result<Option<Arc<Self>>> {
-        let Some(path) = default_config_path(paths) else {
-            return Ok(None);
-        };
-        if !path.exists() {
+        // `config.toml` is the baseline; servers stored by the dashboard merge
+        // over it and override a file server with the same name.
+        let mut servers = file_servers_for_policy(paths, transport_policy);
+        if let Some(store_path) = store_path {
+            for (name, config) in stored_servers(store_path) {
+                servers.insert(name, config);
+            }
+        }
+        if servers.is_empty() {
             return Ok(None);
         }
-
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(error) => {
-                eprintln!(
-                    "MCP config at '{}' could not be read; MCP will be disabled: {:#}",
-                    path.display(),
-                    error
-                );
-                return Ok(None);
-            }
-        };
-        let config = match mcp_config_for_policy(&raw, transport_policy) {
-            Ok(config) => config,
-            Err(error) => {
-                eprintln!(
-                    "MCP config at '{}' is invalid; MCP will be disabled: {:#}",
-                    path.display(),
-                    error
-                );
-                return Ok(None);
-            }
-        };
 
         let handler = NacMcpClientHandler {
             roots: mcp_roots_for_policy(cwd, sandbox, root_policy)?,
@@ -104,7 +153,7 @@ impl McpRegistry {
         let mut tools = HashMap::new();
         let mut seen_names = HashMap::<String, usize>::new();
 
-        for (server_name, server_config) in config.mcp_servers {
+        for (server_name, server_config) in servers {
             if !server_config.enabled {
                 continue;
             }

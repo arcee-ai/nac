@@ -983,6 +983,7 @@ pub async fn build_managed_worker_config(
             &workspace_cwd,
             None,
             &config_paths,
+            Some(&store_path),
             McpTransportPolicy::StreamableHttpOnly,
             McpRootPolicy::None,
         )
@@ -992,7 +993,13 @@ pub async fn build_managed_worker_config(
     } else {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &workspace_paths)?;
-        let mcp = McpRegistry::load(&workspace_cwd, sandbox.as_ref(), &workspace_paths).await?;
+        let mcp = McpRegistry::load(
+            &workspace_cwd,
+            sandbox.as_ref(),
+            &workspace_paths,
+            Some(&store_path),
+        )
+        .await?;
         let (skill_workspace, visibility) = if sandbox.is_some() {
             (None, SkillPathVisibility::Hidden)
         } else {

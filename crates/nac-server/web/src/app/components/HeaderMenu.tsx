@@ -29,9 +29,11 @@ const DOCS_URL = "https://github.com/arcee-ai/nac#readme";
 export function HeaderMenu({
   onConfigurations,
   onSshConfigs,
+  onMcpServers,
 }: {
   onConfigurations: () => void;
   onSshConfigs: () => void;
+  onMcpServers: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
@@ -96,6 +98,10 @@ export function HeaderMenu({
           <TabButton size={itemSize} onClick={act(onSshConfigs)}>
             <Icon iconName={IconName.Globe} />
             <span className="text-left flex-grow">SSH configs</span>
+          </TabButton>
+          <TabButton size={itemSize} onClick={act(onMcpServers)}>
+            <Icon iconName={IconName.Toolbox} />
+            <span className="text-left flex-grow">MCP servers</span>
           </TabButton>
           <Separator />
           <TabButton size={itemSize} onClick={openExternally(DOCS_URL)}>
