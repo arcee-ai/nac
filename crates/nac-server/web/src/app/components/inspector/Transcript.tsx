@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   Button,
@@ -32,6 +39,7 @@ import {
 } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
+  useLoadOlderMessages,
   useRegenerateRun,
   useSubmitRun,
   useWorkspaceRevisions,
@@ -119,8 +127,34 @@ export function Transcript({
   const toast = useToast();
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
+  const olderMessages = useLoadOlderMessages(sessionId);
   const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
     useStickToBottom({ resetKey: sessionId });
+  const prependAnchor = useRef<{ height: number; top: number } | null>(null);
+  const messageWindowStart = snapshot?.message_page?.start ?? 0;
+
+  useLayoutEffect(() => {
+    const anchor = prependAnchor.current;
+    const scroller = scrollRef.current;
+    if (!anchor || !scroller) return;
+    scroller.scrollTop = anchor.top + (scroller.scrollHeight - anchor.height);
+    prependAnchor.current = null;
+  }, [messageWindowStart, scrollRef]);
+
+  const loadOlderMessages = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (scroller) {
+      prependAnchor.current = {
+        height: scroller.scrollHeight,
+        top: scroller.scrollTop,
+      };
+    }
+    void olderMessages.mutateAsync().then((accepted) => {
+      if (!accepted) prependAnchor.current = null;
+    }).catch(() => {
+      prependAnchor.current = null;
+    });
+  }, [olderMessages, scrollRef]);
 
   perfRender("Transcript");
 
@@ -301,11 +335,43 @@ export function Transcript({
             isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[840px]",
           )}
         >
+          {snapshot?.message_page?.has_older ? (
+            <div className="mb-4 flex flex-col items-start gap-2">
+              <Button
+                variant={ButtonVariant.Ghost}
+                size={ButtonSize.Small}
+                content={ButtonContent.Text}
+                disabled={olderMessages.isPending}
+                onClick={loadOlderMessages}
+              >
+                {olderMessages.isPending ? "Loading…" : "Load older"}
+              </Button>
+              {olderMessages.isError ? (
+                <div
+                  role="alert"
+                  className="flex items-center gap-2 text-basic-muted label-small"
+                >
+                  <span>Couldn’t load older messages.</span>
+                  <Button
+                    variant={ButtonVariant.Ghost}
+                    size={ButtonSize.Small}
+                    content={ButtonContent.Text}
+                    onClick={loadOlderMessages}
+                  >
+                    Try again
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {!snapshot && !errorNotice ? (
             <div className="text-basic-muted label-small">Loading…</div>
           ) : null}
 
-          {snapshot && turns.length === 0 && !running && !showPending ? (
+          {snapshot?.message_page?.total === 0 &&
+          !running &&
+          !showPending ? (
             <div className="text-basic-muted label-small">
               No messages yet. Type something below.
             </div>

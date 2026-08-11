@@ -921,16 +921,14 @@ async fn post_codex_json_with_retry(
             .map(str::to_string);
 
         if status.is_success() {
-            // Reading the body incrementally forfeits the retry: by the time a
-            // read fails the caller has already seen part of the answer.
+            // Codex responses are requested as streams even when nobody is
+            // observing live deltas. Stop at the protocol terminal event in
+            // both cases; waiting for EOF can otherwise delay the next tool
+            // round on a keep-alive SSE body.
             //
-            // Codex often omits Content-Type on streamed responses. We already
-            // asked for an event stream (`Accept` + `stream: true`), and the
-            // buffered fallback detects SSE from `data:` lines — so a missing
-            // header must not force the non-streaming path and drop live deltas.
-            if let Some(on_delta) = on_delta.filter(|_| {
-                content_type.is_none() || is_event_stream(content_type.as_deref())
-            }) {
+            // Codex often omits Content-Type on streamed responses. `Accept`
+            // and `stream: true` make a missing header an SSE response here.
+            if content_type.is_none() || is_event_stream(content_type.as_deref()) {
                 return stream_codex_responses(response, url, status, on_delta).await;
             }
             let response_body = read_codex_body(response, url, status).await?;
@@ -993,9 +991,9 @@ async fn stream_codex_responses(
     response: reqwest::Response,
     url: &str,
     status: StatusCode,
-    on_delta: &(dyn Fn(ModelStreamDelta) + Send + Sync),
+    on_delta: DeltaSink<'_>,
 ) -> std::result::Result<Value, CodexRequestError> {
-    read_sse_response(url, response, ResponsesStreamFold::new(Some(on_delta)))
+    read_sse_response(url, response, ResponsesStreamFold::new(on_delta))
         .await
         .map_err(|error| CodexRequestError {
             status: Some(status),
@@ -2036,5 +2034,65 @@ mod tests {
         assert_eq!(parsed["output"][0]["type"], "message");
         assert_eq!(parsed["output"][0]["content"][0]["text"], "hello");
         assert_eq!(parsed["usage"]["total_tokens"], 3);
+    }
+
+    #[tokio::test]
+    async fn codex_without_delta_sink_finishes_before_sse_body_closes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+        use tokio::time::timeout;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (release_server, wait_for_release) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            let event = concat!(
+                "data: {\"type\":\"response.output_item.done\",\"output_index\":0,",
+                "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",",
+                "\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\",",
+                "\"status\":\"completed\"}}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":",
+                "{\"status\":\"completed\",\"output\":[]}}\n\n"
+            );
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                      Transfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream
+                .write_all(format!("{:X}\r\n{event}\r\n", event.len()).as_bytes())
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+
+            let _ = wait_for_release.await;
+            let _ = stream.write_all(b"0\r\n\r\n").await;
+        });
+
+        let result = timeout(
+            Duration::from_secs(1),
+            post_codex_json_with_retry(
+                &Client::new(),
+                &format!("http://{address}"),
+                &json!({"stream": true}),
+                &stored_codex_auth("access-token"),
+                None,
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let response = result
+            .expect("terminal event should finish an unobserved Codex stream")
+            .unwrap();
+        assert_eq!(response["output"][0]["type"], "function_call");
+        assert_eq!(response["output"][0]["call_id"], "call_1");
     }
 }

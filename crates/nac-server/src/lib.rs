@@ -40,6 +40,8 @@ use axum::{
 use include_dir::{include_dir, Dir};
 #[cfg(test)]
 use nac_core::mixed_mode::MixedTierSettings;
+#[cfg(test)]
+use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{
@@ -690,6 +692,7 @@ pub struct MessagePageMetadata {
 #[derive(Debug, Clone, Serialize)]
 pub struct MessagesPageResponse {
     pub messages: Vec<Message>,
+    pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
@@ -733,6 +736,7 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
     fn from(page: MessagesPageSnapshot) -> Self {
         Self {
             messages: page.messages,
+            created_at: page.created_at,
             page: page.page.into(),
         }
     }
@@ -8109,6 +8113,102 @@ model = "gpt-5.2"
         let mut expected_projected = default.clone();
         expected_projected["sessions"] = serde_json::json!([]);
         assert_eq!(projected, expected_projected);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn paged_routes_preserve_raw_indexes_timestamps_and_projection_caps() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("paged_route_contract");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+        let mut transcript = test_transcript();
+        transcript.insert(
+            6,
+            Message::Tool {
+                tool_call_id: "call-thread".to_string(),
+                content: "thread result".to_string(),
+            },
+        );
+        seed_session_with_messages(&root, "target", "2026-01-02 00:00:00.000000000", transcript);
+        TranscriptLogWriter::new(&root.join("store.db"))
+            .unwrap()
+            .append(
+                "target",
+                9,
+                &Message::User {
+                    content: "logged tail".to_string(),
+                },
+            )
+            .unwrap();
+        let app = router(test_manager(&root));
+
+        let response = get_response(
+            app.clone(),
+            "/sessions/target/messages?before=10&limit=4&include_system=true",
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let page: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(
+            page["page"],
+            serde_json::json!({
+                "start": 6,
+                "end": 10,
+                "total": 10,
+                "has_older": true,
+            })
+        );
+        assert_eq!(
+            page["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|message| message["role"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["tool", "system", "assistant", "user"]
+        );
+        let created_at = page["created_at"].as_array().unwrap();
+        assert_eq!(created_at.len(), 4);
+        assert!(created_at[..3].iter().all(serde_json::Value::is_null));
+        assert!(created_at[3].is_string());
+        assert_eq!(page["messages"][3]["content"], "logged tail");
+
+        let response = get_response(
+            app,
+            "/sessions/target?message_limit=3&thread_event_limit=1&include_sessions=false&include_system=true",
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let snapshot: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(snapshot["messages"].as_array().unwrap().len(), 3);
+        assert_eq!(snapshot["message_created_at"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            snapshot["message_page"],
+            serde_json::json!({
+                "start": 7,
+                "end": 10,
+                "total": 10,
+                "has_older": true,
+            })
+        );
+        let message_created_at = snapshot["message_created_at"].as_array().unwrap();
+        assert!(message_created_at[..2]
+            .iter()
+            .all(serde_json::Value::is_null));
+        assert!(message_created_at[2].is_string());
+        assert_eq!(snapshot["sessions"], serde_json::json!([]));
+        assert!(snapshot["thread_events"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|events| events.as_array().unwrap().len() <= 1));
 
         let _ = std::fs::remove_dir_all(root);
     }

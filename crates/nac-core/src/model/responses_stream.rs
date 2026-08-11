@@ -82,6 +82,10 @@ impl StreamFold for ResponsesStreamFold<'_> {
         Ok(())
     }
 
+    fn is_complete(&self) -> bool {
+        self.final_response.is_some()
+    }
+
     fn finish(self) -> Result<Value, String> {
         self.final_response
             .ok_or_else(|| "SSE stream did not include a final response event".to_string())

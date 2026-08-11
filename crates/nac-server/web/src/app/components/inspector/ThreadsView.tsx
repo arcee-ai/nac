@@ -1,9 +1,11 @@
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 
@@ -36,6 +38,7 @@ import {
 import {
   groupThreadLog,
   mergeThreadLog,
+  mergeThreadEventPages,
   persistedThreadLog,
   threadIsThinking,
   type LogEntry,
@@ -43,6 +46,7 @@ import {
   type ToolCallEntry,
 } from "@/app/lib/threadLog";
 import { dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
+import { useThreadEventPages } from "@/app/services/queries";
 import { useLiveThreads } from "@/app/store/runtimeStore";
 import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
 import type {
@@ -251,7 +255,9 @@ function LogScroller({
   entries,
   running,
   thinking,
+  loading,
   className,
+  historyControl,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   /** Whether the reader is still at the bottom, so new lines may scroll. */
@@ -260,7 +266,9 @@ function LogScroller({
   running: boolean;
   /** Model is between tool calls — show a live shimmer line under the log. */
   thinking: boolean;
+  loading: boolean;
   className?: string;
+  historyControl?: ReactNode;
 }) {
   return (
     <div
@@ -276,6 +284,7 @@ function LogScroller({
         }
       }}
     >
+      {historyControl}
       <div className="pb-[128px] md:pb-4">
         {entries.map((entry) => (
           <LogEntryView
@@ -291,7 +300,7 @@ function LogScroller({
             <span className="text-shimmer-basic">Working…</span>
           </p>
         ) : null}
-        {!entries.length && !running ? (
+        {!entries.length && !running && !loading ? (
           <p className="pt-4 code code-small text-basic-muted">
             No commands recorded.
           </p>
@@ -305,12 +314,29 @@ function LogScroller({
 function LogPane({
   lines,
   running,
+  hasOlder,
+  loadingOlder,
+  loadingInitial,
+  historyError,
+  onRetry,
+  onLoadOlder,
   className,
 }: {
   lines: ThreadLogLine[];
   running: boolean;
+  hasOlder: boolean;
+  loadingOlder: boolean;
+  loadingInitial: boolean;
+  historyError: string | null;
+  onLoadOlder: () => Promise<unknown>;
+  onRetry: () => Promise<unknown>;
   className?: string;
 }) {
+  const prependAnchor = useRef<{
+    height: number;
+    top: number;
+    firstKey: string | null;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stuckRef = useRef(true);
   const entries = useMemo(() => groupThreadLog(lines), [lines]);
@@ -318,6 +344,40 @@ function LogPane({
     () => threadIsThinking(running, lines),
     [running, lines],
   );
+  const firstEntryKey =
+    entries[0]?.kind === "tool_call"
+      ? `call-${entries[0].callId}`
+      : entries[0]?.key ?? null;
+
+  useLayoutEffect(() => {
+    const anchor = prependAnchor.current;
+    const element = scrollRef.current;
+    if (!anchor || !element || anchor.firstKey === firstEntryKey) return;
+    element.scrollTop = anchor.top + (element.scrollHeight - anchor.height);
+    prependAnchor.current = null;
+  }, [firstEntryKey]);
+
+  useEffect(() => {
+    const anchor = prependAnchor.current;
+    if (!loadingOlder && anchor?.firstKey === firstEntryKey) {
+      prependAnchor.current = null;
+    }
+  }, [firstEntryKey, loadingOlder]);
+
+  const loadOlder = () => {
+    stuckRef.current = false;
+    const element = scrollRef.current;
+    if (element) {
+      prependAnchor.current = {
+        height: element.scrollHeight,
+        top: element.scrollTop,
+        firstKey: firstEntryKey,
+      };
+    }
+    void onLoadOlder().catch(() => {
+      prependAnchor.current = null;
+    });
+  };
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -332,7 +392,41 @@ function LogPane({
       entries={entries}
       running={running}
       thinking={thinking}
+      loading={loadingInitial}
       className={className}
+      historyControl={
+        hasOlder || historyError ? (
+          <div className="flex items-center gap-2 pb-3">
+            {hasOlder ? (
+              <Button
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Secondary}
+                disabled={loadingOlder}
+                onClick={loadOlder}
+              >
+                {loadingOlder ? "Loading…" : "Load older commands"}
+              </Button>
+            ) : null}
+            {historyError ? (
+              <>
+                <span className="text-micro text-error-primary">
+                  {historyError}
+                </span>
+                <Button
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
+                  onClick={() => {
+                    if (hasOlder) loadOlder();
+                    else void onRetry();
+                  }}
+                >
+                  Try again
+                </Button>
+              </>
+            ) : null}
+          </div>
+        ) : null
+      }
     />
   );
 }
@@ -478,6 +572,12 @@ function Detail({
   events,
   liveLog,
   running,
+  hasOlder,
+  loadingOlder,
+  loadingInitial,
+  historyError,
+  onLoadOlder,
+  onRetry,
   view,
   onViewChange,
 }: {
@@ -488,6 +588,12 @@ function Detail({
   /** The same commands as the stream reported them, plus whatever came after. */
   liveLog: ThreadLogLine[];
   running: boolean;
+  hasOlder: boolean;
+  loadingOlder: boolean;
+  loadingInitial: boolean;
+  historyError: string | null;
+  onLoadOlder: () => Promise<unknown>;
+  onRetry: () => Promise<unknown>;
   view: ThreadDetailView;
   onViewChange: (view: ThreadDetailView) => void;
 }) {
@@ -503,6 +609,12 @@ function Detail({
       <LogPane
         lines={log}
         running={running}
+        hasOlder={hasOlder}
+        loadingInitial={loadingInitial}
+        loadingOlder={loadingOlder}
+        historyError={historyError}
+        onLoadOlder={onLoadOlder}
+        onRetry={onRetry}
         className={isMobile ? "pt-14" : undefined}
       />
     ) : (
@@ -650,6 +762,17 @@ export function ThreadsView({
   // phone dialog header names that thread instead of the panel label.
   const currentName = current?.name ?? null;
   const currentRunning = Boolean(currentName && runningNames.has(currentName));
+  const eventPages = useThreadEventPages(
+    snapshot ? sessionId : null,
+    currentName,
+  );
+  const pagedEvents = useMemo(
+    () =>
+      eventPages.data
+        ? mergeThreadEventPages(eventPages.data.pages)
+        : undefined,
+    [eventPages.data],
+  );
   useEffect(() => {
     if (selected || !currentName) return;
     onSelect(currentName);
@@ -726,11 +849,26 @@ export function ThreadsView({
     >
       {current ? (
         <Detail
+          key={`${sessionId}:${current.name}`}
           thread={current}
           episodes={snapshot.thread_episodes?.[current.name] ?? []}
-          events={snapshot.thread_events?.[current.name]}
+          events={
+            pagedEvents ?? snapshot.thread_events?.[current.name]
+          }
           liveLog={live?.log ?? []}
           running={runningNames.has(current.name)}
+          hasOlder={Boolean(eventPages.hasNextPage)}
+          loadingOlder={eventPages.isFetchingNextPage}
+          loadingInitial={eventPages.isPending}
+          historyError={
+            eventPages.error instanceof Error ? eventPages.error.message : null
+          }
+          onLoadOlder={() => eventPages.fetchNextPage()}
+          onRetry={() =>
+            eventPages.data
+              ? eventPages.fetchNextPage()
+              : eventPages.refetch()
+          }
           view={view}
           onViewChange={setView}
         />

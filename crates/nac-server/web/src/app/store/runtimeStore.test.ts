@@ -1,0 +1,94 @@
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/app/lib/perfDebug", () => ({
+  perfEpoch: vi.fn(),
+  perfMark: vi.fn(),
+  perfRender: vi.fn(),
+  perfTime: (_name: string, run: () => unknown) => run(),
+}));
+
+import { mergeWorkspaceStats } from "@/app/services/queries";
+import { applyEnvelope, resetRuntime } from "@/app/store/runtimeStore";
+import type {
+  ManagedSessionSummary,
+  SessionEventEnvelope,
+} from "@/app/types/api";
+
+function envelope(event: unknown): SessionEventEnvelope {
+  return { sequence_id: 1, event } as SessionEventEnvelope;
+}
+
+function summary(
+  id: string,
+  title: string,
+  changed?: number,
+): ManagedSessionSummary {
+  return {
+    summary: { session_id: id, title } as ManagedSessionSummary["summary"],
+    active: false,
+    ...(changed === undefined
+      ? {}
+      : { workspace_diff: { added: changed, removed: 0 } }),
+  } as ManagedSessionSummary;
+}
+
+describe("canonical refresh classification", () => {
+  it("routes transcript commits to messages without a redundant assistant snapshot", () => {
+    resetRuntime("session-a");
+    expect(
+      applyEnvelope(
+        envelope({ type: "transcript_appended", transcript_len: 42 }),
+      ),
+    ).toBe("messages");
+    expect(
+      applyEnvelope(
+        envelope({
+          type: "agent",
+          event: { type: "assistant_message", content_preview: "done" },
+        }),
+      ),
+    ).toBe("none");
+  });
+
+  it("distinguishes normal lifecycle snapshots from destructive fences", () => {
+    resetRuntime("session-a");
+    expect(
+      applyEnvelope(envelope({ type: "run_completed", response: "ok" })),
+    ).toBe("snapshot");
+    expect(
+      applyEnvelope(envelope({ type: "transcript_reverted", transcript_len: 2 })),
+    ).toBe("replace-snapshot");
+    expect(
+      applyEnvelope(
+        envelope({
+          type: "agent",
+          event: {
+            type: "orchestrator_compaction_completed",
+            summary_tokens: 10,
+          },
+        }),
+      ),
+    ).toBe("replace-snapshot");
+  });
+});
+
+describe("workspace statistics merge", () => {
+  it("copies only workspace stats into current base ids", () => {
+    const base = [summary("a", "new title"), summary("b", "second")];
+    const stats = [
+      summary("a", "stale title", 7),
+      summary("deleted", "must not return", 9),
+    ];
+
+    const merged = mergeWorkspaceStats(base, stats);
+    expect(merged.map((entry) => entry.summary.title)).toEqual([
+      "new title",
+      "second",
+    ]);
+    expect(merged.map((entry) => entry.workspace_diff)).toEqual([
+      { added: 7, removed: 0 },
+      undefined,
+    ]);
+    expect(merged.map((entry) => entry.summary.session_id)).toEqual(["a", "b"]);
+  });
+});

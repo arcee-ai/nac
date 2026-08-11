@@ -37,7 +37,10 @@ import {
 } from "@/app/lib/sessionOrder";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useMoveSessionOrder, useSessions } from "@/app/services/queries";
+import {
+  useMoveSessionOrder,
+  useSessionsWithWorkspaceStats,
+} from "@/app/services/queries";
 import {
   clearAttention,
   trackAttention,
@@ -192,8 +195,8 @@ export default function SessionsListPage() {
   const dropTargetRef = useRef<DropTarget | null>(null);
   const pinZoneRef = useRef(false);
 
-  const { data, isLoading, error } = useSessions();
-  const all = data ?? [];
+  const { data, isLoading, error, refetch } = useSessionsWithWorkspaceStats();
+  const all = useMemo(() => data ?? [], [data]);
   const sessions = useVisibleSessions(all);
 
   useEffect(() => {
@@ -517,12 +520,22 @@ export default function SessionsListPage() {
           )}
         >
           {error ? (
-            <div className="label-small text-error-primary">
-              {errorMessage(error)}
+            <div className="flex items-center gap-2 label-small text-error-primary">
+              <span>{errorMessage(error)}</span>
+              <Button
+                variant={ButtonVariant.Ghost}
+                size={ButtonSize.Small}
+                content={ButtonContent.Text}
+                onClick={() => {
+                  void refetch();
+                }}
+              >
+                Try again
+              </Button>
             </div>
           ) : null}
 
-          {!isLoading && sessions.length === 0 ? (
+          {!isLoading && !error && sessions.length === 0 ? (
             <div className="label-small text-basic-muted text-center py-16">
               No sessions match the current filters.
             </div>

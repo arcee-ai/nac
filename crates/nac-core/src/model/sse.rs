@@ -24,6 +24,13 @@ pub(super) trait StreamFold {
     /// Fold one event. `Err` is terminal and carries a user-facing reason.
     fn push(&mut self, event: &Value) -> std::result::Result<(), String>;
 
+    /// Whether a protocol-level terminal event has been folded. Streaming
+    /// callers can stop here instead of waiting for the provider to close an
+    /// otherwise complete SSE body.
+    fn is_complete(&self) -> bool {
+        false
+    }
+
     fn finish(self) -> std::result::Result<Value, String>;
 }
 
@@ -37,13 +44,19 @@ pub(super) async fn read_sse_response<F: StreamFold>(
 
     while let Some(frame) = reader.next_frame().await {
         let frame = frame.with_context(|| format!("model stream from {url} failed"))?;
-        if frame.is_done() || frame.data.trim().is_empty() {
+        if frame.is_done() {
+            break;
+        }
+        if frame.data.trim().is_empty() {
             continue;
         }
         let event: Value = serde_json::from_str(&frame.data)
             .with_context(|| format!("invalid SSE event from {url}: {}", frame.data))?;
         fold.push(&event)
             .map_err(|message| anyhow!("model stream from {url} failed: {message}"))?;
+        if fold.is_complete() {
+            break;
+        }
     }
 
     fold.finish()
@@ -208,6 +221,13 @@ impl SseReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::responses_stream::ResponsesStreamFold;
+    use crate::model::{anthropic_stream::AnthropicStreamFold, chat_stream::ChatStreamFold};
+    use std::time::Instant;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+    use tokio::time::{timeout, Duration};
 
     /// Drive the line machine directly: it is the part that has to survive
     /// frames split across reads, and it is independent of the transport.
@@ -260,5 +280,287 @@ mod tests {
     #[test]
     fn returns_a_trailing_frame_the_server_left_unterminated() {
         assert_eq!(frames(&["data: [DONE]\n"]), vec!["[DONE]".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn responses_finish_on_terminal_event_before_body_closes() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (release_server, wait_for_release) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            let event = concat!(
+                "data: {\"type\":\"response.output_item.done\",\"output_index\":0,",
+                "\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",",
+                "\"call_id\":\"call_1\",\"name\":\"read\",",
+                "\"arguments\":\"{\\\"path\\\":\\\"src/main.rs\\\"}\",",
+                "\"status\":\"completed\"}}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":",
+                "{\"status\":\"completed\",\"output\":[]}}\n\n"
+            );
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                      Transfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream
+                .write_all(format!("{:X}\r\n{event}\r\n", event.len()).as_bytes())
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+
+            let _ = wait_for_release.await;
+            let _ = stream.write_all(b"0\r\n\r\n").await;
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap();
+        let result = timeout(
+            Duration::from_secs(1),
+            read_sse_response(
+                "http://responses.test",
+                response,
+                ResponsesStreamFold::new(None),
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let response = result
+            .expect("terminal response event should finish before the body closes")
+            .unwrap();
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["type"], "function_call");
+        assert_eq!(response["output"][0]["id"], "fc_1");
+        assert_eq!(response["output"][0]["call_id"], "call_1");
+    }
+
+    async fn held_open_sse_response(
+        events: &str,
+    ) -> (
+        reqwest::Response,
+        oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let events = events.to_string();
+        let (release_server, wait_for_release) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                      Transfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream
+                .write_all(format!("{:X}\r\n{events}\r\n", events.len()).as_bytes())
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+            let _ = wait_for_release.await;
+            let _ = stream.write_all(b"0\r\n\r\n").await;
+        });
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap();
+        (response, release_server, server)
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_chat_finishes_at_done_sentinel() {
+        let events = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",",
+            "\"content\":\"hello\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,",
+            "\"id\":\"call_1\",\"type\":\"function\",\"function\":",
+            "{\"name\":\"read\",\"arguments\":\"{}\"}}]},",
+            "\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,",
+            "\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (response, release_server, server) = held_open_sse_response(events).await;
+        let result = timeout(
+            Duration::from_secs(1),
+            read_sse_response(
+                "http://chat-compatible.test",
+                response,
+                ChatStreamFold::new(None, "reasoning_content"),
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let response = result
+            .expect("[DONE] should finish an OpenAI-compatible chat stream")
+            .unwrap();
+        assert_eq!(response["choices"][0]["message"]["content"], "hello");
+        assert_eq!(response["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(
+            response["choices"][0]["message"]["tool_calls"][0]["id"],
+            "call_1"
+        );
+        assert_eq!(response["usage"]["total_tokens"], 3);
+    }
+
+    #[tokio::test]
+    async fn anthropic_stream_keeps_the_default_eof_policy() {
+        let events = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":",
+            "{\"input_tokens\":1}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,",
+            "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,",
+            "\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":",
+            "{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let (response, release_server, server) = held_open_sse_response(events).await;
+        let mut read = Box::pin(read_sse_response(
+            "http://anthropic.test",
+            response,
+            AnthropicStreamFold::new(None),
+        ));
+
+        assert!(
+            timeout(Duration::from_millis(20), read.as_mut())
+                .await
+                .is_err(),
+            "Responses terminal policy must not terminate Anthropic streams"
+        );
+        let _ = release_server.send(());
+        let response = timeout(Duration::from_secs(1), read)
+            .await
+            .expect("Anthropic stream should finish after EOF")
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(response["content"][0]["text"], "hello");
+        assert_eq!(response["stop_reason"], "end_turn");
+        assert_eq!(response["usage"]["input_tokens"], 1);
+        assert_eq!(response["usage"]["output_tokens"], 2);
+    }
+
+    async fn delayed_terminal_response(
+        post_terminal_delay: Duration,
+    ) -> (reqwest::Response, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            let event = concat!(
+                "data: {\"type\":\"response.completed\",\"response\":",
+                "{\"status\":\"completed\",\"output\":[]}}\n\n"
+            );
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                      Transfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream
+                .write_all(format!("{:X}\r\n{event}\r\n", event.len()).as_bytes())
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+            tokio::time::sleep(post_terminal_delay).await;
+            let _ = stream.write_all(b"0\r\n\r\n").await;
+        });
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap();
+        (response, server)
+    }
+
+    async fn measure_buffered_eof(post_terminal_delay: Duration) -> Duration {
+        let (response, server) = delayed_terminal_response(post_terminal_delay).await;
+        let started = Instant::now();
+        response.text().await.unwrap();
+        let elapsed = started.elapsed();
+        server.await.unwrap();
+        elapsed
+    }
+
+    async fn measure_terminal_event(post_terminal_delay: Duration) -> Duration {
+        let (response, server) = delayed_terminal_response(post_terminal_delay).await;
+        let started = Instant::now();
+        read_sse_response(
+            "http://responses.benchmark",
+            response,
+            ResponsesStreamFold::new(None),
+        )
+        .await
+        .unwrap();
+        let elapsed = started.elapsed();
+        server.await.unwrap();
+        elapsed
+    }
+
+    fn summarize_latency(mut samples: Vec<Duration>) -> (Duration, Duration) {
+        samples.sort_unstable();
+        (
+            samples[samples.len() / 2],
+            samples[(samples.len() * 95).div_ceil(100) - 1],
+        )
+    }
+
+    /// Manual comparison of the former EOF-buffered Codex path and terminal
+    /// Responses event completion.
+    ///
+    /// Run with:
+    /// `cargo test --release -p nac-core benchmark_responses_terminal_event_latency -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "manual Responses SSE latency benchmark"]
+    async fn benchmark_responses_terminal_event_latency() {
+        const SAMPLES: usize = 30;
+        const POST_TERMINAL_DELAY: Duration = Duration::from_millis(20);
+
+        let _ = measure_buffered_eof(POST_TERMINAL_DELAY).await;
+        let _ = measure_terminal_event(POST_TERMINAL_DELAY).await;
+
+        let mut buffered = Vec::with_capacity(SAMPLES);
+        let mut terminal = Vec::with_capacity(SAMPLES);
+        for sample in 0..SAMPLES {
+            if sample % 2 == 0 {
+                buffered.push(measure_buffered_eof(POST_TERMINAL_DELAY).await);
+                terminal.push(measure_terminal_event(POST_TERMINAL_DELAY).await);
+            } else {
+                terminal.push(measure_terminal_event(POST_TERMINAL_DELAY).await);
+                buffered.push(measure_buffered_eof(POST_TERMINAL_DELAY).await);
+            }
+        }
+
+        let (buffered_median, buffered_p95) = summarize_latency(buffered);
+        let (terminal_median, terminal_p95) = summarize_latency(terminal);
+        println!(
+            "Responses SSE completion latency ({SAMPLES} samples, \
+             {}ms post-terminal keep-alive):",
+            POST_TERMINAL_DELAY.as_millis()
+        );
+        println!("buffered EOF: median={buffered_median:?}, p95={buffered_p95:?}");
+        println!("terminal event: median={terminal_median:?}, p95={terminal_p95:?}");
     }
 }
