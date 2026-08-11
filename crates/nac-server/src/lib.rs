@@ -43,7 +43,9 @@ use nac_core::mixed_mode::MixedTierSettings;
 #[cfg(test)]
 use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
-    commands::{FrontendCommand, PreparedUserInput},
+    commands::{
+        slash_command_definitions, PreparedUserInput, SlashCommand, SlashCommandDefinition,
+    },
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
@@ -2093,6 +2095,7 @@ fn api_router(manager: SessionManager) -> Router {
             post(launch_model_defaults_handler),
         )
         .route("/models", get(models_handler))
+        .route("/commands", get(commands_handler))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/order", put(reorder_sessions_handler))
         .route(
@@ -2993,6 +2996,10 @@ async fn models_handler() -> Json<ModelListing> {
     Json(nac_core::model::api_listing())
 }
 
+async fn commands_handler() -> Json<&'static [SlashCommandDefinition]> {
+    Json(slash_command_definitions())
+}
+
 async fn list_sessions(
     State(manager): State<SessionManager>,
     Query(query): Query<ListSessionsQuery>,
@@ -3643,10 +3650,8 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
     }
 }
 
-fn frontend_command_name(command: FrontendCommand) -> &'static str {
-    match command {
-        FrontendCommand::Compact => "compact",
-    }
+fn frontend_command_name(command: SlashCommand) -> &'static str {
+    command.definition().name
 }
 
 fn session_event_stream(
@@ -4773,6 +4778,19 @@ mod tests {
         let serialized = serde_json::to_value(defaults).unwrap();
         assert!(serialized["configured_model"].is_null());
         assert!(serialized["configured_reasoning_effort"].is_null());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn commands_route_returns_registry() {
+        let root = temp_root("commands_endpoint");
+        let app = router(test_manager(&root));
+        let response = get_response(app, "/commands", None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await,
+            serde_json::to_value(slash_command_definitions()).unwrap()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

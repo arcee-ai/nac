@@ -35,6 +35,7 @@ import type {
   RevertSessionResponse,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
+  SlashCommandDefinition,
   SshBrowseRequest,
   SshConfigurationList,
   SshConfigurationRecord,
@@ -258,6 +259,9 @@ export const api = {
    */
   getModelCatalog: (signal?: AbortSignal) =>
     request<ModelCatalog>("GET", "/models", { signal }),
+
+  listCommands: (signal?: AbortSignal) =>
+    request<SlashCommandDefinition[]>("GET", "/commands", { signal }),
 
   listModelConfigs: (signal?: AbortSignal) =>
     request<ModelConfigurationList>("GET", "/model-configs", { signal }),

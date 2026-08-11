@@ -1021,6 +1021,13 @@ export interface ReorderSessionsResponse {
   sessions: SessionSummarySnapshot[];
 }
 
+export interface SlashCommandDefinition {
+  command: string;
+  name: string;
+  description: string;
+  accepts_arguments: boolean;
+}
+
 export interface SubmitPromptRequest {
   prompt: string;
 }
