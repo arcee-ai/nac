@@ -7,14 +7,19 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  test-server:
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Install Node
         uses: actions/setup-node@v4
@@ -46,11 +51,41 @@ jobs:
             exit 1
           fi
 
-      - name: Run tests
-        run: cargo test --workspace --locked
+      - name: Run nac-server tests
+        run: cargo test -p nac-server --locked
+
+  test-core:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Run nac-core and nac-catalog-gen tests
+        run: cargo test -p nac-core -p nac-catalog-gen --locked
+
+  test:
+    if: ${{ always() }}
+    needs: [test-server, test-core]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require all test suites
+        env:
+          SERVER_RESULT: ${{ needs.test-server.result }}
+          CORE_RESULT: ${{ needs.test-core.result }}
+        run: |
+          test "$SERVER_RESULT" = success
+          test "$CORE_RESULT" = success
 
   build:
-    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -76,6 +111,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
       - name: Build nac-web binary
         run: |
           cargo build --release --locked \
@@ -97,7 +135,7 @@ jobs:
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
