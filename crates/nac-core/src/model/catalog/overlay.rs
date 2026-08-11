@@ -826,7 +826,7 @@ pub(super) fn is_utc_iso8601(value: &str) -> bool {
 /// credential-grade permission hardening — the overlay is a cache, not a
 /// secret). A crash or cancellation mid-write can leave a dotfile tmp but
 /// never a truncated overlay; readers only ever see complete files.
-fn atomic_replace(path: &Path, contents: &str) -> io::Result<()> {
+pub(super) fn atomic_replace(path: &Path, contents: &str) -> io::Result<()> {
     use std::io::Write;
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(

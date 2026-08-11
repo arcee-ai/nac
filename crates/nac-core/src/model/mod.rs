@@ -45,7 +45,10 @@ pub use backend::{
     validate_backend_api_key_env, validate_caller_supplied_base_url,
     validate_model_reasoning_effort,
 };
-pub use catalog::{api_listing, provider_for_model, spawn_overlay_refresh, ModelListing};
+pub use catalog::{
+    api_listing, provider_for_model, spawn_arcee_model_refresh, spawn_overlay_refresh,
+    ModelListing,
+};
 pub(crate) use catalog::{Compat, CompletionsThinkingFormat, ModelMetadata, ThinkingLevelMap};
 pub use providers::{
     list_managed_provider_models, list_provider_models, provider_default_base_url,
