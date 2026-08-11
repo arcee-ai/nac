@@ -185,7 +185,7 @@ function McpServersManager({
   const isMobile = useIsMobile();
   // Warms the catalog as soon as the modal opens, so the picker's grouped
   // sections are already there when "Add server" is selected.
-  useMcpLibrary();
+  const { data: library } = useMcpLibrary();
   const { data, isLoading } = useMcpServers();
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);
@@ -202,6 +202,17 @@ function McpServersManager({
     setTemplate(null);
     setCustomDraft(false);
   };
+
+  // The catalog entry behind the open form: the picked template for a draft,
+  // the recorded library id (or name) for a stored server.
+  const libraryEntry =
+    template ??
+    (record
+      ? (library?.entries.find(
+          (entry) =>
+            entry.id === record.library_id || entry.name === record.name,
+        ) ?? null)
+      : null);
 
   return (
     <Modal
@@ -241,6 +252,12 @@ function McpServersManager({
             key={record ? record.config_id : (template?.id ?? "custom")}
             record={record}
             template={template}
+            libraryEntry={libraryEntry}
+            onBack={() => {
+              setPicked(DRAFT);
+              setTemplate(null);
+              setCustomDraft(false);
+            }}
             onClose={onClose}
             onSaved={pick}
             onDeleted={() => pick(DRAFT)}
@@ -518,9 +535,77 @@ function KvEditor({
   );
 }
 
+/**
+ * The catalog entry's identity and description as a card: thumbnail, name,
+ * category, auth badge, docs link, and the description clamped to three
+ * lines with a toggle when it overflows.
+ */
+function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  // The docs link renders separately, so an inline "Docs: <url>" fragment
+  // (common in registry descriptions) is dropped from the prose.
+  const description = entry.description
+    .replace(/\bDocs:\s*https?:\/\/\S+/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const long = description.length > 220;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-muted p-3">
+      <div className="flex items-center gap-2 min-w-0">
+        <EntryThumbnail entry={entry} />
+        <div className="flex flex-col min-w-0 flex-grow">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="code code-small text-basic-primary truncate">
+              {entry.name}
+            </span>
+            {entry.auth === "required_header" ? (
+              <Badge text="Key required" color={BadgeColor.Yellow} />
+            ) : null}
+          </div>
+          <span className="text-micro text-basic-muted uppercase tracking-wide">
+            {entry.category}
+          </span>
+        </div>
+        <a
+          href={entry.docs_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 shrink-0 text-small text-info-primary hover:underline"
+        >
+          <Icon iconName={IconName.BookOpen} />
+          Docs
+        </a>
+      </div>
+      {description ? (
+        <>
+          <span
+            className={cn(
+              "text-small text-basic-muted",
+              !expanded && "line-clamp-3",
+            )}
+          >
+            {description}
+          </span>
+          {long ? (
+            <button
+              type="button"
+              className="self-start text-small text-basic-primary hover:underline"
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {expanded ? "Show less" : "Show more"}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function McpServerForm({
   record,
   template,
+  libraryEntry,
+  onBack,
   onClose,
   onSaved,
   onDeleted,
@@ -529,6 +614,8 @@ function McpServerForm({
 }: {
   record: McpServerView | null;
   template: McpLibraryEntry | null;
+  libraryEntry: McpLibraryEntry | null;
+  onBack: () => void;
   onClose: () => void;
   onSaved: (configId: string) => void;
   onDeleted: () => void;
@@ -717,25 +804,27 @@ function McpServerForm({
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
+      <div className="flex items-center gap-1 shrink-0 border-b border-muted px-2 py-2">
+        <Button
+          size={ButtonSize.Medium}
+          variant={ButtonVariant.Ghost}
+          content={ButtonContent.Icon}
+          aria-label="Back to library"
+          onClick={onBack}
+        >
+          <Icon iconName={IconName.Left} />
+        </Button>
+        <span className="text-small text-basic-primary truncate">
+          {record?.name ?? template?.name ?? "Custom server"}
+        </span>
+      </div>
       <div
         className={cn(
           "flex-1 overflow-auto p-4 flex flex-col gap-4 [&>*]:shrink-0",
           isMobile && "pb-[88px]",
         )}
       >
-        {template ? (
-          <div className="text-small text-basic-muted">
-            {template.description}{" "}
-            <a
-              href={template.docs_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-info-primary underline"
-            >
-              Docs
-            </a>
-          </div>
-        ) : null}
+        {libraryEntry ? <EntryDetails entry={libraryEntry} /> : null}
 
         <div className="flex flex-col gap-1">
           <FieldLabel label="Name" required />
