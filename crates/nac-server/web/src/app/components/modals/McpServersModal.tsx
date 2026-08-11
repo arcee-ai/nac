@@ -212,6 +212,14 @@ function LibraryPicker({
   const { data } = useMcpLibrary();
   const { data: serverData } = useMcpServers();
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
+  const categories = useMemo(() => {
+    const seen: string[] = [];
+    for (const entry of data?.entries ?? []) {
+      if (!seen.includes(entry.category)) seen.push(entry.category);
+    }
+    return seen;
+  }, [data]);
   // Entries already saved as a server: matched by the recorded library id,
   // or by name for servers created before the id was recorded.
   const installed = useMemo(() => {
@@ -225,15 +233,25 @@ function LibraryPicker({
       ids.has(entry.id) || names.has(entry.name);
   }, [serverData]);
   // Grouped by category before a search; a flat filtered list while typing.
+  // A query searches names and descriptions, falling back to tags when
+  // nothing matches directly.
   const sections = useMemo(() => {
-    const all = data?.entries ?? [];
+    const all = (data?.entries ?? []).filter(
+      (entry) => category === null || entry.category === category,
+    );
     const needle = query.trim().toLowerCase();
     if (needle) {
-      const matches = all.filter(
+      const direct = all.filter(
         (entry) =>
           entry.name.toLowerCase().includes(needle) ||
           entry.description.toLowerCase().includes(needle),
       );
+      const matches =
+        direct.length > 0
+          ? direct
+          : all.filter((entry) =>
+              entry.tags.some((tag) => tag.toLowerCase().includes(needle)),
+            );
       return matches.length > 0 ? [{ category: null, entries: matches }] : [];
     }
     const grouped: { category: string | null; entries: McpLibraryEntry[] }[] =
@@ -249,7 +267,7 @@ function LibraryPicker({
       }
     }
     return grouped;
-  }, [data, query]);
+  }, [data, query, category]);
 
   useLayoutEffect(() => {
     setFooter(
@@ -290,6 +308,26 @@ function LibraryPicker({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
+        {categories.length > 1 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {[null, ...categories].map((item) => (
+              <Button
+                key={item ?? "all"}
+                size={ButtonSize.Small}
+                variant={
+                  category === item
+                    ? ButtonVariant.Primary
+                    : ButtonVariant.Secondary
+                }
+                content={ButtonContent.Text}
+                aria-pressed={category === item}
+                onClick={() => setCategory(item)}
+              >
+                {item ?? "All"}
+              </Button>
+            ))}
+          </div>
+        ) : null}
         {sections.map((section) => (
           <div
             key={section.category ?? "search"}

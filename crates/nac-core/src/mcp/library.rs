@@ -48,6 +48,9 @@ pub struct McpLibraryEntry {
     pub icon_url: Option<String>,
     /// Section the picker groups the entry under before a search.
     pub category: String,
+    /// Search fallback terms: consulted when a query matches neither name
+    /// nor description.
+    pub tags: Vec<String>,
 }
 
 /// Category of every registry-sourced entry; curated entries carry their own.
@@ -65,6 +68,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
         auth_prompt: Option<(&str, &str)>,
         docs_url: &str,
         icon_url: &str,
+        tags: &[&str],
     ) -> McpLibraryEntry {
         McpLibraryEntry {
             id: name.to_string(),
@@ -78,6 +82,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             docs_url: docs_url.to_string(),
             icon_url: Some(icon_url.to_string()),
             category: category.to_string(),
+            tags: tags.iter().map(|tag| tag.to_string()).collect(),
         }
     }
 
@@ -91,6 +96,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             Some(("x-api-key", "Exa API key; anonymous use is rate limited")),
             "https://docs.exa.ai/reference/exa-mcp",
             "https://exa.ai/favicon.ico",
+            &["search", "web", "research", "crawl"],
         ),
         entry(
             "Docs & reference",
@@ -104,6 +110,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             )),
             "https://github.com/upstash/context7",
             "https://context7.com/favicon.ico",
+            &["docs", "documentation", "libraries", "upstash"],
         ),
         entry(
             "Code & repositories",
@@ -114,6 +121,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             None,
             "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
             "https://deepwiki.com/favicon.ico",
+            &["github", "repositories", "wiki", "docs"],
         ),
         entry(
             "Code & repositories",
@@ -124,6 +132,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             None,
             "https://vercel.com/blog/grep-a-million-github-repositories-via-mcp",
             "https://vercel.com/favicon.ico",
+            &["code", "search", "github", "grep", "vercel"],
         ),
         entry(
             "Code & repositories",
@@ -134,6 +143,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             Some(("Authorization", "Bearer <personal access token>")),
             "https://github.com/github/github-mcp-server",
             "https://github.githubassets.com/favicons/favicon-dark.png",
+            &["git", "issues", "pull requests", "code"],
         ),
         entry(
             "Data & ML",
@@ -147,6 +157,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             )),
             "https://huggingface.co/settings/mcp",
             "https://huggingface.co/favicon.ico",
+            &["models", "datasets", "ml", "ai", "spaces"],
         ),
         entry(
             "Docs & reference",
@@ -157,6 +168,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             None,
             "https://github.com/cloudflare/mcp-server-cloudflare",
             "https://www.cloudflare.com/favicon.ico",
+            &["docs", "documentation", "workers", "cdn"],
         ),
     ]
 }
@@ -196,6 +208,16 @@ struct SmitheryListedServer {
 struct SmitheryServerDetail {
     #[serde(default)]
     deployment_url: Option<String>,
+}
+
+/// A qualified name like `upstash/context7-mcp` as search tags: its
+/// lowercase word segments, minus the noise word every entry shares.
+fn tags_from_qualified(qualified: &str) -> Vec<String> {
+    qualified
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|segment| !segment.is_empty() && !segment.eq_ignore_ascii_case("mcp"))
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 /// A qualified name like `upstash/context7-mcp` as a server name: the last
@@ -262,6 +284,7 @@ pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
                 .await
                 .ok()?;
             let url = detail.deployment_url?;
+            let tags = tags_from_qualified(&server.qualified_name);
             Some((
                 position,
                 McpLibraryEntry {
@@ -282,6 +305,7 @@ pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
                     }),
                     icon_url: server.icon_url,
                     category: REGISTRY_CATEGORY.to_string(),
+                    tags,
                 },
             ))
         });
@@ -316,6 +340,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn qualified_names_become_tags() {
+        assert_eq!(
+            tags_from_qualified("upstash/context7-mcp"),
+            vec!["upstash", "context7"]
+        );
+        assert_eq!(tags_from_qualified("exa"), vec!["exa"]);
+    }
+
+    #[test]
     fn qualified_names_become_server_names() {
         assert_eq!(name_from_qualified("upstash/context7-mcp"), "context7_mcp");
         assert_eq!(name_from_qualified("exa"), "exa");
@@ -337,6 +370,7 @@ mod tests {
                 docs_url: "https://smithery.ai/servers/exa".to_string(),
                 icon_url: None,
                 category: REGISTRY_CATEGORY.to_string(),
+                tags: Vec::new(),
             },
             McpLibraryEntry {
                 id: "smithery:acme/tool".to_string(),
@@ -350,6 +384,7 @@ mod tests {
                 docs_url: "https://smithery.ai/servers/acme/tool".to_string(),
                 icon_url: None,
                 category: REGISTRY_CATEGORY.to_string(),
+                tags: Vec::new(),
             },
         ];
         let merged = merge_library_entries(remote);

@@ -823,6 +823,7 @@ export interface McpLibraryEntry {
   docs_url: string;
   icon_url: string | null;
   category: string;
+  tags: string[];
 }
 
 export interface McpLibraryResponse {
