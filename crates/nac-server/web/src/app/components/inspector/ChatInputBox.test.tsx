@@ -227,6 +227,21 @@ describe("slash-command suggestions", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("Send completes an active suggestion before executing it", async () => {
+    const textarea = composer();
+    type(textarea, "/co");
+    const send = screen.getByRole("button", { name: "Send" });
+
+    fireEvent.click(send);
+    expect(textarea.value).toBe("/compact");
+    expect(mocks.compact).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith("session"));
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("pointer completion keeps focus and argument commands append one space", () => {
     mocks.commands.data = [
       {

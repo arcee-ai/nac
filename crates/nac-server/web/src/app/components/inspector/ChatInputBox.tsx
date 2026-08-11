@@ -654,6 +654,13 @@ export function ChatInputBox({
       style={isMobile ? GROUND_FADE_UP : undefined}
       onSubmit={(e) => {
         e.preventDefault();
+        const selected = suggestionsOpen
+          ? filteredCommands[activeSuggestion]
+          : undefined;
+        if (selected) {
+          completeCommand(selected);
+          return;
+        }
         void submit();
       }}
     >
