@@ -135,6 +135,9 @@ function McpServersManager({
   onClose: () => void;
 }) {
   const isMobile = useIsMobile();
+  // Warms the catalog as soon as the modal opens, so the picker's grouped
+  // sections are already there when "Add server" is selected.
+  useMcpLibrary();
   const { data, isLoading } = useMcpServers();
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);

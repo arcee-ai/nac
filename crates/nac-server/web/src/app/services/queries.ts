@@ -341,13 +341,17 @@ export function useDeleteSshConfig() {
   });
 }
 
+/**
+ * Matches the server-side registry cache, so a fallback answer carrying only
+ * the embedded entries is retried instead of pinned for the session.
+ */
+const MCP_LIBRARY_STALE_MS = 5 * 60 * 1000;
+
 export function useMcpLibrary() {
   return useQuery<McpLibraryResponse>({
     queryKey: queryKeys.mcpLibrary,
     queryFn: ({ signal }) => api.getMcpLibrary(signal),
-    // The catalog is embedded in the binary, so it cannot change underneath
-    // the page.
-    staleTime: Infinity,
+    staleTime: MCP_LIBRARY_STALE_MS,
     retry: false,
   });
 }

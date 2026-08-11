@@ -2038,6 +2038,9 @@ async fn reject_foreign_host(
 }
 
 pub fn router(manager: SessionManager) -> Router {
+    // The registry answer takes a few seconds, so it is warmed in the
+    // background rather than on the first picker open.
+    tokio::spawn(mcp_api::warm_library_cache());
     api_router(manager)
         .merge(embedded_frontend_router())
         .layer(response_compression_layer())

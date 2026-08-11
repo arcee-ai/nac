@@ -53,8 +53,19 @@ pub struct McpLibraryEntry {
     pub tags: Vec<String>,
 }
 
-/// Category of every registry-sourced entry; curated entries carry their own.
-pub const REGISTRY_CATEGORY: &str = "Popular on Smithery";
+/// Smithery's browse categories: the label shown as a section heading, and
+/// the semantic query smithery.ai itself issues for that category.
+const SMITHERY_CATEGORIES: &[(&str, &str)] = &[
+    ("Web Search", "search the web for information"),
+    ("Browser Automation", "automate and control web browsers"),
+    (
+        "Academic Research",
+        "research papers citations and scholarly",
+    ),
+    ("Finance", "financial data stocks and trading"),
+    ("Reasoning", "thinking reasoning and problem solving"),
+    ("Dev Tools", "software development and coding tools"),
+];
 
 /// The curated entries embedded in the binary: available offline, and the
 /// only place auth headers and hints are known.
@@ -88,7 +99,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
 
     vec![
         entry(
-            "Web search",
+            "Web Search",
             "exa",
             "Web search and content extraction built for agents.",
             "https://mcp.exa.ai/mcp",
@@ -99,7 +110,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             &["search", "web", "research", "crawl"],
         ),
         entry(
-            "Docs & reference",
+            "Dev Tools",
             "context7",
             "Up-to-date documentation and code examples for libraries.",
             "https://mcp.context7.com/mcp",
@@ -113,7 +124,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             &["docs", "documentation", "libraries", "upstash"],
         ),
         entry(
-            "Code & repositories",
+            "Dev Tools",
             "deepwiki",
             "Ask questions about public GitHub repositories.",
             "https://mcp.deepwiki.com/mcp",
@@ -124,7 +135,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             &["github", "repositories", "wiki", "docs"],
         ),
         entry(
-            "Code & repositories",
+            "Dev Tools",
             "grep_app",
             "Search code across a million public GitHub repositories.",
             "https://mcp.grep.app",
@@ -135,7 +146,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             &["code", "search", "github", "grep", "vercel"],
         ),
         entry(
-            "Code & repositories",
+            "Dev Tools",
             "github",
             "Repositories, issues and pull requests on GitHub.",
             "https://api.githubcopilot.com/mcp/",
@@ -146,7 +157,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             &["git", "issues", "pull requests", "code"],
         ),
         entry(
-            "Data & ML",
+            "Dev Tools",
             "huggingface",
             "Models, datasets and Spaces on the Hugging Face Hub.",
             "https://huggingface.co/mcp",
@@ -160,7 +171,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             &["models", "datasets", "ml", "ai", "spaces"],
         ),
         entry(
-            "Docs & reference",
+            "Dev Tools",
             "cloudflare_docs",
             "Search the Cloudflare developer documentation.",
             "https://docs.mcp.cloudflare.com/mcp",
@@ -174,9 +185,10 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
 }
 
 const SMITHERY_REGISTRY: &str = "https://registry.smithery.ai";
-/// How many verified servers the registry is asked for, and the ceiling on
-/// per-entry detail requests.
-const SMITHERY_PAGE_SIZE: usize = 50;
+/// How many servers each category listing is asked for.
+const SMITHERY_PAGE_SIZE: usize = 16;
+/// How many servers each category keeps after filtering.
+const SMITHERY_CATEGORY_LIMIT: usize = 8;
 const SMITHERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Deserialize)]
@@ -210,6 +222,20 @@ struct SmitheryServerDetail {
     deployment_url: Option<String>,
 }
 
+/// Percent-encodes a registry query for use inside a URL query string.
+fn url_encode(raw: &str) -> String {
+    let mut encoded = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 /// A qualified name like `upstash/context7-mcp` as search tags: its
 /// lowercase word segments, minus the noise word every entry shares.
 fn tags_from_qualified(qualified: &str) -> Vec<String> {
@@ -236,9 +262,10 @@ fn name_from_qualified(qualified: &str) -> String {
         .collect()
 }
 
-/// Verified, remotely hosted servers from the Smithery registry, most used
-/// first. Each needs a second request for its connection URL, so the details
-/// are fetched concurrently and an entry that fails is dropped rather than
+/// Verified, remotely hosted servers from the Smithery registry, grouped
+/// under Smithery's own browse categories, most used first within each. The
+/// category listings run concurrently, as do the per-entry detail requests
+/// for the connection URLs; an entry that fails is dropped rather than
 /// failing the list.
 pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
     let client = reqwest::Client::builder()
@@ -246,28 +273,67 @@ pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
         .build()
         .context("failed to build registry client")?;
 
-    let listing: SmitheryListResponse = client
-        .get(format!(
-            "{SMITHERY_REGISTRY}/servers?q=is%3Averified&pageSize={SMITHERY_PAGE_SIZE}"
-        ))
-        .send()
-        .await
-        .context("failed to reach the Smithery registry")?
-        .error_for_status()
-        .context("the Smithery registry refused the listing")?
-        .json()
-        .await
-        .context("the Smithery registry listing was not understood")?;
+    let mut listings = JoinSet::new();
+    for (index, (category, query)) in SMITHERY_CATEGORIES.iter().enumerate() {
+        let client = client.clone();
+        let encoded: String = url_encode(&format!("is:verified {query}"));
+        listings.spawn(async move {
+            let listing: SmitheryListResponse = client
+                .get(format!(
+                    "{SMITHERY_REGISTRY}/servers?q={encoded}&pageSize={SMITHERY_PAGE_SIZE}"
+                ))
+                .send()
+                .await
+                .context("failed to reach the Smithery registry")?
+                .error_for_status()
+                .context("the Smithery registry refused the listing")?
+                .json()
+                .await
+                .context("the Smithery registry listing was not understood")?;
+            Ok::<_, anyhow::Error>((index, *category, listing))
+        });
+    }
 
-    let mut listed: Vec<SmitheryListedServer> = listing
-        .servers
-        .into_iter()
-        .filter(|server| server.verified && server.remote)
-        .collect();
-    listed.sort_by_key(|server| std::cmp::Reverse(server.use_count));
+    let mut categorized: Vec<(usize, &str, Vec<SmitheryListedServer>)> = Vec::new();
+    let mut failure = None;
+    while let Some(joined) = listings.join_next().await {
+        match joined.context("a registry listing task failed")? {
+            Ok((index, category, listing)) => {
+                let mut servers: Vec<SmitheryListedServer> = listing
+                    .servers
+                    .into_iter()
+                    .filter(|server| server.verified && server.remote)
+                    .collect();
+                servers.sort_by_key(|server| std::cmp::Reverse(server.use_count));
+                categorized.push((index, category, servers));
+            }
+            Err(error) => failure = Some(error),
+        }
+    }
+    if categorized.is_empty() {
+        return Err(failure.unwrap_or_else(|| anyhow::anyhow!("the registry answered nothing")));
+    }
+    categorized.sort_by_key(|(index, _, _)| *index);
+
+    // A server can match several category queries; the first category in
+    // catalog order keeps it.
+    let mut seen = std::collections::HashSet::new();
+    let mut listed: Vec<(SmitheryListedServer, &str)> = Vec::new();
+    for (_, category, servers) in categorized {
+        let mut kept = 0;
+        for server in servers {
+            if kept == SMITHERY_CATEGORY_LIMIT {
+                break;
+            }
+            if seen.insert(server.qualified_name.clone()) {
+                listed.push((server, category));
+                kept += 1;
+            }
+        }
+    }
 
     let mut details = JoinSet::new();
-    for (position, server) in listed.into_iter().enumerate() {
+    for (position, (server, category)) in listed.into_iter().enumerate() {
         let client = client.clone();
         details.spawn(async move {
             let detail: SmitheryServerDetail = client
@@ -304,7 +370,7 @@ pub async fn fetch_smithery_library_entries() -> Result<Vec<McpLibraryEntry>> {
                         format!("https://smithery.ai/servers/{}", server.qualified_name)
                     }),
                     icon_url: server.icon_url,
-                    category: REGISTRY_CATEGORY.to_string(),
+                    category: category.to_string(),
                     tags,
                 },
             ))
@@ -340,6 +406,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn queries_are_percent_encoded() {
+        assert_eq!(
+            url_encode("is:verified search the web"),
+            "is%3Averified%20search%20the%20web"
+        );
+    }
+
+    #[test]
     fn qualified_names_become_tags() {
         assert_eq!(
             tags_from_qualified("upstash/context7-mcp"),
@@ -369,7 +443,7 @@ mod tests {
                 auth_hint: None,
                 docs_url: "https://smithery.ai/servers/exa".to_string(),
                 icon_url: None,
-                category: REGISTRY_CATEGORY.to_string(),
+                category: "Web Search".to_string(),
                 tags: Vec::new(),
             },
             McpLibraryEntry {
@@ -383,7 +457,7 @@ mod tests {
                 auth_hint: None,
                 docs_url: "https://smithery.ai/servers/acme/tool".to_string(),
                 icon_url: None,
-                category: REGISTRY_CATEGORY.to_string(),
+                category: "Dev Tools".to_string(),
                 tags: Vec::new(),
             },
         ];

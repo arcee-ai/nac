@@ -194,12 +194,22 @@ static LIBRARY_CACHE: tokio::sync::Mutex<Option<(Instant, Vec<mcp::McpLibraryEnt
 /// The embedded catalog, extended by verified servers from the Smithery
 /// registry when it answers in time.
 pub async fn library_handler() -> Json<McpLibraryResponse> {
+    Json(McpLibraryResponse {
+        entries: library_entries().await,
+    })
+}
+
+/// Fills the library cache ahead of the first request, so opening the picker
+/// shows the full catalog immediately instead of waiting on the registry.
+pub async fn warm_library_cache() {
+    let _ = library_entries().await;
+}
+
+async fn library_entries() -> Vec<mcp::McpLibraryEntry> {
     let mut cache = LIBRARY_CACHE.lock().await;
     if let Some((fetched_at, entries)) = cache.as_ref() {
         if fetched_at.elapsed() < LIBRARY_CACHE_TTL {
-            return Json(McpLibraryResponse {
-                entries: entries.clone(),
-            });
+            return entries.clone();
         }
     }
     let entries = match mcp::fetch_smithery_library_entries().await {
@@ -213,7 +223,7 @@ pub async fn library_handler() -> Json<McpLibraryResponse> {
         }
     };
     *cache = Some((Instant::now(), entries.clone()));
-    Json(McpLibraryResponse { entries })
+    entries
 }
 
 pub async fn list_servers_handler(
