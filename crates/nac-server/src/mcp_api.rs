@@ -307,8 +307,9 @@ pub async fn delete_server_handler(
     State(manager): State<SessionManager>,
     AxumPath(config_id): AxumPath<String>,
 ) -> Result<StatusCode, ApiError> {
-    mcp::load_mcp_server_configuration(manager.store_path(), &config_id)?;
-    mcp::delete_mcp_server_configuration(manager.store_path(), &config_id)?;
+    if !mcp::delete_mcp_server_configuration(manager.store_path(), &config_id)? {
+        return Err(McpServerConfigurationStoreError::NotFound(config_id).into());
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
