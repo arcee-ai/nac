@@ -23,7 +23,8 @@ export type ReasoningEffort =
   | "low"
   | "medium"
   | "high"
-  | "xhigh";
+  | "xhigh"
+  | "max";
 
 /** Mixed-mode dispatch difficulty, serialized lowercase. */
 export const MIXED_TIERS = ["easy", "medium", "hard"] as const;

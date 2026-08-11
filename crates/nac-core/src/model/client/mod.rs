@@ -172,12 +172,23 @@ fn anthropic_headers(
     request: reqwest::RequestBuilder,
     api_key: &str,
     cache_ttl: Option<&'static str>,
+    context_management: bool,
 ) -> reqwest::RequestBuilder {
     let request = request
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION);
+    // The `anthropic-beta` header accepts multiple comma-separated values.
+    // Collect every active beta so both 1h cache TTL and context_management
+    // can ride in a single header.
+    let mut betas: Vec<&str> = Vec::new();
     if cache_ttl == Some("1h") {
-        return request.header("anthropic-beta", "extended-cache-ttl-2025-04-11");
+        betas.push("extended-cache-ttl-2025-04-11");
+    }
+    if context_management {
+        betas.push("context-management-2025-06-27");
+    }
+    if !betas.is_empty() {
+        return request.header("anthropic-beta", betas.join(","));
     }
     request
 }
@@ -574,22 +585,38 @@ impl ModelClient {
             self.cache_ttl,
             &self.resolved_model.thinking_level_map,
             self.resolved_model.max_tokens,
+            self.resolved_model.adaptive_thinking,
+            self.resolved_model.context_management,
+            self.resolved_model.clear_thinking,
         )?;
+
+        // The context_management beta header must only be sent when the
+        // request body actually includes the `context_management` edit,
+        // which requires thinking to be active (non-none effort).
+        let thinking_active =
+            matches!(self.reasoning_effort, Some(effort) if effort != ReasoningEffort::None);
+        let send_context_management = self.resolved_model.context_management
+            && self.resolved_model.clear_thinking
+            && thinking_active;
 
         let value = match on_delta {
             Some(_) => {
                 request["stream"] = Value::Bool(true);
                 let api_key = self.api_key.as_str();
                 let cache_ttl = self.cache_ttl;
+                let context_management = send_context_management;
                 self.post_sse_with_retry_headers(
                     &url,
                     &request,
-                    |request| anthropic_headers(request, api_key, cache_ttl),
+                    |request| anthropic_headers(request, api_key, cache_ttl, context_management),
                     AnthropicStreamFold::new(on_delta),
                 )
                 .await?
             }
-            None => self.post_anthropic_json_with_retry(&url, &request).await?,
+            None => {
+                self.post_anthropic_json_with_retry(&url, &request, send_context_management)
+                    .await?
+            }
         };
         Ok(self.with_usage_cost(parse_anthropic_messages_response(&value, &url)?))
     }
@@ -670,11 +697,16 @@ impl ModelClient {
         .await
     }
 
-    async fn post_anthropic_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
+    async fn post_anthropic_json_with_retry(
+        &self,
+        url: &str,
+        body: &Value,
+        context_management: bool,
+    ) -> Result<Value> {
         let api_key = self.api_key.as_str();
         let cache_ttl = self.cache_ttl;
         self.post_json_with_retry_headers(url, body, |request| {
-            anthropic_headers(request, api_key, cache_ttl)
+            anthropic_headers(request, api_key, cache_ttl, context_management)
         })
         .await
     }

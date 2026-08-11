@@ -29,6 +29,8 @@ use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 mod auth_status;
 #[cfg(test)]
 mod auth_status_tests;
+mod anthropic_overlay;
+mod arcee_overlay;
 mod data;
 mod overlay;
 #[cfg(test)]
@@ -43,6 +45,8 @@ mod types;
 mod user_override_tests;
 mod user_overrides;
 
+pub use anthropic_overlay::spawn_anthropic_model_refresh;
+pub use arcee_overlay::spawn_arcee_model_refresh;
 pub use overlay::spawn_overlay_refresh;
 pub use types::{
     ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, DefaultLimits, ModelCostRates,
@@ -89,6 +93,22 @@ pub(crate) enum CatalogWarning {
         provider: String,
         reason: String,
     },
+    ArceeOverlayUnreadable {
+        path: PathBuf,
+        error: String,
+    },
+    ArceeOverlayCorrupt {
+        path: PathBuf,
+        error: String,
+    },
+    AnthropicOverlayUnreadable {
+        path: PathBuf,
+        error: String,
+    },
+    AnthropicOverlayCorrupt {
+        path: PathBuf,
+        error: String,
+    },
     UserOverridesMalformed {
         path: PathBuf,
         error: String,
@@ -128,6 +148,26 @@ impl std::fmt::Display for CatalogWarning {
                     "skipping catalog overlay provider '{provider}': {reason}"
                 )
             }
+            Self::ArceeOverlayUnreadable { path, error } => write!(
+                formatter,
+                "cannot read arcee catalog overlay {}: {error} (seed models stay active)",
+                path.display()
+            ),
+            Self::ArceeOverlayCorrupt { path, error } => write!(
+                formatter,
+                "ignoring corrupt arcee catalog overlay {}: {error} (seed models stay active)",
+                path.display()
+            ),
+            Self::AnthropicOverlayUnreadable { path, error } => write!(
+                formatter,
+                "cannot read anthropic catalog overlay {}: {error} (baseline stays active)",
+                path.display()
+            ),
+            Self::AnthropicOverlayCorrupt { path, error } => write!(
+                formatter,
+                "ignoring corrupt anthropic catalog overlay {}: {error} (baseline stays active)",
+                path.display()
+            ),
             Self::UserOverridesMalformed { path, error } => write!(
                 formatter,
                 "ignoring malformed user model overrides {}: {error}",
@@ -222,6 +262,8 @@ impl ModelCatalog {
         if env_layers {
             if let Some(home) = home {
                 overlay::merge_overlay(&mut catalog, home, &mut warnings);
+                arcee_overlay::merge_arcee_overlay(&mut catalog, home, &mut warnings);
+                anthropic_overlay::merge_anthropic_overlay(&mut catalog, home, &mut warnings);
                 user_overrides::apply_user_overrides(&mut catalog, home, &mut warnings);
             }
         }

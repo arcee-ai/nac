@@ -19,13 +19,14 @@ const ALL_PROVIDERS: [BackendKind; 8] = [
     BackendKind::ArceeApi,
 ];
 
-const ALL_EFFORTS: [ReasoningEffort; 6] = [
+const ALL_EFFORTS: [ReasoningEffort; 7] = [
     ReasoningEffort::None,
     ReasoningEffort::Minimal,
     ReasoningEffort::Low,
     ReasoningEffort::Medium,
     ReasoningEffort::High,
     ReasoningEffort::Xhigh,
+    ReasoningEffort::Max,
 ];
 
 #[test]
@@ -68,25 +69,36 @@ fn unknown_models_clone_provider_defaults_with_fallback_limits() {
     }
 }
 
-/// Independent transcription of the pre-S4 `backend.rs` validation matrix.
-/// Since S4, `validate_model_reasoning_effort` itself reads the catalog
-/// maps; the matrix guards compare against this hand-written reference so
-/// they keep proving the data reproduces the historical behavior instead of
-/// vacuously comparing the map against itself.
+/// Independent transcription of the pre-S4 `backend.rs` validation matrix,
+/// with post-S4 extensions: `Max` effort for GPT-5.6 models (OpenAI docs
+/// confirm GPT-5.6-only), and per-model effort tiers for Fireworks and
+/// Together (provider docs show model-specific behavior the uniform pre-S4
+/// matrix did not capture). Since S4, `validate_model_reasoning_effort`
+/// itself reads the catalog maps; the matrix guards compare against this
+/// hand-written reference so they keep proving the data reproduces the
+/// historical behavior instead of vacuously comparing the map against
+/// itself.
 fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEffort) -> bool {
     match provider {
         BackendKind::DeepSeekChat => matches!(
             effort,
-            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Xhigh
-        ),
-        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
-            effort,
             ReasoningEffort::None
                 | ReasoningEffort::Low
-                | ReasoningEffort::Medium
                 | ReasoningEffort::High
+                | ReasoningEffort::Xhigh
         ),
-        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => true,
+        BackendKind::FireworksChat => fireworks_matrix_accepts(model, effort),
+        BackendKind::TogetherChat => together_matrix_accepts(model, effort),
+        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => {
+            // `max` is a post-S4 addition: only GPT-5.6 models support it
+            // (OpenAI docs confirm GPT-5.6-only). Unknown models and
+            // non-5.6 models stay at the pre-S4 six levels.
+            if effort == ReasoningEffort::Max {
+                model.starts_with("gpt-5.6")
+            } else {
+                true
+            }
+        }
         BackendKind::AnthropicMessages => {
             // `none` (omission) was safe for every family, including models
             // whose adaptive thinking is always on.
@@ -112,6 +124,94 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
             }
         }
         BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
+    }
+}
+
+/// Post-S4 per-model extensions for Fireworks: provider docs show
+/// model-specific effort tiers that the uniform pre-S4 matrix did not
+/// capture. GPT-OSS and MiniMax models are reasoning-only (the API
+/// rejects `none`); DeepSeek V4 and GLM 5.2 support an `xhigh` tier
+/// (wire "max") above high. Unknown models and all other known models
+/// keep the pre-S4 uniform row (none/low/medium/high).
+fn fireworks_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
+    // GPT-OSS models: reasoning-only, `none` is rejected by the API.
+    let gpt_oss = pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-120b")
+        || pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-20b");
+    // MiniMax models: reasoning-only, `none` is rejected by the API.
+    let minimax = pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m2p7")
+        || pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m3");
+    // DeepSeek V4 models: support `xhigh` (wire "max") above high.
+    let deepseek_v4 =
+        pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash")
+            || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash-0731")
+            || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-pro");
+    // GLM 5.2 models (incl. fast router): support `xhigh` (wire "max").
+    let glm = pre_s4_anthropic_family(model, "accounts/fireworks/models/glm-5p2")
+        || pre_s4_anthropic_family(model, "accounts/fireworks/routers/glm-5p2-fast");
+
+    if gpt_oss || minimax {
+        matches!(
+            effort,
+            ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
+        )
+    } else if deepseek_v4 || glm {
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+                | ReasoningEffort::Xhigh
+        )
+    } else {
+        // Default (unknown models and all other known models): the pre-S4
+        // uniform matrix row.
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+        )
+    }
+}
+
+/// Post-S4 per-model extensions for Together: provider docs show
+/// model-specific effort tiers. GLM-5.2 and DeepSeek V4 Pro support
+/// `max` above high; non-reasoning models (Qwen2.5-7B, Qwen3.7-Max,
+/// Llama-3.3-70B) accept no explicit effort levels. Unknown models
+/// and all other known models keep the pre-S4 uniform row
+/// (none/low/medium/high).
+fn together_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
+    // Non-reasoning models: no explicit effort levels accepted.
+    let non_reasoning = model == "Qwen/Qwen2.5-7B-Instruct-Turbo"
+        || model == "Qwen/Qwen3.7-Max"
+        || model == "meta-llama/Llama-3.3-70B-Instruct-Turbo";
+    // GLM-5.2 and DeepSeek V4 Pro: support `max` above high.
+    let max_tier = pre_s4_anthropic_family(model, "zai-org/GLM-5.2")
+        || pre_s4_anthropic_family(model, "deepseek-ai/DeepSeek-V4-Pro");
+
+    if non_reasoning {
+        false
+    } else if max_tier {
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+                | ReasoningEffort::Max
+        )
+    } else {
+        // Default (unknown models and all other known models): the pre-S4
+        // uniform matrix row.
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+        )
     }
 }
 
@@ -207,7 +307,7 @@ fn wire_level_special_cases_are_encoded_in_data() {
             .wire_value(ReasoningEffort::High),
         Some("high")
     );
-    assert!(!deepseek
+    assert!(deepseek
         .thinking_level_map
         .is_supported(ReasoningEffort::Low));
     assert_eq!(
@@ -226,12 +326,19 @@ fn wire_level_special_cases_are_encoded_in_data() {
         Some("reasoning")
     );
 
-    // Arcee accepts no explicit effort levels, not even `none`.
+    // Arcee's _default entry has the Arcee thinking format (bare
+    // reasoning_effort) but an empty thinking_level_map, so unknown models
+    // accept no explicit effort levels. The passthrough models get their
+    // effort maps from the arcee overlay at runtime.
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         let arcee = resolve(backend, "arcee-model");
         assert!(arcee.thinking_level_map.0.is_empty(), "{backend}");
         assert!(!arcee.reasoning, "{backend}");
-        assert_eq!(arcee.compat.completions_thinking_format, None, "{backend}");
+        assert_eq!(
+            arcee.compat.completions_thinking_format,
+            Some(CompletionsThinkingFormat::Arcee),
+            "{backend}"
+        );
     }
 }
 
@@ -239,18 +346,19 @@ fn wire_level_special_cases_are_encoded_in_data() {
 fn effective_settings_resolve_catalog_metadata_at_construction() {
     let settings = EffectiveModelSettings::from_optional(
         Some(BackendKind::DeepSeekChat),
-        Some("deepseek-chat".to_string()),
+        Some("deepseek-v4-flash".to_string()),
         Some("https://api.deepseek.com".to_string()),
         Some(ReasoningEffort::High),
         None,
         std::collections::BTreeMap::new(),
     )
     .expect("valid deepseek settings");
-    assert_eq!(settings.resolved.id, "deepseek-chat");
+    assert_eq!(settings.resolved.id, "deepseek-v4-flash");
     assert_eq!(settings.resolved.provider, BackendKind::DeepSeekChat);
     assert_eq!(settings.resolved.api, ApiKind::OpenAiCompletions);
-    // S1: `deepseek-chat` is a models.dev catalog entry, so resolution finds
-    // the generated baseline (real limits) instead of the provider default.
+    // S1: `deepseek-v4-flash` is a models.dev catalog entry, so resolution
+    // finds the generated baseline (real limits) instead of the provider
+    // default.
     assert_eq!(settings.resolved.source, ModelSource::Baseline);
     assert_eq!(settings.resolved.context_window, 1_000_000);
     assert!(settings
@@ -297,17 +405,17 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
     // documents the provenance of every value). These pins make seed edits
     // deliberate.
     let codex_cases = [
-        ("gpt-5.6-sol", "GPT-5.6 Sol", 1_050_000, 128_000, 5.0, 30.0),
+        ("gpt-5.6-sol", "GPT-5.6 Sol", 272_000, 128_000, 5.0, 30.0),
         (
             "gpt-5.6-terra",
             "GPT-5.6 Terra",
-            1_050_000,
+            272_000,
             128_000,
             2.0,
             12.0,
         ),
-        ("gpt-5.6-luna", "GPT-5.6 Luna", 1_050_000, 128_000, 0.2, 1.2),
-        ("gpt-5.6", "GPT-5.6", 1_050_000, 128_000, 5.0, 30.0),
+        ("gpt-5.6-luna", "GPT-5.6 Luna", 272_000, 128_000, 0.2, 1.2),
+        ("gpt-5.6", "GPT-5.6", 272_000, 128_000, 5.0, 30.0),
         (
             "gpt-5.3-codex-spark",
             "GPT-5.3 Codex Spark",
@@ -328,13 +436,25 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
         assert_eq!(metadata.cost.output, output, "{id}");
         assert!(metadata.reasoning, "{id}");
         // Codex matrix behavior: every effort level, sent verbatim.
+        // GPT-5.6 models additionally support `max` (post-S4 addition);
+        // gpt-5.3-codex-spark does not.
+        let supports_max = id.starts_with("gpt-5.6");
         for effort in ALL_EFFORTS {
-            assert_eq!(
-                metadata.thinking_level_map.wire_value(effort),
-                Some(effort.as_str()),
-                "{id} {}",
-                effort.as_str()
-            );
+            if effort == ReasoningEffort::Max && !supports_max {
+                assert_eq!(
+                    metadata.thinking_level_map.wire_value(effort),
+                    None,
+                    "{id} {} should not be supported",
+                    effort.as_str()
+                );
+            } else {
+                assert_eq!(
+                    metadata.thinking_level_map.wire_value(effort),
+                    Some(effort.as_str()),
+                    "{id} {}",
+                    effort.as_str()
+                );
+            }
         }
     }
 
@@ -376,7 +496,8 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
             assert_eq!(metadata.cost.cache_read, 0.0, "{backend}/{id}");
             assert_eq!(metadata.cost.cache_write, 0.0, "{backend}/{id}");
             assert_eq!(metadata.reasoning, *reasoning, "{backend}/{id}");
-            // Arcee matrix behavior: no explicit effort levels accepted.
+            // Trinity models accept no explicit effort levels (empty map).
+            // The passthrough models get their maps from the arcee overlay.
             assert!(metadata.thinking_level_map.0.is_empty(), "{backend}/{id}");
             // The completions compat matches the provider default.
             let default = resolve(backend, "model-with-no-catalog-entry");
@@ -492,9 +613,10 @@ fn generated_entries_satisfy_catalog_invariants() {
             }
         }
     }
-    // Snapshot pin: 80 agent-compatible generated models plus 11 hand-seeded entries. Drift fails loudly here at regen/seed-edit time,
-    // forcing a deliberate review.
-    assert_eq!(entry_count, 92, "catalog model count drifted");
+    // Snapshot pin: 78 agent-compatible generated models plus 11 hand-seeded
+    // entries (2 deprecated deepseek models removed). Drift fails loudly here
+    // at regen/seed-edit time, forcing a deliberate review.
+    assert_eq!(entry_count, 90, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -646,6 +768,9 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
         None,
         &settings.resolved.thinking_level_map,
         settings.resolved.max_tokens,
+        false,
+        false,
+        false,
     )
     .unwrap();
     assert_eq!(request["thinking"], serde_json::json!({"type": "adaptive"}));
@@ -966,7 +1091,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 92, "catalog model count drifted");
+    assert_eq!(total, 90, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks

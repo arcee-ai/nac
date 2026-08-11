@@ -158,7 +158,7 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     assert!(metadata
         .thinking_level_map
         .is_supported(ReasoningEffort::High));
-    assert!(!metadata
+    assert!(metadata
         .thinking_level_map
         .is_supported(ReasoningEffort::Low));
     assert_eq!(
@@ -231,7 +231,7 @@ async fn refresh_304_without_overlay_keeps_baseline_and_bumps_sidecar() {
     // No overlay is written for an unchanged snapshot; the baseline stays
     // authoritative.
     assert!(!env.overlay_path().exists());
-    let metadata = resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let metadata = resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.source, ModelSource::Baseline);
     // The sidecar clock advances (cadence) and keeps the revalidated ETag.
     let sidecar = read_sidecar(&env.sidecar_path()).expect("sidecar written on 304");
@@ -378,7 +378,7 @@ async fn refresh_failures_are_contained_without_touching_state() {
     garbage.finish();
 
     // Offline behavior: the embedded baseline keeps resolving.
-    let metadata = resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let metadata = resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.source, ModelSource::Baseline);
     assert_eq!(metadata.context_window, 1_000_000);
 }
@@ -561,7 +561,7 @@ fn resolution_and_validation_paths_never_touch_the_network() {
     // catalog metadata locally.
     EffectiveModelSettings::from_optional(
         Some(BackendKind::DeepSeekChat),
-        Some("deepseek-chat".to_string()),
+        Some("deepseek-v4-flash".to_string()),
         Some("https://api.deepseek.com".to_string()),
         Some(ReasoningEffort::High),
         None,
@@ -570,7 +570,7 @@ fn resolution_and_validation_paths_never_touch_the_network() {
     .expect("valid settings");
     validate_model_configuration(
         BackendKind::DeepSeekChat,
-        "deepseek-chat",
+        "deepseek-v4-flash",
         Some("https://api.deepseek.com"),
         Some(ReasoningEffort::High),
         Some("DEEPSEEK_API_KEY"),
@@ -629,7 +629,7 @@ fn corrupt_overlay_is_ignored_with_a_warning() {
         matches!(warnings[0], CatalogWarning::OverlayCorrupt { .. }),
         "{warnings:?}"
     );
-    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
+    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.source, ModelSource::Baseline);
     assert_eq!(metadata.context_window, 1_000_000);
 }
@@ -741,7 +741,7 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
     let baseline_catalog = baseline_catalog();
     let (providers, warnings, count) =
         map_models_dev(MODELS_DEV_FIXTURE, &baseline_catalog).expect("fixture maps");
-    assert_eq!(count, 81, "fixture agent-compatible model count drifted");
+    assert_eq!(count, 79, "fixture agent-compatible model count drifted");
     assert!(warnings.is_empty(), "{warnings:?}");
 
     let baseline: data::GeneratedCatalog =
@@ -784,9 +784,9 @@ fn runtime_mapper_preserves_only_malformed_baseline_ids() {
         "deepseek": {
             "models": {
                 // Known baseline ID whose refreshed record cannot be decoded.
-                "deepseek-chat": "not-an-object",
+                "deepseek-v4-flash": "not-an-object",
                 // Known baseline ID explicitly declared incompatible.
-                "deepseek-reasoner": {
+                "deepseek-v4-pro": {
                     "tool_call": false,
                     "limit": { "context": 1_000, "output": 100 }
                 }
@@ -799,17 +799,16 @@ fn runtime_mapper_preserves_only_malformed_baseline_ids() {
     let (mut providers, warnings, count) = map_models_dev(&payload, &seed).unwrap();
     assert_eq!(count, 1);
     assert!(warnings.iter().any(|warning| {
-        warning.contains("deepseek-chat") && warning.contains("kept embedded baseline")
+        warning.contains("deepseek-v4-flash") && warning.contains("kept embedded baseline")
     }));
     let mapped = providers.remove(&BackendKind::DeepSeekChat).unwrap();
     let baseline: data::GeneratedCatalog =
         serde_json::from_str(data::GENERATED_CATALOG_JSON).unwrap();
     assert_eq!(
-        mapped.models["deepseek-chat"],
-        baseline.providers[&BackendKind::DeepSeekChat].models["deepseek-chat"]
+        mapped.models["deepseek-v4-flash"],
+        baseline.providers[&BackendKind::DeepSeekChat].models["deepseek-v4-flash"]
     );
-    assert!(!mapped.models.contains_key("deepseek-reasoner"));
-    assert!(!mapped.models.contains_key("deepseek-v4-flash"));
+    assert!(!mapped.models.contains_key("deepseek-v4-pro"));
 
     let mut catalog = seed::seed_catalog();
     data::merge_generated_baseline(&mut catalog);
@@ -819,14 +818,14 @@ fn runtime_mapper_preserves_only_malformed_baseline_ids() {
         mapped,
         ModelSource::Overlay,
     );
-    let preserved = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-chat");
-    let expected = &baseline.providers[&BackendKind::DeepSeekChat].models["deepseek-chat"];
+    let preserved = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
+    let expected = &baseline.providers[&BackendKind::DeepSeekChat].models["deepseek-v4-flash"];
     assert_eq!(preserved.context_window, expected.context_window);
     assert_eq!(preserved.max_tokens, expected.max_tokens);
     assert_eq!(preserved.cost, expected.cost);
     assert_eq!(
         catalog
-            .resolve(BackendKind::DeepSeekChat, "deepseek-reasoner")
+            .resolve(BackendKind::DeepSeekChat, "deepseek-v4-pro")
             .source,
         ModelSource::ProviderDefault
     );
