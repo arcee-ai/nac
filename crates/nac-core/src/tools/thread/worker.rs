@@ -6,18 +6,19 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::time::timeout;
+use tokio::time::sleep;
 
 use crate::events::{decode_stderr_event, AgentEvent};
 use crate::model::{ModelClient, TokenUsage};
-use crate::process::{isolate_process_group, terminate_child_tree};
-use crate::tools::ToolRuntime;
+use crate::process::ProcessTreeGuard;
+use crate::tools::{ThreadCancellation, ToolRuntime};
 
 pub(super) struct WorkerRun {
     pub(super) stdout: String,
     pub(super) stderr: String,
     pub(super) exit_code: i32,
     pub(super) timed_out: bool,
+    pub(super) cancelled: bool,
     pub(super) timeout_reason: Option<String>,
     pub(super) usage: Option<TokenUsage>,
 }
@@ -196,6 +197,7 @@ pub(super) async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
     invocation: WorkerInvocation<'_>,
+    cancellation: ThreadCancellation,
 ) -> std::io::Result<WorkerRun> {
     let executable = runtime.worker_executable.clone().ok_or_else(|| {
         std::io::Error::new(
@@ -241,22 +243,25 @@ pub(super) async fn run_worker(
         command.arg("--skill").arg(skill);
     }
     command.args(runtime.backend.worker_cli_args());
-    isolate_process_group(&mut command);
     command.kill_on_drop(true);
 
-    let mut child = command.spawn()?;
+    let (mut child, mut process_tree) = ProcessTreeGuard::spawn_supervised(&mut command)?;
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child.stderr.take().unwrap();
     let event_sink = runtime.event_sink.clone();
     let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
+    let stderr_cancellation = cancellation.clone();
     let stderr_handle = tokio::spawn(async move {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
         let mut output = String::new();
         let mut worker_usage = TokenUsage::default();
         while let Ok(Some(line)) = lines.next_line().await {
+            if stderr_cancellation.is_cancelled() {
+                break;
+            }
             if let Some(event) = decode_stderr_event(&line) {
                 timeout_trace_for_logs.lock().await.observe(&event);
                 if let AgentEvent::AssistantMessage {
@@ -290,11 +295,15 @@ pub(super) async fn run_worker(
     });
 
     let stdout = child.stdout.take().unwrap();
+    let stdout_cancellation = cancellation.clone();
     let stdout_handle = tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut output = String::new();
         while let Ok(Some(line)) = lines.next_line().await {
+            if stdout_cancellation.is_cancelled() {
+                break;
+            }
             if !output.is_empty() {
                 output.push('\n');
             }
@@ -303,22 +312,64 @@ pub(super) async fn run_worker(
         output
     });
 
-    let status = timeout(Duration::from_secs(invocation.timeout_secs), child.wait()).await;
-    let timed_out = status.is_err();
-    if timed_out {
-        terminate_child_tree(&mut child).await;
+    enum WaitOutcome {
+        Exited(std::io::Result<std::process::ExitStatus>),
+        TimedOut,
+        Cancelled,
     }
 
-    let (stderr, worker_usage) = stderr_handle.await.unwrap_or_default();
-    let stdout = stdout_handle.await.unwrap_or_default();
+    let deadline = sleep(Duration::from_secs(invocation.timeout_secs));
+    tokio::pin!(deadline);
+    let mut outcome = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => WaitOutcome::Cancelled,
+        result = child.wait() => WaitOutcome::Exited(result),
+        _ = &mut deadline => WaitOutcome::TimedOut,
+    };
+    if matches!(outcome, WaitOutcome::Exited(_)) {
+        process_tree.mark_leader_reaped();
+    }
+    if matches!(outcome, WaitOutcome::Exited(_)) && cancellation.is_cancelled() {
+        outcome = WaitOutcome::Cancelled;
+    }
+
+    let timed_out = matches!(outcome, WaitOutcome::TimedOut);
+    let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
+    if timed_out || cancelled {
+        process_tree.terminate(&mut child).await;
+    }
+
+    let readers = async {
+        let (stderr, worker_usage) = stderr_handle.await.unwrap_or_default();
+        let stdout = stdout_handle.await.unwrap_or_default();
+        (stderr, worker_usage, stdout)
+    };
+    tokio::pin!(readers);
+    let (stderr, worker_usage, stdout) = if timed_out || cancelled {
+        readers.await
+    } else {
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                cancelled = true;
+                process_tree.terminate(&mut child).await;
+                readers.await
+            }
+            output = &mut readers => output,
+        }
+    };
+
+    if !timed_out && !cancelled {
+        process_tree.finish().await;
+    }
     let timeout_reason = if timed_out {
         Some(timeout_trace.lock().await.timeout_reason())
     } else {
         None
     };
-    let exit_code = match status {
-        Ok(wait_result) => wait_result?.code().unwrap_or(-1),
-        Err(_) => -1,
+    let exit_code = match outcome {
+        WaitOutcome::Exited(wait_result) if !cancelled => wait_result?.code().unwrap_or(-1),
+        WaitOutcome::Exited(_) | WaitOutcome::TimedOut | WaitOutcome::Cancelled => -1,
     };
 
     Ok(WorkerRun {
@@ -326,6 +377,7 @@ pub(super) async fn run_worker(
         stderr,
         exit_code,
         timed_out,
+        cancelled,
         timeout_reason,
         usage: worker_usage,
     })
@@ -335,8 +387,200 @@ pub(super) async fn run_worker(
 mod tests {
     use super::*;
     use crate::model::{BackendKind, EffectiveModelSettings};
+    use crate::tools::test_runtime;
     use crate::TEST_ENV_LOCK;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_stops_two_managed_workers_and_their_descendants() {
+        let root = std::env::temp_dir().join(format!("nac_worker_cancel_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker.sh");
+        let script = format!(
+            r#"#!/bin/sh
+name=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --thread-name) name="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf ready > '{root}/'"$name"'.ready'
+trap '' TERM
+(trap '' TERM; sleep 1; printf survived > '{root}/'"$name"'.late') &
+wait
+"#,
+            root = root.display()
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.store_path = root.join("store.db");
+        runtime.worker_executable = Some(executable);
+        crate::store::initialize(&runtime.store_path).unwrap();
+        crate::store::insert_test_session(&runtime.store_path, "session");
+        assert!(runtime.active_threads.begin_run());
+        assert!(runtime.active_threads.mark("a", "dispatch-a"));
+        assert!(runtime.active_threads.mark("b", "dispatch-b"));
+        let cancellation_a = runtime.active_threads.start("a", "dispatch-a").unwrap();
+        let cancellation_b = runtime.active_threads.start("b", "dispatch-b").unwrap();
+        let client = ModelClient::new_for_test();
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+
+        let worker_a = async {
+            let result = run_worker(
+                &runtime,
+                &client,
+                WorkerInvocation {
+                    session_id: "session",
+                    thread_name: "a",
+                    dispatch_id: "dispatch-a",
+                    action: "a",
+                    source_threads: &no_sources,
+                    scheduled_skills: &no_skills,
+                    timeout_secs: 30,
+                },
+                cancellation_a,
+            )
+            .await;
+            let _ = runtime
+                .active_threads
+                .close(&runtime.store_path, "session", "a", "dispatch-a");
+            result
+        };
+        let worker_b = async {
+            let result = run_worker(
+                &runtime,
+                &client,
+                WorkerInvocation {
+                    session_id: "session",
+                    thread_name: "b",
+                    dispatch_id: "dispatch-b",
+                    action: "b",
+                    source_threads: &no_sources,
+                    scheduled_skills: &no_skills,
+                    timeout_secs: 30,
+                },
+                cancellation_b,
+            )
+            .await;
+            let _ = runtime
+                .active_threads
+                .close(&runtime.store_path, "session", "b", "dispatch-b");
+            result
+        };
+        let cancel_when_ready = async {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while !root.join("a.ready").exists() || !root.join("b.ready").exists() {
+                    sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("managed workers never became ready");
+            runtime
+                .active_threads
+                .cancel_and_drain(Some((&runtime.store_path, "session")))
+                .await
+        };
+
+        let (worker_a, worker_b, cancellation) =
+            tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::join!(worker_a, worker_b, cancel_when_ready)
+            })
+            .await
+            .expect("managed worker cancellation did not drain");
+        cancellation.unwrap();
+        assert!(worker_a.unwrap().cancelled);
+        assert!(worker_b.unwrap().cancelled);
+        sleep(Duration::from_millis(1100)).await;
+        assert!(!root.join("a.late").exists());
+        assert!(!root.join("b.late").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_after_leader_exit_kills_pipe_holding_descendant() {
+        let root =
+            std::env::temp_dir().join(format!("nac_worker_reaped_cancel_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker.sh");
+        let script = format!(
+            r#"#!/bin/sh
+printf '%s' "$$" > '{root}/leader.pid'
+printf ready > '{root}/descendant-ready'
+(trap '' TERM; sleep 1; printf survived > '{root}/late-write') &
+exit 0
+"#,
+            root = root.display()
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.store_path = root.join("store.db");
+        runtime.worker_executable = Some(executable);
+        let cancellation = ThreadCancellation::default();
+        let client = ModelClient::new_for_test();
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let worker = run_worker(
+            &runtime,
+            &client,
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            cancellation.clone(),
+        );
+        let cancel_after_reap = async {
+            let leader = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if root.join("descendant-ready").exists() {
+                        let pid = std::fs::read_to_string(root.join("leader.pid"))
+                            .unwrap()
+                            .parse::<libc::pid_t>()
+                            .unwrap();
+                        break pid;
+                    }
+                    sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("worker descendant never became ready");
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while unsafe { libc::kill(leader, 0) == 0 } {
+                    sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("worker leader was not reaped");
+            cancellation.cancel();
+        };
+
+        let (worker, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(worker, cancel_after_reap)
+        })
+        .await
+        .expect("cancellation after leader exit did not drain");
+        assert!(worker.unwrap().cancelled);
+        sleep(Duration::from_millis(1100)).await;
+        assert!(!root.join("late-write").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
     #[test]
     fn worker_model_transport_is_complete_with_absent_effort_and_empty_headers() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();

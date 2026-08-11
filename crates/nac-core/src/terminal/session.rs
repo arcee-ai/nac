@@ -1,5 +1,3 @@
-#[cfg(all(unix, not(target_os = "macos")))]
-use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -11,6 +9,8 @@ use anyhow::{Context, Result};
 use portable_pty::{NativePtySystem, PtySize, PtySystem};
 use tokio::sync::Notify;
 
+#[cfg(unix)]
+use crate::process::{descendant_pids, signal_pids};
 use crate::sandbox::ExecutionBackend;
 
 const MAX_SESSION_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -278,138 +278,6 @@ impl Drop for TerminalSession {
         }
         self.alive.store(false, Ordering::SeqCst);
     }
-}
-
-#[cfg(unix)]
-fn descendant_pids(root: libc::pid_t) -> Vec<libc::pid_t> {
-    #[cfg(target_os = "macos")]
-    {
-        descendant_pids_macos(root)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        descendant_pids_from_pairs(root, process_parent_pairs())
-    }
-}
-
-#[cfg(unix)]
-fn signal_pids(pids: &[libc::pid_t], signal: libc::c_int) {
-    for &pid in pids {
-        unsafe {
-            libc::kill(pid, signal);
-        }
-    }
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn descendant_pids_from_pairs(
-    root: libc::pid_t,
-    pairs: Vec<(libc::pid_t, libc::pid_t)>,
-) -> Vec<libc::pid_t> {
-    let mut children: HashMap<libc::pid_t, Vec<libc::pid_t>> = HashMap::new();
-
-    for (pid, ppid) in pairs {
-        children.entry(ppid).or_default().push(pid);
-    }
-
-    let mut found = Vec::new();
-    let mut queue = VecDeque::from([root]);
-    while let Some(parent) = queue.pop_front() {
-        let Some(direct_children) = children.get(&parent) else {
-            continue;
-        };
-        for &child in direct_children {
-            if child <= 1 || found.contains(&child) {
-                continue;
-            }
-            found.push(child);
-            queue.push_back(child);
-        }
-    }
-    found
-}
-
-#[cfg(target_os = "macos")]
-fn descendant_pids_macos(root: libc::pid_t) -> Vec<libc::pid_t> {
-    let mut found = Vec::new();
-    let mut queue = VecDeque::from([root]);
-    while let Some(parent) = queue.pop_front() {
-        for child in direct_child_pids_macos(parent) {
-            if child <= 1 || found.contains(&child) {
-                continue;
-            }
-            found.push(child);
-            queue.push_back(child);
-        }
-    }
-    found
-}
-
-#[cfg(target_os = "macos")]
-fn direct_child_pids_macos(parent: libc::pid_t) -> Vec<libc::pid_t> {
-    let mut capacity = 32usize;
-    loop {
-        let mut pids = vec![0 as libc::pid_t; capacity];
-        let returned = unsafe {
-            libc::proc_listchildpids(
-                parent,
-                pids.as_mut_ptr().cast(),
-                (capacity * std::mem::size_of::<libc::pid_t>()) as libc::c_int,
-            )
-        };
-        if returned <= 0 {
-            return Vec::new();
-        }
-
-        let count = (returned as usize).min(capacity);
-        pids.truncate(count);
-        let children = pids.into_iter().filter(|pid| *pid > 1).collect::<Vec<_>>();
-        if children.len() < capacity || capacity >= 4096 {
-            return children;
-        }
-        capacity *= 2;
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn process_parent_pairs() -> Vec<(libc::pid_t, libc::pid_t)> {
-    let mut pairs = Vec::new();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return pairs;
-    };
-
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|value| value.parse::<libc::pid_t>().ok())
-        else {
-            continue;
-        };
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-            continue;
-        };
-        let Some((_, rest)) = stat.rsplit_once(") ") else {
-            continue;
-        };
-        let mut fields = rest.split_whitespace();
-        let _state = fields.next();
-        let Some(ppid) = fields
-            .next()
-            .and_then(|value| value.parse::<libc::pid_t>().ok())
-        else {
-            continue;
-        };
-        pairs.push((pid, ppid));
-    }
-
-    pairs
-}
-
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-fn process_parent_pairs() -> Vec<(libc::pid_t, libc::pid_t)> {
-    Vec::new()
 }
 
 pub(crate) fn terminal_env() -> &'static [(&'static str, &'static str)] {
