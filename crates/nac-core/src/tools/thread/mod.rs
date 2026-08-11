@@ -5,7 +5,7 @@ use crate::model::{ModelClient, ThreadComplexity};
 use crate::skills::SkillRegistry;
 use crate::store;
 use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
-use crate::types::ToolDefinition;
+use crate::types::{ToolDefinition, TOOL_CALL_CANCELLED_MARKER};
 
 mod worker;
 #[cfg(test)]
@@ -262,7 +262,9 @@ pub async fn execute_parsed_dispatch(
     let Some(cancellation) = runtime.active_threads.start(&thread_name, &dispatch_id) else {
         close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
         return ToolResult {
-            content: format!("Thread '{thread_name}' was cancelled before it started."),
+            content: format!(
+                "{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before it started."
+            ),
             is_error: true,
         };
     };
@@ -312,7 +314,7 @@ pub async fn execute_parsed_dispatch(
             }
         }
         Ok(run) if run.cancelled => ToolResult {
-            content: format!("Thread '{thread_name}' was cancelled."),
+            content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled."),
             is_error: true,
         },
         Ok(run) if run.timed_out => {

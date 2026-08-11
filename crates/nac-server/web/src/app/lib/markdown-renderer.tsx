@@ -1,4 +1,4 @@
-import { isValidElement, memo, type ReactNode } from "react";
+import { Suspense, isValidElement, memo, use, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
+import { normalizeMath } from "@/app/lib/math-source";
 import { perfRender } from "@/app/lib/perfDebug";
 
 import bash from "highlight.js/lib/languages/bash";
@@ -44,6 +45,34 @@ const remarkPlugins = [remarkGfm];
 const rehypePlugins = [
   [rehypeHighlight, { languages, detect: true, ignoreMissing: true }] as const,
 ];
+
+/** A plugin list as react-markdown takes it; the tuple types are not exported. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PluginList = any[];
+
+interface MathPlugins {
+  remark: PluginList;
+  rehype: PluginList;
+}
+
+let mathPlugins: Promise<MathPlugins> | null = null;
+
+/**
+ * The pipeline with MathJax in it, assembled once the chunk carrying it lands.
+ * The promise is cached so `use` only ever suspends on the first formula in a
+ * session, and never again after that.
+ */
+function loadMathPlugins(): Promise<MathPlugins> {
+  mathPlugins ??= import("@/app/lib/markdown-mathjax").then(
+    ({ rehypeMathjaxPlugin, remarkMathPlugin }) => ({
+      remark: [...remarkPlugins, remarkMathPlugin],
+      // Ahead of the highlighter, which would otherwise tokenize the TeX of a
+      // `language-math` block into spans before MathJax gets to read it.
+      rehype: [rehypeMathjaxPlugin, ...rehypePlugins],
+    }),
+  );
+  return mathPlugins;
+}
 
 /** Text of a fenced block, for the clipboard. Nested spans carry the tokens. */
 function textOf(node: ReactNode): string {
@@ -91,6 +120,15 @@ function wrapStreaming(children: ReactNode, streaming: boolean): ReactNode {
   return <span className="streaming-chunk">{children}</span>;
 }
 
+/** Stable digest of a stylesheet, used only to tell two of them apart. */
+function fingerprint(css: string): string {
+  let hash = 0;
+  for (let index = 0; index < css.length; index += 1) {
+    hash = (hash * 31 + css.charCodeAt(index)) | 0;
+  }
+  return `${css.length.toString(36)}-${(hash >>> 0).toString(36)}`;
+}
+
 interface MarkdownRendererProps {
   children: string;
   /** Fade newly painted prose while the turn is still streaming. */
@@ -112,6 +150,19 @@ function buildComponents(streaming: boolean) {
         <table {...props} />
       </div>
     ),
+    // The only stylesheet that can reach here is the one MathJax ships with
+    // each formula it typesets, and those overlap almost entirely: a streamed
+    // turn produces one per block, every message another copy. Naming them
+    // lets React hoist them into the head and keep one of each instead.
+    style: ({ children }: React.ComponentPropsWithoutRef<"style">) => {
+      const css = typeof children === "string" ? children : "";
+      if (!css) return null;
+      return (
+        <style href={`mathjax-${fingerprint(css)}`} precedence="mathjax">
+          {css}
+        </style>
+      );
+    },
     p: ({ children, ...props }: React.ComponentPropsWithoutRef<"p">) => (
       <p {...props}>{wrapStreaming(children, streaming)}</p>
     ),
@@ -153,12 +204,45 @@ function Parsed({
   source: string;
   streaming: boolean;
 }) {
-  return (
+  // The delimiters a model writes are not the ones remark-math reads, and the
+  // dollars it means as money have to be neutered before the parser pairs them
+  // up — both only work on the source, so they happen here.
+  const math = normalizeMath(source);
+  const components = streaming ? streamingComponents : staticComponents;
+  const withoutMath = (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
       rehypePlugins={rehypePlugins as any}
-      components={streaming ? streamingComponents : staticComponents}
+      components={components}
+    >
+      {math.source}
+    </ReactMarkdown>
+  );
+  if (!math.hasMath) return withoutMath;
+  // Until MathJax has loaded the very same text renders without it, TeX source
+  // and all, which is a far better wait than a hole in the message.
+  return (
+    <Suspense fallback={withoutMath}>
+      <ParsedWithMath source={math.source} components={components} />
+    </Suspense>
+  );
+}
+
+/** The same parse with MathJax in the pipeline, once its chunk has arrived. */
+function ParsedWithMath({
+  source,
+  components,
+}: {
+  source: string;
+  components: ReturnType<typeof buildComponents>;
+}) {
+  const plugins = use(loadMathPlugins());
+  return (
+    <ReactMarkdown
+      remarkPlugins={plugins.remark}
+      rehypePlugins={plugins.rehype}
+      components={components}
     >
       {source}
     </ReactMarkdown>

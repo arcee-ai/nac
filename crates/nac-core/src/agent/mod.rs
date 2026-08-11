@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -126,6 +126,10 @@ pub struct Agent {
     /// Token usage from the most recent `send()` call, updated after each
     /// model call; `None` if the provider omitted usage.
     pub last_usage: Option<crate::model::TokenUsage>,
+    /// Output received from the provider for the model call currently in
+    /// flight. Deltas remain live-only during an ordinary run, but keeping a
+    /// local copy lets cancellation commit the text the user already saw.
+    partial_stream: StdMutex<ModelStreamDelta>,
 }
 
 /// Connection and identity needed to append to the orchestrator transcript
@@ -199,6 +203,31 @@ fn incomplete_tool_turn_index(messages: &[Message]) -> Option<usize> {
         })
         .collect::<HashSet<_>>();
     (!expected.is_subset(&observed)).then_some(index)
+}
+
+fn missing_tool_result_ids(messages: &[Message]) -> Vec<String> {
+    let Some(index) = incomplete_tool_turn_index(messages) else {
+        return Vec::new();
+    };
+    let Message::Assistant {
+        tool_calls: Some(tool_calls),
+        ..
+    } = &messages[index]
+    else {
+        return Vec::new();
+    };
+    let observed = messages[index + 1..]
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool { tool_call_id, .. } => Some(tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    tool_calls
+        .iter()
+        .filter(|tool_call| !observed.contains(tool_call.id.as_str()))
+        .map(|tool_call| tool_call.id.clone())
+        .collect()
 }
 
 fn transcripts_match(left: &[Message], right: &[Message]) -> Result<bool> {
@@ -334,6 +363,7 @@ impl Agent {
             transcript_log,
             transcript_recovery_warning: None,
             last_usage: None,
+            partial_stream: StdMutex::new(ModelStreamDelta::default()),
         })
     }
 
@@ -393,6 +423,7 @@ impl Agent {
         // `last_usage` is per-send. Clearing it prevents a cancellation before
         // the first current model response from persisting a previous run's usage.
         self.last_usage = None;
+        self.clear_partial_stream();
         // Transcript commit point (prompt): the prompt is durable in the log
         // before the first model call. A log failure is fatal to the run.
         if let Err(error) = self
@@ -443,6 +474,7 @@ impl Agent {
             });
 
             let call_started = Instant::now();
+            self.clear_partial_stream();
             let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
                 self.event_sink.emit_assistant_delta(AssistantStreamDelta {
                     thread_name: self.thread_name.clone(),
@@ -450,7 +482,17 @@ impl Agent {
                     reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
                 });
             });
-            let push_delta = |delta| deltas.push(delta);
+            let push_delta = |delta: ModelStreamDelta| {
+                {
+                    let mut partial = self
+                        .partial_stream
+                        .lock()
+                        .expect("partial model stream state");
+                    partial.text.push_str(&delta.text);
+                    partial.reasoning.push_str(&delta.reasoning);
+                }
+                deltas.push(delta);
+            };
             // Only the orchestrator's output is read as it arrives: a thread is
             // summarized on its card, and nobody watching at all means the
             // cheaper buffered request shape.
@@ -549,6 +591,7 @@ impl Agent {
                 self.tool_runtime.terminal_manager.remove_all().await;
                 return Err(error);
             }
+            self.clear_partial_stream();
             if let Some(compaction) = &mut self.compaction {
                 compaction.record_ordinary_context(
                     &self.messages,
@@ -921,9 +964,45 @@ impl Agent {
     /// the next restore re-normalize the stale log tail, while a persisted
     /// marker would cover the stale rows and resurrect orphaned tool results
     /// into the provider view.
+    #[cfg(test)]
     pub async fn append_cancellation_marker(&mut self) -> Result<()> {
         self.normalize_dangling_tail().await?;
-        self.push_and_log(Message::Assistant {
+        self.append_cancellation_tail(Vec::new()).await
+    }
+
+    /// Close every unfinished tool call with a synthetic cancellation result
+    /// instead of trimming its assistant turn. Session cancellation uses this
+    /// path so the chat can retain dispatched thread cards and their persisted
+    /// logs while the resulting transcript remains valid provider history.
+    pub async fn append_cancellation_marker_preserving_tools(&mut self) -> Result<()> {
+        let missing_results = missing_tool_result_ids(&self.messages)
+            .into_iter()
+            .map(|tool_call_id| Message::Tool {
+                tool_call_id,
+                content: crate::types::TOOL_CALL_CANCELLED_MARKER.to_string(),
+            })
+            .collect::<Vec<_>>();
+        // Remove a log row whose blocking append completed after the run task
+        // was aborted but before its in-memory push. The missing-result scan
+        // above deliberately uses the authoritative in-memory transcript.
+        self.delete_log_tail(self.messages.len() as u64).await?;
+        self.append_cancellation_tail(missing_results).await
+    }
+
+    async fn append_cancellation_tail(&mut self, mut messages: Vec<Message>) -> Result<()> {
+        let partial = self.take_partial_stream();
+        if !partial.is_empty() {
+            messages.push(Message::Assistant {
+                content: (!partial.text.is_empty()).then_some(partial.text),
+                reasoning_text: (!partial.reasoning.is_empty()).then_some(partial.reasoning),
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: Some(self.client.model_origin()),
+                reasoning_field: None,
+            });
+        }
+        messages.push(Message::Assistant {
             content: Some("[run cancelled by user]".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -931,8 +1010,24 @@ impl Agent {
             duration_ms: None,
             model_origin: None,
             reasoning_field: None,
-        })
-        .await
+        });
+        self.push_batch_and_log(messages).await
+    }
+
+    fn clear_partial_stream(&self) {
+        *self
+            .partial_stream
+            .lock()
+            .expect("partial model stream state") = ModelStreamDelta::default();
+    }
+
+    fn take_partial_stream(&self) -> ModelStreamDelta {
+        std::mem::take(
+            &mut *self
+                .partial_stream
+                .lock()
+                .expect("partial model stream state"),
+        )
     }
 
     /// Append `messages` to the transcript log at absolute positions

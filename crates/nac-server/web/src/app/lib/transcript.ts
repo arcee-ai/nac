@@ -21,6 +21,14 @@ import type {
   ToolCall,
 } from "@/app/types/api";
 
+/** Exact assistant marker written after any partial response on cancellation. */
+export const RUN_CANCELLED_MARKER = "[run cancelled by user]";
+/**
+ * Prefix the backend puts on every tool result that exists only because the
+ * user stopped the run — both the synthetic result that closes a call the run
+ * never reached and the one a worker returns when its dispatch is drained.
+ */
+const TOOL_CALL_CANCELLED_MARKER = "[tool call cancelled by user]";
 
 /**
  * Orchestrator tools that only read back state the side panel already shows.
@@ -34,7 +42,12 @@ const SILENT_TOOLS = new Set([
   "workset_list",
 ]);
 
-export type ThreadState = "running" | "pending" | "done" | "error";
+export type ThreadState =
+  | "running"
+  | "pending"
+  | "done"
+  | "cancelled"
+  | "error";
 
 export interface TranscriptThread {
   /**
@@ -96,6 +109,13 @@ export interface ModelTurn {
 }
 
 export type TranscriptTurn = UserTurn | ModelTurn;
+
+/**
+ * Key of a model turn that exists only as a stream, with nothing persisted to
+ * key it by. Committed turns are keyed by their message index, so this one is
+ * named rather than numbered to keep the two apart.
+ */
+export const STREAMING_TURN_KEY = "model-streaming";
 
 /** Model output that has arrived over the stream, prose and reasoning apart. */
 export interface StreamedOutput {
@@ -315,13 +335,18 @@ function describeThread(
     (event) => event.type === "thread_finished",
   );
   const finishedLive = live?.status === "finished";
-  const state: ThreadState = live?.isError
-    ? "error"
-    : result != null || finishedLive || finishedPersisted
-      ? "done"
-      : waitingOnBatchDep
-        ? "pending"
-        : "running";
+  const cancelled =
+    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
+    Boolean(live?.cancelled);
+  const state: ThreadState = cancelled
+    ? "cancelled"
+    : live?.isError
+      ? "error"
+      : result != null || finishedLive || finishedPersisted
+        ? "done"
+        : waitingOnBatchDep
+          ? "pending"
+          : "running";
 
   return {
     key: identity,
@@ -348,7 +373,16 @@ function lastBlockText(
 ): string | null {
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index];
-    if (block.kind === kind) return block.text;
+    if (
+      block.kind === kind &&
+      !(
+        kind === "text" &&
+        block.kind === "text" &&
+        block.text.trim() === RUN_CANCELLED_MARKER
+      )
+    ) {
+      return block.text;
+    }
   }
   return null;
 }
@@ -386,21 +420,31 @@ function nextOrdinal(
 export function withStreamedOutput(
   turns: TranscriptTurn[],
   stream: StreamedOutput,
+  /**
+   * The prompt this output answers has not reached the snapshot yet, so a model
+   * turn at the end of `turns` is the previous run's. Appending to it would put
+   * this run's output inside that turn and read as its work — its duration, and
+   * the snapshot its run captured, would then describe this output too.
+   */
+  promptUncommitted = false,
 ): TranscriptTurn[] {
   const reasoning = stripNativeToolMarkup(stream.reasoning).trim();
   const text = stripNativeToolMarkup(stream.text).trim();
   if (!reasoning && !text) return turns;
 
   const last = turns[turns.length - 1];
-  const live = last?.kind === "model";
+  const live = last?.kind === "model" && !promptUncommitted;
   // The run answers with output before its first message is persisted, so the
-  // turn it belongs to may not exist yet. It is keyed as the model turn it is
-  // about to become, so committing the message does not remount it.
+  // turn it belongs to may not exist yet. Its key stays out of the namespace a
+  // committed turn draws from — the index of its message — because a key that
+  // lands on one of those indexes hands this turn the other one's identity: the
+  // same React row, and whatever that turn is addressed by elsewhere, down to
+  // the snapshot its finished run captured.
   const turn: ModelTurn = live
     ? { ...last, blocks: last.blocks.slice() }
     : {
         kind: "model",
-        key: `model-${turns.filter((entry) => entry.kind === "model").length}`,
+        key: STREAMING_TURN_KEY,
         blocks: [],
         durationMs: null,
         messageIndex: null,
@@ -472,6 +516,14 @@ export function buildTranscript(
 
   const turns: TranscriptTurn[] = [];
   let current: ModelTurn | null = null;
+  /**
+   * How many entries of the duration history each model turn stands for. The
+   * backend indexes that history by visible response — an assistant message
+   * with no tool calls — and a turn does not always hold exactly one: a cancel
+   * mid-stream commits the partial response and the marker after it, while a
+   * run that died between tool rounds leaves a turn with none at all.
+   */
+  const responsesPerTurn = new Map<ModelTurn, number>();
 
   messages.forEach((message, index) => {
     const absoluteIndex = windowStart + index;
@@ -502,6 +554,9 @@ export function buildTranscript(
     current.key = `model-${absoluteIndex}`;
     current.messageIndex = absoluteIndex;
     const blocks = current.blocks;
+    if (!message.tool_calls?.length) {
+      responsesPerTurn.set(current, (responsesPerTurn.get(current) ?? 0) + 1);
+    }
 
     const reasoning = stripNativeToolMarkup(message.reasoning_text ?? "").trim();
     if (reasoning) {
@@ -597,8 +652,10 @@ export function buildTranscript(
       skipActiveTurn = false;
       continue;
     }
+    const responses = responsesPerTurn.get(turn) ?? 0;
+    if (!responses) continue;
     turn.durationMs = durations[durationIndex] ?? null;
-    durationIndex -= 1;
+    durationIndex -= responses;
   }
 
   return turns;

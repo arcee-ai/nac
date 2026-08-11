@@ -14,7 +14,8 @@ const STATE_ORDER: Record<ThreadState, number> = {
   error: 0,
   running: 1,
   pending: 2,
-  done: 3,
+  cancelled: 3,
+  done: 4,
 };
 
 function StateIcon({ state }: { state: ThreadState }) {
@@ -40,6 +41,15 @@ function StateIcon({ state }: { state: ThreadState }) {
       />
     );
   }
+  if (state === "cancelled") {
+    return (
+      <Icon
+        iconName={IconName.Close}
+        size={20}
+        className="[&>path]:!fill-basic-muted"
+      />
+    );
+  }
   return (
     <Icon
       iconName={IconName.CheckCircle}
@@ -62,6 +72,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
   const isMobile = useIsMobile();
   const running = thread.state === "running";
   const pending = thread.state === "pending";
+  const cancelled = thread.state === "cancelled";
   // Before the first command there is nothing to tail, so the card keeps
   // showing what the thread was asked to do.
   const tail = thread.log.length
@@ -119,7 +130,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
             </span>
           )}
         </div>
-        {running ? (
+        {running || cancelled ? (
           <ThreadLogTail
             lines={tail}
             className="flex-1 min-h-0 w-full px-2 pb-2"

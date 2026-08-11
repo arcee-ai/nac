@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -40,6 +41,7 @@ import { perfMark, perfRender, perfTime } from "@/app/lib/perfDebug";
 import {
   buildTranscript,
   withStreamedOutput,
+  STREAMING_TURN_KEY,
   type TranscriptTurn,
 } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -155,8 +157,18 @@ export function Transcript({
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
   const olderMessages = useLoadOlderMessages(sessionId);
+  const { data: revisions } = useWorkspaceRevisions(sessionId);
+  const latestRevisionId = revisions?.at(-1)?.id ?? 0;
   const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
-    useStickToBottom({ resetKey: sessionId });
+    useStickToBottom({
+      resetKey: sessionId,
+      pinKey: [
+        running ? "running" : "idle",
+        snapshot?.active_run ? "active" : "settled",
+        snapshot?.messages.length ?? 0,
+        latestRevisionId,
+      ].join(":"),
+    });
   const prependAnchor = useRef<{ height: number; top: number } | null>(null);
   const messageWindowStart = snapshot?.message_page?.start ?? 0;
 
@@ -196,14 +208,35 @@ export function Transcript({
       perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads)),
     [snapshot, liveThreads],
   );
+  // Prefer the live active_run copy; fall back to the optimistic prompt set at
+  // Send so the bubble is already above the model pill before the round-trip.
+  const submitted = running
+    ? snapshot?.active_run?.submitted_user_message
+    : undefined;
+  const pendingText = submitted
+    ? displayPromptFromMessageText(submitted.content)
+    : (optimisticPrompt ?? "");
+  // Compared against the last *user* turn rather than the last turn of any
+  // kind: everything the run produces lands after the prompt it answers, so
+  // once that prompt is in the snapshot the copy is a duplicate no matter how
+  // many model turns have piled up on top of it.
+  const showPending = Boolean(
+    pendingText && lastUserText(snapshotTurns) !== pendingText,
+  );
   const turns = useMemo(
     () =>
-      withStreamedOutput(snapshotTurns, {
-        text: streamText,
-        reasoning: streamReasoning,
-      }),
-    [snapshotTurns, streamText, streamReasoning],
+      withStreamedOutput(
+        snapshotTurns,
+        { text: streamText, reasoning: streamReasoning },
+        showPending,
+      ),
+    [snapshotTurns, streamText, streamReasoning, showPending],
   );
+  // A stream that had to open a turn of its own is answering a prompt the
+  // snapshot has not caught up with, so the optimistic bubble moves into the
+  // list with it instead of being rendered under the whole thing.
+  const streamingTurn =
+    showPending && turns[turns.length - 1]?.key === STREAMING_TURN_KEY;
   perfMark("transcript:turns", {
     fields: { turns: turns.length, streamChars: streamText.length },
     throttleMs: 1000,
@@ -257,27 +290,11 @@ export function Transcript({
   const model = snapshot?.metadata.model ?? "";
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
-  const { data: revisions } = useWorkspaceRevisions(sessionId);
   const turnRevisions = useMemo(
     () => revisionsByTurn(turns, revisions),
     [turns, revisions],
   );
 
-  // Prefer the live active_run copy; fall back to the optimistic prompt set at
-  // Send so the bubble is already above the model pill before the round-trip.
-  const submitted = running
-    ? snapshot?.active_run?.submitted_user_message
-    : undefined;
-  const pendingText = submitted
-    ? displayPromptFromMessageText(submitted.content)
-    : (optimisticPrompt ?? "");
-  // Compared against the last *user* turn rather than the last turn of any
-  // kind: everything the run produces lands after the prompt it answers, so
-  // once that prompt is in the snapshot the copy is a duplicate no matter how
-  // many model turns have piled up on top of it.
-  const showPending = Boolean(
-    pendingText && lastUserText(turns) !== pendingText,
-  );
   useEffect(() => {
     if (!showPending && optimisticPrompt) {
       setOptimisticUserPrompt(null);
@@ -460,7 +477,7 @@ export function Transcript({
                 }
               }
 
-              return (
+              const row = (
                 <ModelMessage
                   key={turn.key}
                   turn={turn}
@@ -488,14 +505,32 @@ export function Transcript({
                       : null
                   }
                   onRevert={openRevert}
-                  snapshotRevision={turnRevisions.get(turn.key) ?? null}
+                  snapshotRevision={
+                    turn.messageIndex != null
+                      ? (turnRevisions.get(turn.messageIndex) ?? null)
+                      : null
+                  }
                   filesPanel={filesPanel}
                 />
+              );
+
+              // The prompt a streaming turn answers is not in the snapshot yet,
+              // so its bubble is still the optimistic copy — which belongs
+              // above the answer to it rather than after it.
+              return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
+                <Fragment key={turn.key}>
+                  <UserMessage text={pendingText} pending />
+                  {row}
+                </Fragment>
+              ) : (
+                row
               );
             })}
           </PerfProfiler>
 
-          {showPending ? <UserMessage text={pendingText} pending /> : null}
+          {showPending && !streamingTurn ? (
+            <UserMessage text={pendingText} pending />
+          ) : null}
 
           {/* Before the first assistant message or stream delta lands, keep the
               same chrome as a live ModelMessage — pill + model name — rather
