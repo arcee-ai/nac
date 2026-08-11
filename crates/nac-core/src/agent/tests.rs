@@ -32,6 +32,17 @@ fn worker_prompt_exposes_exact_retained_thread_name() {
 }
 
 #[test]
+fn prompts_require_explicit_partition_ownership() {
+    let orchestrator = render_orchestrator_system_prompt("/resolved/workspace", 3_600);
+    assert!(orchestrator.contains("include each shard's exact item identifiers"));
+    assert!(orchestrator.contains("not raw tool output"));
+
+    let worker = render_worker_system_prompt("/resolved/workspace", Some("search/shard-1"));
+    assert!(worker.contains("report the missing assignment as a blocker"));
+    assert!(worker.contains("do not reconstruct, overlap, or borrow items"));
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(

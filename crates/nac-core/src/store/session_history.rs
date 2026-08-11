@@ -45,9 +45,11 @@ pub(crate) struct HistoryEventRecord {
     pub stream: HistoryEventStreamRef,
     pub event_type: String,
     pub created_at: Option<String>,
-    /// JSON-encoded persisted payload. Kept as text so a bounded prefix remains
-    /// valid response JSON even when the original payload is very large.
+    /// JSON-encoded persisted payload excerpt. Kept as text so a bounded
+    /// excerpt remains valid response JSON even when the original is large.
     pub payload_json: String,
+    /// Character offset of payload_json within the original payload.
+    pub payload_start_char: usize,
     pub payload_chars: usize,
     pub payload_truncated: bool,
 }
@@ -70,6 +72,7 @@ pub(crate) fn load_session_history_events(
     path: &Path,
     session_id: &str,
     stream: &HistoryEventStream,
+    contains: Option<&str>,
     phase: HistoryEventPhase,
     limit: usize,
 ) -> Result<HistoryEventPage> {
@@ -88,8 +91,15 @@ pub(crate) fn load_session_history_events(
             } else {
                 0
             };
-            let (rows, has_older_events) =
-                query_event_rows(&tx, session_id, stream, before_id, limit, snapshot_len)?;
+            let (rows, has_older_events) = query_event_rows(
+                &tx,
+                session_id,
+                stream,
+                contains,
+                before_id,
+                limit,
+                snapshot_len,
+            )?;
             if rows.is_empty() {
                 if let HistoryEventStream::Thread { thread_name } = stream {
                     if before_id.is_none() && !thread_stream_exists(&tx, session_id, thread_name)? {
@@ -99,14 +109,14 @@ pub(crate) fn load_session_history_events(
                     }
                     (Vec::new(), None)
                 } else {
-                    load_snapshot_page(&tx, session_id, stream, None, limit)?
+                    load_snapshot_page(&tx, session_id, stream, contains, None, limit)?
                 }
             } else {
                 let oldest_id = rows.last().map(|row| row.id);
                 let events = rows
                     .into_iter()
                     .rev()
-                    .map(|row| normalize_event_row(session_id, row))
+                    .map(|row| normalize_event_row(session_id, row, contains))
                     .collect::<Result<Vec<_>>>()?;
                 let next = if has_older_events {
                     oldest_id.map(|before_id| HistoryEventPhase::Events {
@@ -123,7 +133,7 @@ pub(crate) fn load_session_history_events(
             }
         }
         HistoryEventPhase::Snapshot { before_index } => {
-            load_snapshot_page(&tx, session_id, stream, Some(before_index), limit)?
+            load_snapshot_page(&tx, session_id, stream, contains, Some(before_index), limit)?
         }
     };
 
@@ -139,6 +149,7 @@ fn query_event_rows(
     conn: &Connection,
     session_id: &str,
     stream: &HistoryEventStream,
+    contains: Option<&str>,
     before_id: Option<i64>,
     limit: usize,
     snapshot_len: usize,
@@ -176,6 +187,7 @@ fn query_event_rows(
          FROM thread_events
          WHERE session_id = ?1
            AND (?2 IS NULL OR id < ?2)
+           AND (?7 IS NULL OR instr(event_json, ?7) > 0)
            {stream_predicate}
          ORDER BY id DESC
          LIMIT ?5"
@@ -192,7 +204,8 @@ fn query_event_rows(
             MAX_EVENT_BYTES,
             stream_name,
             i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX),
-            i64::try_from(snapshot_len).unwrap_or(i64::MAX)
+            i64::try_from(snapshot_len).unwrap_or(i64::MAX),
+            contains
         ],
         |row| {
             let id = row.get::<_, i64>(0)?;
@@ -221,7 +234,11 @@ fn query_event_rows(
     Ok((rows, has_older))
 }
 
-fn normalize_event_row(session_id: &str, row: RawEventRow) -> Result<HistoryEventRecord> {
+fn normalize_event_row(
+    session_id: &str,
+    row: RawEventRow,
+    contains: Option<&str>,
+) -> Result<HistoryEventRecord> {
     if row.thread_name == ORCHESTRATOR_STEERING_TARGET {
         let entry = decode_transcript_log_entry(&row.event_json).ok_or_else(|| {
             anyhow!(
@@ -242,6 +259,7 @@ fn normalize_event_row(session_id: &str, row: RawEventRow) -> Result<HistoryEven
             row.id,
             Some(row.created_at),
             &message,
+            contains,
         );
         return Ok(record);
     }
@@ -263,7 +281,8 @@ fn normalize_event_row(session_id: &str, row: RawEventRow) -> Result<HistoryEven
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "worker_event".to_string());
-    let (payload_json, payload_chars, payload_truncated) = bounded_payload(&payload);
+    let (payload_json, payload_chars, payload_start_char, payload_truncated) =
+        bounded_payload(&payload, contains);
     Ok(HistoryEventRecord {
         source: HistoryEventSource::ThreadEvent,
         source_id: row.id,
@@ -274,6 +293,7 @@ fn normalize_event_row(session_id: &str, row: RawEventRow) -> Result<HistoryEven
         event_type,
         created_at: Some(row.created_at),
         payload_json,
+        payload_start_char,
         payload_chars,
         payload_truncated,
     })
@@ -283,6 +303,7 @@ fn load_snapshot_page(
     conn: &Connection,
     session_id: &str,
     stream: &HistoryEventStream,
+    contains: Option<&str>,
     before_index: Option<usize>,
     limit: usize,
 ) -> Result<(Vec<HistoryEventRecord>, Option<HistoryEventPhase>)> {
@@ -308,6 +329,33 @@ fn load_snapshot_page(
     let messages: Vec<Message> = serde_json::from_str(&messages_json)
         .context("corrupt_history: failed to parse stored session messages")?;
     let end = before_index.unwrap_or(messages.len()).min(messages.len());
+    if let Some(needle) = contains {
+        let matching = messages[..end]
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                serde_json::to_string(message).is_ok_and(|payload| payload.contains(needle))
+            })
+            .collect::<Vec<_>>();
+        let start = matching.len().saturating_sub(limit);
+        let events = matching[start..]
+            .iter()
+            .map(|(index, message)| {
+                normalize_message(
+                    session_id,
+                    HistoryEventSource::Snapshot,
+                    i64::try_from(*index).unwrap_or(i64::MAX),
+                    None,
+                    message,
+                    contains,
+                )
+            })
+            .collect();
+        let next = (start > 0).then(|| HistoryEventPhase::Snapshot {
+            before_index: matching[start].0,
+        });
+        return Ok((events, next));
+    }
     let start = end.saturating_sub(limit);
     let events = messages[start..end]
         .iter()
@@ -319,6 +367,7 @@ fn load_snapshot_page(
                 i64::try_from(start + offset).unwrap_or(i64::MAX),
                 None,
                 message,
+                None,
             )
         })
         .collect();
@@ -334,6 +383,7 @@ fn normalize_message(
     source_id: i64,
     created_at: Option<String>,
     message: &Message,
+    contains: Option<&str>,
 ) -> HistoryEventRecord {
     let event_type = match &message {
         Message::System { .. } => "system_message",
@@ -343,7 +393,8 @@ fn normalize_message(
     }
     .to_string();
     let payload = serde_json::to_string(&message).unwrap_or_else(|_| "null".to_string());
-    let (payload_json, payload_chars, payload_truncated) = bounded_payload(&payload);
+    let (payload_json, payload_chars, payload_start_char, payload_truncated) =
+        bounded_payload(&payload, contains);
     HistoryEventRecord {
         source,
         source_id,
@@ -352,18 +403,30 @@ fn normalize_message(
         event_type,
         created_at,
         payload_json,
+        payload_start_char,
         payload_chars,
         payload_truncated,
     }
 }
 
-fn bounded_payload(payload: &str) -> (String, usize, bool) {
+fn bounded_payload(payload: &str, contains: Option<&str>) -> (String, usize, usize, bool) {
     let payload_chars = payload.chars().count();
-    let payload_json: String = payload.chars().take(MAX_PAYLOAD_CHARS).collect();
+    let match_start = contains
+        .and_then(|needle| payload.find(needle))
+        .map(|byte_index| payload[..byte_index].chars().count());
+    let payload_start_char = match_start
+        .map(|index| index.saturating_sub(MAX_PAYLOAD_CHARS / 4))
+        .unwrap_or(0);
+    let payload_json = payload
+        .chars()
+        .skip(payload_start_char)
+        .take(MAX_PAYLOAD_CHARS)
+        .collect();
     (
         payload_json,
         payload_chars,
-        payload_chars > MAX_PAYLOAD_CHARS,
+        payload_start_char,
+        payload_start_char > 0 || payload_chars > MAX_PAYLOAD_CHARS,
     )
 }
 
@@ -480,6 +543,7 @@ mod tests {
             &path,
             "session-a",
             &HistoryEventStream::All,
+            None,
             HistoryEventPhase::Events { before_id: None },
             10,
         )
@@ -494,6 +558,7 @@ mod tests {
             &path,
             "session-a",
             &HistoryEventStream::All,
+            None,
             HistoryEventPhase::Snapshot { before_index },
             10,
         )
@@ -532,6 +597,7 @@ mod tests {
             &HistoryEventStream::Thread {
                 thread_name: "failed-worker".to_string(),
             },
+            None,
             HistoryEventPhase::Events { before_id: None },
             10,
         )
@@ -540,6 +606,70 @@ mod tests {
         assert_eq!(page.events[0].event_type, "error");
         assert!(page.events[0].payload_json.contains("build failed"));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn literal_filter_pages_matching_events_and_snapshot_to_exhaustion() {
+        let path = temp_store("literal_filter");
+        crate::store::initialize(&path).unwrap();
+        insert_snapshot(
+            &path,
+            "session-a",
+            &[
+                Message::System {
+                    content: "unrelated".to_string(),
+                },
+                Message::User {
+                    content: "cancelled snapshot".to_string(),
+                },
+            ],
+        );
+        for message in ["old cancelled event", "unrelated", "new cancelled event"] {
+            crate::store::append_thread_event(
+                &path,
+                "session-a",
+                "worker-a",
+                &serde_json::to_string(&AgentEvent::Error {
+                    thread_name: Some("worker-a".to_string()),
+                    message: message.to_string(),
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+
+        let mut phase = HistoryEventPhase::Events { before_id: None };
+        let mut payloads = Vec::new();
+        for _ in 0..4 {
+            let page = load_session_history_events(
+                &path,
+                "session-a",
+                &HistoryEventStream::All,
+                Some("cancelled"),
+                phase,
+                1,
+            )
+            .unwrap();
+            payloads.extend(page.events.into_iter().map(|event| event.payload_json));
+            let Some(next) = page.next_phase else {
+                break;
+            };
+            phase = next;
+        }
+        assert_eq!(payloads.len(), 3);
+        assert!(payloads[0].contains("new cancelled event"));
+        assert!(payloads[1].contains("old cancelled event"));
+        assert!(payloads[2].contains("cancelled snapshot"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+    #[test]
+    fn filtered_payload_excerpt_includes_a_match_beyond_the_prefix() {
+        let payload = format!("{}cancelled near the tail", "x".repeat(1_500));
+        let (excerpt, chars, start, truncated) = bounded_payload(&payload, Some("cancelled"));
+        assert!(excerpt.contains("cancelled near the tail"));
+        assert_eq!(chars, payload.chars().count());
+        assert!(start > 0);
+        assert!(truncated);
     }
 
     #[test]
@@ -568,6 +698,7 @@ mod tests {
                 &path,
                 session_id,
                 &HistoryEventStream::All,
+                None,
                 HistoryEventPhase::Events { before_id: None },
                 10,
             )
