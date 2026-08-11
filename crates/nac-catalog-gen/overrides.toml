@@ -8,10 +8,10 @@
 # nac-core's `model/catalog/tests.rs`; the guard tests assert the catalog
 # data and validation each equal that transcription:
 #
-#   deepseek-chat:            none, high, xhigh (wire "max")
-#   fireworks-chat:           none, low, medium, high
-#   together-chat:            none, low, medium, high
-#   openai-responses:         all six levels, verbatim
+#   deepseek-chat:            none, low, high, xhigh (wire "max")
+#   fireworks-chat:           none, low, medium, high (per-model extensions below)
+#   together-chat:            none, low, medium, high (per-model extensions below)
+#   openai-responses:         all six levels, verbatim (GPT-5.6 adds `max`)
 #   anthropic-messages:       per-family (below); unknown → none only
 #
 # `default_thinking_levels` replaces the models.dev-derived seed map of
@@ -38,13 +38,50 @@
 # responses/completions adapters append "/responses" and "/chat/completions"
 # to the values below as-is.
 
-# deepseek: none/high/xhigh for every model; xhigh is the wire tier "max".
+# deepseek: none/low/high/xhigh for every model; xhigh is the wire tier "max".
 [providers."deepseek-chat"]
-default_thinking_levels = { none = "none", high = "high", xhigh = "max" }
+default_thinking_levels = { none = "none", low = "low", high = "high", xhigh = "max" }
 
 # fireworks: none through high, sent verbatim.
 [providers."fireworks-chat"]
 default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
+
+# Post-S4 per-model extensions for Fireworks: provider docs show
+# model-specific effort tiers that the uniform pre-S4 matrix did not
+# capture. GPT-OSS and MiniMax models are reasoning-only (the API
+# rejects `none`); DeepSeek V4 and GLM 5.2 support an `xhigh` tier
+# (wire "max") above high. Dated snapshots inherit the family override.
+
+# GPT-OSS models: reasoning-only, `none` is rejected by the API.
+[providers."fireworks-chat".models."accounts/fireworks/models/gpt-oss-120b"]
+thinking_levels = { low = "low", medium = "medium", high = "high" }
+
+[providers."fireworks-chat".models."accounts/fireworks/models/gpt-oss-20b"]
+thinking_levels = { low = "low", medium = "medium", high = "high" }
+
+# MiniMax models: reasoning-only, `none` is rejected by the API.
+[providers."fireworks-chat".models."accounts/fireworks/models/minimax-m2p7"]
+thinking_levels = { low = "low", medium = "medium", high = "high" }
+
+[providers."fireworks-chat".models."accounts/fireworks/models/minimax-m3"]
+thinking_levels = { low = "low", medium = "medium", high = "high" }
+
+# DeepSeek V4 models: support `xhigh` (wire "max") above high.
+[providers."fireworks-chat".models."accounts/fireworks/models/deepseek-v4-flash"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
+
+[providers."fireworks-chat".models."accounts/fireworks/models/deepseek-v4-flash-0731"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
+
+[providers."fireworks-chat".models."accounts/fireworks/models/deepseek-v4-pro"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
+
+# GLM 5.2 models (incl. fast router): support `xhigh` (wire "max").
+[providers."fireworks-chat".models."accounts/fireworks/models/glm-5p2"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
+
+[providers."fireworks-chat".models."accounts/fireworks/routers/glm-5p2-fast"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
 
 # together: none through high, sent verbatim. Endpoint default hand-seeded
 # (models.dev carries no `api`): the adapter appends "/chat/completions".
@@ -52,12 +89,51 @@ default_thinking_levels = { none = "none", low = "low", medium = "medium", high 
 default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
 default_base_url = "https://api.together.xyz/v1"
 
+# Post-S4 per-model extensions for Together: provider docs show
+# model-specific effort tiers. GLM-5.2 and DeepSeek V4 Pro support
+# `max` above high; non-reasoning models (Qwen2.5-7B, Qwen3.7-Max,
+# Llama-3.3-70B) accept no explicit effort levels. Dated snapshots
+# inherit the family override.
+
+# GLM-5.2: fix context window to 512K (models.dev underreports) + add `max`.
+[providers."together-chat".models."zai-org/GLM-5.2"]
+context_window = 524288
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", max = "max" }
+
+# DeepSeek V4 Pro: support `max` above high.
+[providers."together-chat".models."deepseek-ai/DeepSeek-V4-Pro"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", max = "max" }
+
+# Non-reasoning models: no explicit effort levels accepted.
+[providers."together-chat".models."Qwen/Qwen2.5-7B-Instruct-Turbo"]
+thinking_levels = {}
+
+[providers."together-chat".models."Qwen/Qwen3.7-Max"]
+thinking_levels = {}
+
+[providers."together-chat".models."meta-llama/Llama-3.3-70B-Instruct-Turbo"]
+thinking_levels = {}
+
 # openai-responses: every level, sent verbatim (the pre-S4 matrix accepted
 # all six for any model). Endpoint default hand-seeded (models.dev carries
 # no `api`): the adapter appends "/responses".
 [providers."openai-responses"]
 default_thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh" }
 default_base_url = "https://api.openai.com/v1"
+
+# GPT-5.6 family (incl. dated snapshots): supports the `max` effort tier
+# above xhigh (models.dev lists it; OpenAI docs confirm GPT-5.6-only).
+[providers."openai-responses".models."gpt-5.6"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-sol"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-terra"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-luna"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
 
 # anthropic: conservative none-only for every model (including families
 # newer than the matrix — opus-4-7/4-8, sonnet-5, fable-5 — whose thinking

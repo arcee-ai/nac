@@ -10,10 +10,14 @@
 //! arcee-auth/arcee-api and chatgpt-codex-responses are absent from
 //! models.dev, so their known-model entries are maintained by hand here
 //! (`codex_seed_models`/`arcee_seed_models`): limits and pricing come from
-//! the providers' own documentation (the codex entries reference the
-//! overlapping models.dev openai baseline values). Every entry's thinking
-//! map still matches the provider's matrix behavior exactly — codex
-//! all-levels verbatim, arcee rejects every explicit effort.
+//! the providers' own documentation. The codex entries' context windows
+//! reflect the Codex subscription endpoint's server-side cap of 272K
+//! (confirmed via the live Codex models API at
+//! chatgpt.com/backend-api/codex/models), which is ~3.9× smaller than the
+//! standard OpenAI API's 1.05M for the same GPT-5.6 models; max output
+//! tokens and pricing match the models.dev openai baseline. Every entry's
+//! thinking map still matches the provider's matrix behavior exactly —
+//! codex all-levels verbatim, arcee rejects every explicit effort.
 
 use super::{
     api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelCostRates, ModelMetadata,
@@ -31,10 +35,11 @@ fn levels(entries: &[(ReasoningEffort, &str)]) -> ThinkingLevelMap {
     )
 }
 
-/// deepseek-chat: none/high/xhigh; xhigh is the wire-level tier `max`.
+/// deepseek-chat: none/low/high/xhigh; xhigh is the wire-level tier `max`.
 fn deepseek_levels() -> ThinkingLevelMap {
     levels(&[
         (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Low, "low"),
         (ReasoningEffort::High, "high"),
         (ReasoningEffort::Xhigh, "max"),
     ])
@@ -59,6 +64,21 @@ fn all_levels() -> ThinkingLevelMap {
         (ReasoningEffort::Medium, "medium"),
         (ReasoningEffort::High, "high"),
         (ReasoningEffort::Xhigh, "xhigh"),
+    ])
+}
+
+/// GPT-5.6 models: all six levels plus `max` (GPT-5.6-only tier above
+/// xhigh; models.dev confirms and OpenAI docs reserve it for the hardest
+/// quality-first workloads).
+fn all_levels_with_max() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Minimal, "minimal"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+        (ReasoningEffort::Max, "max"),
     ])
 }
 
@@ -141,17 +161,23 @@ fn seeded_model(
 /// chatgpt-codex-responses known models: OpenAI's documented Codex lineup
 /// for ChatGPT sign-in (developers.openai.com/codex/models — Sol/Terra/Luna,
 /// gpt-5.6, and the Pro-tier Spark preview; deprecated codex models are
-/// deliberately omitted). Limits and pricing reference the overlapping
-/// models.dev openai baseline entries; ChatGPT-sign-in usage is
-/// subscription-billed, so the rates are the API-equivalent prices. Effort
-/// maps stay all-levels verbatim per the matrix.
+/// deliberately omitted). Context windows reflect the Codex subscription
+/// endpoint's server-side cap of 272K (confirmed via the live Codex models
+/// API at chatgpt.com/backend-api/codex/models), not the standard OpenAI
+/// API's 1.05M — the same GPT-5.6 models accept 1.05M through
+/// api.openai.com but only 272K through the ChatGPT-sign-in transport.
+/// Max output tokens and pricing reference the overlapping models.dev
+/// openai baseline entries; ChatGPT-sign-in usage is subscription-billed,
+/// so the rates are the API-equivalent prices. Effort maps stay all-levels
+/// verbatim per the matrix.
 fn codex_seed_models() -> Vec<ModelMetadata> {
     let provider = BackendKind::ChatGptCodexResponses;
     let model = |id: &str,
                  display_name: &str,
                  context_window: u64,
                  max_tokens: u64,
-                 cost: ModelCostRates| {
+                 cost: ModelCostRates,
+                 thinking_level_map: ThinkingLevelMap| {
         seeded_model(
             provider,
             id,
@@ -160,7 +186,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             max_tokens,
             cost,
             true,
-            all_levels(),
+            thinking_level_map,
             Compat::default(),
         )
     };
@@ -168,30 +194,34 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
         model(
             "gpt-5.6-sol",
             "GPT-5.6 Sol",
-            1_050_000,
+            272_000,
             128_000,
             rates(5.0, 30.0, 0.5, 6.25),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.6-terra",
             "GPT-5.6 Terra",
-            1_050_000,
+            272_000,
             128_000,
             rates(2.0, 12.0, 0.2, 2.5),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.6-luna",
             "GPT-5.6 Luna",
-            1_050_000,
+            272_000,
             128_000,
             rates(0.2, 1.2, 0.02, 0.25),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.6",
             "GPT-5.6",
-            1_050_000,
+            272_000,
             128_000,
             rates(5.0, 30.0, 0.5, 6.25),
+            all_levels_with_max(),
         ),
         model(
             "gpt-5.3-codex-spark",
@@ -199,6 +229,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             128_000,
             32_000,
             rates(1.75, 14.0, 0.175, 0.0),
+            all_levels(),
         ),
     ]
 }
@@ -213,9 +244,12 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
 /// it). Max output is undocumented except trinity-large-thinking's 80k
 /// (Vercel AI Gateway's arcee-ai integration); the others keep the
 /// conservative fallback. Cache pricing is undocumented (zero = unknown).
-/// Effort maps stay empty per the matrix: Arcee accepts no explicit effort
-/// levels. `reasoning` marks the thinking variant's reasoning_content
-/// output; it accepts no effort knob.
+/// Effort maps stay empty for the Trinity models: trinity-large-thinking
+/// always reasons (no effort knob), and the non-thinking variants accept no
+/// reasoning control. The Arcee passthrough models (deepseek-v4-pro, glm-5.2,
+/// etc.) get their effort maps from the arcee overlay's
+/// `passthrough_effort_map`. `reasoning` marks the thinking variant's
+/// reasoning_content output.
 fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
     let model =
         |id: &str, display_name: &str, max_tokens: u64, cost: ModelCostRates, reasoning: bool| {
@@ -228,7 +262,11 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
                 cost,
                 reasoning,
                 ThinkingLevelMap::default(),
-                completions_compat(None, "reasoning_content", Some(0.0)),
+                completions_compat(
+                    Some(CompletionsThinkingFormat::Arcee),
+                    "reasoning_content",
+                    Some(0.0),
+                ),
             )
         };
     vec![
@@ -283,11 +321,13 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             PROVIDER_DEFAULT_MODEL_ID,
             true,
             deepseek_levels(),
-            // DeepSeek rejects an explicit temperature on reasoning models.
+            // DeepSeek V4 accepts temperature (confirmed via API testing;
+            // the old "rejects temperature on reasoning models" note was
+            // specific to the deprecated R1 reasoner model).
             completions_compat(
                 Some(CompletionsThinkingFormat::Deepseek),
                 "reasoning_content",
-                None,
+                Some(0.0),
             ),
         ),
         &[],
@@ -391,14 +431,22 @@ pub(super) fn seed_catalog() -> ModelCatalog {
     );
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         register(
-            // Arcee accepts no explicit effort levels; its completions
-            // responses still carry reasoning text in `reasoning_content`.
+            // Arcee passthrough models accept bare `reasoning_effort`; the
+            // Arcee thinking format sends it without wrapper objects. The
+            // seed models (trinity-*) keep an empty thinking_level_map, so
+            // validation rejects every explicit effort and the format is
+            // never reached for them. Responses carry reasoning text in
+            // `reasoning_content`.
             entry(
                 backend,
                 PROVIDER_DEFAULT_MODEL_ID,
                 false,
                 ThinkingLevelMap::default(),
-                completions_compat(None, "reasoning_content", Some(0.0)),
+                completions_compat(
+                    Some(CompletionsThinkingFormat::Arcee),
+                    "reasoning_content",
+                    Some(0.0),
+                ),
             ),
             &arcee_seed_models(backend),
             // arcee-api's conventional variable (the README's provider-named

@@ -46,7 +46,7 @@ pub const PROVIDER_MAP: [(&str, &str); 5] = [
 ];
 
 /// Effort levels nac knows, in `ReasoningEffort` serde (lowercase) form.
-pub const EFFORT_NAMES: [&str; 6] = ["none", "minimal", "low", "medium", "high", "xhigh"];
+pub const EFFORT_NAMES: [&str; 7] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 // ---------------------------------------------------------------------------
 // models.dev input schema (strict where drift matters, tolerant elsewhere)
@@ -335,10 +335,11 @@ fn is_valid_env_name(name: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-/// Map `reasoning_options` to thinking-level seeds. Wire values `xhigh` and
-/// `max` both address nac's xhigh slot; when a model lists both, `max` (the
-/// higher tier) wins, matching nac's anthropic/deepseek xhigh→"max"
-/// convention.
+/// Map `reasoning_options` to thinking-level seeds. Wire values map to
+/// nac effort slots by name; `max` gets its own `max` slot when the model
+/// also lists `xhigh` (OpenAI GPT-5.6), or collapses into the `xhigh` slot
+/// when `xhigh` is absent (Anthropic/DeepSeek, where `max` is the wire
+/// value for nac's xhigh tier).
 fn seed_thinking_levels(
     provider: &str,
     model: &str,
@@ -364,26 +365,25 @@ fn seed_thinking_levels(
                     // models.dev encodes the no-effort tier as a bare null.
                     let wire = value.as_deref().unwrap_or("none");
                     let effort = match wire {
-                        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" => wire,
-                        // `max` is the wire-level tier above xhigh on
-                        // anthropic/deepseek; nac addresses it as xhigh.
-                        "max" => "xhigh",
+                        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" => wire,
                         other => bail!(
                             "models.dev provider '{provider}' model '{model}': unknown effort \
                              value '{other}' (models.dev schema drift — extend the generator \
                              deliberately)"
                         ),
                     };
-                    let dominated = matches!(
-                        map.get(effort),
-                        Some(Some(existing)) if existing == "max" && wire == "xhigh"
-                    );
-                    if !dominated {
-                        map.insert(effort.to_string(), Some(wire.to_string()));
-                    }
+                    map.insert(effort.to_string(), Some(wire.to_string()));
                 }
             }
         }
+    }
+    // If `max` is present but `xhigh` is not, `max` is the wire value for
+    // nac's xhigh slot (Anthropic/DeepSeek convention: the top tier is
+    // called `max` on the wire but maps to nac's xhigh effort). Move it
+    // so the seed map matches the curated override structure.
+    if map.contains_key("max") && !map.contains_key("xhigh") {
+        let wire = map.remove("max").flatten();
+        map.insert("xhigh".to_string(), wire);
     }
     Ok(map)
 }

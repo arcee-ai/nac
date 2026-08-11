@@ -33,7 +33,7 @@ pub fn provider_default_base_url(backend: BackendKind) -> Option<&'static str> {
     match backend {
         BackendKind::OpenAiResponses => Some("https://api.openai.com/v1"),
         BackendKind::AnthropicMessages => Some("https://api.anthropic.com"),
-        BackendKind::DeepSeekChat => Some("https://api.deepseek.com/v1"),
+        BackendKind::DeepSeekChat => Some("https://api.deepseek.com"),
         BackendKind::FireworksChat => Some("https://api.fireworks.ai/inference/v1"),
         BackendKind::TogetherChat => Some("https://api.together.xyz/v1"),
         BackendKind::ArceeApi | BackendKind::ArceeAuth => Some(ARCEE_AUTH_CANONICAL_BASE_URL),

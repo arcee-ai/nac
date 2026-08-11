@@ -381,8 +381,8 @@ pub struct RunOptions {
     pub worker_executable: Option<PathBuf>,
     pub store: StoreOptions,
     pub model: ModelOptions,
-    /// New-session override. `None` inherits `[compaction].threshold_tokens`;
-    /// `Some(0)` explicitly disables the persisted threshold.
+    /// New-session override. `None` defaults to 70% of the resolved model's
+    /// context window; `Some(0)` explicitly disables compaction.
     pub orchestrator_compaction_threshold: Option<u64>,
     pub sandbox: SandboxOptions,
     /// How to reach the host of a remote session; mutually exclusive with sandbox.
@@ -703,12 +703,17 @@ pub fn effective_model_settings(
 /// Resolve and normalize the persisted orchestrator compaction threshold for a
 /// new session. Resume never calls this function: its value comes from the
 /// session snapshot instead.
+///
+/// When no threshold is requested, the default is 70% of the resolved model's
+/// context window (rounded to the nearest whole token). `Some(0)` explicitly
+/// disables compaction. Config.toml `[compaction].threshold_tokens` is no
+/// longer consulted — the section is silently ignored if present.
 pub fn effective_orchestrator_compaction_threshold(
     requested: Option<u64>,
-    config: &NacConfig,
+    context_window: u64,
 ) -> Result<Option<u64>> {
     let threshold = requested
-        .or(config.compaction.threshold_tokens)
+        .or(Some((context_window as f64 * 0.7).round() as u64))
         .filter(|threshold| *threshold != 0);
     if threshold.is_some_and(|threshold| threshold > crate::MAX_SUPPORTED_TOKEN_COUNT) {
         anyhow::bail!(
@@ -784,7 +789,7 @@ pub async fn build_run_config(
     let settings = effective_model_settings(&options.model, config)?;
     let orchestrator_compaction_threshold = effective_orchestrator_compaction_threshold(
         options.orchestrator_compaction_threshold,
-        config,
+        settings.resolved.context_window,
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
@@ -1474,40 +1479,53 @@ mod tests {
     }
 
     #[test]
-    fn compaction_threshold_inherits_normalizes_zero_and_rejects_out_of_range_values() {
-        let config: NacConfig = toml::from_str("[compaction]\nthreshold_tokens = 64000\n").unwrap();
+    fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_out_of_range_values() {
+        // No request: defaults to 70% of the context window (rounded).
         assert_eq!(
-            effective_orchestrator_compaction_threshold(None, &config).unwrap(),
-            Some(64_000)
+            effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
+            Some(140_000)
         );
+        // Explicit request wins over the 0.7×context default.
         assert_eq!(
-            effective_orchestrator_compaction_threshold(Some(12_000), &config).unwrap(),
+            effective_orchestrator_compaction_threshold(Some(12_000), 200_000).unwrap(),
             Some(12_000)
         );
+        // Some(0) explicitly disables compaction regardless of context window.
         assert_eq!(
-            effective_orchestrator_compaction_threshold(Some(0), &config).unwrap(),
+            effective_orchestrator_compaction_threshold(Some(0), 200_000).unwrap(),
             None
         );
-
-        let disabled: NacConfig = toml::from_str("[compaction]\nthreshold_tokens = 0\n").unwrap();
-        assert_eq!(
-            effective_orchestrator_compaction_threshold(None, &disabled).unwrap(),
-            None
-        );
+        // The boundary value is accepted.
         assert_eq!(
             effective_orchestrator_compaction_threshold(
                 Some(crate::MAX_SUPPORTED_TOKEN_COUNT),
-                &NacConfig::default(),
+                200_000,
             )
             .unwrap(),
             Some(crate::MAX_SUPPORTED_TOKEN_COUNT)
         );
+        // Above the boundary is rejected.
         assert!(effective_orchestrator_compaction_threshold(
             Some(crate::MAX_SUPPORTED_TOKEN_COUNT + 1),
-            &NacConfig::default(),
+            200_000,
         )
         .is_err());
 
+        // The `[compaction]` section is no longer consulted: a config that
+        // has one produces the same result as one without.
+        let config_with_compaction: NacConfig =
+            toml::from_str("[compaction]\nthreshold_tokens = 64000\n").unwrap();
+        assert_eq!(
+            effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
+            Some(140_000)
+        );
+        // The field still parses (backward compat) but is dead.
+        assert_eq!(
+            config_with_compaction.compaction.threshold_tokens,
+            Some(64_000)
+        );
+
+        // NonModelNacConfig still omits compaction entirely.
         let worker_config: NacConfig =
             toml::from_str::<NonModelNacConfig>("[compaction]\nthreshold_tokens = 64000\n")
                 .unwrap()

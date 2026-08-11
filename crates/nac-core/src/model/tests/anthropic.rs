@@ -21,6 +21,9 @@ fn anthropic_request_omits_none_and_maps_supported_efforts_exactly() {
             None,
             &unknown_levels,
             unknown_max_tokens,
+            false,
+            false,
+            false,
         )
         .unwrap();
         // S6: max_tokens is the resolved catalog value — the conservative
@@ -48,6 +51,9 @@ fn anthropic_request_omits_none_and_maps_supported_efforts_exactly() {
             None,
             &opus_levels,
             test_resolved(BackendKind::AnthropicMessages, "claude-opus-4-6").max_tokens,
+            false,
+            false,
+            false,
         )
         .unwrap();
         assert_eq!(request["thinking"], json!({"type": "adaptive"}));
@@ -94,6 +100,9 @@ fn anthropic_request_with_1h_ttl_sets_ttl_on_all_breakpoints() {
         Some("1h"),
         &test_resolved(BackendKind::AnthropicMessages, "claude-sonnet-4-6").thinking_level_map,
         test_resolved(BackendKind::AnthropicMessages, "claude-sonnet-4-6").max_tokens,
+        false,
+        false,
+        false,
     )
     .unwrap();
 
@@ -134,6 +143,9 @@ fn anthropic_request_with_no_messages_skips_message_breakpoint() {
         None,
         &test_resolved(BackendKind::AnthropicMessages, "claude-sonnet-4-6").thinking_level_map,
         test_resolved(BackendKind::AnthropicMessages, "claude-sonnet-4-6").max_tokens,
+        false,
+        false,
+        false,
     )
     .unwrap();
 
@@ -220,6 +232,9 @@ fn summary_shaped_requests_preserve_all_systems_and_omit_tools() {
         Some("1h"),
         &test_resolved(BackendKind::AnthropicMessages, "claude-sonnet-4-6").thinking_level_map,
         test_resolved(BackendKind::AnthropicMessages, "claude-sonnet-4-6").max_tokens,
+        false,
+        false,
+        false,
     )
     .unwrap();
     assert_eq!(anthropic["system"][0]["text"], "primary\n\nagents");
@@ -318,6 +333,9 @@ fn anthropic_response_tool_thinking_round_trips() {
         None,
         &test_resolved(BackendKind::AnthropicMessages, "claude-opus-4-6").thinking_level_map,
         test_resolved(BackendKind::AnthropicMessages, "claude-opus-4-6").max_tokens,
+        false,
+        false,
+        false,
     )
     .unwrap();
 

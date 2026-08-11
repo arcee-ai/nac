@@ -64,7 +64,8 @@ fn seed_mapping_toggle_effort_and_budget_tokens() {
     assert_eq!(map.get("low").unwrap().as_deref(), Some("low"));
     assert_eq!(map.get("medium").unwrap().as_deref(), Some("medium"));
     assert_eq!(map.get("high").unwrap().as_deref(), Some("high"));
-    // `max` addresses nac's xhigh slot with its wire value preserved.
+    // `max` without `xhigh` collapses into nac's xhigh slot (Anthropic/
+    // DeepSeek convention: the top wire tier is `max` but maps to xhigh).
     assert_eq!(map.get("xhigh").unwrap().as_deref(), Some("max"));
     assert_eq!(
         map.len(),
@@ -74,7 +75,7 @@ fn seed_mapping_toggle_effort_and_budget_tokens() {
 }
 
 #[test]
-fn seed_mapping_max_wins_over_xhigh_when_both_are_listed() {
+fn seed_mapping_max_and_xhigh_get_separate_slots_when_both_listed() {
     let generation = generate(
         &one_model(
             r#", "reasoning_options": [
@@ -84,8 +85,11 @@ fn seed_mapping_max_wins_over_xhigh_when_both_are_listed() {
         EMPTY_OVERRIDES,
     );
     let map = &only_model(&generation).thinking_level_map;
-    assert_eq!(map.get("xhigh").unwrap().as_deref(), Some("max"));
-    assert_eq!(map.len(), 1);
+    // When both are listed, each gets its own nac effort slot (OpenAI
+    // GPT-5.6: xhigh and max are distinct tiers).
+    assert_eq!(map.get("xhigh").unwrap().as_deref(), Some("xhigh"));
+    assert_eq!(map.get("max").unwrap().as_deref(), Some("max"));
+    assert_eq!(map.len(), 2);
 
     let reversed = generate(
         &one_model(
@@ -101,8 +105,17 @@ fn seed_mapping_max_wins_over_xhigh_when_both_are_listed() {
             .get("xhigh")
             .unwrap()
             .as_deref(),
+        Some("xhigh"),
+        "order-independent: both tiers get their own slots"
+    );
+    assert_eq!(
+        only_model(&reversed)
+            .thinking_level_map
+            .get("max")
+            .unwrap()
+            .as_deref(),
         Some("max"),
-        "order-independent: the higher tier keeps the shared slot"
+        "order-independent: both tiers get their own slots"
     );
 }
 
