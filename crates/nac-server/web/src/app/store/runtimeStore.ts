@@ -281,15 +281,23 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
     }
     case "run_cancelled":
       // Stopping is what the user asked for: the transcript already carries the
-      // cancellation marker, so a red box would only contradict it. A provider
-      // refusal seen earlier in this run is moot now for the same reason.
-      setState({
+      // cancellation marker, so a red box would only contradict it. Terminalize
+      // only live workers; completed cards and their logs remain useful history.
+      setState((state) => ({
         running: false,
         activity: "",
         error: null,
         modelError: null,
         streamSettled: true,
-      });
+        threads: Object.fromEntries(
+          Object.entries(state.threads).map(([name, thread]) => [
+            name,
+            thread.status === "running"
+              ? { ...thread, status: "finished", exitCode: null, isError: false }
+              : thread,
+          ]),
+        ),
+      }));
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
       return "snapshot";
     case "snapshot_saved":

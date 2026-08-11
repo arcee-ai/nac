@@ -259,6 +259,13 @@ pub async fn execute_parsed_dispatch(
         timeout_secs,
         complexity: _,
     } = params;
+    let Some(cancellation) = runtime.active_threads.start(&thread_name, &dispatch_id) else {
+        close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
+        return ToolResult {
+            content: format!("Thread '{thread_name}' was cancelled before it started."),
+            is_error: true,
+        };
+    };
 
     runtime.event_sink.emit(AgentEvent::ThreadStarted {
         name: thread_name.clone(),
@@ -278,6 +285,7 @@ pub async fn execute_parsed_dispatch(
             scheduled_skills: &scheduled_skills,
             timeout_secs,
         },
+        cancellation,
     )
     .await;
 
@@ -288,7 +296,7 @@ pub async fn execute_parsed_dispatch(
     if let Ok(run) = &result {
         if let Some(usage) = &run.usage {
             let mut wu = runtime.worker_usage.lock().await;
-            wu.add_cost_saturating(&usage);
+            wu.add_cost_saturating(usage);
         }
     }
 
@@ -303,6 +311,10 @@ pub async fn execute_parsed_dispatch(
                 is_error: true,
             }
         }
+        Ok(run) if run.cancelled => ToolResult {
+            content: format!("Thread '{thread_name}' was cancelled."),
+            is_error: true,
+        },
         Ok(run) if run.timed_out => {
             let timeout_reason = run.timeout_reason.clone();
             runtime.event_sink.emit(AgentEvent::ThreadFinished {

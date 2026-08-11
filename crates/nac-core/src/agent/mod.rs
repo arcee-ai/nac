@@ -276,6 +276,10 @@ impl Agent {
             &config.workspace_cwd,
             &local_paths,
         )?;
+        let terminal_manager = match config.mode {
+            AgentMode::Worker => crate::terminal::TerminalManager::for_worker(),
+            AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
+        };
         Ok(Self {
             client,
             messages,
@@ -292,7 +296,7 @@ impl Agent {
                 backend,
                 mcp: config.mcp,
                 skills: config.skills,
-                terminal_manager: crate::terminal::TerminalManager::new(),
+                terminal_manager,
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
                 mixed_clients: config.mixed_clients,

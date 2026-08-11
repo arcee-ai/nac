@@ -8,7 +8,11 @@ vi.mock("@/app/lib/perfDebug", () => ({
 }));
 
 import { mergeWorkspaceStats } from "@/app/services/queries";
-import { applyEnvelope, resetRuntime } from "@/app/store/runtimeStore";
+import {
+  applyEnvelope,
+  getRuntimeState,
+  resetRuntime,
+} from "@/app/store/runtimeStore";
 import type {
   ManagedSessionSummary,
   SessionEventEnvelope,
@@ -69,6 +73,71 @@ describe("canonical refresh classification", () => {
         }),
       ),
     ).toBe("replace-snapshot");
+  });
+});
+
+describe("run cancellation", () => {
+  it("stops live threads without erasing finished history or reporting failure", () => {
+    resetRuntime("session-a");
+    applyEnvelope(envelope({ type: "run_started", prompt_preview: "work" }));
+    for (const name of ["finished", "worker-a", "worker-b"]) {
+      applyEnvelope(
+        envelope({
+          type: "agent",
+          event: { type: "thread_started", name, action: `run ${name}`, source_threads: [] },
+        }),
+      );
+    }
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: { type: "thread_log", name: "finished", line: "kept output" },
+      }),
+    );
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "thread_finished",
+          name: "finished",
+          exit_code: 0,
+          timed_out: false,
+        },
+      }),
+    );
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: { type: "model_error", message: "provider refused" },
+      }),
+    );
+
+    expect(applyEnvelope(envelope({ type: "run_cancelled" }))).toBe("snapshot");
+    const state = getRuntimeState();
+    expect(state.running).toBe(false);
+    expect(state.error).toBeNull();
+    expect(state.modelError).toBeNull();
+    expect(Object.values(state.threads).every((thread) => thread.status === "finished")).toBe(true);
+    expect(Object.values(state.threads).every((thread) => thread.isError === false)).toBe(true);
+    expect(state.threads.finished.log).toHaveLength(1);
+    expect(state.events.at(-1)).toMatchObject({
+      text: "Run cancelled",
+      isError: false,
+    });
+  });
+
+  it("keeps provider failures visible for failed runs", () => {
+    resetRuntime("session-a");
+    applyEnvelope(envelope({ type: "run_started", prompt_preview: "work" }));
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: { type: "model_error", message: "provider refused" },
+      }),
+    );
+    applyEnvelope(envelope({ type: "run_failed", message: "run failed" }));
+
+    expect(getRuntimeState().error).toBe("provider refused");
   });
 });
 
