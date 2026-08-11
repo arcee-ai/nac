@@ -83,7 +83,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
     // has to live on a wrapper underneath it.
     <div
       className={cn(
-        "shrink-0 h-[84px] overflow-hidden rounded-[4px]",
+        "shrink-0 h-[84px] max-w-full overflow-hidden rounded-[4px]",
         isMobile ? "w-[172px]" : "w-[220px]",
         running || pending ? "bg-elevation-level-2" : "bg-elevation-level-1",
       )}
@@ -145,8 +145,8 @@ interface WaveRowProps {
 }
 
 /**
- * One topological DAG level: threads that can run concurrently. The row scrolls
- * horizontally and the rail on the left carries the state of this level.
+ * One topological DAG level: threads that can run concurrently. The tiles wrap
+ * within this level while the rail on the left carries its aggregate state.
  */
 function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
   const state = worstState(threads);
@@ -154,9 +154,7 @@ function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
   return (
     <div
       className={cn(
-        "pl-4 py-3 w-full border-l-2 border-solid overflow-x-auto hide-scrollbar",
-        // Fade the row out on the right so a wave reads as scrollable.
-        "[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]",
+        "pl-4 py-3 w-full min-w-0 border-l-2 border-solid",
         state === "error"
           ? "border-error-primary"
           : state === "running"
@@ -164,7 +162,7 @@ function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
             : "border-tertiary",
       )}
     >
-      <div className="flex items-start gap-1 pr-12 w-fit">
+      <div className="flex flex-wrap items-start gap-1 w-full min-w-0">
         {threads.map((thread) => (
           <ThreadBox
             key={thread.key}
