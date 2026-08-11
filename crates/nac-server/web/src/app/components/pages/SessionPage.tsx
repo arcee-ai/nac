@@ -24,8 +24,7 @@ import {
 } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
-import { errorMessage } from "@/app/providers/ToastProvider";
-import { useSessionActions } from "@/app/providers/SessionActionsProvider";
+import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
   DEFAULT_SESSION_PANEL,
   isSessionPanel,
@@ -121,7 +120,7 @@ export default function SessionPage() {
     refetch: refetchSnapshot,
   } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
-  const actions = useSessionActions();
+  const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
@@ -154,25 +153,10 @@ export default function SessionPage() {
   const configError = entry?.summary.model_config_error;
   // The repair notice already explains a broken config, and that is exactly why
   // the snapshot request fails, so only report an unexplained fetch failure.
-  const fetchError =
-    !configError && !snapshot && error ? errorMessage(error) : null;
-  const errorNotice = configError
-    ? {
-        message: `Configuration needs repair: ${configError}`,
-        action: {
-          label: "Open settings",
-          onClick: () => actions.settings(id),
-        },
-      }
-    : fetchError
-      ? {
-          message: fetchError,
-          action: {
-            label: "Try again",
-            onClick: () => void refetchSnapshot(),
-          },
-        }
-      : null;
+  const failure = configError ?? (!snapshot && error ? error : null);
+  const errorNotice = failure
+    ? toNotice(failure, () => void refetchSnapshot())
+    : null;
 
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
 

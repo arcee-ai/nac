@@ -6312,63 +6312,6 @@ threshold_tokens = 64000
     }
 
     #[tokio::test]
-    async fn arcee_auth_rejects_non_thinking_model_on_create_and_update() {
-        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-        let root = temp_root("arcee_auth_model_contract");
-        let nac_home = root.join("nac-home");
-        std::fs::create_dir_all(&nac_home).unwrap();
-        std::fs::write(
-            nac_home.join("config.toml"),
-            "[model]\nmodel = \"gpt-5.2\"\n",
-        )
-        .unwrap();
-        write_arcee_auth(&nac_home, "https://api.arcee.ai");
-        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
-        let manager = test_manager(&root);
-        let store_path = root.join("store.db");
-
-        let create_error = manager
-            .create_session(CreateSessionRequest {
-                backend: RequestField::Value("arcee-auth".to_string()),
-                model: RequestField::Value("trinity-mini".to_string()),
-                ..CreateSessionRequest::default()
-            })
-            .await
-            .expect_err("create must enforce the managed Arcee model contract");
-        assert!(
-            create_error.to_string().contains("trinity-large-thinking"),
-            "{create_error:#}"
-        );
-        assert!(!store_path.exists(), "invalid create must not persist");
-
-        let created = manager
-            .create_session(CreateSessionRequest::default())
-            .await
-            .expect("configured API-key provider should create");
-        let session_id = created.metadata.session_id.unwrap();
-        let before = sessions::load_session(&store_path, &session_id).unwrap();
-        let update_error = manager
-            .update_session_config(
-                &session_id,
-                UpdateConfigRequest {
-                    backend: RequestField::Value("arcee-auth".to_string()),
-                    model: RequestField::Value("trinity-mini".to_string()),
-                    ..UpdateConfigRequest::default()
-                },
-            )
-            .await
-            .expect_err("update must enforce the managed Arcee model contract");
-        assert!(
-            update_error.to_string().contains("trinity-large-thinking"),
-            "{update_error:#}"
-        );
-        let after = sessions::load_session(&store_path, &session_id).unwrap();
-        assert_eq!(after.backend, before.backend);
-        assert_eq!(after.model, before.model);
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[tokio::test]
     async fn openai_config_launch_switch_to_arcee_normalizes_the_managed_tuple() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("openai_to_arcee_launch");

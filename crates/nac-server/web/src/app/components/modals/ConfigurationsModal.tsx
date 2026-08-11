@@ -50,6 +50,7 @@ import {
   providerLabel,
   providerUsesApiKey,
 } from "@/app/lib/providers";
+import { humanErrorText } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useCreateModelConfig,
@@ -279,7 +280,7 @@ function ConfigurationForm({
     : keyQuery.isFetching
       ? { status: "validating" }
       : keyQuery.error
-        ? { status: "error", message: errorMessage(keyQuery.error) }
+        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
         : keyQuery.data
           ? {
               status: "ready",
@@ -380,7 +381,7 @@ function ConfigurationForm({
         toast.success(`Configuration ${saved.name} created`);
       }
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      setError(humanErrorText(saveError, backend));
     }
   };
 
@@ -391,7 +392,7 @@ function ConfigurationForm({
       onDeleted();
       toast.success(`Configuration ${record.name} removed`);
     } catch (deleteError) {
-      setError(errorMessage(deleteError));
+      setError(humanErrorText(deleteError));
     }
   };
 

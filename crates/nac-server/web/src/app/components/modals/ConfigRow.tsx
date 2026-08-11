@@ -107,12 +107,7 @@ export function ConfigRow({
           <HoverHint title={hint} position={TooltipPosition.TopCenter} />
         ) : null}
       </div>
-      <div
-        className={cn(
-          "shrink-0",
-          verticalOnMobile && "w-full md:w-auto",
-        )}
-      >
+      <div className={cn("shrink-0", verticalOnMobile && "w-full md:w-auto")}>
         {control}
       </div>
     </div>

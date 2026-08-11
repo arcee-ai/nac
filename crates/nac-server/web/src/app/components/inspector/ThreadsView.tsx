@@ -795,8 +795,11 @@ export function ThreadsView({
       }
       list={
         ordered.length === 0 ? (
-          <div className="p-1 label-micro text-basic-muted">
-            No threads yet for this session.
+          <div className="flex flex-col px-2 pb-4 pt-2 text-micro">
+            <p className="text-basic-tertiary">No threads yet.</p>
+            <p className="text-basic-muted">
+              Start a conversation to create one.
+            </p>
           </div>
         ) : (
           ordered.map((thread) => {
@@ -873,7 +876,10 @@ export function ThreadsView({
           onViewChange={setView}
         />
       ) : (
-        <PanelEmpty>No threads yet for this session.</PanelEmpty>
+        <PanelEmpty title="No thread selected">
+          Threads contain conversations, command output, and file changes for
+          each task. Select a thread to view its details.
+        </PanelEmpty>
       )}
     </PanelSplit>
   );

@@ -14,6 +14,57 @@ import type {
   ReasoningEffort,
 } from "@/app/types/api";
 
+/** A model chosen out of the catalog, together with where it is served. */
+export interface CatalogPick {
+  backend: BackendKind;
+  model: string;
+  /** The endpoint the catalog names for this provider, managed one first. */
+  baseUrl: string;
+}
+
+/** Where a session on this provider sends its requests. */
+export function catalogBaseUrl(provider: CatalogProvider): string {
+  return provider.managed_base_url ?? provider.default_base_url ?? "";
+}
+
+/**
+ * Models to open on, best first, and the providers serving them. Only the
+ * Trinity ids are seeded into the server's catalog; the passthrough models
+ * arrive with the live Arcee overlay, so Trinity stays behind the preferred
+ * pick as the fallback for a catalog that has not been refreshed yet.
+ */
+const DEFAULT_PICK_MODELS = [
+  "deepseek/deepseek-v4-flash-latest",
+  "trinity-large-thinking",
+];
+const DEFAULT_PICK_BACKENDS: BackendKind[] = ["arcee-auth", "arcee-api"];
+
+/**
+ * What the catalog opens on while nothing has been picked, so a first session —
+ * the case with no saved configuration to fall back on — is one click away. A
+ * provider the server can already authenticate as wins; otherwise the stored
+ * login one opens and asks for its login.
+ */
+export function defaultCatalogPick(
+  catalog: ModelCatalog | undefined,
+): CatalogPick | null {
+  for (const model of DEFAULT_PICK_MODELS) {
+    const candidates = DEFAULT_PICK_BACKENDS.flatMap((backend) => {
+      const provider = findProvider(catalog, backend);
+      if (!provider?.models.some((entry) => entry.id === model)) return [];
+      const baseUrl = catalogBaseUrl(provider);
+      return baseUrl ? [{ provider, baseUrl }] : [];
+    });
+    const chosen =
+      candidates.find((entry) => entry.provider.auth_status === "ready") ??
+      candidates[0];
+    if (chosen) {
+      return { backend: chosen.provider.id, model, baseUrl: chosen.baseUrl };
+    }
+  }
+  return null;
+}
+
 /** What the catalog knows about the model a session is actually running. */
 export interface ResolvedCatalogModel {
   provider: CatalogProvider | null;

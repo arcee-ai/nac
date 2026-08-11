@@ -19,7 +19,8 @@ import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import { modelItems } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";
-import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { humanErrorText } from "@/app/lib/providerError";
+import { useToast } from "@/app/providers/ToastProvider";
 import {
   useManagedProviderModels,
   useStoredKeyProviderModels,
@@ -82,7 +83,9 @@ export function ModelPicker({
       await updateConfig.mutateAsync({ id: sessionId, patch: { model } });
       toast.success(`Model switched to ${model}`);
     } catch (error) {
-      toast.error(`The model was not switched: ${errorMessage(error)}`);
+      toast.error(
+        `The model was not switched: ${humanErrorText(error, backend)}`,
+      );
     }
   };
 
@@ -95,7 +98,7 @@ export function ModelPicker({
     </div>
   ) : query.isError ? (
     <p className="px-2 py-1 text-micro text-error-primary">
-      {errorMessage(query.error)}
+      {humanErrorText(query.error, backend)}
     </p>
   ) : items.length === 0 ? (
     <p className="px-2 py-1 text-micro text-basic-muted">
