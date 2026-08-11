@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -207,6 +208,15 @@ function ConfigurationForm({
   const [compaction, setCompaction] = useState(
     record?.orchestrator_compaction_threshold?.toString() ?? "",
   );
+  // Track whether the compaction value was auto-suggested (vs. user-entered)
+  // so model changes don't clobber a manual value. The ref mirrors the state
+  // so the auto-suggest effect can read it without depending on the state.
+  const compactionRef = useRef(
+    record?.orchestrator_compaction_threshold?.toString() ?? "",
+  );
+  const compactionAutoRef = useRef(
+    record?.orchestrator_compaction_threshold == null,
+  );
   const [headers, setHeaders] = useState(() =>
     record && Object.keys(record.extra_headers).length
       ? JSON.stringify(record.extra_headers, null, 2)
@@ -225,6 +235,21 @@ function ConfigurationForm({
     reasoning,
     REASONING_ITEMS,
   );
+
+  // Auto-suggest 70% of the selected model's context window as the compaction
+  // threshold. A manually entered value is preserved across model changes —
+  // the suggestion only fills the field when it is empty or was itself last
+  // auto-suggested.
+  useEffect(() => {
+    const resolved = resolveCatalogModel(catalog.data, backend, model);
+    const contextWindow = resolved.contextWindow;
+    if (contextWindow && (compactionRef.current === "" || compactionAutoRef.current)) {
+      compactionAutoRef.current = true;
+      const suggested = String(Math.round(contextWindow * 0.7));
+      compactionRef.current = suggested;
+      setCompaction(suggested);
+    }
+  }, [backend, model, catalog.data]);
   const { signedIn } = useManagedSignIn(backend);
   const debouncedKey = useDebouncedValue(apiKey.trim(), KEY_DEBOUNCE_MS);
   // A saved setup keeps its key on the server; only a key typed here is ours
@@ -590,10 +615,15 @@ function ConfigurationForm({
                 inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 className="w-full md:w-[105px]"
                 inputClassName="text-right"
-                placeholder="config.toml"
+                placeholder="auto"
                 inputMode="numeric"
                 value={compaction}
-                onChange={(event) => edit(setCompaction)(event.target.value)}
+                onChange={(event) => {
+                  setError("");
+                  compactionAutoRef.current = false;
+                  compactionRef.current = event.target.value;
+                  setCompaction(event.target.value);
+                }}
               />
             }
           />

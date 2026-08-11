@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -188,6 +188,30 @@ function LaunchForm({
     setSelection(next);
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
+
+  // Auto-suggest 70% of the selected model's context window as the compaction
+  // threshold. A manually entered value is preserved across model changes —
+  // the suggestion only fills the field when it is empty or was itself last
+  // auto-suggested.
+  const compactionRef = useRef("");
+  const compactionAutoRef = useRef(true);
+  useEffect(() => {
+    const resolved = resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model);
+    const contextWindow = resolved.contextWindow;
+    if (contextWindow && (compactionRef.current === "" || compactionAutoRef.current)) {
+      compactionAutoRef.current = true;
+      const suggested = String(Math.round(contextWindow * 0.7));
+      compactionRef.current = suggested;
+      setCompaction(suggested);
+    }
+  }, [chosen?.backend, chosen?.model, catalog.data]);
+
+  const onCompactionChange = (value: string) => {
+    setError(null);
+    compactionAutoRef.current = false;
+    compactionRef.current = value;
+    setCompaction(value);
+  };
 
   /** Paths belong to whichever machine runs the session, so they do not carry over. */
   const changeMode = (next: Mode) => {
@@ -513,10 +537,10 @@ function LaunchForm({
                     inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                     className="w-full md:w-[120px]"
                     inputClassName="md:text-right"
-                    placeholder="config.toml"
+                    placeholder="auto"
                     inputMode="numeric"
                     value={compaction}
-                    onChange={(e) => edit(setCompaction)(e.target.value)}
+                    onChange={(e) => onCompactionChange(e.target.value)}
                   />
                 }
               />

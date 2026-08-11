@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -261,6 +261,17 @@ function SettingsForm({
       ? String(initial.orchestrator_compaction_threshold)
       : "",
   );
+  // Track whether the compaction value was auto-suggested (vs. user-entered)
+  // so model changes don't clobber a manual value. The ref mirrors the state
+  // so the auto-suggest effect can read it without depending on the state.
+  const compactionRef = useRef(
+    initial.orchestrator_compaction_threshold != null
+      ? String(initial.orchestrator_compaction_threshold)
+      : "",
+  );
+  const compactionAutoRef = useRef(
+    initial.orchestrator_compaction_threshold == null,
+  );
   // Null while the session keeps the key it already has. A string is a
   // replacement being typed, and an empty one means the key was taken away.
   const [keyDraft, setKeyDraft] = useState<string | null>(null);
@@ -316,6 +327,21 @@ function SettingsForm({
     resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
     reasoning,
   );
+
+  // Auto-suggest 70% of the selected model's context window as the compaction
+  // threshold. A manually entered value is preserved across model changes —
+  // the suggestion only fills the field when it is empty or was itself last
+  // auto-suggested.
+  useEffect(() => {
+    const resolved = resolveCatalogModel(catalog.data, backend, model);
+    const contextWindow = resolved.contextWindow;
+    if (contextWindow && (compactionRef.current === "" || compactionAutoRef.current)) {
+      compactionAutoRef.current = true;
+      const suggested = String(Math.round(contextWindow * 0.7));
+      compactionRef.current = suggested;
+      setCompaction(suggested);
+    }
+  }, [backend, model, catalog.data]);
 
   const { provider, signedIn } = useManagedSignIn(kind);
   const loginQuery = useManagedProviderModels(
@@ -607,11 +633,15 @@ function SettingsForm({
         <Input
           label="Compaction threshold"
           inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-          hintText="Context size that triggers compaction; 0 disables it. Blank keeps the configured default."
-          placeholder="config.toml"
+          hintText="Context size that triggers compaction; 0 disables it. Blank auto-suggests 70% of the model's context window."
+          placeholder="auto"
           inputMode="numeric"
           value={compaction}
-          onChange={(event) => setCompaction(event.target.value)}
+          onChange={(event) => {
+            compactionAutoRef.current = false;
+            compactionRef.current = event.target.value;
+            setCompaction(event.target.value);
+          }}
         />
 
         <Separator />
