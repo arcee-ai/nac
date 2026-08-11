@@ -509,10 +509,14 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
     }
 
     let mut agent = orchestrator_agent(store_path.clone(), "session", None);
-    agent
+    let repaired = agent
         .restore_messages_merging_log_tail(blob, None)
         .await
         .unwrap();
+    assert!(
+        repaired.is_none(),
+        "discarding only untrusted tail rows leaves the blob untouched"
+    );
 
     assert_eq!(agent.messages.len(), 7);
     let warning = agent
@@ -568,10 +572,11 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
     .unwrap();
 
     let mut agent = orchestrator_agent(store_path.clone(), "session", None);
-    agent
+    let repaired = agent
         .restore_messages_merging_log_tail(blob, None)
         .await
-        .unwrap();
+        .unwrap()
+        .expect("trimming a dangling turn out of the blob must report the rewritten snapshot");
 
     assert_eq!(agent.messages.len(), 6);
     assert!(agent.transcript_recovery_warning().is_some());
@@ -586,6 +591,11 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
         .unwrap();
     let persisted: Vec<Message> = serde_json::from_str(&persisted_json).unwrap();
     assert_eq!(persisted.len(), 6);
+    assert_eq!(
+        serde_json::to_value(&repaired).unwrap(),
+        serde_json::to_value(&persisted).unwrap(),
+        "the reported blob is exactly the blob the repair persisted"
+    );
     assert_eq!(
         crate::sessions::list_sessions(&store_path)
             .unwrap()

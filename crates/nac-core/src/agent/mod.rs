@@ -684,15 +684,20 @@ impl Agent {
     /// A validly encoded index gap is repaired under the session operation
     /// lease by retaining the longest contiguous prefix and atomically
     /// deleting the untrusted physical suffix. Decode failures remain fatal.
+    ///
+    /// Returns the rewritten snapshot blob when gap recovery also trimmed a
+    /// dangling tool turn out of the blob (`replace_snapshot_and_delete_from`),
+    /// so a caller holding the pre-repair snapshot can refresh its copy;
+    /// `None` when the blob was left untouched.
     pub async fn restore_messages_merging_log_tail(
         &mut self,
         messages: Vec<Message>,
         operation_lease: Option<&crate::sessions::SessionOperationLease>,
-    ) -> Result<()> {
+    ) -> Result<Option<Vec<Message>>> {
         self.transcript_recovery_warning = None;
         let Some(sink) = &self.transcript_log else {
             self.restore_messages(messages);
-            return Ok(());
+            return Ok(None);
         };
         let blob_len = messages.len() as u64;
         let writer = sink.writer.clone();
@@ -760,7 +765,7 @@ impl Agent {
         }
         if tail.is_empty() && !recovered_gap {
             self.restore_messages(messages);
-            return Ok(());
+            return Ok(None);
         }
 
         let mut merged = messages;
@@ -778,6 +783,7 @@ impl Agent {
         }
 
         let merged_len = merged.len();
+        let mut repaired_blob = None;
         truncate_incomplete_tool_turn(&mut merged);
         if merged.len() < merged_len {
             if recovered_gap && merged.len() < blob_len as usize {
@@ -789,12 +795,13 @@ impl Agent {
                 })
                 .await
                 .map_err(|error| anyhow!("transcript snapshot repair task failed: {error}"))??;
+                repaired_blob = Some(merged.clone());
             } else {
                 self.delete_log_tail(merged.len() as u64).await?;
             }
         }
         self.restore_messages(merged);
-        Ok(())
+        Ok(repaired_blob)
     }
 
     /// Trim a dangling tool turn from the transcript AND the transcript log
