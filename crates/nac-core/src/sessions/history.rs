@@ -155,8 +155,15 @@ SELECT s.session_id,
            (SELECT COUNT(*) FROM thread_events te
             WHERE te.session_id = s.session_id
               AND te.thread_name = '__orchestrator__'
-              AND json_extract(te.event_json, '$.nac_transcript_message.idx') >=
-                  COALESCE(json_array_length(s.messages_json), 0)),
+              AND CASE
+                  WHEN json_valid(te.event_json) = 0 THEN 0
+                  WHEN json_type(te.event_json, '$.nac_transcript_message.idx')
+                      IS NOT 'integer' THEN 0
+                  WHEN json_extract(te.event_json, '$.nac_transcript_message.idx') < 0 THEN 0
+                  WHEN json_extract(te.event_json, '$.nac_transcript_message.idx') >=
+                      COALESCE(json_array_length(s.messages_json), 0) THEN 1
+                  ELSE 0
+              END),
        (SELECT COUNT(DISTINCT te.thread_name) FROM thread_events te
         WHERE te.session_id = s.session_id AND te.thread_name != '__orchestrator__'),
        (SELECT COUNT(*) FROM episodes e WHERE e.session_id = s.session_id)
@@ -450,6 +457,13 @@ mod tests {
                 },
             )
             .unwrap();
+        crate::store::append_thread_event(
+            &path,
+            "other",
+            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            "{malformed",
+        )
+        .unwrap();
 
         let current =
             list_history_sessions(&path, "current", HistoryNamespace::Session, None, 10).unwrap();
@@ -472,6 +486,15 @@ mod tests {
             list_history_sessions(&path, "current", HistoryNamespace::Store, None, 10).unwrap();
         assert_eq!(store.sessions.len(), 3);
         assert_eq!(store.sessions[0].display_label, "Prompt for current");
+        assert_eq!(
+            store
+                .sessions
+                .iter()
+                .find(|session| session.session_id == "other")
+                .unwrap()
+                .orchestrator_message_count,
+            0
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
