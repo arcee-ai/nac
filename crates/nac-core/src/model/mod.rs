@@ -16,6 +16,18 @@ fn backoff_duration(attempt: usize) -> Duration {
     Duration::from_millis((delay_ms as f64 * jitter) as u64)
 }
 
+fn retryable_http_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 409 | 429) || status.is_server_error()
+}
+
+fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|seconds| Duration::from_secs(seconds.min(60)))
+}
+
 mod anthropic;
 mod anthropic_stream;
 mod api_key_store;

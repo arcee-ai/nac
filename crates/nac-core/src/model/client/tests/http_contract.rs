@@ -100,7 +100,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         })
         .to_string(),
     )]);
-    let client = ModelClient {
+    let mut client = ModelClient {
         client: arcee::no_redirect_client().unwrap(),
         base_url: format!("{}/tenant/base", server.base_url),
         api_key: "stored-login-credential".to_string(),
@@ -117,6 +117,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         prompt_cache_key: None,
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
     };
+    client.resolved_model.max_tokens = 500_000;
     let messages = vec![
         Message::System {
             content: "Follow instructions".to_string(),
@@ -187,6 +188,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
     );
     let body: Value = serde_json::from_slice(&request.body).expect("request JSON");
     assert_eq!(body["model"], "arcee-test-model");
+    assert_eq!(body["max_tokens"], 262_144);
     assert_eq!(body["temperature"], 0.0);
     assert_eq!(
         body["messages"],
@@ -423,6 +425,90 @@ fn truncate_utf8_preserves_exact_boundary_and_short_values() {
     assert_eq!(exact.len(), 500);
     assert_eq!(truncate_utf8(&exact, 500), exact);
     assert_eq!(truncate_utf8("short", 500), "short");
+}
+
+#[tokio::test]
+async fn retries_request_timeout_and_conflict_responses() {
+    for status in ["408 Request Timeout", "409 Conflict"] {
+        let server = ScriptedServer::start(vec![
+            ScriptedResponse::json(status, "{}"),
+            ScriptedResponse::json("200 OK", r#"{"ok":true}"#),
+        ]);
+        let client = test_model_client(
+            BackendKind::OpenAiResponses,
+            server.base_url.clone(),
+            std::collections::BTreeMap::new(),
+        );
+        let value = client
+            .post_json_with_retry(&format!("{}/retry", server.base_url), &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(value["ok"], true, "{status}");
+        assert_eq!(server.finish().len(), 2, "{status}");
+    }
+}
+
+#[tokio::test]
+async fn retries_transient_shared_sse_before_observable_output() {
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "200 OK",
+            "data: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",\"message\":\"try later\"}}\n\n",
+        ),
+        ScriptedResponse::json(
+            "200 OK",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n",
+        ),
+    ]);
+    let client = test_model_client(
+        BackendKind::OpenAiResponses,
+        server.base_url.clone(),
+        std::collections::BTreeMap::new(),
+    );
+    let value = client
+        .post_sse_with_retry_headers(
+            &format!("{}/stream", server.base_url),
+            &json!({}),
+            |request| request,
+            || ResponsesStreamFold::new(None),
+        )
+        .await
+        .unwrap();
+    assert_eq!(value["status"], "completed");
+    assert_eq!(server.finish().len(), 2);
+}
+
+#[tokio::test]
+async fn does_not_retry_shared_sse_after_observable_output() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+            "data: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",\"message\":\"try later\"}}\n\n"
+        ),
+    )]);
+    let client = test_model_client(
+        BackendKind::OpenAiResponses,
+        server.base_url.clone(),
+        std::collections::BTreeMap::new(),
+    );
+    let seen = AtomicUsize::new(0);
+    let sink = |_| {
+        seen.fetch_add(1, Ordering::Relaxed);
+    };
+    client
+        .post_sse_with_retry_headers(
+            &format!("{}/stream", server.base_url),
+            &json!({}),
+            |request| request,
+            || ResponsesStreamFold::new(Some(&sink)),
+        )
+        .await
+        .expect_err("observable output must forfeit replay");
+    assert_eq!(seen.load(Ordering::Relaxed), 1);
+    assert_eq!(server.finish().len(), 1);
 }
 
 #[tokio::test]

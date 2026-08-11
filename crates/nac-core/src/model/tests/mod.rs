@@ -48,3 +48,20 @@ fn backoff_duration_stays_within_jitter_bounds() {
         }
     }
 }
+
+#[test]
+fn retry_policy_covers_transient_statuses_and_bounds_retry_after() {
+    for status in [408, 409, 429, 500, 599] {
+        assert!(retryable_http_status(
+            reqwest::StatusCode::from_u16(status).unwrap()
+        ));
+    }
+    for status in [400, 401, 403, 404, 422] {
+        assert!(!retryable_http_status(
+            reqwest::StatusCode::from_u16(status).unwrap()
+        ));
+    }
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::RETRY_AFTER, "600".parse().unwrap());
+    assert_eq!(retry_after_delay(&headers), Some(Duration::from_secs(60)));
+}

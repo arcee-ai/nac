@@ -335,6 +335,8 @@ async fn together_reasoning_round_trips_under_the_reasoning_field() {
     let requests = server.finish();
     assert_eq!(requests.len(), 2);
     let body = serde_json::from_slice::<Value>(&requests[1].body).expect("request body is JSON");
+    assert_eq!(body["max_tokens"], client.resolved_model.max_tokens);
+    assert_eq!(body["context_length_exceeded_behavior"], "truncate");
     assert_eq!(
         body["messages"][1],
         json!({

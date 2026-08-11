@@ -99,7 +99,7 @@ impl StreamFold for ResponsesStreamFold<'_> {
 
     fn finish(self) -> Result<Value, StreamFoldError> {
         self.final_response.ok_or_else(|| {
-            StreamFoldError::permanent("SSE stream did not include a final response event")
+            StreamFoldError::retryable("SSE stream did not include a final response event")
         })
     }
 }
