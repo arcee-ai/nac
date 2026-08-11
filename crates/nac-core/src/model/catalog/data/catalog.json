@@ -212,40 +212,6 @@
       "credential_env_var": "DEEPSEEK_API_KEY",
       "default_base_url": "https://api.deepseek.com",
       "models": {
-        "deepseek-chat": {
-          "display_name": "DeepSeek Chat",
-          "context_window": 1000000,
-          "max_tokens": 384000,
-          "cost": {
-            "input": 0.14,
-            "output": 0.28,
-            "cache_read": 0.0028,
-            "cache_write": 0.0
-          },
-          "reasoning": false,
-          "thinking_level_map": {
-            "high": "high",
-            "none": "none",
-            "xhigh": "max"
-          }
-        },
-        "deepseek-reasoner": {
-          "display_name": "DeepSeek Reasoner",
-          "context_window": 1000000,
-          "max_tokens": 384000,
-          "cost": {
-            "input": 0.14,
-            "output": 0.28,
-            "cache_read": 0.0028,
-            "cache_write": 0.0
-          },
-          "reasoning": true,
-          "thinking_level_map": {
-            "high": "high",
-            "none": "none",
-            "xhigh": "max"
-          }
-        },
         "deepseek-v4-flash": {
           "display_name": "DeepSeek V4 Flash",
           "context_window": 1000000,
@@ -259,6 +225,7 @@
           "reasoning": true,
           "thinking_level_map": {
             "high": "high",
+            "low": "low",
             "none": "none",
             "xhigh": "max"
           }
@@ -276,6 +243,7 @@
           "reasoning": true,
           "thinking_level_map": {
             "high": "high",
+            "low": "low",
             "none": "none",
             "xhigh": "max"
           }

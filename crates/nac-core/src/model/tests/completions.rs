@@ -27,8 +27,9 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
     );
     assert!(absent.get("thinking").is_none());
     assert!(absent.get("reasoning_effort").is_none());
-    // DeepSeek's compat omits an explicit temperature.
-    assert!(absent.get("temperature").is_none());
+    // DeepSeek's compat sends temperature 0.0 (V4 models accept it; the
+    // old "rejects temperature on reasoning models" note was R1-specific).
+    assert_eq!(absent["temperature"], json!(0.0));
     assert_eq!(
         absent["messages"][0]["reasoning_content"],
         "need current context"
@@ -106,10 +107,11 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
                 user,
                 {"role": "assistant", "content": "prior", "reasoning_content": "thought"}
             ],
+            "temperature": 0.0,
             "thinking": {"type": "enabled"},
             "reasoning_effort": "high"
         }),
-        "DeepSeek: thinking dialect, no explicit temperature"
+        "DeepSeek: thinking dialect, temperature 0.0"
     );
 
     let fireworks = completions_chat_request(

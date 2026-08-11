@@ -79,7 +79,10 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
     match provider {
         BackendKind::DeepSeekChat => matches!(
             effort,
-            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Xhigh
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::High
+                | ReasoningEffort::Xhigh
         ),
         BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
             effort,
@@ -218,7 +221,7 @@ fn wire_level_special_cases_are_encoded_in_data() {
             .wire_value(ReasoningEffort::High),
         Some("high")
     );
-    assert!(!deepseek
+    assert!(deepseek
         .thinking_level_map
         .is_supported(ReasoningEffort::Low));
     assert_eq!(
@@ -250,18 +253,19 @@ fn wire_level_special_cases_are_encoded_in_data() {
 fn effective_settings_resolve_catalog_metadata_at_construction() {
     let settings = EffectiveModelSettings::from_optional(
         Some(BackendKind::DeepSeekChat),
-        Some("deepseek-chat".to_string()),
+        Some("deepseek-v4-flash".to_string()),
         Some("https://api.deepseek.com".to_string()),
         Some(ReasoningEffort::High),
         None,
         std::collections::BTreeMap::new(),
     )
     .expect("valid deepseek settings");
-    assert_eq!(settings.resolved.id, "deepseek-chat");
+    assert_eq!(settings.resolved.id, "deepseek-v4-flash");
     assert_eq!(settings.resolved.provider, BackendKind::DeepSeekChat);
     assert_eq!(settings.resolved.api, ApiKind::OpenAiCompletions);
-    // S1: `deepseek-chat` is a models.dev catalog entry, so resolution finds
-    // the generated baseline (real limits) instead of the provider default.
+    // S1: `deepseek-v4-flash` is a models.dev catalog entry, so resolution
+    // finds the generated baseline (real limits) instead of the provider
+    // default.
     assert_eq!(settings.resolved.source, ModelSource::Baseline);
     assert_eq!(settings.resolved.context_window, 1_000_000);
     assert!(settings
@@ -515,9 +519,10 @@ fn generated_entries_satisfy_catalog_invariants() {
             }
         }
     }
-    // Snapshot pin: 80 agent-compatible generated models plus 11 hand-seeded entries. Drift fails loudly here at regen/seed-edit time,
-    // forcing a deliberate review.
-    assert_eq!(entry_count, 92, "catalog model count drifted");
+    // Snapshot pin: 78 agent-compatible generated models plus 11 hand-seeded
+    // entries (2 deprecated deepseek models removed). Drift fails loudly here
+    // at regen/seed-edit time, forcing a deliberate review.
+    assert_eq!(entry_count, 90, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -992,7 +997,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 92, "catalog model count drifted");
+    assert_eq!(total, 90, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks

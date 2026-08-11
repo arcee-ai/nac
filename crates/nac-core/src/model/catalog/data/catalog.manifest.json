@@ -1,11 +1,11 @@
 {
-  "sha256": "1d533cfdfcfbe8bb6494aa0b3ea29f43f8ed7f7388b58ffcb97f561d47466e06",
-  "generated_at": "2026-08-05T22:38:06Z",
-  "models_dev_url": "https://models.dev/api.json",
-  "models_dev_etag": "\"57f65abb5b727c5252e507b653cdad21\"",
+  "sha256": "d8b7e3102d27b7cf179f778c82a3edadbaf61599e675b2d85ec6e58f01512e3b",
+  "generated_at": "2026-08-11T05:11:11Z",
+  "models_dev_url": "crates/nac-catalog-gen/fixtures/models-dev-api.json",
+  "models_dev_etag": null,
   "model_counts": {
     "anthropic-messages": 13,
-    "deepseek-chat": 4,
+    "deepseek-chat": 2,
     "fireworks-chat": 17,
     "openai-responses": 29,
     "together-chat": 18

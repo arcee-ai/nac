@@ -8,7 +8,7 @@
 # nac-core's `model/catalog/tests.rs`; the guard tests assert the catalog
 # data and validation each equal that transcription:
 #
-#   deepseek-chat:            none, high, xhigh (wire "max")
+#   deepseek-chat:            none, low, high, xhigh (wire "max")
 #   fireworks-chat:           none, low, medium, high
 #   together-chat:            none, low, medium, high
 #   openai-responses:         all six levels, verbatim (GPT-5.6 adds `max`)
@@ -38,9 +38,9 @@
 # responses/completions adapters append "/responses" and "/chat/completions"
 # to the values below as-is.
 
-# deepseek: none/high/xhigh for every model; xhigh is the wire tier "max".
+# deepseek: none/low/high/xhigh for every model; xhigh is the wire tier "max".
 [providers."deepseek-chat"]
-default_thinking_levels = { none = "none", high = "high", xhigh = "max" }
+default_thinking_levels = { none = "none", low = "low", high = "high", xhigh = "max" }
 
 # fireworks: none through high, sent verbatim.
 [providers."fireworks-chat"]

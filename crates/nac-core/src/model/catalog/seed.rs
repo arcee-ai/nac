@@ -31,10 +31,11 @@ fn levels(entries: &[(ReasoningEffort, &str)]) -> ThinkingLevelMap {
     )
 }
 
-/// deepseek-chat: none/high/xhigh; xhigh is the wire-level tier `max`.
+/// deepseek-chat: none/low/high/xhigh; xhigh is the wire-level tier `max`.
 fn deepseek_levels() -> ThinkingLevelMap {
     levels(&[
         (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Low, "low"),
         (ReasoningEffort::High, "high"),
         (ReasoningEffort::Xhigh, "max"),
     ])
@@ -304,11 +305,13 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             PROVIDER_DEFAULT_MODEL_ID,
             true,
             deepseek_levels(),
-            // DeepSeek rejects an explicit temperature on reasoning models.
+            // DeepSeek V4 accepts temperature (confirmed via API testing;
+            // the old "rejects temperature on reasoning models" note was
+            // specific to the deprecated R1 reasoner model).
             completions_compat(
                 Some(CompletionsThinkingFormat::Deepseek),
                 "reasoning_content",
-                None,
+                Some(0.0),
             ),
         ),
         &[],

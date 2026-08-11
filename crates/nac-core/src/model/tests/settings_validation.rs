@@ -338,6 +338,7 @@ fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence(
             "model",
             &[
                 ReasoningEffort::None,
+                ReasoningEffort::Low,
                 ReasoningEffort::High,
                 ReasoningEffort::Xhigh,
             ],
@@ -440,8 +441,8 @@ fn validation_error_messages_are_preserved_verbatim() {
         (
             BackendKind::DeepSeekChat,
             "model",
-            ReasoningEffort::Low,
-            "invalid model configuration: reasoning effort 'low' is not supported by backend 'deepseek-chat'; supported values: none, high, or xhigh",
+            ReasoningEffort::Minimal,
+            "invalid model configuration: reasoning effort 'minimal' is not supported by backend 'deepseek-chat'; supported values: none, low, high, or xhigh",
         ),
         (
             BackendKind::FireworksChat,
