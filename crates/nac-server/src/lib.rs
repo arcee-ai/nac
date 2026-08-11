@@ -1255,18 +1255,22 @@ impl SessionManager {
     async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        self.attach_session_locked(session_id).await
+        self.attach_session_locked(session_id, None).await
     }
 
     /// Attaches while the caller holds this session's lifecycle gate. Keeping
     /// resume and insertion behind the same gate prevents an old service from
     /// being inserted after a settings update has committed.
-    async fn attach_session_locked(&self, session_id: &str) -> Result<Arc<SessionService>> {
+    async fn attach_session_locked(
+        &self,
+        session_id: &str,
+        operation_lease: Option<&sessions::SessionOperationLease>,
+    ) -> Result<Arc<SessionService>> {
         if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
             return Ok(Arc::clone(service));
         }
 
-        let service = Arc::new(self.resume_session(session_id).await?);
+        let service = Arc::new(self.resume_session(session_id, operation_lease).await?);
         let mut active = self.inner.active_sessions.write().await;
         if let Some(existing) = active.get(session_id) {
             return Ok(Arc::clone(existing));
@@ -1306,10 +1310,12 @@ impl SessionManager {
                     ));
                 }
                 self.inner.active_sessions.write().await.remove(session_id);
-                self.attach_session_locked(session_id).await?
+                self.attach_session_locked(session_id, Some(operation_lease))
+                    .await?
             }
         } else {
-            self.attach_session_locked(session_id).await?
+            self.attach_session_locked(session_id, Some(operation_lease))
+                .await?
         };
         Ok(service)
     }
@@ -1849,7 +1855,11 @@ impl SessionManager {
         Ok(())
     }
 
-    async fn resume_session(&self, session_id: &str) -> Result<SessionService> {
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        operation_lease: Option<&sessions::SessionOperationLease>,
+    ) -> Result<SessionService> {
         let summary = self
             .list_sessions(false)
             .await?
@@ -1863,14 +1873,26 @@ impl SessionManager {
             &summary.cwd
         };
         let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
-        let run_config = runtime::build_resume_config_for_session(
-            self.inner.store_path.clone(),
-            session_id,
-            &config,
-            self.inner.root_cwd.clone(),
-            Some(self.inner.worker_executable.clone()),
-        )
-        .await?;
+        let run_config = if let Some(operation_lease) = operation_lease {
+            runtime::build_resume_config_for_session_with_lease(
+                self.inner.store_path.clone(),
+                session_id,
+                &config,
+                self.inner.root_cwd.clone(),
+                Some(self.inner.worker_executable.clone()),
+                operation_lease,
+            )
+            .await?
+        } else {
+            runtime::build_resume_config_for_session(
+                self.inner.store_path.clone(),
+                session_id,
+                &config,
+                self.inner.root_cwd.clone(),
+                Some(self.inner.worker_executable.clone()),
+            )
+            .await?
+        };
         Ok(SessionService::from_orchestrator_run_config(run_config).service)
     }
 }
@@ -7798,6 +7820,115 @@ model = "gpt-5.2"
         assert!(listed.iter().all(|entry| !entry.active));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn session_snapshot_recovers_non_contiguous_transcript_tail() {
+        let _lock = SERVER_MODEL_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = temp_root("transcript_gap_recovery");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+        let transcript = vec![
+            Message::System {
+                content: "system".to_string(),
+            },
+            Message::User {
+                content: "first prompt".to_string(),
+            },
+            Message::Assistant {
+                content: Some("first answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+            Message::User {
+                content: "second prompt".to_string(),
+            },
+            Message::Assistant {
+                content: Some("second answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+            Message::User {
+                content: "third prompt".to_string(),
+            },
+            Message::Assistant {
+                content: Some("third answer".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        ];
+        seed_session_with_messages(
+            &root,
+            "target",
+            "2026-01-02 00:00:00.000000000",
+            transcript.clone(),
+        );
+        let orphan = Message::User {
+            content: "must not be exposed".to_string(),
+        };
+        nac_core::test_support::store::append_thread_event(
+            &root.join("store.db"),
+            "target",
+            nac_core::test_support::store::ORCHESTRATOR_STEERING_TARGET,
+            &nac_core::test_support::store::encode_transcript_log_entry(8, &orphan).unwrap(),
+        )
+        .unwrap();
+        let manager = test_manager(&root);
+        let gate = manager.lifecycle_gate("target");
+        let lifecycle = gate.lock().await;
+        let operation_lease =
+            sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "target").unwrap();
+        manager
+            .attach_current_operation_service_locked("target", &operation_lease)
+            .await
+            .expect("cold prompt attach must reuse its existing operation lease");
+        drop(lifecycle);
+        drop(operation_lease);
+        let app = router(manager);
+
+        let response = get_response(app, "/sessions/target", None).await;
+        let status = response.status();
+        let body = response_body(response).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let snapshot: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(snapshot["messages"].as_array().unwrap().len(), 7);
+        let warning = snapshot["transcript_recovery_warning"].as_str().unwrap();
+        assert!(warning.contains("index 7"), "{warning}");
+        assert!(
+            warning.contains("1 untrusted transcript log row"),
+            "{warning}"
+        );
+        assert!(!warning.contains("must not be exposed"), "{warning}");
+        let summary = snapshot["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|summary| summary["session_id"] == "target")
+            .unwrap();
+        assert_eq!(summary["visible_message_count"], 6);
+        assert_eq!(summary["last_user_prompt"], "third prompt");
+        assert!(TranscriptLogWriter::new(&root.join("store.db"))
+            .unwrap()
+            .read_from("target", 7)
+            .unwrap()
+            .is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

@@ -358,6 +358,13 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
         },
     )
     .unwrap();
+    crate::store::open_runtime_connection(&store_path)
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET messages_json = ?1 WHERE session_id = 'session'",
+            rusqlite::params![serde_json::to_string(&agent.messages).unwrap()],
+        )
+        .unwrap();
     let instruction = "Drop the fun facts and recommend a niche OSS repository.";
     let queued = crate::store::queue_thread_steering(
         &store_path,
