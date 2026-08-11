@@ -8,7 +8,7 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-use crate::events::{decode_stderr_event, AgentEvent};
+use crate::events::{decode_stderr_event, sanitize_external_agent_event, AgentEvent};
 use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
 use crate::tools::{ThreadCancellation, ToolRuntime};
@@ -21,6 +21,7 @@ pub(super) struct WorkerRun {
     pub(super) cancelled: bool,
     pub(super) timeout_reason: Option<String>,
     pub(super) usage: Option<TokenUsage>,
+    pub(super) model_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -258,6 +259,7 @@ pub(super) async fn run_worker(
         let mut lines = reader.lines();
         let mut output = String::new();
         let mut worker_usage = TokenUsage::default();
+        let mut model_error = None;
         while let Ok(Some(line)) = lines.next_line().await {
             if stderr_cancellation.is_cancelled() {
                 break;
@@ -269,6 +271,15 @@ pub(super) async fn run_worker(
                 } = &event
                 {
                     worker_usage += usage.clone();
+                }
+                if matches!(event, AgentEvent::ModelError { .. }) {
+                    if let Some(AgentEvent::ModelError { message, .. }) =
+                        sanitize_external_agent_event(event.clone())
+                    {
+                        if !message.trim().is_empty() {
+                            model_error = Some(message);
+                        }
+                    }
                 }
                 event_sink.emit(event);
             } else {
@@ -291,7 +302,7 @@ pub(super) async fn run_worker(
         } else {
             Some(worker_usage)
         };
-        (output, usage)
+        (output, usage, model_error)
     });
 
     let stdout = child.stdout.take().unwrap();
@@ -340,12 +351,12 @@ pub(super) async fn run_worker(
     }
 
     let readers = async {
-        let (stderr, worker_usage) = stderr_handle.await.unwrap_or_default();
+        let (stderr, worker_usage, model_error) = stderr_handle.await.unwrap_or_default();
         let stdout = stdout_handle.await.unwrap_or_default();
-        (stderr, worker_usage, stdout)
+        (stderr, worker_usage, model_error, stdout)
     };
     tokio::pin!(readers);
-    let (stderr, worker_usage, stdout) = if timed_out || cancelled {
+    let (stderr, worker_usage, model_error, stdout) = if timed_out || cancelled {
         readers.await
     } else {
         tokio::select! {
@@ -380,6 +391,7 @@ pub(super) async fn run_worker(
         cancelled,
         timeout_reason,
         usage: worker_usage,
+        model_error,
     })
 }
 
@@ -581,6 +593,69 @@ exit 0
         assert!(!root.join("late-write").exists());
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn worker_retains_latest_sanitized_model_error_separately_from_stderr() {
+        let root = std::env::temp_dir().join(format!("nac_worker_error_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker.sh");
+        let model_started = serde_json::to_string(&AgentEvent::ModelCallStarted {
+            thread_name: Some("worker".to_string()),
+            iteration: 3,
+        })
+        .unwrap();
+        let first = serde_json::to_string(&AgentEvent::ModelError {
+            thread_name: Some("worker".to_string()),
+            message: "first model error".to_string(),
+        })
+        .unwrap();
+        let second = serde_json::to_string(&AgentEvent::ModelError {
+            thread_name: Some("worker".to_string()),
+            message: "x".repeat(700),
+        })
+        .unwrap();
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' '{prefix}{model_started}' >&2\n\
+             printf '%s\\n' '{prefix}{first}' >&2\n\
+             printf '%s\\n' 'pid file already exists' >&2\n\
+             printf '%s\\n' '{prefix}{second}' >&2\n\
+             printf '%s\\n' 'MCP unavailable' >&2\nexit 1\n",
+            prefix = crate::events::STDERR_EVENT_PREFIX,
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let run = run_worker(
+            &runtime,
+            &ModelClient::new_for_test(),
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(run.exit_code, 1);
+        assert_eq!(run.model_error.as_deref(), Some("x".repeat(600).as_str()));
+        assert_eq!(run.stderr, "pid file already exists\nMCP unavailable");
+        assert!(!run.stderr.contains(crate::events::STDERR_EVENT_PREFIX));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn worker_model_transport_is_complete_with_absent_effort_and_empty_headers() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
