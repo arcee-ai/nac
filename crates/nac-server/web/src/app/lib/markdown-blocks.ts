@@ -1,21 +1,17 @@
 // Splitting streamed markdown into independently parsable top-level blocks.
 
-/** Opening or closing fence: up to three spaces, then three or more ` or ~. */
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
-const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-const LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
-const INDENTED_CODE = /^(?: {4}|\t)/;
-const BLANK = /^[ \t]*$/;
+import {
+  BLANK,
+  CLOSING_MATH_FENCE,
+  FENCE,
+  INDENTED_CODE,
+  LIST_ITEM,
+  MATH_FENCE,
+  closesFence,
+} from "@/app/lib/markdown-lines";
 
 /** What the block being scanned is, when that decides whether a blank line ends it. */
 type BlockKind = "list" | "code" | "other";
-
-function closes(line: string, opener: string): boolean {
-  const match = CLOSING_FENCE.exec(line);
-  if (!match) return false;
-  const found = match[1];
-  return found[0] === opener[0] && found.length >= opener.length;
-}
 
 /**
  * Whether `line` can still belong to the open block rather than start a new one.
@@ -45,13 +41,22 @@ export function splitMarkdownBlocks(source: string): string[] {
   const blocks: string[] = [];
   let start = 0;
   let openFence: string | null = null;
+  let openMath = false;
   let kind: BlockKind | null = null;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
 
     if (openFence !== null) {
-      if (closes(line, openFence)) openFence = null;
+      if (closesFence(line, openFence)) openFence = null;
+      continue;
+    }
+
+    // Display math is a fence of its own, and the rows of an aligned
+    // environment are routinely separated by the blank lines this would
+    // otherwise cut at.
+    if (openMath) {
+      if (CLOSING_MATH_FENCE.test(line)) openMath = false;
       continue;
     }
 
@@ -74,6 +79,12 @@ export function splitMarkdownBlocks(source: string): string[] {
     const fence = FENCE.exec(line);
     if (fence) {
       openFence = fence[1];
+      kind ??= "other";
+      continue;
+    }
+
+    if (MATH_FENCE.test(line)) {
+      openMath = true;
       kind ??= "other";
       continue;
     }

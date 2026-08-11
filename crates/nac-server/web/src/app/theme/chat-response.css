@@ -40,8 +40,25 @@
   }
 }
 
-.chat-response .katex-error {
-  color: var(--color-text-basic-tertiary) !important;
+/* MathJax renders a formula as text in its own fonts and ships a stylesheet
+   with it, so all that is left here is what it leaves to the page. */
+.chat-response mjx-container {
+  color: var(--color-text-basic-primary);
+}
+
+/* A formula wider than the transcript scrolls on its own rather than stretching
+   the message around it. */
+.chat-response mjx-container[display="true"] {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.25rem;
+}
+
+/* TeX MathJax could not parse is left in place, marked with an inline red that
+   the theme overrides with its own. */
+.chat-response .mathjax-error {
+  color: var(--color-text-error-primary) !important;
 }
 
 .chat-response h1,

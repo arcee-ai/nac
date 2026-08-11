@@ -23,6 +23,14 @@ let epoch = 0;
 let startedAt = 0;
 const counters = new Map<string, Counter>();
 const lastLogAt = new Map<string, number>();
+const events: Array<{
+  atMs: number;
+  epoch: number;
+  tag: string;
+  ms?: number;
+  fields: Record<string, number | string>;
+}> = [];
+const MAX_EVENTS = 2000;
 
 export function perfEnabled(): boolean {
   return DEV && enabled;
@@ -60,6 +68,15 @@ export interface PerfOptions {
 /** Record one occurrence of `tag` and, subject to throttling, print it. */
 export function perfMark(tag: string, options: PerfOptions = {}): void {
   if (!DEV || !enabled) return;
+
+  events.push({
+    atMs: startedAt ? performance.now() - startedAt : 0,
+    epoch,
+    tag,
+    ms: options.ms,
+    fields: options.fields ?? {},
+  });
+  if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
 
   const entry = counter(tag);
   entry.count += 1;
@@ -136,6 +153,7 @@ function report(): void {
 function reset(): void {
   counters.clear();
   lastLogAt.clear();
+  events.length = 0;
   epoch = 0;
   startedAt = performance.now();
 }
@@ -158,6 +176,9 @@ if (DEV) {
     reset,
     get counters() {
       return Object.fromEntries(counters);
+    },
+    get events() {
+      return events.slice();
     },
   };
 }

@@ -277,9 +277,7 @@ export function ConfigurationsPanel({
     ? defaultModel
     : models.some((model) => model.id === configuredModel)
       ? configuredModel
-      : (models[0]?.id ??
-        modelOverride ??
-        (defaultModel || configuredModel));
+      : (models[0]?.id ?? modelOverride ?? (defaultModel || configuredModel));
 
   /** Passing null hands the choice back to the default above. */
   const switchSource = (next: Source | null) => {
@@ -298,20 +296,27 @@ export function ConfigurationsPanel({
     ? (configurations.find((entry) => entry.config_id === configId) ?? null)
     : null;
 
+  // The session's own provider, endpoint and credential, none of them touched.
+  // The model is deliberately not part of this: pointing the session at another
+  // model the same provider serves is a change the existing setup absorbs,
+  // rather than one that makes the form ask for a credential all over again.
+  const preservesInitial = Boolean(
+    initial &&
+    picked === null &&
+    source.kind === "new" &&
+    backend === initial.backend &&
+    baseUrlDraft.trim() === initial.base_url &&
+    !apiKey.trim(),
+  );
+
   const selection = useMemo<LaunchModelSelection | null>(() => {
-    const preservesInitial =
-      initial &&
-      picked === null &&
-      source.kind === "new" &&
-      backend === initial.backend &&
-      modelDraft.trim() === initial.model &&
-      baseUrlDraft.trim() === initial.base_url &&
-      !apiKey.trim();
-    if (preservesInitial) {
+    if (initial && preservesInitial) {
+      const model = provider === CUSTOM ? modelDraft.trim() : chosenModel;
+      if (!model) return null;
       return {
         kind: "resolved",
         backend: initial.backend,
-        model: initial.model,
+        model,
         base_url: initial.base_url,
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
@@ -411,6 +416,7 @@ export function ConfigurationsPanel({
   }, [
     source.kind,
     initial,
+    preservesInitial,
     picked,
     catalogPick,
     catalogCredential,
@@ -458,24 +464,17 @@ export function ConfigurationsPanel({
    * A hand-written setup has no credential to settle: its URL and model are the
    * fields being filled in, so having them is the equivalent milestone.
    */
-  const credentialReady =
-    initial &&
-    picked === null &&
-    source.kind === "new" &&
-    backend === initial.backend &&
-    modelDraft.trim() === initial.model &&
-    baseUrlDraft.trim() === initial.base_url &&
-    !apiKey.trim()
-      ? true
-      : source.kind === "catalog"
-        ? Boolean(catalogPick) && (catalogCredential || keyValidated)
-        : source.kind === "new"
-          ? provider === CUSTOM
-            ? Boolean(baseUrlDraft.trim() && modelDraft.trim())
-            : needsKey
-              ? keyValidated
-              : signedIn
-          : Boolean(resolved);
+  const credentialReady = preservesInitial
+    ? true
+    : source.kind === "catalog"
+      ? Boolean(catalogPick) && (catalogCredential || keyValidated)
+      : source.kind === "new"
+        ? provider === CUSTOM
+          ? Boolean(baseUrlDraft.trim() && modelDraft.trim())
+          : needsKey
+            ? keyValidated
+            : signedIn
+        : Boolean(resolved);
 
   const keyInvalid = validation.status === "error";
   // A login that cannot read the model index leaves the same empty list as a
