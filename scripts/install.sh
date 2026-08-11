@@ -66,6 +66,14 @@ download "$url" "$archive"
 
 mkdir -p "$INSTALL_DIR"
 tar -xzf "$archive" -C "$tmpdir"
+
+for bin in nac-web nac; do
+  if [ ! -f "$tmpdir/$bin" ]; then
+    echo "archive $asset is missing $bin; aborting before changing $INSTALL_DIR" >&2
+    exit 1
+  fi
+done
+
 install -m 755 "$tmpdir/nac-web" "$INSTALL_DIR/nac-web"
 install -m 755 "$tmpdir/nac" "$INSTALL_DIR/nac"
 
