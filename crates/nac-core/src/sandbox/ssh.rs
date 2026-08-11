@@ -66,6 +66,25 @@ impl SshBackend {
         command.arg(remote_command);
         command
     }
+    pub(crate) fn sftp_command(&self) -> Result<Command> {
+        prepare_control_socket_dir(&self.control_path).with_context(|| {
+            format!(
+                "failed to create ssh control directory for {}",
+                self.control_path.display()
+            )
+        })?;
+        let mut command = Command::new("ssh");
+        command.args(self.ssh_args());
+        command.arg("-s");
+        command.arg("--");
+        command.arg(&self.connection.host);
+        command.arg("sftp");
+        command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        command.kill_on_drop(true);
+        Ok(command)
+    }
 
     fn remote_command_in_dir(
         &self,
