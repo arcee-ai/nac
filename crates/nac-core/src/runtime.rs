@@ -1118,6 +1118,7 @@ pub async fn build_resume_config(
         config,
         lookup_cwd,
         options.worker_executable,
+        None,
     )
     .await
 }
@@ -1136,6 +1137,27 @@ pub async fn build_resume_config_for_session(
         config,
         resume_base_cwd,
         worker_executable,
+        None,
+    )
+    .await
+}
+
+pub async fn build_resume_config_for_session_with_lease(
+    store_path: PathBuf,
+    session_id: &str,
+    config: &NacConfig,
+    resume_base_cwd: PathBuf,
+    worker_executable: Option<PathBuf>,
+    operation_lease: &sessions::SessionOperationLease,
+) -> Result<OrchestratorRunConfig> {
+    let snapshot = sessions::load_session(&store_path, session_id)?;
+    build_resume_config_from_snapshot(
+        snapshot,
+        store_path,
+        config,
+        resume_base_cwd,
+        worker_executable,
+        Some(operation_lease),
     )
     .await
 }
@@ -1146,8 +1168,9 @@ async fn build_resume_config_from_snapshot(
     config: &NacConfig,
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
+    operation_lease: Option<&sessions::SessionOperationLease>,
 ) -> Result<OrchestratorRunConfig> {
-    let snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
+    let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     // Resume reaches the host with the connection the session recorded, not with
     // whatever the local ssh config happens to say now.
     let ssh = snapshot.ssh.clone();
@@ -1287,9 +1310,15 @@ async fn build_resume_config_from_snapshot(
     // appended after the last snapshot save are merged over the blob, and a
     // dangling tool turn is trimmed from both (crash-resume normalization).
     // An empty log tail is exactly the pre-log restore path.
-    agent
-        .restore_messages_merging_log_tail(snapshot.messages.clone())
-        .await?;
+    // Gap recovery can also rewrite the blob itself (a dangling turn trimmed
+    // out of it): install the repaired blob so store-backed transcript reads
+    // do not serve the discarded turn from the stale pre-repair snapshot.
+    if let Some(repaired_blob) = agent
+        .restore_messages_merging_log_tail(snapshot.messages.clone(), operation_lease)
+        .await?
+    {
+        snapshot.messages = repaired_blob;
+    }
     agent.restore_compaction_checkpoint()?;
 
     let session_id = snapshot.session_id.clone();
@@ -2539,6 +2568,7 @@ X-Config = "yes"
             &NacConfig::default(),
             root.clone(),
             None,
+            None,
         )
         .await
         {
@@ -3035,6 +3065,7 @@ X-Config = "yes"
             &NacConfig::default(),
             PathBuf::from("/local/resume/base"),
             None,
+            None,
         )
         .await
         {
@@ -3070,6 +3101,7 @@ X-Config = "yes"
             store_path.clone(),
             &complete_model_config(),
             PathBuf::from("/local/resume/base"),
+            None,
             None,
         )
         .await
