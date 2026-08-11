@@ -14,10 +14,7 @@ import {
   Separator,
 } from "@/app/atoms";
 import { AuthenticationRow } from "@/app/components/modals/AuthenticationRow";
-import {
-  CatalogModelPicker,
-  type CatalogPick,
-} from "@/app/components/modals/CatalogModelPicker";
+import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { PROTOCOL_ITEMS } from "@/app/components/modals/options";
@@ -29,13 +26,15 @@ import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, modelItems, type Validation } from "@/app/lib/apiKey";
+import { type CatalogPick, defaultCatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
   PROVIDER_KINDS,
   providerLabel,
   providerUsesApiKey,
 } from "@/app/lib/providers";
-import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { humanErrorText } from "@/app/lib/providerError";
+import { useToast } from "@/app/providers/ToastProvider";
 import {
   useDeleteModelConfig,
   useManagedProviderModels,
@@ -115,7 +114,9 @@ export function ConfigurationsPanel({
   // Null until the user picks a source themselves, so the default below can
   // still settle once the list arrives.
   const [picked, setPicked] = useState<Source | null>(null);
-  const [catalogPick, setCatalogPick] = useState<CatalogPick | null>(null);
+  // Null until the user picks a model out of the catalog, which leaves the
+  // default below in place.
+  const [pickedModel, setPickedModel] = useState<CatalogPick | null>(null);
   const [provider, setProvider] = useState<ProviderChoice>("arcee-api");
   const [protocol, setProtocol] = useState<BackendKind>("arcee-api");
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -141,6 +142,16 @@ export function ConfigurationsPanel({
     (latestSaved
       ? { kind: "saved", configId: latestSaved.config_id }
       : { kind: "catalog" });
+
+  // The catalog opens on nac's default model rather than on an empty picker,
+  // which is what makes a first session — nothing saved, so this is the source
+  // that opens — a single click. Derived, so the default settles once the catalog
+  // arrives and disappears again the moment another source is chosen.
+  const catalogDefault = useMemo(
+    () => (source.kind === "catalog" ? defaultCatalogPick(catalog.data) : null),
+    [source.kind, catalog.data],
+  );
+  const catalogPick = pickedModel ?? catalogDefault;
 
   // A catalog entry names its own provider; everywhere else the dropdown does.
   const backend: BackendKind =
@@ -210,7 +221,7 @@ export function ConfigurationsPanel({
     : keyQuery.isFetching
       ? { status: "validating" }
       : keyQuery.error
-        ? { status: "error", message: errorMessage(keyQuery.error) }
+        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
         : keyQuery.data
           ? {
               status: "ready",
@@ -227,7 +238,9 @@ export function ConfigurationsPanel({
   const resolved =
     resolvedTarget && !configQuery.error ? (configQuery.data ?? null) : null;
   const resolveError =
-    resolvedTarget && configQuery.error ? errorMessage(configQuery.error) : "";
+    resolvedTarget && configQuery.error
+      ? humanErrorText(configQuery.error, backend)
+      : "";
 
   // A saved setup is a starting point rather than a lock: these follow what the
   // server resolved until the user changes them for the session being created.
@@ -255,7 +268,7 @@ export function ConfigurationsPanel({
     setBaseUrlOverride(null);
     setModelOverride(null);
     if (next?.kind !== "file") setFilePath("");
-    if (next?.kind !== "catalog") setCatalogPick(null);
+    if (next?.kind !== "catalog") setPickedModel(null);
     if (next?.kind !== "new" && next?.kind !== "catalog") setNameDraft(null);
   };
 
@@ -388,7 +401,9 @@ export function ConfigurationsPanel({
       if (configId === id) switchSource(null);
       toast.success(`Configuration ${label} removed`);
     } catch (error) {
-      toast.error(`Failed to remove the configuration: ${errorMessage(error)}`);
+      toast.error(
+        `Failed to remove the configuration: ${humanErrorText(error)}`,
+      );
     }
   };
 
@@ -415,7 +430,7 @@ export function ConfigurationsPanel({
   // A login that cannot read the model index leaves the same empty list as a
   // provider with nothing to offer, so saying which one it is has to be explicit.
   const modelListError = loginQuery.isError
-    ? errorMessage(loginQuery.error)
+    ? humanErrorText(loginQuery.error, backend)
     : (resolved?.models_error ?? "");
   const boxInvalid =
     invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
@@ -498,7 +513,7 @@ export function ConfigurationsPanel({
                     failed={catalog.isError}
                     value={catalogPick}
                     onSelect={(pick) => {
-                      setCatalogPick(pick);
+                      setPickedModel(pick);
                       setApiKey("");
                       setNameDraft(null);
                     }}

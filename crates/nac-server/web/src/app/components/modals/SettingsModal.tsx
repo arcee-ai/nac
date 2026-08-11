@@ -56,6 +56,7 @@ import {
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
 import { providerUsesApiKey } from "@/app/lib/providers";
+import { humanErrorText } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
 import {
@@ -336,7 +337,7 @@ function SettingsForm({
     : keyQuery.isFetching
       ? { status: "validating" }
       : keyQuery.isError
-        ? { status: "error", message: errorMessage(keyQuery.error) }
+        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
         : keyQuery.data
           ? {
               status: "ready",
@@ -519,11 +520,11 @@ function SettingsForm({
       toast.success("Session settings saved");
       onClose();
     } catch (saveError) {
-      const message = errorMessage(saveError);
+      const busyRun = saveError instanceof ApiError && saveError.status === 409;
       toast.error(
-        /HTTP 409/.test(message)
+        busyRun
           ? "Session is busy — try again after the run finishes"
-          : `Error: ${message}`,
+          : `Error: ${humanErrorText(saveError, backend)}`,
       );
     }
   };
@@ -911,7 +912,9 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
       label="Authentication"
       validation={failed || expired}
       validationText={
-        failed ? state.message : expired ? errorMessage(reach.error) : undefined
+        failed || expired
+          ? humanErrorText(failed ? state.message : reach.error, backend)
+          : undefined
       }
       hintText={
         signedIn

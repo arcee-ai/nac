@@ -25,7 +25,7 @@ import {
   TabButtonVariant,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { catalogBaseUrl } from "@/app/lib/catalog";
+import { catalogBaseUrl, type CatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { formatTokensCompact } from "@/app/lib/format";
 import { providerLabel, providerOrder } from "@/app/lib/providers";
@@ -38,13 +38,6 @@ import type {
   ModelCostRates,
   ProviderModel,
 } from "@/app/types/api";
-
-export interface CatalogPick {
-  backend: BackendKind;
-  model: string;
-  /** The endpoint the catalog names for this provider, managed one first. */
-  baseUrl: string;
-}
 
 interface Row {
   provider: CatalogProvider;

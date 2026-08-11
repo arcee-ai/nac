@@ -10,10 +10,7 @@ import {
   type SelectItem,
   Separator,
 } from "@/app/atoms";
-import {
-  CatalogModelPicker,
-  type CatalogPick,
-} from "@/app/components/modals/CatalogModelPicker";
+import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import {
   EFFORT_LEVEL_OPTIONS,
@@ -22,6 +19,7 @@ import {
 import {
   catalogBaseUrl,
   catalogProviderForModel,
+  type CatalogPick,
   resolveCatalogModel,
 } from "@/app/lib/catalog";
 import { useModelCatalog } from "@/app/services/queries";

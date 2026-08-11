@@ -1,0 +1,36 @@
+import type React from "react";
+
+import { cn } from "@/app/lib/cn";
+
+/**
+ * Paths exported from the Figma "SessionIllustration" layer (viewBox 0 0 95 96).
+ * The export hard-codes the dark-mode fill, so the fill is left to CSS here and
+ * defaults to the `fill-muted` token the design uses.
+ */
+const GRID_PATH =
+  "M95 64.7797H79.5544V78.0484H95V96H0V31.2203H61.7894V0H95V64.7797ZM33.2129 93.6586H46.3415V80.3898H33.2129V93.6586ZM48.6585 93.6586H61.7894V80.3898H48.6585V93.6586ZM79.5544 93.6586H92.6829V80.3898H79.5544V93.6586ZM2.31707 78.0484H15.4479V64.7797H2.31707V78.0484ZM17.765 78.0484H30.8936V49.1718H17.765V78.0484ZM33.2106 78.0484H46.3415V64.7797H33.2106V78.0484ZM2.31707 62.4383H15.4479V49.1718H2.31707V62.4383ZM48.6585 62.4383H61.7894V49.1718H48.6585V62.4383ZM64.1064 62.4383H77.235V49.1718H64.1064V62.4383ZM79.5544 62.4383H92.6829V49.1718H79.5544V62.4383ZM17.765 46.8304H30.8936V33.5617H17.765V46.8304ZM33.2129 46.8282H46.3415V33.5617H33.2129V46.8282ZM79.5544 46.8282H92.6829V33.5617H79.5544V46.8282ZM64.1064 31.2203H77.235V17.9516H64.1064V31.2203ZM64.1064 15.6101H77.235V2.34141H64.1064V15.6101ZM79.5544 15.6101H92.6829V2.34141H79.5544V15.6101Z";
+
+const BAR_PATH =
+  "M48.6585 17.9516H0V0H48.6585V17.9516ZM2.31707 15.6101H15.4479V2.34141H2.31707V15.6101ZM17.765 15.6101H30.8936V2.34141H17.765V15.6101Z";
+
+interface SessionIllustrationProps {
+  className?: string;
+}
+
+const SessionIllustration: React.FC<SessionIllustrationProps> = ({
+  className = "",
+}) => (
+  <svg
+    width={95}
+    height={96}
+    viewBox="0 0 95 96"
+    xmlns="http://www.w3.org/2000/svg"
+    className={cn("fill-basic-muted", className)}
+    aria-hidden
+  >
+    <path fillRule="evenodd" clipRule="evenodd" d={GRID_PATH} />
+    <path fillRule="evenodd" clipRule="evenodd" d={BAR_PATH} />
+  </svg>
+);
+
+export default SessionIllustration;

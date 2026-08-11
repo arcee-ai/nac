@@ -27,6 +27,8 @@ import {
   Loader,
   LoaderSize,
   Logo,
+  ChatSessionMessage,
+  ChatSessionMessageVariant,
   MessageBox,
   MessageBoxVariant,
   Modal,
@@ -108,7 +110,9 @@ export default function DesignPreviewPage() {
             <Button variant={ButtonVariant.Secondary}>Secondary</Button>
             <Button variant={ButtonVariant.Tertiary}>Tertiary</Button>
             <Button variant={ButtonVariant.Ghost}>Ghost</Button>
-            <Button variant={ButtonVariant.GhostDestructive}>Destructive</Button>
+            <Button variant={ButtonVariant.GhostDestructive}>
+              Destructive
+            </Button>
             <Button variant={ButtonVariant.Primary} loading>
               Loading
             </Button>
@@ -267,6 +271,36 @@ export default function DesignPreviewPage() {
                 title="Branch switched"
                 className="w-[280px]"
               />
+            </div>
+            <div className="flex flex-col gap-2 w-[398px]">
+              <ChatSessionMessage
+                variant={ChatSessionMessageVariant.Danger}
+                title="Message Title"
+                action={{ label: "Message CTA", onClick: () => {} }}
+              >
+                Message description
+              </ChatSessionMessage>
+              <ChatSessionMessage
+                variant={ChatSessionMessageVariant.Error}
+                title="Message Title"
+                action={{ label: "Message CTA", onClick: () => {} }}
+              >
+                Message description
+              </ChatSessionMessage>
+              <ChatSessionMessage
+                variant={ChatSessionMessageVariant.Success}
+                title="Message Title"
+                action={{ label: "Message CTA", onClick: () => {} }}
+              >
+                Message description
+              </ChatSessionMessage>
+              <ChatSessionMessage
+                variant={ChatSessionMessageVariant.Info}
+                title="Message Title"
+                action={{ label: "Message CTA", onClick: () => {} }}
+              >
+                Message description
+              </ChatSessionMessage>
             </div>
             <div className="flex flex-wrap items-center gap-6">
               <CircularLoader size={LoaderSize.Medium} />

@@ -1,6 +1,12 @@
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
+import {
+  Button,
+  ButtonContent,
+  ButtonVariant,
+  Modal,
+  ModalSize,
+} from "@/app/atoms";
 import { displaySessionTitle, shortId } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";

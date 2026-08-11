@@ -12,14 +12,18 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
+  ChatSessionMessage,
+  ChatSessionMessageVariant,
   Icon,
   IconName,
   MessageBox,
   MessageBoxSize,
   MessageBoxVariant,
 } from "@/app/atoms";
+import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { cn } from "@/app/lib/cn";
@@ -28,6 +32,7 @@ import {
   displayPromptFromMessageText,
   formatStoreTime,
 } from "@/app/lib/format";
+import { humanErrorText } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import type { SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
@@ -74,11 +79,12 @@ interface TranscriptProps {
   panel: SessionPanel;
   /** Brings the matching side panel forward when the chat points at a row. */
   onFocusPanel: (panel: SessionPanel) => void;
-  /** Session-level failure (broken config / snapshot fetch), shown in the chat. */
-  errorNotice?: {
-    message: string;
-    action?: { label: string; onClick: () => void };
-  } | null;
+  /**
+   * The failure the chat reports — a broken config, an unreadable snapshot, or
+   * whatever the provider refused the run over — already put into words and
+   * paired with whatever can be done about it.
+   */
+  errorNotice?: ErrorNotice | null;
 }
 
 export function TranscriptRecoveryNotice({
@@ -144,6 +150,8 @@ export function Transcript({
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const toast = useToast();
+  const backend = snapshot?.metadata.backend ?? null;
+  const toNotice = useErrorNotice(sessionId, backend);
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
   const olderMessages = useLoadOlderMessages(sessionId);
@@ -168,11 +176,14 @@ export function Transcript({
         top: scroller.scrollTop,
       };
     }
-    void olderMessages.mutateAsync().then((accepted) => {
-      if (!accepted) prependAnchor.current = null;
-    }).catch(() => {
-      prependAnchor.current = null;
-    });
+    void olderMessages
+      .mutateAsync()
+      .then((accepted) => {
+        if (!accepted) prependAnchor.current = null;
+      })
+      .catch(() => {
+        prependAnchor.current = null;
+      });
   }, [olderMessages, scrollRef]);
 
   perfRender("Transcript");
@@ -229,13 +240,12 @@ export function Transcript({
             `▶ resent: ${response.display_prompt.slice(0, 80)}`,
           );
         } catch (err) {
-          const message = errorMessage(err);
-          pushLocalEvent("error", `resend failed: ${message}`, true);
-          toast.error(`Failed to resend: ${message}`);
+          pushLocalEvent("error", `resend failed: ${errorMessage(err)}`, true);
+          toast.error(`Failed to resend: ${humanErrorText(err, backend)}`);
         }
       })();
     },
-    [actionsBusy, regenerate, sessionId, toast],
+    [actionsBusy, backend, regenerate, sessionId, toast],
   );
 
   const openRevert = useCallback((messageIdx: number, prompt: string) => {
@@ -335,13 +345,37 @@ export function Transcript({
     ],
   );
 
+  // A session nobody has written to yet offers starter prompts in place of the
+  // transcript, and they are centred in the space the messages would fill.
+  // Emptiness is measured in turns rather than in the message page: every
+  // session opens with a system prompt, which the page counts and the
+  // transcript does not show.
+  const showInitialPrompts = Boolean(
+    snapshot && turns.length === 0 && !running && !showPending,
+  );
+
   const runError = error && !running ? error : null;
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
-  const notice = errorNotice ?? (runError ? { message: runError } : null);
+  const notice = errorNotice ?? (runError ? toNotice(runError) : null);
 
   return (
     <div className="relative flex-1 min-h-0">
+      {/* The starter prompts sit beside the transcript rather than inside it:
+          the scroll region follows its own bottom edge, which would pin a
+          column of prompts under the composer and cut off the first ones. */}
+      {showInitialPrompts ? (
+        <div
+          className={cn(
+            "absolute inset-x-0 top-[96px] flex overflow-auto px-4 md:top-[72px] md:px-0",
+            isMobile ? "bottom-[128px]" : "bottom-[136px]",
+          )}
+        >
+          <div className="m-auto w-full max-w-[840px]">
+            <InitialPrompts />
+          </div>
+        </div>
+      ) : null}
       <div ref={scrollRef} className="h-full overflow-auto">
         {/* The top bar is fixed over this scroll region, so the first message
             needs to clear it. */}
@@ -391,14 +425,6 @@ export function Transcript({
           <TranscriptRecoveryNotice
             warning={snapshot?.transcript_recovery_warning}
           />
-
-          {snapshot?.message_page?.total === 0 &&
-          !running &&
-          !showPending ? (
-            <div className="text-basic-muted label-small">
-              No messages yet. Type something below.
-            </div>
-          ) : null}
 
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
@@ -496,22 +522,14 @@ export function Transcript({
           ) : null}
 
           {notice ? (
-            <MessageBox
-              variant={MessageBoxVariant.Error}
-              size={MessageBoxSize.Medium}
-              title={notice.message}
-              className="w-fit max-w-full"
+            <ChatSessionMessage
+              role="alert"
+              variant={ChatSessionMessageVariant.Error}
+              title={notice.title}
+              action={notice.action}
             >
-              {notice.action ? (
-                <button
-                  type="button"
-                  className="underline hover:opacity-80"
-                  onClick={notice.action.onClick}
-                >
-                  {notice.action.label}
-                </button>
-              ) : null}
-            </MessageBox>
+              {notice.description}
+            </ChatSessionMessage>
           ) : null}
         </div>
       </div>

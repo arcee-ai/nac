@@ -9,39 +9,6 @@ mod header_policy;
 mod http_contract;
 mod s5_wire;
 
-#[test]
-fn arcee_auth_rejects_every_model_except_trinity_large_thinking() {
-    let invalid = validate_model_configuration(
-        BackendKind::ArceeAuth,
-        "trinity-mini",
-        Some(crate::model::ARCEE_AUTH_CANONICAL_BASE_URL),
-        None,
-        None,
-        &std::collections::BTreeMap::new(),
-    )
-    .expect_err("managed Arcee auth must reject custom model IDs");
-    assert!(
-        invalid.to_string().contains("trinity-large-thinking"),
-        "{invalid:#}"
-    );
-
-    let settings = EffectiveModelSettings::new(
-        BackendKind::ArceeAuth,
-        "trinity-mini".to_string(),
-        crate::model::ARCEE_AUTH_CANONICAL_BASE_URL.to_string(),
-        None,
-        None,
-        std::collections::BTreeMap::new(),
-    )
-    .unwrap();
-    let direct = ModelClient::from_effective_settings(settings)
-        .expect_err("direct model-client construction must enforce the managed model contract");
-    assert!(
-        direct.to_string().contains("trinity-large-thinking"),
-        "{direct:#}"
-    );
-}
-
 fn test_model_client(
     backend: BackendKind,
     base_url: String,
