@@ -1,17 +1,39 @@
 use serde::{Deserialize, Serialize};
 
-/// Parsed slash commands shared by frontends.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Slash commands understood by NAC.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SlashCommand {
     Compact,
 }
 
-/// Slash commands that require frontend-side handling rather than agent submission.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum FrontendCommand {
-    Compact,
+/// User-facing metadata shared by command parsing and frontend discovery.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct SlashCommandDefinition {
+    pub command: SlashCommand,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub accepts_arguments: bool,
+}
+
+const SLASH_COMMANDS: &[SlashCommandDefinition] = &[SlashCommandDefinition {
+    command: SlashCommand::Compact,
+    name: "compact",
+    description: "Compact the current session context",
+    accepts_arguments: false,
+}];
+
+pub fn slash_command_definitions() -> &'static [SlashCommandDefinition] {
+    SLASH_COMMANDS
+}
+
+impl SlashCommand {
+    pub fn definition(self) -> &'static SlashCommandDefinition {
+        SLASH_COMMANDS
+            .iter()
+            .find(|definition| definition.command == self)
+            .expect("every slash command must have a definition")
+    }
 }
 
 /// A prompt ready to send to the agent while preserving frontend display text.
@@ -28,7 +50,7 @@ pub struct PreparedPrompt {
 pub enum PreparedUserInput {
     Empty,
     SubmitPrompt(PreparedPrompt),
-    FrontendCommand(FrontendCommand),
+    FrontendCommand(SlashCommand),
     InvalidSlashCommand { message: String },
 }
 
@@ -38,9 +60,7 @@ pub fn prepare_user_input(input: &str) -> PreparedUserInput {
     }
 
     match parse_slash_command(input) {
-        Some(Ok(SlashCommand::Compact)) => {
-            PreparedUserInput::FrontendCommand(FrontendCommand::Compact)
-        }
+        Some(Ok(command)) => PreparedUserInput::FrontendCommand(command),
         Some(Err(message)) => PreparedUserInput::InvalidSlashCommand { message },
         None => PreparedUserInput::SubmitPrompt(PreparedPrompt {
             raw_prompt: input.to_string(),
@@ -60,11 +80,17 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
     let name_end = body.find(char::is_whitespace).unwrap_or(body.len());
     let name = &body[..name_end];
     let args = body[name_end..].trim();
+    let Some(definition) = SLASH_COMMANDS
+        .iter()
+        .find(|definition| definition.name == name)
+    else {
+        return Some(Err(format!("unknown slash command: /{}", name)));
+    };
 
-    Some(match name {
-        "compact" if args.is_empty() => Ok(SlashCommand::Compact),
-        "compact" => Err("usage: /compact".to_string()),
-        _ => Err(format!("unknown slash command: /{}", name)),
+    Some(if definition.accepts_arguments || args.is_empty() {
+        Ok(definition.command)
+    } else {
+        Err(format!("usage: /{}", definition.name))
     })
 }
 
@@ -97,11 +123,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_frontend_slash_commands() {
-        assert_eq!(
-            parse_slash_command("/compact"),
-            Some(Ok(SlashCommand::Compact))
-        );
+    fn registered_slash_commands_parse_by_canonical_name() {
+        for definition in slash_command_definitions() {
+            assert_eq!(
+                parse_slash_command(&format!("/{}", definition.name)),
+                Some(Ok(definition.command))
+            );
+        }
     }
 
     #[test]
@@ -112,7 +140,7 @@ mod tests {
         );
         assert_eq!(
             prepare_user_input("/compact"),
-            PreparedUserInput::FrontendCommand(FrontendCommand::Compact)
+            PreparedUserInput::FrontendCommand(SlashCommand::Compact)
         );
         assert_eq!(
             prepare_user_input("/compact now"),
