@@ -114,6 +114,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         )]),
         arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
         cache_ttl: None,
+        prompt_cache_key: None,
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
     };
     let messages = vec![
@@ -234,6 +235,7 @@ async fn custom_arcee_routes_are_exact_on_wire() {
             extra_headers: std::collections::BTreeMap::new(),
             arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
+            prompt_cache_key: None,
             resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
         };
 
@@ -279,6 +281,7 @@ async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_header
             )]),
             arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
+            prompt_cache_key: None,
             resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
         };
 
@@ -456,6 +459,7 @@ async fn arcee_multibyte_error_body_does_not_panic() {
         extra_headers: std::collections::BTreeMap::new(),
         arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
         cache_ttl: None,
+        prompt_cache_key: None,
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "test-model"),
     };
 
@@ -507,6 +511,39 @@ async fn send_turn_dispatches_on_the_resolved_api_not_the_backend() {
         "the responses wire shape proves api-axis dispatch: {body}"
     );
     assert!(body.get("messages").is_none());
+}
+
+#[tokio::test]
+async fn openai_send_turn_carries_session_cache_policy_to_the_wire() {
+    let server = ScriptedServer::start(vec![s5_openai_response()]);
+    let mut client = test_model_client(
+        BackendKind::OpenAiResponses,
+        server.base_url.clone(),
+        std::collections::BTreeMap::new(),
+    );
+    client.model = "gpt-5.6".to_string();
+    client.resolved_model = catalog::resolve(BackendKind::OpenAiResponses, "gpt-5.6");
+    let client = client.with_prompt_cache_key(Some("session-1".to_string()));
+    let body = s5_send_and_finish(
+        &client,
+        server,
+        vec![
+            Message::System {
+                content: "stable instructions".to_string(),
+            },
+            Message::User {
+                content: "changing request".to_string(),
+            },
+        ],
+    )
+    .await;
+
+    assert_eq!(body["prompt_cache_key"], "session-1");
+    assert_eq!(body["prompt_cache_options"], json!({"mode": "explicit"}));
+    assert_eq!(
+        body["input"][0]["content"][0]["prompt_cache_breakpoint"],
+        json!({"mode": "explicit"})
+    );
 }
 
 #[tokio::test]

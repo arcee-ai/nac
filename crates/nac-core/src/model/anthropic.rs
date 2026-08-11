@@ -55,9 +55,25 @@ pub(super) fn anthropic_messages_request(
         request["tools"] = Value::Array(tools_arr);
     }
 
-    // Breakpoint 3: last content block of the last message (conversation history).
-    if let Some(last_msg) = messages.last_mut() {
-        add_cache_control_to_last_block(last_msg, cache_ttl);
+    // Breakpoint 3: the user boundary that ended the prior provider request.
+    // Select it structurally rather than by user-message recency: steering can
+    // add more user messages after a tool-result batch and displace that
+    // stable boundary beyond Anthropic's 20-block lookback.
+    let latest_assistant = messages
+        .iter()
+        .rposition(|message| message.get("role").and_then(Value::as_str) == Some("assistant"));
+    let prior_user = latest_assistant.and_then(|assistant| {
+        messages[..assistant]
+            .iter()
+            .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+    });
+
+    // Breakpoint 4: the moving tip of the current request.
+    let latest_user = messages
+        .iter()
+        .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"));
+    for index in [prior_user, latest_user].into_iter().flatten() {
+        add_cache_control_to_last_block(&mut messages[index], cache_ttl);
     }
     request["messages"] = Value::Array(messages);
 
