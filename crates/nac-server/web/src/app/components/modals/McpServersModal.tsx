@@ -67,6 +67,8 @@ interface KvRow {
   value: string;
   stored: boolean;
   keepStored: boolean;
+  /** The key the secret is stored under; keeping only works under it. */
+  storedKey?: string;
   placeholder?: string;
 }
 
@@ -76,6 +78,7 @@ function rowsFromRecord(map: Record<string, string>): KvRow[] {
     value: "",
     stored: true,
     keepStored: true,
+    storedKey: key,
     placeholder: preview,
   }));
 }
@@ -90,7 +93,7 @@ function mapFromRows(rows: KvRow[]): Record<string, string | null> {
     const key = row.key.trim();
     if (!key) continue;
     if (!row.value) {
-      if (row.keepStored) map[key] = null;
+      if (row.keepStored && key === row.storedKey) map[key] = null;
       continue;
     }
     map[key] = row.value;
