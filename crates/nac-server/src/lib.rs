@@ -2111,14 +2111,14 @@ fn api_router(manager: SessionManager) -> Router {
             "/ssh-configs/{config_id}",
             patch(update_ssh_config_handler).delete(delete_ssh_config_handler),
         )
-        .route("/mcp/library", get(mcp_api::library_handler))
+        .route("/mcp_library/library", get(mcp_api::library_handler))
         .route(
-            "/mcp/servers",
+            "/mcp_library/servers",
             get(mcp_api::list_servers_handler).post(mcp_api::create_server_handler),
         )
-        .route("/mcp/servers/test", post(mcp_api::test_server_handler))
+        .route("/mcp_library/servers/test", post(mcp_api::test_server_handler))
         .route(
-            "/mcp/servers/{config_id}",
+            "/mcp_library/servers/{config_id}",
             patch(mcp_api::update_server_handler).delete(mcp_api::delete_server_handler),
         )
         .route("/auth", get(managed_auth::list_handler))
