@@ -496,6 +496,16 @@ function LaunchForm({
           >
             <div className="flex flex-col gap-2">
               <ConfigRow
+                label="Reasoning effort"
+                hint="Reasoning effort passed to the model."
+                control={smallSelect(
+                  reasoningItems,
+                  reasoning,
+                  edit(setReasoning),
+                )}
+              />
+              <Separator />
+              <ConfigRow
                 label="Advanced Configurations"
                 hint="Reasoning, compaction, extra headers and a first message."
                 control={
@@ -509,16 +519,6 @@ function LaunchForm({
 
               {advanced ? (
                 <>
-                  <Separator />
-                  <ConfigRow
-                    label="Reasoning"
-                    hint="Reasoning effort passed to the model."
-                    control={smallSelect(
-                      reasoningItems,
-                      reasoning,
-                      edit(setReasoning),
-                    )}
-                  />
                   <Separator />
                   <ConfigRow
                     label="Orchestrator compaction threshold"
