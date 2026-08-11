@@ -51,6 +51,27 @@ fn deserialize_token_accounting(
     }
 }
 
+/// Diagnostic prefix `load_session_config` uses for an unparseable
+/// `mixed_models_json` column, so callers can require an explicit repair
+/// instead of persisting the loss.
+pub const MALFORMED_MIXED_MODELS_DIAGNOSTIC: &str = "malformed stored mixed models";
+
+pub(super) fn serialize_mixed_models(mixed: Option<&MixedModeConfig>) -> Result<Option<String>> {
+    mixed
+        .map(|config| {
+            serde_json::to_string(config).context("failed to serialize session mixed models")
+        })
+        .transpose()
+}
+
+pub(super) fn deserialize_mixed_models(raw: Option<&str>) -> Result<Option<MixedModeConfig>> {
+    raw.map(|json| {
+        serde_json::from_str::<MixedModeConfig>(json)
+            .context("failed to parse stored session mixed models")
+    })
+    .transpose()
+}
+
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
@@ -187,6 +208,7 @@ pub fn update_session_config(
                 .map(|effort| effort.as_str().to_string()),
             api_key_env: snapshot.api_key_env.clone(),
             extra_headers_json,
+            mixed_models: snapshot.mixed_models.clone(),
             orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
             config_version: snapshot.config_version,
             diagnostics: Vec::new(),
@@ -207,6 +229,7 @@ pub fn update_raw_session_config(
         SessionConfigUpdateError::Store(anyhow!("session configuration version overflow"))
     })?;
 
+    let mixed_models_json = serialize_mixed_models(config.mixed_models.as_ref())?;
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let updated = tx.execute(
@@ -217,9 +240,10 @@ pub fn update_raw_session_config(
              reasoning_effort = ?4,
              api_key_env = ?5,
              extra_headers_json = ?6,
-             orchestrator_compaction_threshold = ?7,
-             config_version = ?8
-         WHERE session_id = ?9 AND config_version = ?10",
+             mixed_models_json = ?7,
+             orchestrator_compaction_threshold = ?8,
+             config_version = ?9
+         WHERE session_id = ?10 AND config_version = ?11",
         params![
             config.model,
             config.base_url,
@@ -227,6 +251,7 @@ pub fn update_raw_session_config(
             config.reasoning_effort,
             config.api_key_env,
             config.extra_headers_json,
+            mixed_models_json,
             config.orchestrator_compaction_threshold,
             next_version,
             config.session_id,
@@ -273,7 +298,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file, mixed_models_json
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -292,37 +317,47 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, model, base_url, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold
+            "SELECT session_id, model, base_url, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, mixed_models_json
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
             |row| {
-                Ok(RawSessionConfig {
-                    session_id: row.get(0)?,
-                    model: row.get(1)?,
-                    base_url: row.get(2)?,
-                    backend: row.get(3)?,
-                    reasoning_effort: row.get(4)?,
-                    api_key_env: row.get(5)?,
-                    extra_headers_json: row.get(6)?,
-                    config_version: row.get(7)?,
-                    orchestrator_compaction_threshold: row.get(8)?,
-                    diagnostics: Vec::new(),
-                })
+                Ok((
+                    RawSessionConfig {
+                        session_id: row.get(0)?,
+                        model: row.get(1)?,
+                        base_url: row.get(2)?,
+                        backend: row.get(3)?,
+                        reasoning_effort: row.get(4)?,
+                        api_key_env: row.get(5)?,
+                        extra_headers_json: row.get(6)?,
+                        mixed_models: None,
+                        config_version: row.get(7)?,
+                        orchestrator_compaction_threshold: row.get(8)?,
+                        diagnostics: Vec::new(),
+                    },
+                    row.get::<_, Option<String>>(9)?,
+                ))
             },
         )
         .optional()?;
 
-    let Some(mut config) = row else {
+    let Some((mut config, mixed_models_json)) = row else {
         return Err(anyhow!("session '{}' was not found", session_id));
     };
+    match deserialize_mixed_models(mixed_models_json.as_deref()) {
+        Ok(mixed_models) => config.mixed_models = mixed_models,
+        Err(error) => config
+            .diagnostics
+            .push(format!("{MALFORMED_MIXED_MODELS_DIAGNOSTIC}: {error:#}")),
+    }
     config.orchestrator_compaction_threshold =
         validate_stored_compaction_threshold(config.orchestrator_compaction_threshold)?;
-    config.diagnostics = model_config_diagnostics(
+    config.diagnostics.extend(model_config_diagnostics(
         config.backend.as_deref(),
         config.reasoning_effort.as_deref(),
         config.extra_headers_json.as_deref(),
-    );
+    ));
     Ok(config)
 }
 
@@ -330,7 +365,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file
+            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file, mixed_models_json
              FROM sessions
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
@@ -398,6 +433,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         orchestrator_compaction_threshold: row.get(18)?,
         ssh_port: row.get(19)?,
         ssh_identity_file: row.get(20)?,
+        mixed_models_json: row.get(21)?,
     })
 }
 
@@ -834,6 +870,7 @@ fn insert_or_replace_session(
         &snapshot.token_usages,
         snapshot.unattributed_token_usage.as_ref(),
     )?;
+    let mixed_models_json = serialize_mixed_models(snapshot.mixed_models.as_ref())?;
 
     // The legacy `store_path` column is kept physically (NOT NULL in existing
     // stores) but is informational only: it records the store that was
@@ -845,10 +882,11 @@ fn insert_or_replace_session(
              last_response_duration_ms, previous_response_duration_ms,
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
-             orchestrator_compaction_threshold, ssh_port, ssh_identity_file
+             orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
+             mixed_models_json
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -892,6 +930,7 @@ fn insert_or_replace_session(
             snapshot.orchestrator_compaction_threshold,
             stored_ssh_port(snapshot.ssh.as_ref()),
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
+            mixed_models_json,
         ],
     )?;
     Ok(())
@@ -919,6 +958,7 @@ struct SessionRow {
     orchestrator_compaction_threshold: Option<u64>,
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
+    mixed_models_json: Option<String>,
 }
 
 impl SessionRow {
@@ -948,6 +988,7 @@ impl SessionRow {
             ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,
             extra_headers,
+            mixed_models: deserialize_mixed_models(self.mixed_models_json.as_deref())?,
             orchestrator_compaction_threshold: validate_stored_compaction_threshold(
                 self.orchestrator_compaction_threshold,
             )?,

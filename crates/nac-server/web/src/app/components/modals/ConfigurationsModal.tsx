@@ -27,6 +27,10 @@ import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import {
+  MixedModelsSection,
+  type MixedSelection,
+} from "@/app/components/modals/MixedModelsSection";
+import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
@@ -213,6 +217,10 @@ function ConfigurationForm({
       : "",
   );
   const [prompt, setPrompt] = useState(record?.initial_prompt ?? "");
+  const [mixed, setMixed] = useState<MixedSelection>({
+    mode: record?.mixed_models ? "mixed" : "single",
+    mixed: record?.mixed_models ?? null,
+  });
   const [error, setError] = useState("");
 
   const name = nameDraft ?? autoName(backend, takenNames);
@@ -312,6 +320,12 @@ function ConfigurationForm({
       return;
     }
 
+    if (mixed.mode === "mixed" && !mixed.mixed) {
+      setError("Complete the easy, medium and hard tiers before saving.");
+      return;
+    }
+    const mixedModels = mixed.mode === "mixed" ? mixed.mixed : null;
+
     try {
       if (record) {
         const patch: UpdateModelConfigurationRequest = {
@@ -322,6 +336,7 @@ function ConfigurationForm({
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
+          mixed_models: mixedModels,
         };
         // Omitted keeps what is stored, which is the only way to leave a
         // credential or a hand-written gateway URL alone.
@@ -344,6 +359,7 @@ function ConfigurationForm({
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
+          mixed_models: mixedModels,
         });
         onSaved(saved.config_id);
         toast.success(`Configuration ${saved.name} created`);
@@ -596,6 +612,11 @@ function ConfigurationForm({
                 onChange={(event) => edit(setCompaction)(event.target.value)}
               />
             }
+          />
+          <Separator />
+          <MixedModelsSection
+            initial={record?.mixed_models ?? null}
+            onChange={setMixed}
           />
           <Separator />
           <TextArea

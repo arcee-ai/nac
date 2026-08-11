@@ -349,6 +349,12 @@ impl ModelClient {
         self.reasoning_effort
     }
 
+    /// Catalog cost rates of the resolved model, USD per 1M tokens.
+    /// All-zero means the catalog has no pricing for it.
+    pub(crate) fn cost_rates(&self) -> catalog::ModelCostRates {
+        self.resolved_model.cost
+    }
+
     pub fn api_key_env(&self) -> Option<&str> {
         self.api_key_env.as_deref()
     }
@@ -632,12 +638,16 @@ impl ModelClient {
                     request.header("Authorization", format!("Bearer {token}"))
                 })
                 .await?;
-            return read_sse_response(url, response, ChatStreamFold::new(Some(on_delta), reasoning_field))
-                .await
-                .map_err(|error| ModelHttpError {
-                    status: None,
-                    message: error.to_string(),
-                });
+            return read_sse_response(
+                url,
+                response,
+                ChatStreamFold::new(Some(on_delta), reasoning_field),
+            )
+            .await
+            .map_err(|error| ModelHttpError {
+                status: None,
+                message: error.to_string(),
+            });
         }
         self.try_post_json_with_retry_headers(url, body, |request| {
             request.header("Authorization", format!("Bearer {token}"))
@@ -859,6 +869,19 @@ impl ModelClient {
         let mut client = Self::new_for_test();
         client.base_url = base_url;
         client.reasoning_effort = None;
+        client
+    }
+
+    pub(crate) fn new_for_test_settings(
+        backend: BackendKind,
+        model: &str,
+        reasoning_effort: ReasoningEffort,
+    ) -> Self {
+        let mut client = Self::new_for_test();
+        client.backend = backend;
+        client.model = model.to_string();
+        client.reasoning_effort = Some(reasoning_effort);
+        client.resolved_model = catalog::resolve(backend, model);
         client
     }
 

@@ -2,6 +2,7 @@ mod compaction;
 mod filesystem;
 mod managed_auth;
 mod mcp_api;
+mod mixed_models;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -43,12 +44,15 @@ use axum::{
 };
 use include_dir::{include_dir, Dir};
 #[cfg(test)]
+use nac_core::mixed_mode::MixedTierSettings;
+#[cfg(test)]
 use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
     commands::{FrontendCommand, PreparedUserInput},
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
+    mixed_mode::MixedModeConfig,
     model::{
         list_managed_provider_models, list_provider_models, list_stored_api_keys,
         managed_backend_base_url, provider_default_base_url, provider_for_model,
@@ -357,6 +361,9 @@ pub struct CreateSessionRequest {
     /// Omitted inherits `[compaction].threshold_tokens`; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
+    /// Mixed-mode tier models; omitted or null launches single-model.
+    #[serde(default)]
+    pub mixed_models: RequestField<MixedModeConfig>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -424,6 +431,9 @@ pub struct CreateModelConfigurationRequest {
     pub orchestrator_compaction_threshold: Option<u64>,
     /// Message the launch modal pre-fills when this setup is chosen.
     pub initial_prompt: Option<String>,
+    /// Mixed-mode tier models saved with this setup.
+    #[serde(default)]
+    pub mixed_models: Option<MixedModeConfig>,
 }
 
 /// Edits a saved setup in place. Every field is tri-state: omit it to keep what
@@ -452,6 +462,8 @@ pub struct UpdateModelConfigurationRequest {
     pub orchestrator_compaction_threshold: RequestField<u64>,
     #[serde(default)]
     pub initial_prompt: RequestField<String>,
+    #[serde(default)]
+    pub mixed_models: RequestField<MixedModeConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -554,6 +566,9 @@ pub struct UpdateConfigRequest {
     /// Omitted preserves; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
+    /// Omitted preserves; null returns the session to single-model mode.
+    #[serde(default)]
+    pub mixed_models: RequestField<MixedModeConfig>,
 }
 
 impl UpdateConfigRequest {
@@ -568,6 +583,7 @@ impl UpdateConfigRequest {
                 self.orchestrator_compaction_threshold,
                 RequestField::Omitted
             )
+            && matches!(self.mixed_models, RequestField::Omitted)
     }
 }
 
@@ -1193,7 +1209,7 @@ impl SessionManager {
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         let orchestrator_compaction_threshold =
             create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
-        let model = model_options(
+        let mut model = model_options(
             request.model,
             request.base_url,
             request.backend,
@@ -1201,6 +1217,14 @@ impl SessionManager {
             request.api_key_env,
             request.extra_headers,
         )?;
+        model.mixed = match request.mixed_models {
+            RequestField::Omitted | RequestField::Null => None,
+            RequestField::Value(mixed) => Some(mixed_models::normalize(
+                mixed,
+                &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
+                None,
+            )?),
+        };
         // Mirror the launch-time resolution so the destination is checked
         // against the backend the session will actually use.
         let launch_backend = model.backend.or_else(|| {
@@ -1759,7 +1783,7 @@ impl SessionManager {
     pub async fn update_session_config(
         &self,
         session_id: &str,
-        request: UpdateConfigRequest,
+        mut request: UpdateConfigRequest,
     ) -> Result<()> {
         let request_empty = request.is_empty();
         if request_empty {
@@ -1814,7 +1838,31 @@ impl SessionManager {
             return Ok(());
         }
         let mut prospective = current.clone();
+        // Mixed tiers need the credential destination policy, which the plain
+        // field patch does not, so they are settled here instead.
+        let mixed_field = std::mem::take(&mut request.mixed_models);
         apply_raw_config_patch(&mut prospective, request)?;
+        match mixed_field {
+            RequestField::Omitted => {
+                // An unrelated patch must not persist the parse failure as a
+                // clear; only an explicit set or null may replace the column.
+                if current.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.starts_with(sessions::MALFORMED_MIXED_MODELS_DIAGNOSTIC)
+                }) {
+                    return Err(request_configuration_error(
+                        "stored mixed-mode model settings are malformed; include mixed_models in the update to repair them, or null to return to single-model mode",
+                    ));
+                }
+            }
+            RequestField::Null => prospective.mixed_models = None,
+            RequestField::Value(mixed) => {
+                prospective.mixed_models = Some(mixed_models::normalize(
+                    mixed,
+                    &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
+                    None,
+                )?);
+            }
+        }
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
             &mut prospective,
             backend_selected,
@@ -1832,7 +1880,7 @@ impl SessionManager {
             )?;
         }
 
-        let _settings = EffectiveModelSettings::new(
+        EffectiveModelSettings::new(
             backend,
             prospective.model.clone(),
             prospective.base_url.clone(),
@@ -1840,6 +1888,11 @@ impl SessionManager {
             prospective.api_key_env.clone(),
             extra_headers.clone(),
         )?;
+        // Fail a broken mixed tier here, not at the session's next launch.
+        if let Some(mixed) = prospective.mixed_models.as_ref() {
+            nac_core::mixed_mode::validate(mixed)
+                .map_err(|error| request_configuration_error(format!("{error:#}")))?;
+        }
         validate_model_configuration(
             backend,
             &prospective.model,
@@ -2374,9 +2427,23 @@ async fn create_model_config_handler(
     let id = uuid::Uuid::new_v4();
     let credential_name =
         expects_key.then(|| format!("{GENERATED_CREDENTIAL_PREFIX}{}", id.simple()));
-    if let Some(name) = credential_name.as_deref() {
-        store_api_key(name, api_key)?;
-    }
+    let policy = NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?;
+    let mixed_models = request
+        .mixed_models
+        .map(|mixed| {
+            mixed_models::normalize(
+                mixed,
+                &policy,
+                credential_name
+                    .as_deref()
+                    .map(|name| mixed_models::InheritedCredential {
+                        backend,
+                        name,
+                        previous: None,
+                    }),
+            )
+        })
+        .transpose()?;
 
     let configuration = model_configurations::NewModelConfiguration {
         name: request.name,
@@ -2390,7 +2457,13 @@ async fn create_model_config_handler(
         extra_headers: request.extra_headers.unwrap_or_default(),
         orchestrator_compaction_threshold: request.orchestrator_compaction_threshold,
         initial_prompt: request.initial_prompt,
+        mixed_models,
     };
+    // No credential is written until every caller-controlled field, including
+    // all mixed tiers, has been normalized and validated.
+    if let Some(name) = credential_name.as_deref() {
+        store_api_key(name, api_key)?;
+    }
     let record = model_configurations::insert_model_configuration(
         &manager.inner.store_path,
         &id.to_string(),
@@ -2488,15 +2561,19 @@ async fn update_model_config_handler(
 
     // The credential the row ends up pointing at, and the one it is leaving
     // behind — exactly one of the two survives this request.
+    let replacement_credential = supplied_key.filter(|key| !key.is_empty()).map(|key| {
+        (
+            format!(
+                "{GENERATED_CREDENTIAL_PREFIX}{}",
+                uuid::Uuid::new_v4().simple()
+            ),
+            key,
+        )
+    });
     let (api_key_env, superseded) = if !expects_key {
         (None, existing.api_key_env.clone())
-    } else if let Some(key) = supplied_key.filter(|key| !key.is_empty()) {
-        let name = format!(
-            "{GENERATED_CREDENTIAL_PREFIX}{}",
-            uuid::Uuid::new_v4().simple()
-        );
-        store_api_key(&name, &key)?;
-        (Some(name), existing.api_key_env.clone())
+    } else if let Some((name, _)) = replacement_credential.as_ref() {
+        (Some(name.clone()), existing.api_key_env.clone())
     } else if matches!(request.api_key, RequestField::Null) || existing.api_key_env.is_none() {
         return Err(ApiError {
             status: StatusCode::BAD_REQUEST,
@@ -2532,18 +2609,69 @@ async fn update_model_config_handler(
             RequestField::Null => None,
             RequestField::Omitted => existing.initial_prompt.clone(),
         },
+        mixed_models: match request.mixed_models {
+            RequestField::Value(mixed) => Some(mixed_models::normalize(
+                mixed,
+                &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+                api_key_env
+                    .as_deref()
+                    .map(|name| mixed_models::InheritedCredential {
+                        backend,
+                        name,
+                        previous: existing.api_key_env.as_deref(),
+                    }),
+            )?),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.mixed_models.clone().map(|mut mixed| {
+                if let Some(name) = api_key_env.as_deref() {
+                    mixed_models::rotate_inherited_credential(
+                        &mut mixed,
+                        mixed_models::InheritedCredential {
+                            backend,
+                            name,
+                            previous: existing.api_key_env.as_deref(),
+                        },
+                    );
+                }
+                mixed
+            }),
+        },
     };
 
+    // As on create, mixed-tier validation precedes credential storage. From
+    // here onward the database error path removes the new key atomically.
+    if let Some((name, key)) = replacement_credential.as_ref() {
+        store_api_key(name, key)?;
+    }
     match model_configurations::update_model_configuration(
         &manager.inner.store_path,
         &config_id,
         configuration,
     ) {
         Ok(record) => {
-            if let Some(name) = superseded
-                .as_deref()
+            // A generated key survives exactly as long as something in the
+            // updated record — top-level or a tier — still names it; every
+            // other generated key this update walked away from is retired.
+            let mut retired: std::collections::BTreeSet<&str> = existing
+                .mixed_models
+                .as_ref()
+                .map(mixed_models::tier_credentials)
+                .into_iter()
+                .flatten()
+                .chain(superseded.as_deref())
                 .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-            {
+                .collect();
+            for kept in record.api_key_env.iter().map(String::as_str).chain(
+                record
+                    .mixed_models
+                    .as_ref()
+                    .map(mixed_models::tier_credentials)
+                    .into_iter()
+                    .flatten(),
+            ) {
+                retired.remove(kept);
+            }
+            for name in retired {
                 let _ = remove_api_key(name);
             }
             Ok(Json(record))
@@ -2725,12 +2853,23 @@ async fn delete_model_config_handler(
     model_configurations::delete_model_configuration(&manager.inner.store_path, &config_id)?;
 
     // Only a key this server filed away is ours to drop; a hand-configured
-    // environment variable name belongs to the operator.
-    if let Some(name) = record
+    // environment variable name belongs to the operator. Tiers can hold a
+    // generated key the top level already rotated off, so both are swept.
+    let generated: std::collections::BTreeSet<&str> = record
         .api_key_env
         .as_deref()
+        .into_iter()
+        .chain(
+            record
+                .mixed_models
+                .as_ref()
+                .map(mixed_models::tier_credentials)
+                .into_iter()
+                .flatten(),
+        )
         .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-    {
+        .collect();
+    for name in generated {
         let _ = remove_api_key(name);
     }
     Ok(StatusCode::NO_CONTENT)
@@ -3307,6 +3446,7 @@ fn model_options(
         api_model: required_create_string(model, "model")?,
         api_key_env,
         extra_headers,
+        mixed: None,
     })
 }
 
@@ -4920,6 +5060,7 @@ mod tests {
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
+            mixed_models: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             ssh_port: None,
             ssh_identity_file: None,
@@ -4955,6 +5096,7 @@ mod tests {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                     ssh_host: None,
                     ssh_port: None,
                     ssh_identity_file: None,
@@ -5000,6 +5142,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5042,6 +5185,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5077,6 +5221,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5091,6 +5236,188 @@ mod tests {
             assert_eq!(stored.base_url, "https://api.openai.com/v1");
             let _ = std::fs::remove_dir_all(&root);
         }
+    }
+
+    #[tokio::test]
+    async fn model_patch_validates_and_clears_mixed_tier_models() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("mixed_models_model_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
+        seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+        let manager = test_manager(&root);
+
+        let tier = |model: &str, reasoning_effort| MixedTierSettings {
+            model: model.to_string(),
+            backend: None,
+            base_url: None,
+            api_key_env: None,
+            reasoning_effort,
+        };
+        let mixed_patch = |mixed_models: RequestField<MixedModeConfig>| UpdateConfigRequest {
+            model: RequestField::Omitted,
+            base_url: RequestField::Omitted,
+            backend: RequestField::Omitted,
+            reasoning_effort: RequestField::Omitted,
+            api_key_env: RequestField::Omitted,
+            extra_headers: RequestField::Omitted,
+            orchestrator_compaction_threshold: RequestField::Omitted,
+            mixed_models,
+        };
+
+        manager
+            .update_session_config(
+                "session",
+                mixed_patch(RequestField::Value(MixedModeConfig {
+                    easy: tier("gpt-5-mini", Some(ReasoningEffort::Low)),
+                    medium: tier("gpt-5", None),
+                    hard: tier("claude-fable-5", None),
+                })),
+            )
+            .await
+            .expect("valid tier models should persist");
+        let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
+        assert!(stored.mixed_models.is_some());
+
+        // A tier effort its model's catalog metadata rejects fails the PATCH
+        // and leaves the stored config untouched.
+        let error = manager
+            .update_session_config(
+                "session",
+                mixed_patch(RequestField::Value(MixedModeConfig {
+                    easy: tier("gpt-5-mini", None),
+                    medium: tier("gpt-5", None),
+                    hard: tier("claude-fable-5", Some(ReasoningEffort::High)),
+                })),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("invalid hard tier model settings"),
+            "{error:#}"
+        );
+        let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
+        let tiers = stored
+            .mixed_models
+            .expect("stored mixed config should survive the failed patch");
+        assert_eq!(tiers.hard.reasoning_effort, None);
+
+        // Null returns the session to single-model mode.
+        manager
+            .update_session_config("session", mixed_patch(RequestField::Null))
+            .await
+            .expect("clearing the mixed config should succeed");
+        let stored = sessions::load_session_config(&root.join("store.db"), "session").unwrap();
+        assert!(stored.mixed_models.is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn malformed_mixed_models_diagnostic_survives_and_patch_repairs_it() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("malformed_mixed_models_patch");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+
+        let corrupt = || {
+            rusqlite::Connection::open(&store_path)
+                .unwrap()
+                .execute(
+                    "UPDATE sessions SET mixed_models_json = '{broken' WHERE session_id = 'session'",
+                    [],
+                )
+                .unwrap();
+        };
+        corrupt();
+
+        let raw = sessions::load_session_config(&store_path, "session").unwrap();
+        assert!(
+            raw.diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("malformed stored mixed models")),
+            "{:?}",
+            raw.diagnostics
+        );
+
+        // A patch that leaves mixed_models untouched must not persist the
+        // parse failure as a cleared column.
+        let error = manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    reasoning_effort: RequestField::Value("low".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("malformed"),
+            "unrelated patch should be rejected while mixed models are malformed: {error:#}"
+        );
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        let raw_column: Option<String> = conn
+            .query_row(
+                "SELECT mixed_models_json FROM sessions WHERE session_id = 'session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw_column.as_deref(), Some("{broken"));
+        drop(conn);
+
+        let tier = |model: &str, effort| MixedTierSettings {
+            model: model.to_string(),
+            backend: None,
+            base_url: None,
+            api_key_env: None,
+            reasoning_effort: effort,
+        };
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    mixed_models: RequestField::Value(MixedModeConfig {
+                        easy: tier("gpt-5-mini", Some(ReasoningEffort::Low)),
+                        medium: tier("gpt-5", None),
+                        hard: tier("gpt-5", None),
+                    }),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("a replacement PATCH should repair malformed mixed models");
+        let replaced = sessions::load_session_config(&store_path, "session").unwrap();
+        assert!(
+            replaced.diagnostics.is_empty(),
+            "{:?}",
+            replaced.diagnostics
+        );
+        assert!(replaced.mixed_models.is_some());
+
+        corrupt();
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    mixed_models: RequestField::Null,
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("a null PATCH should clear malformed mixed models");
+        let cleared = sessions::load_session_config(&store_path, "session").unwrap();
+        assert!(cleared.diagnostics.is_empty(), "{:?}", cleared.diagnostics);
+        assert!(cleared.mixed_models.is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn seed_session(root: &std::path::Path, session_id: &str, created_at: &str) {
@@ -6024,6 +6351,7 @@ thread_timeout_secs = 7200
                     api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -6224,6 +6552,7 @@ threshold_tokens = 64000
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
                 orchestrator_compaction_threshold: RequestField::Null,
+                mixed_models: RequestField::Omitted,
                 ..CreateSessionRequest::default()
             })
             .await
@@ -6246,6 +6575,7 @@ threshold_tokens = 64000
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
                 orchestrator_compaction_threshold: RequestField::Value(0),
+                mixed_models: RequestField::Omitted,
                 ..CreateSessionRequest::default()
             })
             .await
@@ -7011,6 +7341,7 @@ model = "gpt-5.2"
                         "true".to_string(),
                     )]))),
                     orchestrator_compaction_threshold: RequestField::Value(64_000),
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -7047,6 +7378,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Null,
                     orchestrator_compaction_threshold: RequestField::Null,
+                    mixed_models: RequestField::Omitted,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -7068,6 +7400,7 @@ model = "gpt-5.2"
                     base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     orchestrator_compaction_threshold: RequestField::Value(32_000),
+                    mixed_models: RequestField::Omitted,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -7086,6 +7419,7 @@ model = "gpt-5.2"
                     base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                     api_key_env: RequestField::Null,
                     orchestrator_compaction_threshold: RequestField::Value(0),
+                    mixed_models: RequestField::Omitted,
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -7295,6 +7629,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -7336,6 +7671,7 @@ model = "gpt-5.2"
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
+                mixed_models: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -7388,6 +7724,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        mixed_models: RequestField::Omitted,
                     },
                 )
                 .await
@@ -7416,6 +7753,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -7436,6 +7774,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -7454,6 +7793,7 @@ model = "gpt-5.2"
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
+                mixed_models: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -7500,6 +7840,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    mixed_models: RequestField::Omitted,
                 },
             )
             .await
@@ -7999,6 +8340,287 @@ model = "gpt-5.2"
         )
         .await
         .unwrap()
+    }
+
+    async fn patch_json(app: Router, uri: &str, body: serde_json::Value) -> Response {
+        app.oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn delete_response(app: Router, uri: &str) -> Response {
+        app.oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    fn mixed_openai_tiers(easy_model: &str) -> serde_json::Value {
+        let tier = |model: &str| {
+            serde_json::json!({
+                "model": model,
+                "backend": "openai-responses",
+                "base_url": "https://api.openai.com/v1"
+            })
+        };
+        serde_json::json!({
+            "easy": tier(easy_model),
+            "medium": tier("gpt-5.5"),
+            "hard": tier("gpt-5.5")
+        })
+    }
+
+    async fn listed_credentials(app: Router) -> serde_json::Value {
+        response_json(get_response(app, "/credentials", None).await).await["credentials"].clone()
+    }
+
+    #[tokio::test]
+    async fn invalid_mixed_create_does_not_leak_generated_credential() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("invalid_mixed_create_credential");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+        let before = listed_credentials(app.clone()).await;
+
+        let response = post_json(
+            app.clone(),
+            "/model-configs",
+            serde_json::json!({
+                "name": "invalid mixed create",
+                "backend": "openai-responses",
+                "model": "gpt-5.5",
+                "api_key": "create-secret",
+                "mixed_models": mixed_openai_tiers("   ")
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(listed_credentials(app).await, before);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn invalid_mixed_update_does_not_leak_generated_credential() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("invalid_mixed_update_credential");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+        let created = post_json(
+            app.clone(),
+            "/model-configs",
+            serde_json::json!({
+                "name": "update target",
+                "backend": "openai-responses",
+                "model": "gpt-5.5",
+                "api_key": "original-secret"
+            }),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let config_id = response_json(created).await["config_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let before = listed_credentials(app.clone()).await;
+
+        let response = patch_json(
+            app.clone(),
+            &format!("/model-configs/{config_id}"),
+            serde_json::json!({
+                "api_key": "replacement-secret",
+                "mixed_models": mixed_openai_tiers("   ")
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(listed_credentials(app).await, before);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn backend_switch_keeps_generated_credential_still_referenced_by_tiers() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("backend_switch_tier_credential");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let created = post_json(
+            app.clone(),
+            "/model-configs",
+            serde_json::json!({
+                "name": "backend switch",
+                "backend": "openai-responses",
+                "model": "gpt-5.5",
+                "api_key": "tier-shared-secret",
+                "mixed_models": mixed_openai_tiers("gpt-5.5")
+            }),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let record = response_json(created).await;
+        let config_id = record["config_id"].as_str().unwrap().to_string();
+        let generated_name = record["api_key_env"].as_str().unwrap().to_string();
+        assert!(generated_name.starts_with(GENERATED_CREDENTIAL_PREFIX));
+
+        // Moving the primary off API-key auth leaves the tiers on the old
+        // backend still pointing at the generated key, so it must survive.
+        let response = patch_json(
+            app.clone(),
+            &format!("/model-configs/{config_id}"),
+            serde_json::json!({
+                "backend": "chatgpt-codex-responses",
+                "model": "gpt-5.6-sol"
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let updated = response_json(response).await;
+        assert!(updated["api_key_env"].is_null());
+        for tier in ["easy", "medium", "hard"] {
+            assert_eq!(updated["mixed_models"][tier]["api_key_env"], generated_name);
+        }
+        let listed = listed_credentials(app.clone()).await.to_string();
+        assert!(
+            listed.contains(&generated_name),
+            "the generated key is still referenced by tiers and must not be deleted: {listed}"
+        );
+
+        // Once nothing in the record names the key — here, clearing the
+        // tiers — the update retires it instead of orphaning the secret.
+        let response = patch_json(
+            app.clone(),
+            &format!("/model-configs/{config_id}"),
+            serde_json::json!({ "mixed_models": null }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let listed = listed_credentials(app).await.to_string();
+        assert!(
+            !listed.contains(&generated_name),
+            "clearing the last tier reference must retire the generated key: {listed}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_configuration_sweeps_generated_tier_credentials() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("delete_sweeps_tier_credentials");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let created = post_json(
+            app.clone(),
+            "/model-configs",
+            serde_json::json!({
+                "name": "delete sweep",
+                "backend": "openai-responses",
+                "model": "gpt-5.5",
+                "api_key": "tier-shared-secret",
+                "mixed_models": mixed_openai_tiers("gpt-5.5")
+            }),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let record = response_json(created).await;
+        let config_id = record["config_id"].as_str().unwrap().to_string();
+        let generated_name = record["api_key_env"].as_str().unwrap().to_string();
+
+        // Move the primary off the key so only tiers reference it.
+        let response = patch_json(
+            app.clone(),
+            &format!("/model-configs/{config_id}"),
+            serde_json::json!({
+                "backend": "chatgpt-codex-responses",
+                "model": "gpt-5.6-sol"
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = delete_response(app.clone(), &format!("/model-configs/{config_id}")).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let listed = listed_credentials(app).await.to_string();
+        assert!(
+            !listed.contains(&generated_name),
+            "deleting the configuration must sweep tier-only generated keys: {listed}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn generated_configuration_credential_launches_same_backend_mixed_tiers() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("generated_mixed_launch");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        // In particular OPENAI_API_KEY is absent: only the UI-created
+        // NAC_CONFIG_* credential can authenticate the orchestrator and tiers.
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+
+        let created = post_json(
+            app.clone(),
+            "/model-configs",
+            serde_json::json!({
+                "name": "generated mixed",
+                "backend": "openai-responses",
+                "model": "gpt-5.5",
+                "api_key": "generated-only-secret",
+                "mixed_models": mixed_openai_tiers("gpt-5.5")
+            }),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let record = response_json(created).await;
+        let generated_name = record["api_key_env"].as_str().unwrap();
+        assert!(generated_name.starts_with(GENERATED_CREDENTIAL_PREFIX));
+        for tier in ["easy", "medium", "hard"] {
+            assert_eq!(record["mixed_models"][tier]["api_key_env"], generated_name);
+        }
+
+        let launched = post_json(
+            app,
+            "/sessions",
+            serde_json::json!({
+                "cwd": root,
+                "backend": record["backend"],
+                "model": record["model"],
+                "base_url": record["base_url"],
+                "api_key_env": record["api_key_env"],
+                "mixed_models": record["mixed_models"]
+            }),
+        )
+        .await;
+        assert_eq!(launched.status(), StatusCode::CREATED);
+        let snapshot = response_json(launched).await;
+        assert_eq!(snapshot["metadata"]["api_key_env"], generated_name);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// One-shot stand-in for a provider's model index, answering the first

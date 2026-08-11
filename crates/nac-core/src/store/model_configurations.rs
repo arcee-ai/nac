@@ -22,6 +22,9 @@ pub struct ModelConfigurationRecord {
     pub orchestrator_compaction_threshold: Option<u64>,
     /// Message the launch modal pre-fills when this setup is chosen.
     pub initial_prompt: Option<String>,
+    /// Mixed-mode tier models; `None` keeps single-model behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mixed_models: Option<crate::mixed_mode::MixedModeConfig>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -37,6 +40,7 @@ pub struct NewModelConfiguration {
     pub extra_headers: BTreeMap<String, String>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub initial_prompt: Option<String>,
+    pub mixed_models: Option<crate::mixed_mode::MixedModeConfig>,
 }
 
 #[derive(Debug)]
@@ -106,6 +110,38 @@ fn decode_headers(raw: &str) -> BTreeMap<String, String> {
     serde_json::from_str(raw).unwrap_or_default()
 }
 
+fn encode_mixed_models(
+    mixed: Option<&crate::mixed_mode::MixedModeConfig>,
+) -> ConfigurationResult<Option<String>> {
+    mixed
+        .map(|config| {
+            serde_json::to_string(config).map_err(|error| {
+                ModelConfigurationStoreError::InvalidInput(format!(
+                    "could not encode mixed models: {error}"
+                ))
+            })
+        })
+        .transpose()
+}
+
+/// Only `encode_mixed_models` ever writes the column, so a row that fails to
+/// parse is real corruption; fail the read rather than silently loading the
+/// setup as single-model.
+fn decode_mixed_models(
+    raw: Option<&str>,
+) -> rusqlite::Result<Option<crate::mixed_mode::MixedModeConfig>> {
+    raw.map(|json| {
+        serde_json::from_str(json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                12,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    })
+    .transpose()
+}
+
 fn is_unique_violation(error: &rusqlite::Error) -> bool {
     matches!(
         error.sqlite_error_code(),
@@ -126,6 +162,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfiguration
         extra_headers: decode_headers(&extra_headers),
         orchestrator_compaction_threshold: row.get(8)?,
         initial_prompt: row.get(9)?,
+        mixed_models: decode_mixed_models(row.get::<_, Option<String>>(12)?.as_deref())?,
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
     })
@@ -133,7 +170,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfiguration
 
 const SELECT_COLUMNS: &str = "config_id, name, backend, model, base_url, api_key_env,
      reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
-     initial_prompt, created_at, updated_at";
+     initial_prompt, created_at, updated_at, mixed_models_json";
 
 pub fn list_model_configurations(
     path: &Path,
@@ -189,6 +226,7 @@ fn validated_record(
             .initial_prompt
             .map(|prompt| prompt.trim().to_string())
             .filter(|prompt| !prompt.is_empty()),
+        mixed_models: configuration.mixed_models,
         created_at,
         updated_at: now_utc(),
     })
@@ -219,8 +257,8 @@ pub fn insert_model_configuration(
         "INSERT INTO model_configurations
          (config_id, name, backend, model, base_url, api_key_env,
           reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
-          initial_prompt, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+          initial_prompt, created_at, updated_at, mixed_models_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             record.config_id,
             record.name,
@@ -234,6 +272,7 @@ pub fn insert_model_configuration(
             record.initial_prompt,
             record.created_at,
             record.updated_at,
+            encode_mixed_models(record.mixed_models.as_ref())?,
         ],
     )
     .map_err(|error| {
@@ -268,7 +307,7 @@ pub fn update_model_configuration(
              SET name = ?2, backend = ?3, model = ?4, base_url = ?5, api_key_env = ?6,
                  reasoning_effort = ?7, extra_headers_json = ?8,
                  orchestrator_compaction_threshold = ?9, initial_prompt = ?10,
-                 updated_at = ?11
+                 updated_at = ?11, mixed_models_json = ?12
              WHERE config_id = ?1",
             params![
                 record.config_id,
@@ -282,6 +321,7 @@ pub fn update_model_configuration(
                 record.orchestrator_compaction_threshold,
                 record.initial_prompt,
                 record.updated_at,
+                encode_mixed_models(record.mixed_models.as_ref())?,
             ],
         )
         .map_err(|error| {
@@ -345,6 +385,7 @@ mod tests {
             extra_headers: BTreeMap::from([("X-Trace".to_string(), "on".to_string())]),
             orchestrator_compaction_threshold: Some(64_000),
             initial_prompt: Some("Review the diff".to_string()),
+            mixed_models: None,
         }
     }
 

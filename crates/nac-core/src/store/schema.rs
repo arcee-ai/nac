@@ -1,11 +1,13 @@
 use super::*;
 
-// 11 added the mcp_server_configurations table. (10 rather than 9 before it:
-// a store already at 9 would otherwise skip creating the ssh_configurations
-// table — `open_runtime_connection` returns early whenever the stored version
-// already equals this one. 9 itself added the per-session ssh port and key
-// columns after this branch and main advanced independently.)
-const STORE_SCHEMA_VERSION: i64 = 11;
+// 12 rather than 11: two branches each shipped an "11" — one adding the
+// mcp_server_configurations table, the other the mixed-mode tier model
+// columns (`mixed_models_json` on `sessions` and `model_configurations`).
+// A store already at 11 from either branch would otherwise skip the other's
+// migration — `open_runtime_connection` returns early whenever the stored
+// version already equals this one. (10 added the ssh_configurations table;
+// 9 added the per-session ssh port and key columns.)
+const STORE_SCHEMA_VERSION: i64 = 12;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -183,6 +185,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535))",
     )?;
     ensure_column(&transaction, "sessions", "ssh_identity_file", "TEXT")?;
+    // Mixed-mode tier models; NULL keeps single-model behavior, so legacy
+    // rows load unchanged.
+    ensure_column(&transaction, "sessions", "mixed_models_json", "TEXT")?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -201,6 +206,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER CHECK (transcript_len IS NULL OR transcript_len >= 0)",
     )?;
     create_model_configurations_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "model_configurations",
+        "mixed_models_json",
+        "TEXT",
+    )?;
     create_ssh_configurations_table(&transaction)?;
     create_mcp_server_configurations_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;

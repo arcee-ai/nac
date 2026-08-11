@@ -10,6 +10,7 @@ use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
+use crate::mixed_mode::{resolve_dispatch_clients, MixedModeConfig};
 use crate::model::{
     managed_backend_base_url, BackendKind, EffectiveModelSettings, ModelClient,
     ModelConfigurationError, ReasoningEffort,
@@ -329,6 +330,9 @@ pub struct ModelOptions {
     pub api_model: Option<String>,
     pub api_key_env: OptionalModelOption<String>,
     pub extra_headers: Option<BTreeMap<String, String>>,
+    /// Mixed-mode tier worker models; `Some` turns mixed mode on for the
+    /// session, `None` keeps single-model behavior.
+    pub mixed: Option<MixedModeConfig>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -787,6 +791,12 @@ pub async fn build_run_config(
         config,
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
+    let mixed_models = options.model.mixed.clone();
+    let mixed_clients = mixed_models
+        .as_ref()
+        .map(resolve_dispatch_clients)
+        .transpose()?
+        .map(std::sync::Arc::new);
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -831,6 +841,7 @@ pub async fn build_run_config(
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
+                mixed_clients: mixed_clients.clone(),
             },
         )?;
         let mut session_snapshot = sessions::new_snapshot(
@@ -847,6 +858,7 @@ pub async fn build_run_config(
             settings.extra_headers.clone(),
         );
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+        session_snapshot.mixed_models = mixed_models;
         sessions::create_session(&store_path, &session_snapshot)?;
 
         return Ok(OrchestratorRunConfig {
@@ -915,6 +927,7 @@ pub async fn build_run_config(
             extra_tool_defs: Vec::new(),
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
+            mixed_clients: mixed_clients.clone(),
         },
     )?;
     let mut session_snapshot = sessions::new_snapshot(
@@ -931,6 +944,7 @@ pub async fn build_run_config(
         settings.extra_headers.clone(),
     );
     session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+    session_snapshot.mixed_models = mixed_models;
     sessions::create_session(&store_path, &session_snapshot)?;
 
     Ok(OrchestratorRunConfig {
@@ -1051,6 +1065,7 @@ pub async fn build_managed_worker_config(
             extra_tool_defs,
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
+            mixed_clients: None,
         },
     )?;
 
@@ -1185,6 +1200,18 @@ async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
+    let mixed_clients = snapshot
+        .mixed_models
+        .as_ref()
+        .map(resolve_dispatch_clients)
+        .transpose()
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "stored session mixed-mode model settings are invalid; settings repair required: {:#}",
+                error
+            )
+        })?
+        .map(std::sync::Arc::new);
     let sandbox = if ssh.is_some() {
         None
     } else {
@@ -1255,6 +1282,7 @@ async fn build_resume_config_from_snapshot(
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: worker_thread_timeout_secs(config),
+            mixed_clients,
         },
     )?;
     // Restore is blob ++ transcript log: rows the crashed previous run
@@ -1574,6 +1602,7 @@ mod tests {
                 api_model: Some(" explicit-model ".to_string()),
                 api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
                 extra_headers: Some(headers.clone()),
+                mixed: None,
             },
             &config,
         )
@@ -2689,6 +2718,7 @@ X-Config = "yes"
                     api_model: Some("snapshot-model".to_string()),
                     api_key_env: OptionalModelOption::Value(key_name.to_string()),
                     extra_headers: Some(headers.clone()),
+                    mixed: None,
                 },
                 orchestrator_compaction_threshold: Some(48_000),
                 sandbox: SandboxOptions::default(),

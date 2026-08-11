@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -27,6 +27,10 @@ import {
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
 import {
+  MixedModelsSection,
+  type MixedSelection,
+} from "@/app/components/modals/MixedModelsSection";
+import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
@@ -35,7 +39,10 @@ import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
+import { loadLastMixed, storeLastMixed } from "@/app/lib/lastMixed";
 import {
+  inheritPrimaryCredential,
+  withoutInheritedCredential,
   CLEAR_EFFORT,
   csv,
   launchLocationFromValues,
@@ -146,6 +153,10 @@ function LaunchForm({
   const [advanced, setAdvanced] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
+  const [mixed, setMixed] = useState<MixedSelection>({
+    mode: "single",
+    mixed: null,
+  });
   const [error, setError] = useState<FormError | null>(null);
   // The host this form has actually reached. Everything remote — the working
   // directory above all — is meaningless until one connection has answered, so
@@ -188,6 +199,22 @@ function LaunchForm({
     setSelection(next);
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
+
+  const onMixed = useCallback((next: MixedSelection) => {
+    setMixed(next);
+    setError((current) => (current?.field === "config" ? null : current));
+  }, []);
+
+  // A resolved saved setup is authoritative for its mixed tiers — including
+  // an explicitly single-model one. Only without a saved setup is the last
+  // mixed setup a session launched with offered again. The key remounts the
+  // section when the seed changes.
+  const lastMixed = useMemo(() => loadLastMixed(), []);
+  const savedMixed =
+    selection?.kind === "resolved"
+      ? (selection.mixed_models ?? null)
+      : lastMixed;
+  const savedMixedKey = JSON.stringify(savedMixed);
 
   /** Paths belong to whichever machine runs the session, so they do not carry over. */
   const changeMode = (next: Mode) => {
@@ -236,6 +263,14 @@ function LaunchForm({
       });
       return;
     }
+    if (mixed.mode === "mixed" && !mixed.mixed) {
+      setError({
+        field: "config",
+        message:
+          "Complete the easy, medium and hard tiers before creating a session.",
+      });
+      return;
+    }
 
     let headers: Record<string, string> | undefined;
     try {
@@ -252,7 +287,11 @@ function LaunchForm({
     let configuredEffort: string | null;
     try {
       if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync(selection.request);
+        const request =
+          mixed.mode === "mixed" && mixed.mixed
+            ? { ...selection.request, mixed_models: mixed.mixed }
+            : selection.request;
+        const record = await createModelConfig.mutateAsync(request);
         backend = record.backend as BackendKind;
         model = record.model;
         baseUrl = record.base_url;
@@ -274,6 +313,11 @@ function LaunchForm({
       return;
     }
 
+    const launchMixed =
+      mixed.mode === "mixed" && mixed.mixed
+        ? inheritPrimaryCredential(mixed.mixed, backend, apiKeyEnv)
+        : null;
+
     const body: CreateSessionRequest = {
       // The connection that answered, rather than what the fields hold now:
       // this is the one already proved to work.
@@ -293,6 +337,7 @@ function LaunchForm({
           : reasoning || configuredEffort || null,
     };
     if (headers !== undefined) body.extra_headers = headers;
+    if (launchMixed) body.mixed_models = launchMixed;
 
     const threshold = nullable(compaction);
     if (threshold !== null)
@@ -313,6 +358,9 @@ function LaunchForm({
     try {
       const snapshot = await createSession.mutateAsync(body);
       const newId = snapshot.metadata.session_id;
+      storeLastMixed(
+        launchMixed && withoutInheritedCredential(launchMixed, apiKeyEnv),
+      );
       toast.success("Session created");
 
       // A title is presentation state, so it is applied after creation.
@@ -495,6 +543,12 @@ function LaunchForm({
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
+              <MixedModelsSection
+                key={savedMixedKey}
+                initial={savedMixed}
+                onChange={onMixed}
+              />
+              <Separator />
               <ConfigRow
                 label="Advanced Configurations"
                 hint="Reasoning, compaction, extra headers and a first message."

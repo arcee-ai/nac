@@ -492,7 +492,7 @@ pub(crate) async fn execute_with_dag(
 
             // Spawn execute_parsed_dispatch.
             let runtime = runtime.clone();
-            let client = client.clone();
+            let client = thread::select_dispatch_client(&dispatch.params, &runtime, &client);
             let params = dispatch.params.clone();
             let id = dispatch.tool_call_id.clone();
             let original_index = dispatch.original_index;
@@ -679,6 +679,7 @@ mod tests {
                 scheduled_skills: Vec::new(),
                 session_id: "test-session".to_string(),
                 timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
+                complexity: None,
             },
         }
     }

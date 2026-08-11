@@ -106,6 +106,41 @@ impl ReasoningEffort {
     }
 }
 
+/// Difficulty tier the orchestrator assigns to a thread dispatch in mixed
+/// mode. Each tier routes to its own user-configured worker model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThreadComplexity {
+    Easy,
+    Medium,
+    Hard,
+}
+
+impl ThreadComplexity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Easy => "easy",
+            Self::Medium => "medium",
+            Self::Hard => "hard",
+        }
+    }
+}
+
+impl std::str::FromStr for ThreadComplexity {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "easy" => Ok(Self::Easy),
+            "medium" => Ok(Self::Medium),
+            "hard" => Ok(Self::Hard),
+            other => Err(format!(
+                "unsupported complexity '{other}'; select one of: easy, medium, hard"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveModelSettings {
     pub(crate) backend: BackendKind,

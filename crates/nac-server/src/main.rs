@@ -578,6 +578,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .map(OptionalModelOption::Value)
                 .unwrap_or_default(),
             extra_headers: cli.model.extra_headers,
+            mixed: None,
         },
         sandbox: SandboxOptions {
             sandbox: cli.sandbox.sandbox,

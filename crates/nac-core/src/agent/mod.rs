@@ -102,6 +102,8 @@ pub struct AgentConfig {
     pub extra_tool_defs: Vec<ToolDefinition>,
     pub agents_md_message: Option<String>,
     pub thread_timeout_secs: u64,
+    /// Mixed-mode tier worker clients; `None` keeps single-model dispatch.
+    pub mixed_clients: Option<Arc<tools::thread::MixedDispatchClients>>,
 }
 
 pub struct Agent {
@@ -138,6 +140,20 @@ fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
         content.push_str("\n\n");
         content.push_str(extra);
     }
+}
+
+/// Mixed-mode addendum to the orchestrator system prompt: names each tier's
+/// configured model and reasoning effort.
+fn mixed_mode_prompt_guidance(mixed: &tools::thread::MixedDispatchClients) -> String {
+    format!(
+        "\n\nMixed mode is enabled. Every thread dispatch requires a complexity \
+         classification — easy, medium, or hard — and the matching user-configured \
+         tier runs that dispatch. Classify by the genuine difficulty of the \
+         bounded action: easy for mechanical or well-scoped work, medium for typical \
+         implementation work, hard for work needing deep reasoning or broad context.\n\
+         Configured tiers:{}",
+        mixed.describe_tiers()
+    )
 }
 
 /// Trim a trailing assistant tool-call turn whose tool results never arrived
@@ -207,18 +223,24 @@ impl Agent {
             _ => None,
         };
 
-        let (system_prompt, mut tool_defs) = match config.mode {
+        let (mut system_prompt, mut tool_defs) = match config.mode {
             AgentMode::Worker => (
                 render_worker_system_prompt(&cwd),
                 tools::worker_tool_definitions(),
             ),
             AgentMode::Orchestrator => (
                 render_orchestrator_system_prompt(&cwd, thread_timeout_secs),
-                tools::orchestrator_tool_definitions(config.skills.as_deref()),
+                tools::orchestrator_tool_definitions(
+                    config.skills.as_deref(),
+                    config.mixed_clients.as_deref(),
+                ),
             ),
         };
         if config.mode == AgentMode::Worker {
             tool_defs.extend(config.extra_tool_defs);
+        }
+        if let Some(mixed) = config.mixed_clients.as_deref() {
+            system_prompt.push_str(&mixed_mode_prompt_guidance(mixed));
         }
 
         let mut messages = vec![Message::System {
@@ -272,6 +294,7 @@ impl Agent {
                 terminal_manager: crate::terminal::TerminalManager::new(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
+                mixed_clients: config.mixed_clients,
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -309,6 +332,7 @@ impl Agent {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                mixed_clients: None,
             },
         )
         .expect("default test agent config must be valid")

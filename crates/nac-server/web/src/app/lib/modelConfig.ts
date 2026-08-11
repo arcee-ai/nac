@@ -1,8 +1,59 @@
 // Model and credential rules shared by the launch and settings modals: managed
-// backends with a fixed base URL, credential modes, reasoning-effort clearing
-// and extra-header validation. Ported from the legacy UI unchanged.
+// backends with a fixed base URL, credential modes, mixed-tier credential
+// inheritance, reasoning-effort clearing and extra-header validation.
 
-import type { UpdateConfigRequest } from "@/app/types/api";
+import { MIXED_TIERS } from "@/app/types/api";
+import type {
+  BackendKind,
+  MixedModels,
+  MixedTierSettings,
+  UpdateConfigRequest,
+} from "@/app/types/api";
+
+export function inheritPrimaryCredential(
+  mixed: MixedModels,
+  primaryBackend: BackendKind,
+  primaryApiKeyEnv: string | null,
+  previousApiKeyEnv: string | null = null,
+): MixedModels {
+  const tier = (settings: MixedTierSettings): MixedTierSettings => ({
+    ...settings,
+    api_key_env:
+      settings.backend === primaryBackend &&
+      (!settings.api_key_env || settings.api_key_env === previousApiKeyEnv)
+        ? primaryApiKeyEnv
+        : settings.api_key_env,
+  });
+  return {
+    easy: tier(mixed.easy),
+    medium: tier(mixed.medium),
+    hard: tier(mixed.hard),
+  };
+}
+
+/**
+ * Drop tier credentials that came from inheriting the launch's primary key.
+ * Those selectors are launch-specific (a typed key is stored under a
+ * generated name), so remembering them would replay a name that may no
+ * longer exist; a null credential re-inherits the next launch's primary.
+ */
+export function withoutInheritedCredential(
+  mixed: MixedModels,
+  primaryApiKeyEnv: string | null,
+): MixedModels {
+  const tier = (settings: MixedTierSettings): MixedTierSettings => ({
+    ...settings,
+    api_key_env:
+      primaryApiKeyEnv !== null && settings.api_key_env === primaryApiKeyEnv
+        ? null
+        : settings.api_key_env,
+  });
+  return {
+    easy: tier(mixed.easy),
+    medium: tier(mixed.medium),
+    hard: tier(mixed.hard),
+  };
+}
 
 export const MANAGED_LAUNCH_BASE_URLS: Record<string, string> = {
   "arcee-auth": "https://api.arcee.ai/api/v1",
@@ -115,6 +166,28 @@ function sameHeaderObject(
   const l = Object.keys(left).sort();
   const r = Object.keys(right).sort();
   return l.length === r.length && l.every((key, i) => key === r[i] && left[key] === right[key]);
+}
+
+function sameTier(left: MixedTierSettings, right: MixedTierSettings): boolean {
+  return (
+    left.model === right.model &&
+    (left.backend ?? null) === (right.backend ?? null) &&
+    (left.base_url ?? null) === (right.base_url ?? null) &&
+    (left.api_key_env ?? null) === (right.api_key_env ?? null) &&
+    (left.reasoning_effort ?? null) === (right.reasoning_effort ?? null)
+  );
+}
+
+/** Field-by-field comparison, so serialization order can never fake a change. */
+export function sameMixedModels(
+  left: MixedModels | null,
+  right: MixedModels | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return MIXED_TIERS.every((tier) =>
+    sameTier(left[tier], right[tier]),
+  );
 }
 
 export interface LaunchLocation {
