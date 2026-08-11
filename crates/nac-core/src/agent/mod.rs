@@ -682,15 +682,15 @@ impl Agent {
     /// Restore from a snapshot blob, then merge any transcript-log tail (rows
     /// with `idx >= blob.len()`) left behind by a crashed run, and normalize
     /// a dangling tool turn in both the restored transcript and the log
-    /// (crash-resume normalization). An empty log tail is exactly
-    /// [`Agent::restore_messages`] — the pre-log behavior.
+    /// (crash-resume normalization). An empty log tail over a clean blob is
+    /// exactly [`Agent::restore_messages`] — the pre-log behavior.
     ///
     /// A validly encoded index gap is repaired under the session operation
     /// lease by retaining the longest contiguous prefix and atomically
     /// deleting the untrusted physical suffix. Decode failures remain fatal.
     ///
-    /// Returns the rewritten snapshot blob when gap recovery also trimmed a
-    /// dangling tool turn out of the blob (`replace_snapshot_and_delete_from`),
+    /// Returns the rewritten snapshot blob whenever dangling-turn
+    /// normalization trims into the blob (`replace_snapshot_and_delete_from`),
     /// so a caller holding the pre-repair snapshot can refresh its copy;
     /// `None` when the blob was left untouched.
     pub async fn restore_messages_merging_log_tail(
@@ -726,7 +726,6 @@ impl Agent {
                 .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
         }
         let mut _acquired_operation_lease = None;
-        let mut recovered_gap = false;
         if gap.is_some() {
             if let Some(operation_lease) = operation_lease {
                 operation_lease
@@ -755,7 +754,6 @@ impl Agent {
             .map_err(|error| anyhow!("transcript log repair task failed: {error}"))??;
             tail = repaired_tail;
             if let Some(recovery) = recovery {
-                recovered_gap = true;
                 let row_label = if recovery.discarded_rows == 1 {
                     "row"
                 } else {
@@ -766,10 +764,6 @@ impl Agent {
                     recovery.expected_idx, recovery.discarded_rows, recovery.found_idx
                 ));
             }
-        }
-        if tail.is_empty() && !recovered_gap {
-            self.restore_messages(messages);
-            return Ok(None);
         }
 
         let mut merged = messages;
@@ -790,7 +784,16 @@ impl Agent {
         let mut repaired_blob = None;
         truncate_incomplete_tool_turn(&mut merged);
         if merged.len() < merged_len {
-            if recovered_gap && merged.len() < blob_len as usize {
+            // Trimming below the blob length means the dangling turn lives in
+            // the write-once snapshot itself, so the snapshot must be
+            // rewritten — otherwise the in-memory transcript ends up shorter
+            // than the persisted blob and every later `append_batch` fails
+            // its contiguity check. The decision is derived from the store
+            // state (not from whether THIS restore repaired a gap), so a
+            // later restore still heals a session whose earlier gap recovery
+            // committed the log deletion but failed before the snapshot
+            // rewrite.
+            if merged.len() < blob_len as usize {
                 let writer = sink.writer.clone();
                 let session_id = sink.session_id.clone();
                 let repaired_messages = merged.clone();

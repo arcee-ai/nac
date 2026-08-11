@@ -615,6 +615,68 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
 }
 
 #[tokio::test]
+async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
+    let store_path = test_store_path("merge_partial_recovery");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+        user_message("second prompt"),
+        plain_assistant("second answer"),
+        user_message("third prompt"),
+        tool_call_assistant(&["call-1"]),
+    ];
+    store_snapshot_messages(&store_path, &blob);
+    // Partial-recovery aftermath: an earlier restore already committed the
+    // gap deletion (the untrusted log suffix is gone) but failed before
+    // rewriting the snapshot, so the blob still ends in the dangling tool
+    // turn and this restore sees neither a gap nor a log tail.
+    assert!(read_log(&store_path, "session").is_empty());
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let repaired = agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap()
+        .expect("a dangling turn in the blob must still rewrite the snapshot");
+
+    assert_eq!(agent.messages.len(), 6);
+    assert!(
+        agent.transcript_recovery_warning().is_none(),
+        "no fresh gap was repaired on this restore"
+    );
+    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    let persisted_json: String = connection
+        .query_row(
+            "SELECT messages_json FROM sessions WHERE session_id = 'session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let persisted: Vec<Message> = serde_json::from_str(&persisted_json).unwrap();
+    assert_eq!(persisted.len(), 6);
+    assert_eq!(
+        serde_json::to_value(&repaired).unwrap(),
+        serde_json::to_value(&persisted).unwrap(),
+        "the reported blob is exactly the blob the repair persisted"
+    );
+
+    // The wedge: without the rewrite the next append would require
+    // start_idx == 7 while the agent only held 6 messages.
+    agent
+        .push_and_log_for_test(user_message("next prompt"))
+        .await
+        .unwrap();
+    assert_eq!(read_log(&store_path, "session")[0].0, 6);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     let store_path = test_store_path("cancel");
     crate::store::initialize(&store_path).unwrap();
