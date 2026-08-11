@@ -1,6 +1,7 @@
 mod compaction;
 mod filesystem;
 mod managed_auth;
+mod mcp;
 mod mixed_models;
 mod revert;
 
@@ -2158,6 +2159,7 @@ fn api_router(manager: SessionManager) -> Router {
             "/sessions/{session_id}/cancel-active-run",
             post(cancel_active_run),
         )
+        .nest_service("/mcp", mcp::streamable_http_service(manager.clone()))
         .with_state(manager)
 }
 
