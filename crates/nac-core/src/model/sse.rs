@@ -44,6 +44,25 @@ impl StreamFoldError {
     }
 }
 
+pub(super) fn provider_stream_error(code: Option<&str>, message: &str) -> StreamFoldError {
+    let retryable = code.is_some_and(|code| {
+        matches!(
+            code.to_ascii_lowercase().as_str(),
+            "api_error"
+                | "internal_error"
+                | "overloaded_error"
+                | "rate_limit_error"
+                | "rate_limit_exceeded"
+                | "server_error"
+        )
+    });
+    if retryable {
+        StreamFoldError::retryable(message)
+    } else {
+        StreamFoldError::permanent(message)
+    }
+}
+
 impl fmt::Display for StreamFoldError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
@@ -72,6 +91,14 @@ impl SseError {
         Self {
             message: format!("model stream from {url} failed: {error}"),
             retryable: error.retryable,
+            observable_delta,
+        }
+    }
+
+    fn retryable(message: impl Into<String>, observable_delta: bool) -> Self {
+        Self {
+            message: message.into(),
+            retryable: true,
             observable_delta,
         }
     }
@@ -125,7 +152,7 @@ pub(super) async fn read_sse_response<F: StreamFold>(
 
     while let Some(frame) = reader.next_frame().await {
         let frame = frame.map_err(|error| {
-            SseError::permanent(
+            SseError::retryable(
                 format!("model stream from {url} failed: {error:#}"),
                 fold.has_observable_delta(),
             )
@@ -372,6 +399,14 @@ mod tests {
     #[test]
     fn returns_a_trailing_frame_the_server_left_unterminated() {
         assert_eq!(frames(&["data: [DONE]\n"]), vec!["[DONE]".to_string()]);
+    }
+
+    #[test]
+    fn classifies_only_known_transient_provider_stream_errors() {
+        assert!(provider_stream_error(Some("overloaded_error"), "busy").is_retryable());
+        assert!(provider_stream_error(Some("server_error"), "failed").is_retryable());
+        assert!(!provider_stream_error(Some("insufficient_quota"), "quota").is_retryable());
+        assert!(!provider_stream_error(None, "failed").is_retryable());
     }
 
     #[tokio::test]

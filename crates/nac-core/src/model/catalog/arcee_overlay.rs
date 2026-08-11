@@ -320,7 +320,7 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
     let max_tokens = model
         .max_output_length
         .filter(|&m| m > 0)
-        .unwrap_or(super::FALLBACK_MAX_TOKENS);
+        .unwrap_or_else(|| arcee_max_tokens_fallback(&model.id, context_window));
     let max_tokens = max_tokens.min(context_window);
 
     let pricing = model.pricing.as_ref();
@@ -366,6 +366,16 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
             context_management: false,
             clear_thinking: false,
         },
+    }
+}
+
+fn arcee_max_tokens_fallback(model_id: &str, context_window: u64) -> u64 {
+    match model_id {
+        "trinity-large-thinking" => 80_000,
+        id if passthrough_effort_map(id).is_some() => {
+            262_144.min((context_window / 2).max(1))
+        }
+        _ => super::FALLBACK_MAX_TOKENS,
     }
 }
 
@@ -482,7 +492,11 @@ pub(super) fn merge_arcee_overlay(
     };
 
     let mut models = BTreeMap::new();
-    for entry in entries {
+    for mut entry in entries {
+        if entry.model.max_tokens == super::FALLBACK_MAX_TOKENS {
+            entry.model.max_tokens =
+                arcee_max_tokens_fallback(&entry.id, entry.model.context_window);
+        }
         models.insert(entry.id.clone(), entry.model);
     }
 
