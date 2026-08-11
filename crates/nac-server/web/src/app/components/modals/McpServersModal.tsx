@@ -542,13 +542,19 @@ function KvEditor({
  */
 function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
   const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  const proseRef = useRef<HTMLSpanElement>(null);
   // The docs link renders separately, so an inline "Docs: <url>" fragment
   // (common in registry descriptions) is dropped from the prose.
   const description = entry.description
     .replace(/\bDocs:\s*https?:\/\/\S+/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
-  const long = description.length > 220;
+  // The toggle only appears when the clamp actually hides text.
+  useLayoutEffect(() => {
+    const el = proseRef.current;
+    if (el) setClamped(el.scrollHeight > el.clientHeight);
+  }, [description]);
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-muted p-3">
       <div className="flex items-center gap-2 min-w-0">
@@ -579,6 +585,7 @@ function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
       {description ? (
         <>
           <span
+            ref={proseRef}
             className={cn(
               "text-small text-basic-muted",
               !expanded && "line-clamp-3",
@@ -586,7 +593,7 @@ function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
           >
             {description}
           </span>
-          {long ? (
+          {clamped || expanded ? (
             <button
               type="button"
               className="self-start text-small text-basic-primary hover:underline"
@@ -815,7 +822,7 @@ function McpServerForm({
           <Icon iconName={IconName.Left} />
         </Button>
         <span className="text-small text-basic-primary truncate">
-          {record?.name ?? template?.name ?? "Custom server"}
+          {name.trim() || "Custom server"}
         </span>
       </div>
       <div
