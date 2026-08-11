@@ -90,7 +90,7 @@ struct GetMessagesParams {
     limit: Option<usize>,
     #[schemars(description = "Return messages before this index (cursor)")]
     before: Option<usize>,
-    #[schemars(description = "Include system messages")]
+    #[schemars(description = "Include system messages (default true). When true, transcript_index values are raw transcript positions usable directly with session_action(revert). Setting false breaks the transcript_index ↔ revert mapping.")]
     include_system: Option<bool>,
 }
 
@@ -325,12 +325,13 @@ impl NacMcpService {
         }
     }
 
-    #[tool(name = "get_messages", description = "Get a page of messages from a session transcript.")]
+    #[tool(name = "get_messages", description = "Get a page of messages from a session transcript. Each message includes a transcript_index — the raw transcript position that can be passed to session_action(action=\"revert\", message_idx=transcript_index) to roll back to that point. System messages are included by default so that transcript_index values match raw transcript positions used by revert.")]
     async fn get_messages(
         &self,
         Parameters(params): Parameters<GetMessagesParams>,
     ) -> Result<CallToolResult, ErrorData> {
         use nac_core::session_service::MessagePageRequest;
+        let include_system = params.include_system.unwrap_or(true);
         match self
             .manager
             .messages_page(
@@ -338,18 +339,20 @@ impl NacMcpService {
                 MessagePageRequest {
                     before: params.before,
                     limit: params.limit.unwrap_or(24),
-                    include_system: params.include_system.unwrap_or(false),
+                    include_system,
                 },
             )
             .await
         {
             Ok(page) => {
+                let base = page.page.start;
                 let messages: Vec<_> = page
                     .messages
                     .iter()
                     .enumerate()
                     .map(|(i, msg)| {
                         json!({
+                            "transcript_index": base + i,
                             "role": message_role(msg),
                             "content": message_content(msg),
                             "created_at": page.created_at.get(i).and_then(|c| c.as_ref()),
@@ -391,6 +394,7 @@ impl NacMcpService {
                             .iter()
                             .map(|e| {
                                 json!({
+                                    "id": e.id,
                                     "thread_name": e.thread_name,
                                     "action": e.action,
                                     "content": e.content,
@@ -406,6 +410,7 @@ impl NacMcpService {
                     for (_thread, episodes) in &grouped {
                         for e in episodes {
                             all.push(json!({
+                                "id": e.id,
                                 "thread_name": e.thread_name,
                                 "action": e.action,
                                 "content": e.content,
@@ -413,6 +418,13 @@ impl NacMcpService {
                             }));
                         }
                     }
+                    all.sort_by(|a, b| {
+                        let thread_a = a["thread_name"].as_str().unwrap_or("");
+                        let thread_b = b["thread_name"].as_str().unwrap_or("");
+                        let id_a = a["id"].as_i64().unwrap_or(0);
+                        let id_b = b["id"].as_i64().unwrap_or(0);
+                        thread_a.cmp(thread_b).then(id_a.cmp(&id_b))
+                    });
                     json!({ "episodes": all })
                 })
             }
