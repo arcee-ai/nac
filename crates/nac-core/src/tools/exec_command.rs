@@ -17,9 +17,10 @@ pub fn exec_command_definition() -> ToolDefinition {
         function: FunctionDef {
             name: "exec_command".to_string(),
             description: "Execute a shell command.\n\n\
-Use tty=false (default) as the bash tool for one-shot shell commands like `cargo build`, `npm test`, `git status`, `ls`, etc. \
-The command runs to completion, returns output + exit code, and treats yield_time_ms as a timeout.\n\n\
-Use tty=true for:\n\
+Use tty=false (default) as the non-interactive bash tool for one-shot shell commands like `cargo build`, `npm test`, `git status`, `ls`, etc. \
+The command runs to completion, returns output + exit code, and treats yield_time_ms as a timeout. \
+Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance.\n\n\
+Use tty=true when terminal interaction is required, and for:\n\
 - Interactive REPLs (python, node, etc.)\n\
 - Long-running multi-step workflows where you need shell state to persist across calls \
 (cd into a directory, set env vars, then run commands)\n\
@@ -188,8 +189,18 @@ mod tests {
     use super::*;
     use crate::events::EventSink;
     use serde_json::json;
+    use std::process::Command;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    #[cfg(unix)]
+    use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+    #[cfg(unix)]
+    use std::io::{Read, Write};
+    #[cfg(unix)]
+    use std::net::TcpListener;
+    #[cfg(unix)]
+    use std::time::{Duration, Instant};
 
     fn test_runtime() -> ToolRuntime {
         test_runtime_at(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
@@ -224,6 +235,213 @@ mod tests {
         dir
     }
 
+    const PROMPT_POLICY_COMMAND: &str =
+        "printf '%s|%s|%s\\n' \"$GIT_TERMINAL_PROMPT\" \"$GCM_INTERACTIVE\" \"$GH_PROMPT_DISABLED\"";
+
+    #[tokio::test]
+    async fn prompt_policy_process_helper() {
+        let Some(result_path) = std::env::var_os("NAC_PROMPT_POLICY_RESULT") else {
+            return;
+        };
+
+        let runtime = test_runtime();
+        let one_shot = execute_exec_command(
+            &json!({
+                "cmd": PROMPT_POLICY_COMMAND,
+                "tty": false,
+                "yield_time_ms": 2000
+            }),
+            &runtime,
+        )
+        .await
+        .unwrap();
+        let pty = execute_exec_command(
+            &json!({
+                "cmd": PROMPT_POLICY_COMMAND,
+                "tty": true,
+                "yield_time_ms": 2000
+            }),
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        let one_shot: Value = serde_json::from_str(&one_shot).unwrap();
+        let pty: Value = serde_json::from_str(&pty).unwrap();
+        let session_name = pty["session_name"].as_str().unwrap().to_string();
+        runtime
+            .terminal_manager
+            .remove(&session_name)
+            .await
+            .unwrap();
+        std::fs::write(
+            result_path,
+            serde_json::to_vec(&json!({ "one_shot": one_shot, "pty": pty })).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn run_prompt_policy_process_helper() -> Value {
+        let dir = unique_temp_dir("prompt_policy");
+        let result_path = dir.join("result.json");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::exec_command::tests::prompt_policy_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_PROMPT_POLICY_RESULT", &result_path)
+            .env("GIT_TERMINAL_PROMPT", "sentinel-git")
+            .env("GCM_INTERACTIVE", "sentinel-gcm")
+            .env("GH_PROMPT_DISABLED", "sentinel-gh")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "prompt-policy helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let result = serde_json::from_slice(&std::fs::read(&result_path).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        result
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn git_prompt_process_helper() {
+        let Some(result_path) = std::env::var_os("NAC_GIT_PROMPT_RESULT") else {
+            return;
+        };
+        let prompt_override = if std::env::var_os("NAC_GIT_PROMPT_ENABLE").is_some() {
+            "GIT_TERMINAL_PROMPT=1 "
+        } else {
+            ""
+        };
+        let cmd = format!(
+            "unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy GIT_PROXY_COMMAND; \
+             export NO_PROXY='*' no_proxy='*' GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+             GIT_CONFIG_COUNT=0 GIT_ASKPASS='' SSH_ASKPASS='' LANG=C LC_ALL=C LANGUAGE=''; \
+             {prompt_override}git -c credential.helper= -c core.askPass= -c http.proxy= \
+             ls-remote \"$NAC_GIT_PROMPT_URL\""
+        );
+        let result = execute_exec_command(
+            &json!({ "cmd": cmd, "tty": false, "yield_time_ms": 1000 }),
+            &test_runtime(),
+        )
+        .await
+        .unwrap();
+        std::fs::write(result_path, result).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn run_git_prompt_case(enable_prompt: bool) -> (Value, String) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/repo", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .unwrap();
+                        let mut request = [0u8; 4096];
+                        let _ = stream.read(&mut request);
+                        stream
+                            .write_all(
+                                b"HTTP/1.1 401 Unauthorized\r\n\
+                                  WWW-Authenticate: Basic realm=\"nac-test\"\r\n\
+                                  Content-Length: 0\r\n\
+                                  Connection: close\r\n\r\n",
+                            )
+                            .unwrap();
+                        return true;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return false;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return false,
+                }
+            }
+        });
+
+        let dir = unique_temp_dir(if enable_prompt {
+            "git_prompt_enabled"
+        } else {
+            "git_prompt_disabled"
+        });
+        let result_path = dir.join("result.json");
+        let pty_pair = NativePtySystem::default()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut reader = pty_pair.master.try_clone_reader().unwrap();
+        let capture = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(read) => bytes.extend_from_slice(&buffer[..read]),
+                    Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
+                    Err(error) => panic!("failed to read helper PTY: {error}"),
+                }
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        });
+
+        let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "tools::exec_command::tests::git_prompt_process_helper",
+            "--nocapture",
+        ]);
+        command.env("NAC_GIT_PROMPT_RESULT", &result_path);
+        command.env("NAC_GIT_PROMPT_URL", &url);
+        if enable_prompt {
+            command.env("NAC_GIT_PROMPT_ENABLE", "1");
+        }
+        let mut child = pty_pair.slave.spawn_command(command).unwrap();
+        drop(pty_pair.slave);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        drop(pty_pair.master);
+        let terminal_output = capture.join().unwrap();
+        assert!(server.join().unwrap(), "Git never reached the HTTP fixture");
+        let status = status
+            .unwrap_or_else(|| panic!("Git prompt helper hung; PTY output={terminal_output}"));
+        assert!(
+            status.success(),
+            "Git prompt helper failed with {}; PTY output={terminal_output}",
+            status.exit_code()
+        );
+
+        let result = serde_json::from_slice(&std::fs::read(&result_path).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        (result, terminal_output)
+    }
+
     // ------------------------------------------------------------------
     // exec_command
     // ------------------------------------------------------------------
@@ -233,12 +451,71 @@ mod tests {
         let def = exec_command_definition();
         assert_eq!(def.function.name, "exec_command");
         assert!(def.function.description.contains("tty=true"));
+        assert!(def.function.description.contains("non-interactive"));
+        assert!(def
+            .function
+            .description
+            .contains("terminal prompts are disabled"));
         assert!(def
             .function
             .parameters
             .get("required")
             .and_then(|v| v.as_array())
             .is_some());
+    }
+
+    #[test]
+    fn one_shot_overrides_inherited_prompt_policy() {
+        let result = run_prompt_policy_process_helper();
+        assert_eq!(
+            result["one_shot"]["output"].as_str().unwrap().trim(),
+            "0|0|1"
+        );
+    }
+
+    #[test]
+    fn pty_preserves_inherited_prompt_policy() {
+        let result = run_prompt_policy_process_helper();
+        let output = result["pty"]["output"].as_str().unwrap();
+        assert!(
+            output.contains("sentinel-git|sentinel-gcm|sentinel-gh"),
+            "got: {output}"
+        );
+        assert!(result["pty"]["session_name"].is_string());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_http_auth_prompt_fails_fast_off_server_tty() {
+        let (prompted, prompted_terminal) = run_git_prompt_case(true);
+        assert!(
+            prompted_terminal.contains("Username for"),
+            "negative control did not prompt on the controlling terminal: {prompted_terminal}"
+        );
+        assert!(
+            prompted["output"]
+                .as_str()
+                .unwrap()
+                .contains("Command timed out"),
+            "negative control did not wait for terminal input: {prompted}"
+        );
+        assert!(prompted["exit_code"].is_null());
+
+        let (blocked, blocked_terminal) = run_git_prompt_case(false);
+        assert!(
+            !blocked_terminal.contains("Username for"),
+            "prompt leaked to the controlling terminal: {blocked_terminal}"
+        );
+        let output = blocked["output"].as_str().unwrap();
+        assert!(
+            output.contains("terminal prompts disabled"),
+            "Git did not report prompt suppression: {output}"
+        );
+        assert!(
+            !output.contains("Command timed out"),
+            "Git waited for terminal input: {output}"
+        );
+        assert!(blocked["exit_code"].as_i64().is_some_and(|code| code != 0));
     }
 
     #[tokio::test]
