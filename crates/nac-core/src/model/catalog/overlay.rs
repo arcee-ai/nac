@@ -704,6 +704,15 @@ fn map_model(
     model: &ModelsDevModel,
 ) -> Result<GeneratedModel, String> {
     debug_assert!(is_agent_compatible(model));
+    // For known models (exact match or dated-snapshot family), inherit all
+    // fields from the baseline — the generator's overrides.toml is
+    // authoritative over models.dev for context_window, max_tokens, cost,
+    // reasoning, display_name, and thinking_level_map (same design as
+    // seed_thinking_map: curated overrides persist through overlay
+    // refreshes). For unknown models, map from models.dev data directly.
+    if let Some(entry) = seed_model(baseline, provider, id) {
+        return Ok(entry);
+    }
     let (context_window, max_tokens) = map_limits(model.limit.as_ref());
     Ok(GeneratedModel {
         display_name: model.name.clone(),
@@ -716,6 +725,34 @@ fn map_model(
         enabled_thinking: false,
         context_management: false,
         clear_thinking: false,
+    })
+}
+
+/// Resolve a known model's full entry from the baseline catalog, returning
+/// a `GeneratedModel` that carries every curated override (context_window,
+/// max_tokens, cost, reasoning, display_name, thinking_level_map). Returns
+/// `None` for unknown models so the caller maps them from models.dev data.
+fn seed_model(
+    baseline: &ModelCatalog,
+    provider: BackendKind,
+    id: &str,
+) -> Option<GeneratedModel> {
+    let catalog = baseline.providers.get(&provider)?;
+    let metadata = catalog.resolve_entry(id);
+    if metadata.source != ModelSource::Baseline {
+        return None;
+    }
+    Some(GeneratedModel {
+        display_name: metadata.display_name.clone(),
+        context_window: metadata.context_window,
+        max_tokens: metadata.max_tokens,
+        cost: metadata.cost,
+        reasoning: metadata.reasoning,
+        thinking_level_map: metadata.thinking_level_map,
+        adaptive_thinking: metadata.adaptive_thinking,
+        enabled_thinking: metadata.enabled_thinking,
+        context_management: metadata.context_management,
+        clear_thinking: metadata.clear_thinking,
     })
 }
 

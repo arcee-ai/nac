@@ -70,11 +70,14 @@ fn unknown_models_clone_provider_defaults_with_fallback_limits() {
 }
 
 /// Independent transcription of the pre-S4 `backend.rs` validation matrix,
-/// with one post-S4 extension: `Max` effort for GPT-5.6 models (OpenAI docs
-/// confirm GPT-5.6-only). Since S4, `validate_model_reasoning_effort` itself
-/// reads the catalog maps; the matrix guards compare against this hand-written
-/// reference so they keep proving the data reproduces the historical behavior
-/// instead of vacuously comparing the map against itself.
+/// with post-S4 extensions: `Max` effort for GPT-5.6 models (OpenAI docs
+/// confirm GPT-5.6-only), and per-model effort tiers for Fireworks and
+/// Together (provider docs show model-specific behavior the uniform pre-S4
+/// matrix did not capture). Since S4, `validate_model_reasoning_effort`
+/// itself reads the catalog maps; the matrix guards compare against this
+/// hand-written reference so they keep proving the data reproduces the
+/// historical behavior instead of vacuously comparing the map against
+/// itself.
 fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEffort) -> bool {
     match provider {
         BackendKind::DeepSeekChat => matches!(
@@ -84,13 +87,8 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
                 | ReasoningEffort::High
                 | ReasoningEffort::Xhigh
         ),
-        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::Medium
-                | ReasoningEffort::High
-        ),
+        BackendKind::FireworksChat => fireworks_matrix_accepts(model, effort),
+        BackendKind::TogetherChat => together_matrix_accepts(model, effort),
         BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => {
             // `max` is a post-S4 addition: only GPT-5.6 models support it
             // (OpenAI docs confirm GPT-5.6-only). Unknown models and
@@ -126,6 +124,94 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
             }
         }
         BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
+    }
+}
+
+/// Post-S4 per-model extensions for Fireworks: provider docs show
+/// model-specific effort tiers that the uniform pre-S4 matrix did not
+/// capture. GPT-OSS and MiniMax models are reasoning-only (the API
+/// rejects `none`); DeepSeek V4 and GLM 5.2 support an `xhigh` tier
+/// (wire "max") above high. Unknown models and all other known models
+/// keep the pre-S4 uniform row (none/low/medium/high).
+fn fireworks_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
+    // GPT-OSS models: reasoning-only, `none` is rejected by the API.
+    let gpt_oss = pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-120b")
+        || pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-20b");
+    // MiniMax models: reasoning-only, `none` is rejected by the API.
+    let minimax = pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m2p7")
+        || pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m3");
+    // DeepSeek V4 models: support `xhigh` (wire "max") above high.
+    let deepseek_v4 =
+        pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash")
+            || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash-0731")
+            || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-pro");
+    // GLM 5.2 models (incl. fast router): support `xhigh` (wire "max").
+    let glm = pre_s4_anthropic_family(model, "accounts/fireworks/models/glm-5p2")
+        || pre_s4_anthropic_family(model, "accounts/fireworks/routers/glm-5p2-fast");
+
+    if gpt_oss || minimax {
+        matches!(
+            effort,
+            ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
+        )
+    } else if deepseek_v4 || glm {
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+                | ReasoningEffort::Xhigh
+        )
+    } else {
+        // Default (unknown models and all other known models): the pre-S4
+        // uniform matrix row.
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+        )
+    }
+}
+
+/// Post-S4 per-model extensions for Together: provider docs show
+/// model-specific effort tiers. GLM-5.2 and DeepSeek V4 Pro support
+/// `max` above high; non-reasoning models (Qwen2.5-7B, Qwen3.7-Max,
+/// Llama-3.3-70B) accept no explicit effort levels. Unknown models
+/// and all other known models keep the pre-S4 uniform row
+/// (none/low/medium/high).
+fn together_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
+    // Non-reasoning models: no explicit effort levels accepted.
+    let non_reasoning = model == "Qwen/Qwen2.5-7B-Instruct-Turbo"
+        || model == "Qwen/Qwen3.7-Max"
+        || model == "meta-llama/Llama-3.3-70B-Instruct-Turbo";
+    // GLM-5.2 and DeepSeek V4 Pro: support `max` above high.
+    let max_tier = pre_s4_anthropic_family(model, "zai-org/GLM-5.2")
+        || pre_s4_anthropic_family(model, "deepseek-ai/DeepSeek-V4-Pro");
+
+    if non_reasoning {
+        false
+    } else if max_tier {
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+                | ReasoningEffort::Max
+        )
+    } else {
+        // Default (unknown models and all other known models): the pre-S4
+        // uniform matrix row.
+        matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+        )
     }
 }
 
