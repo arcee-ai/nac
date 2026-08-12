@@ -1,13 +1,38 @@
-import { Suspense, isValidElement, memo, use, type ReactNode } from "react";
+import {
+  Suspense,
+  isValidElement,
+  memo,
+  use,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
+import { useLocation, useNavigate } from "react-router-dom";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
 import { normalizeMath } from "@/app/lib/math-source";
 import { perfRender } from "@/app/lib/perfDebug";
+import { routes, sessionIdFromPath } from "@/app/lib/routes";
+import {
+  classifyMarkdownHref,
+  markdownUrlTransform,
+} from "@/app/lib/workspaceLink";
+import { useToast } from "@/app/providers/ToastProvider";
+import { api } from "@/app/services/api";
+import { queryKeys } from "@/app/services/queries";
+import {
+  revealSidePanel,
+  selectFile,
+  selectFileListing,
+  selectRevision,
+} from "@/app/store/sessionLayoutStore";
+import type { SessionSnapshotResponse } from "@/app/types/api";
 
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -135,17 +160,106 @@ interface MarkdownRendererProps {
   streaming?: boolean;
 }
 
+/**
+ * Chat links that point at workspace files. On a local session, ask nac-web to
+ * open the path with the OS; otherwise fall back to the Files panel. A bare
+ * relative href would otherwise resolve against the document origin, leave the
+ * hash route, and land on the homescreen.
+ */
+function MarkdownLink({
+  href,
+  children,
+  ...props
+}: ComponentPropsWithoutRef<"a">) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isMobile = useIsMobile();
+  const toast = useToast();
+  const client = useQueryClient();
+  const sessionId = sessionIdFromPath(location.pathname);
+  const snapshot = sessionId
+    ? client.getQueryData<SessionSnapshotResponse>(
+        queryKeys.sessionSnapshot(sessionId),
+      )
+    : undefined;
+  const kind = classifyMarkdownHref(href, [
+    snapshot?.workspace?.host_root,
+    snapshot?.metadata.workspace_host_path,
+    snapshot?.metadata.cwd,
+  ]);
+
+  const openInFilesPanel = (path: string) => {
+    if (!sessionId) return;
+    selectRevision(null);
+    selectFileListing("tree");
+    selectFile(path);
+    revealSidePanel(isMobile);
+    navigate(routes.session(sessionId, "files"));
+  };
+
+  if (kind.kind === "workspace" && sessionId) {
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          void api
+            .openWorkspacePath(sessionId, kind.path)
+            .catch((error: unknown) => {
+              // Remote / sandbox sessions cannot open a host path; the Files
+              // panel is the next-best place to land.
+              const message =
+                error instanceof Error ? error.message : String(error);
+              if (!/only available for local sessions|lives only inside the sandbox/i.test(
+                message,
+              )) {
+                toast.error(`Could not open file: ${message}`);
+              }
+              openInFilesPanel(kind.path);
+            });
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  if (kind.kind === "workspace" || kind.kind === "blocked") {
+    // No session to open into (or an absolute path we cannot map): keep the
+    // label, but do not let the browser leave the hash route.
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(event) => event.preventDefault()}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <a
+      {...props}
+      href={kind.href}
+      target="_blank"
+      rel="noopener noreferrer nofollow"
+    >
+      {children}
+    </a>
+  );
+}
+
 // react-markdown never injects raw HTML, so no sanitizer is needed; links still
 // have to be neutered because the model controls their target.
 function buildComponents(streaming: boolean) {
   return {
-    a: ({ ...props }: React.ComponentPropsWithoutRef<"a">) => (
-      <a {...props} target="_blank" rel="noopener noreferrer nofollow" />
-    ),
+    a: MarkdownLink,
     pre: ({ children }: { children?: ReactNode }) => (
       <CodeFence>{children}</CodeFence>
     ),
-    table: ({ ...props }: React.ComponentPropsWithoutRef<"table">) => (
+    table: ({ ...props }: ComponentPropsWithoutRef<"table">) => (
       <div className="overflow-x-auto">
         <table {...props} />
       </div>
@@ -154,7 +268,7 @@ function buildComponents(streaming: boolean) {
     // each formula it typesets, and those overlap almost entirely: a streamed
     // turn produces one per block, every message another copy. Naming them
     // lets React hoist them into the head and keep one of each instead.
-    style: ({ children }: React.ComponentPropsWithoutRef<"style">) => {
+    style: ({ children }: ComponentPropsWithoutRef<"style">) => {
       const css = typeof children === "string" ? children : "";
       if (!css) return null;
       return (
@@ -163,28 +277,28 @@ function buildComponents(streaming: boolean) {
         </style>
       );
     },
-    p: ({ children, ...props }: React.ComponentPropsWithoutRef<"p">) => (
+    p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
       <p {...props}>{wrapStreaming(children, streaming)}</p>
     ),
-    li: ({ children, ...props }: React.ComponentPropsWithoutRef<"li">) => (
+    li: ({ children, ...props }: ComponentPropsWithoutRef<"li">) => (
       <li {...props}>{wrapStreaming(children, streaming)}</li>
     ),
-    h1: ({ children, ...props }: React.ComponentPropsWithoutRef<"h1">) => (
+    h1: ({ children, ...props }: ComponentPropsWithoutRef<"h1">) => (
       <h1 {...props}>{wrapStreaming(children, streaming)}</h1>
     ),
-    h2: ({ children, ...props }: React.ComponentPropsWithoutRef<"h2">) => (
+    h2: ({ children, ...props }: ComponentPropsWithoutRef<"h2">) => (
       <h2 {...props}>{wrapStreaming(children, streaming)}</h2>
     ),
-    h3: ({ children, ...props }: React.ComponentPropsWithoutRef<"h3">) => (
+    h3: ({ children, ...props }: ComponentPropsWithoutRef<"h3">) => (
       <h3 {...props}>{wrapStreaming(children, streaming)}</h3>
     ),
-    h4: ({ children, ...props }: React.ComponentPropsWithoutRef<"h4">) => (
+    h4: ({ children, ...props }: ComponentPropsWithoutRef<"h4">) => (
       <h4 {...props}>{wrapStreaming(children, streaming)}</h4>
     ),
-    h5: ({ children, ...props }: React.ComponentPropsWithoutRef<"h5">) => (
+    h5: ({ children, ...props }: ComponentPropsWithoutRef<"h5">) => (
       <h5 {...props}>{wrapStreaming(children, streaming)}</h5>
     ),
-    h6: ({ children, ...props }: React.ComponentPropsWithoutRef<"h6">) => (
+    h6: ({ children, ...props }: ComponentPropsWithoutRef<"h6">) => (
       <h6 {...props}>{wrapStreaming(children, streaming)}</h6>
     ),
   };
@@ -214,6 +328,7 @@ function Parsed({
       remarkPlugins={remarkPlugins}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
       rehypePlugins={rehypePlugins as any}
+      urlTransform={markdownUrlTransform}
       components={components}
     >
       {math.source}
@@ -242,6 +357,7 @@ function ParsedWithMath({
     <ReactMarkdown
       remarkPlugins={plugins.remark}
       rehypePlugins={plugins.rehype}
+      urlTransform={markdownUrlTransform}
       components={components}
     >
       {source}

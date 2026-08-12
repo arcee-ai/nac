@@ -1,10 +1,10 @@
 // Live run state for the currently viewed session, driven by the SSE stream.
-// The backend streams event- and message-level updates (no token deltas), so
-// this tracks a running flag, a human-readable activity line, an error and a
-// capped event log feeding the Events tab and the transcript typing indicator.
+// This tracks a running flag, a human-readable activity line, an error, the
+// usage the current run has accrued and a capped event log feeding the Events
+// tab and the transcript typing indicator.
 
 import { createStore } from "@/app/lib/store";
-import { isActiveRun } from "@/app/lib/format";
+import { addTokenUsage, isActiveRun } from "@/app/lib/format";
 import {
   threadLogLine,
   toolCallFailed,
@@ -16,6 +16,7 @@ import type {
   AgentEvent,
   AssistantStreamDelta,
   SessionEventEnvelope,
+  TokenUsage,
 } from "@/app/types/api";
 
 export type RuntimeEventKind =
@@ -35,7 +36,6 @@ export interface RuntimeThread {
   status: "running" | "finished";
   /** The active dispatch ended because the parent run was stopped. */
   cancelled: boolean;
-  action: string;
   exitCode: number | null;
   isError: boolean;
   /**
@@ -82,6 +82,19 @@ interface RuntimeState {
    * first and jumps down when the user bubble finally lands.
    */
   optimisticUserPrompt: string | null;
+  /**
+   * What the current run has spent so far, summed from the usage events the
+   * model calls emit. The snapshot only learns the run's usage once the run
+   * ends, so this is the only account of an hour-long run in progress. It is
+   * a delta over the snapshot totals, which stay fixed for the whole run.
+   */
+  runUsage: TokenUsage | null;
+  /**
+   * Bumped by every event that could have touched the checkout. The Files panel
+   * watches it to reread the diff while a run is still going, instead of
+   * standing on whatever the checkout looked like when the panel opened.
+   */
+  workspaceEpoch: number;
 }
 
 export const runtimeStore = createStore<RuntimeState>(
@@ -98,6 +111,8 @@ export const runtimeStore = createStore<RuntimeState>(
     streamReasoning: "",
     streamSettled: false,
     optimisticUserPrompt: null,
+    runUsage: null,
+    workspaceEpoch: 0,
   },
   "runtime",
 );
@@ -120,6 +135,8 @@ export function resetRuntime(sessionId: string | null): void {
     streamReasoning: "",
     streamSettled: false,
     optimisticUserPrompt: null,
+    runUsage: null,
+    workspaceEpoch: 0,
   });
 }
 
@@ -197,7 +214,6 @@ const emptyThread = (name: string): RuntimeThread => ({
   name,
   status: "running",
   cancelled: false,
-  action: "",
   exitCode: null,
   isError: false,
   log: [],
@@ -279,6 +295,9 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         streamText: "",
         streamReasoning: "",
         streamSettled: false,
+        // The snapshot this run is measured against is the one about to be
+        // refetched, so the tally starts empty here rather than at the end.
+        runUsage: null,
       });
       pushEvent({
         seq,
@@ -383,20 +402,35 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
         text: `${failed ? "✕" : "✓"} ${event.name}: ${event.content_preview}`,
         isError: failed,
       });
+      setState((state) => ({ workspaceEpoch: state.workspaceEpoch + 1 }));
       return "none";
     }
+    case "token_usage_updated":
+      setState((state) => ({
+        runUsage: addTokenUsage(
+          state.runUsage,
+          event.usage,
+          // The gauge measures the orchestrator's own context window, so a
+          // worker's reading of its private one must not stand in for it.
+          event.thread_name
+            ? (state.runUsage?.total_tokens ?? 0)
+            : event.usage.total_tokens,
+        ),
+      }));
+      return "none";
     case "thread_started":
-      setState({ activity: `Thread ${event.name}: ${event.action}` });
+      // The action is not carried here: event sanitization replaces it with a
+      // placeholder. The task text comes from the orchestrator's tool call.
+      setState({ activity: `Thread ${event.name} dispatched` });
       pushEvent({
         seq,
         kind: "thread",
-        text: `⌥ thread "${event.name}" — ${event.action}`,
+        text: `⌥ thread "${event.name}" dispatched`,
         isError: false,
       });
       updateThread(event.name, {
         status: "running",
         cancelled: false,
-        action: event.action,
         exitCode: null,
         isError: false,
         // A name can be dispatched again, and the previous run's commands are
@@ -416,7 +450,10 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
         exitCode: event.exit_code,
         isError: Boolean(event.exit_code),
       });
-      return "none";
+      // The dispatch's episode is written as it ends, and the snapshot is the
+      // only thing that carries episodes. Waiting for the run to finish would
+      // hold every one of them back until the whole orchestration was over.
+      return "snapshot";
     case "assistant_message":
       setState({ activity: "" });
       pushEvent({
@@ -507,6 +544,8 @@ export const useRunError = () => useStore((s) => s.error);
 export const useLiveEvents = () => useStore((s) => s.events);
 export const useStreamStatus = () => useStore((s) => s.streamStatus);
 export const useLiveThreads = () => useStore((s) => s.threads);
+export const useRunUsage = () => useStore((s) => s.runUsage);
+export const useWorkspaceEpoch = () => useStore((s) => s.workspaceEpoch);
 export const useStreamText = () => useStore((s) => s.streamText);
 export const useStreamReasoning = () => useStore((s) => s.streamReasoning);
 export const useOptimisticUserPrompt = () =>

@@ -4,7 +4,7 @@ use super::*;
 // ssh_configurations table — `open_runtime_connection` returns early whenever
 // the stored version already equals this one. (9 itself added the per-session
 // ssh port and key columns after this branch and main advanced independently.)
-const STORE_SCHEMA_VERSION: i64 = 10;
+const STORE_SCHEMA_VERSION: i64 = 11;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -141,10 +141,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -182,6 +182,14 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535))",
     )?;
     ensure_column(&transaction, "sessions", "ssh_identity_file", "TEXT")?;
+    // Episodes recorded before dispatches could fail are all handoffs, so the
+    // default is exactly right for them.
+    ensure_column(
+        &transaction,
+        "episodes",
+        "status",
+        "TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error', 'timed_out', 'cancelled'))",
+    )?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -223,6 +231,8 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              session_id TEXT NOT NULL,
              action TEXT NOT NULL,
              content TEXT NOT NULL,
+             status TEXT NOT NULL DEFAULT 'ok'
+                 CHECK (status IN ('ok', 'error', 'timed_out', 'cancelled')),
              created_at TEXT NOT NULL,
              FOREIGN KEY (thread_name, session_id) REFERENCES threads(name, session_id)
          );

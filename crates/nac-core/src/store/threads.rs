@@ -7,14 +7,39 @@ pub fn append_episode(
     action: &str,
     content: &str,
 ) -> Result<()> {
+    append_episode_with_status(
+        path,
+        session_id,
+        thread_name,
+        action,
+        content,
+        EpisodeStatus::Ok,
+    )
+}
+
+pub fn append_episode_with_status(
+    path: &Path,
+    session_id: &str,
+    thread_name: &str,
+    action: &str,
+    content: &str,
+    status: EpisodeStatus,
+) -> Result<()> {
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction()?;
     ensure_thread_in_tx(&tx, session_id, thread_name)?;
 
     tx.execute(
-        "INSERT INTO episodes (thread_name, session_id, action, content, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![thread_name, session_id, action, content, now_utc()],
+        "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            thread_name,
+            session_id,
+            action,
+            content,
+            status.as_str(),
+            now_utc()
+        ],
     )?;
 
     tx.execute(
@@ -50,27 +75,52 @@ pub fn load_worker_context(
     })
 }
 
-/// Load all episodes for all threads in one query, grouped by thread_name.
-/// Episodes are ordered by id ASC (chronological order).
-pub fn load_all_episodes(
+/// Every dispatch of every thread in one query, failures included, grouped by
+/// thread name and ordered by id ASC (chronological order). The all-threads
+/// twin of [`thread_dispatches`], and like it only the panel wants it.
+pub fn load_all_dispatches(
     store_path: &Path,
     session_id: &str,
 ) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
     let conn = open_runtime_connection(store_path)?;
-    load_all_episodes_with_connection(&conn, session_id)
+    load_all_dispatches_with_connection(&conn, session_id)
 }
 
-pub(crate) fn load_all_episodes_with_connection(
+pub(crate) fn load_all_dispatches_with_connection(
     conn: &Connection,
     session_id: &str,
 ) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
-    let mut stmt = conn.prepare(
-        "SELECT e.id, e.thread_name, e.session_id, e.action, e.content, e.created_at
+    group_episodes(conn, session_id, false)
+}
+
+/// Retained handoffs for every thread, grouped and ordered the same way. The
+/// all-threads twin of [`thread_read`], so a reader that means "what the
+/// workers produced" never has a failed dispatch handed to it.
+pub fn load_all_retained_episodes(
+    store_path: &Path,
+    session_id: &str,
+) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
+    let conn = open_runtime_connection(store_path)?;
+    group_episodes(&conn, session_id, true)
+}
+
+fn group_episodes(
+    conn: &Connection,
+    session_id: &str,
+    retained_only: bool,
+) -> Result<HashMap<String, Vec<EpisodeRecord>>> {
+    let retained_filter = if retained_only {
+        "AND e.status = 'ok'"
+    } else {
+        ""
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT e.id, e.thread_name, e.session_id, e.action, e.content, e.status, e.created_at
          FROM episodes e
          INNER JOIN threads t ON e.thread_name = t.name AND e.session_id = t.session_id
-         WHERE e.session_id = ?
-         ORDER BY e.thread_name, e.id",
-    )?;
+         WHERE e.session_id = ? {retained_filter}
+         ORDER BY e.thread_name, e.id"
+    ))?;
     let rows = stmt.query_map(params![session_id], row_to_episode)?;
 
     let mut grouped: HashMap<String, Vec<EpisodeRecord>> = HashMap::new();
@@ -93,10 +143,15 @@ pub(crate) fn list_threads_with_connection(
     conn: &Connection,
     session_id: &str,
 ) -> Result<Vec<ThreadRecord>> {
+    // The count is what a later dispatch can actually read back, so it only
+    // counts retained episodes. The action is the last thing the thread was
+    // asked to do whether or not it got there, which is what makes a thread
+    // that has only ever failed still describable.
     let mut stmt = conn.prepare(
         "SELECT t.name, t.session_id, t.created_at, t.updated_at,
                 (SELECT COUNT(*) FROM episodes e
-                 WHERE e.thread_name = t.name AND e.session_id = t.session_id) AS episode_count,
+                 WHERE e.thread_name = t.name AND e.session_id = t.session_id
+                   AND e.status = 'ok') AS episode_count,
                 (SELECT e.action FROM episodes e
                  WHERE e.thread_name = t.name AND e.session_id = t.session_id
                  ORDER BY e.id DESC
@@ -124,6 +179,64 @@ pub(crate) fn list_threads_with_connection(
 pub fn thread_read(path: &Path, session_id: &str, thread_name: &str) -> Result<Vec<EpisodeRecord>> {
     let conn = open_runtime_connection(path)?;
     load_thread_episodes(&conn, session_id, thread_name)
+}
+
+/// Every dispatch of one thread, failures included. Only the panel wants this;
+/// model-facing reads go through [`thread_read`] so a failed dispatch never
+/// becomes context.
+pub fn thread_dispatches(
+    path: &Path,
+    session_id: &str,
+    thread_name: &str,
+) -> Result<Vec<EpisodeRecord>> {
+    let conn = open_runtime_connection(path)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, thread_name, session_id, action, content, status, created_at
+         FROM episodes
+         WHERE thread_name = ?1 AND session_id = ?2
+         ORDER BY id ASC",
+    )?;
+    let mut rows = stmt.query(params![thread_name, session_id])?;
+    let mut episodes = Vec::new();
+    while let Some(row) = rows.next()? {
+        episodes.push(row_to_episode(row)?);
+    }
+    Ok(episodes)
+}
+
+/// Highest episode id this thread holds, or 0 when it holds none. Taken before
+/// a dispatch runs, it marks off everything the thread already had, so what the
+/// dispatch itself wrote can be recognised afterwards.
+pub fn latest_episode_id(path: &Path, session_id: &str, thread_name: &str) -> Result<i64> {
+    let conn = open_runtime_connection(path)?;
+    conn.query_row(
+        "SELECT COALESCE(MAX(id), 0) FROM episodes
+         WHERE thread_name = ?1 AND session_id = ?2",
+        params![thread_name, session_id],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+/// Whether the thread retained a handoff past `watermark`, which is how a
+/// dispatch that answered before it was killed is told from one that never
+/// produced anything.
+pub fn has_retained_episode_after(
+    path: &Path,
+    session_id: &str,
+    thread_name: &str,
+    watermark: i64,
+) -> Result<bool> {
+    let conn = open_runtime_connection(path)?;
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM episodes
+             WHERE thread_name = ?1 AND session_id = ?2 AND status = 'ok' AND id > ?3
+         )",
+        params![thread_name, session_id, watermark],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
 }
 
 pub fn delete_thread(path: &Path, session_id: &str, thread_name: &str) -> Result<bool> {
@@ -176,9 +289,9 @@ fn load_thread_episodes(
     thread_name: &str,
 ) -> Result<Vec<EpisodeRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, thread_name, session_id, action, content, created_at
+        "SELECT id, thread_name, session_id, action, content, status, created_at
          FROM episodes
-         WHERE thread_name = ?1 AND session_id = ?2
+         WHERE thread_name = ?1 AND session_id = ?2 AND status = 'ok'
          ORDER BY id ASC",
     )?;
     let mut rows = stmt.query(params![thread_name, session_id])?;
@@ -195,9 +308,9 @@ fn latest_episode(
     thread_name: &str,
 ) -> Result<Option<EpisodeRecord>> {
     conn.query_row(
-        "SELECT id, thread_name, session_id, action, content, created_at
+        "SELECT id, thread_name, session_id, action, content, status, created_at
          FROM episodes
-         WHERE thread_name = ?1 AND session_id = ?2
+         WHERE thread_name = ?1 AND session_id = ?2 AND status = 'ok'
          ORDER BY id DESC
          LIMIT 1",
         params![thread_name, session_id],
@@ -214,6 +327,7 @@ fn row_to_episode(row: &rusqlite::Row<'_>) -> rusqlite::Result<EpisodeRecord> {
         session_id: row.get(2)?,
         action: row.get(3)?,
         content: row.get(4)?,
-        created_at: row.get(5)?,
+        status: row.get(5)?,
+        created_at: row.get(6)?,
     })
 }

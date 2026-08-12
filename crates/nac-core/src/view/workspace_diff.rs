@@ -248,7 +248,7 @@ struct DiffHunksResult {
     truncated: bool,
 }
 
-pub(super) fn validate_workspace_relpath(path: &str) -> Result<String> {
+pub fn validate_workspace_relpath(path: &str) -> Result<String> {
     if path.is_empty() {
         bail!("invalid path: path is empty");
     }

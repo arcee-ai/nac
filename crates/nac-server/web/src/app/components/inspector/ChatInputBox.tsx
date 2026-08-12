@@ -54,7 +54,11 @@ import {
   useSlashCommands,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
-import { pushLocalEvent, useRunning } from "@/app/store/runtimeStore";
+import {
+  pushLocalEvent,
+  useRunUsage,
+  useRunning,
+} from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -237,7 +241,10 @@ export function ChatInputBox({
   const submitInFlight = useRef(false);
   const listboxId = useId();
 
-  const metrics = runMetrics(snapshot, entry);
+  // The snapshot only accounts for a run once it ends, so while one is going
+  // the stream's own tally is what keeps these counters moving.
+  const runUsage = useRunUsage();
+  const metrics = runMetrics(snapshot, entry, running ? runUsage : null);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
   const context = contextGauge(
