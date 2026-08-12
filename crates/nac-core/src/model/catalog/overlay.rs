@@ -826,25 +826,7 @@ pub(super) fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// UTC ISO-8601 (`YYYY-MM-DDTHH:MM:SSZ`) without a datetime dependency
-/// (civil-from-days, Howard Hinnant's algorithm); mirrors nac-catalog-gen's
-/// formatter so overlay and baseline timestamps compare lexicographically.
-pub(super) fn format_unix_utc(secs: u64) -> String {
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    let (hour, minute, second) = (rem / 3_600, (rem % 3_600) / 60, rem % 60);
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { year + 1 } else { year };
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
-}
+pub(super) use crate::time::format_unix_utc;
 
 /// Shape check for the stale guard's lexicographic comparison.
 pub(super) fn is_utc_iso8601(value: &str) -> bool {

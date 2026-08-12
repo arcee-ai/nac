@@ -40,6 +40,7 @@ pub mod store;
 mod terminal;
 #[cfg(test)]
 mod test_utils;
+mod time;
 mod tools;
 pub mod types;
 pub mod upgrade;
