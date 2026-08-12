@@ -31,19 +31,6 @@ pub struct McpServerConfigurationRecord {
     pub library_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewMcpServerConfiguration {
-    pub name: String,
-    pub enabled: bool,
-    pub transport: String,
-    pub command: Option<String>,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-    pub url: Option<String>,
-    pub headers: BTreeMap<String, String>,
-    pub library_id: Option<String>,
-}
-
 #[derive(Debug)]
 pub enum McpServerConfigurationStoreError {
     InvalidInput(String),
@@ -109,7 +96,7 @@ fn validate_name(name: &str) -> ConfigurationResult<String> {
 /// Checks the fields an entry must carry and settles the optional ones, so
 /// insert and update reject the same input for the same reason.
 fn validated_record(
-    configuration: NewMcpServerConfiguration,
+    configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let transport = configuration.transport.trim().to_string();
     let (command, url) = match transport.as_str() {
@@ -325,7 +312,7 @@ pub fn load_mcp_server_configuration(
 
 pub fn insert_mcp_server_configuration(
     path: &Path,
-    configuration: NewMcpServerConfiguration,
+    configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
     let mut document = read_document(path)?;
@@ -345,7 +332,7 @@ pub fn insert_mcp_server_configuration(
 pub fn update_mcp_server_configuration(
     path: &Path,
     name: &str,
-    configuration: NewMcpServerConfiguration,
+    configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
     let mut document = read_document(path)?;
@@ -385,8 +372,8 @@ mod tests {
         crate::mcp::test_support::unique_temp_dir("nac-mcp-file-config").join("config.toml")
     }
 
-    fn http_server(name: &str) -> NewMcpServerConfiguration {
-        NewMcpServerConfiguration {
+    fn http_server(name: &str) -> McpServerConfigurationRecord {
+        McpServerConfigurationRecord {
             name: name.to_string(),
             enabled: true,
             transport: MCP_TRANSPORT_STREAMABLE_HTTP.to_string(),
@@ -431,7 +418,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_save_keeps_the_existing_file_permissions() {
+    fn saves_keep_the_existing_file_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
         let path = temp_config();
@@ -456,7 +443,7 @@ mod tests {
         )
         .unwrap();
 
-        let stdio = NewMcpServerConfiguration {
+        let stdio = McpServerConfigurationRecord {
             name: "local".to_string(),
             enabled: false,
             transport: MCP_TRANSPORT_STDIO.to_string(),

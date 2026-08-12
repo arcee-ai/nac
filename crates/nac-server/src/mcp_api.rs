@@ -16,8 +16,8 @@ use axum::http::StatusCode;
 use axum::Json;
 use nac_core::mcp_configurations::{
     self as mcp, McpProbedTool, McpServerConfig, McpServerConfigurationRecord,
-    McpServerConfigurationStoreError, McpTransportConfig, NewMcpServerConfiguration,
-    MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+    McpServerConfigurationStoreError, McpTransportConfig, MCP_TRANSPORT_STDIO,
+    MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 use serde::{Deserialize, Serialize};
 
@@ -296,7 +296,7 @@ pub async fn create_server_handler(
     payload: Result<Json<CreateMcpServerRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<McpServerView>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    let configuration = NewMcpServerConfiguration {
+    let configuration = McpServerConfigurationRecord {
         name: request.name,
         enabled: request.enabled,
         transport: request.transport,
@@ -322,7 +322,7 @@ pub async fn update_server_handler(
     let _write = CONFIG_WRITE.lock().await;
     let existing = mcp::load_mcp_server_configuration(&path, &server_name)?;
 
-    let configuration = NewMcpServerConfiguration {
+    let configuration = McpServerConfigurationRecord {
         name: match request.name {
             RequestField::Value(name) => name,
             RequestField::Null | RequestField::Omitted => existing.name.clone(),

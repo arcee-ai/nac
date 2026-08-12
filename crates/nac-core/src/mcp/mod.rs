@@ -38,8 +38,7 @@ pub use file_config::{
     delete_mcp_server_configuration, insert_mcp_server_configuration,
     list_mcp_server_configurations, load_mcp_server_configuration, mcp_config_path,
     update_mcp_server_configuration, McpServerConfigurationRecord,
-    McpServerConfigurationStoreError, NewMcpServerConfiguration, MCP_TRANSPORT_STDIO,
-    MCP_TRANSPORT_STREAMABLE_HTTP,
+    McpServerConfigurationStoreError, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 pub use library::{
     embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
@@ -584,7 +583,7 @@ url = {}
         let (http_url, http_server) = start_fake_http_mcp_server();
         insert_mcp_server_configuration(
             &nac_home.join("config.toml"),
-            NewMcpServerConfiguration {
+            McpServerConfigurationRecord {
                 name: "saved".to_string(),
                 enabled: true,
                 transport: MCP_TRANSPORT_STREAMABLE_HTTP.to_string(),

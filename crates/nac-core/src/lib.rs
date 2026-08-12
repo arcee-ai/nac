@@ -39,8 +39,7 @@ pub mod mcp_configurations {
         load_mcp_server_configuration, mcp_config_path, merge_library_entries, probe_mcp_server,
         update_mcp_server_configuration, McpLibraryAuth, McpLibraryEntry, McpProbedTool,
         McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
-        McpTransportConfig, NewMcpServerConfiguration, MCP_TRANSPORT_STDIO,
-        MCP_TRANSPORT_STREAMABLE_HTTP,
+        McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }
 
