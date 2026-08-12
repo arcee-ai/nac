@@ -258,19 +258,10 @@ pub(crate) fn list_thread_steering_with_connection(
 mod tests {
     use super::*;
 
-    fn temp_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_steering_test_{label}_{unique}"))
-            .join("store.db")
-    }
 
     #[test]
     fn claim_ack_and_expiry_are_exactly_dispatch_scoped() {
-        let path = temp_store_path("dispatch_scope");
+        let path = crate::test_utils::temp_store_path("dispatch_scope");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session");
         let first = queue_thread_steering(&path, "session", "impl", "dispatch-a", "first").unwrap();
@@ -325,7 +316,7 @@ mod tests {
 
     #[test]
     fn steering_claim_waits_for_a_temporary_writer_lock() {
-        let path = temp_store_path("temporary_lock");
+        let path = crate::test_utils::temp_store_path("temporary_lock");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session");
         queue_thread_steering(&path, "session", "impl", "dispatch", "keep going").unwrap();

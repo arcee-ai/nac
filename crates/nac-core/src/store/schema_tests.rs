@@ -1,14 +1,5 @@
 use super::*;
 
-fn temp_store_path(label: &str) -> PathBuf {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir()
-        .join(format!("nac_schema_{label}_{unique}"))
-        .join("store.db")
-}
 
 fn create_legacy_base(conn: &Connection) {
     conn.execute_batch(
@@ -58,7 +49,7 @@ fn insert_legacy_session(conn: &Connection, session_id: &str) {
 
 #[test]
 fn runtime_connections_restore_wal_mode() {
-    let path = temp_store_path("runtime_wal");
+    let path = crate::test_utils::temp_store_path("runtime_wal");
     initialize(&path).unwrap();
 
     let conn = Connection::open(&path).unwrap();
@@ -264,7 +255,7 @@ fn assert_current_schema(conn: &Connection) {
 
 #[test]
 fn main_v0_store_migrates_directly_to_v4() {
-    let path = temp_store_path("main_v0");
+    let path = crate::test_utils::temp_store_path("main_v0");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
     create_legacy_base(&legacy);
@@ -302,7 +293,7 @@ fn main_v0_store_migrates_directly_to_v4() {
 
 #[test]
 fn partial_v1_tables_at_version_zero_are_rebuilt() {
-    let path = temp_store_path("partial_v1_v0");
+    let path = crate::test_utils::temp_store_path("partial_v1_v0");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
     create_legacy_base(&legacy);
@@ -342,7 +333,7 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
 
 #[test]
 fn v1_to_v4_preserves_owned_rows_drops_orphans_and_sequences() {
-    let path = temp_store_path("v1");
+    let path = crate::test_utils::temp_store_path("v1");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
     create_legacy_base(&legacy);
@@ -500,7 +491,7 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
     // future rebuild-migration) carries transcript log rows through verbatim.
     // Current v4 DBs never re-run this migration, but the assertion keeps the
     // pattern honest for future rebuilds.
-    let path = temp_store_path("transcript_survival");
+    let path = crate::test_utils::temp_store_path("transcript_survival");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
     create_legacy_base(&legacy);
@@ -595,7 +586,7 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
 
 #[test]
 fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
-    let path = temp_store_path("v2");
+    let path = crate::test_utils::temp_store_path("v2");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");
@@ -675,7 +666,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
 
 #[test]
 fn v3_to_v4_backfills_materialized_session_summaries() {
-    let path = temp_store_path("v3_blob_summary");
+    let path = crate::test_utils::temp_store_path("v3_blob_summary");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
     let messages = serde_json::to_string(&vec![
@@ -762,7 +753,7 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
 
 #[test]
 fn checkpoint_table_enforces_completed_row_constraints() {
-    let path = temp_store_path("checkpoint_constraints");
+    let path = crate::test_utils::temp_store_path("checkpoint_constraints");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");
@@ -860,7 +851,7 @@ fn checkpoint_table_enforces_completed_row_constraints() {
 
 #[test]
 fn future_schema_version_is_rejected_without_changes() {
-    let path = temp_store_path("future");
+    let path = crate::test_utils::temp_store_path("future");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let future_version = STORE_SCHEMA_VERSION + 1;
     let future = Connection::open(&path).unwrap();
@@ -885,7 +876,7 @@ fn future_schema_version_is_rejected_without_changes() {
 
 #[test]
 fn opening_v4_store_is_idempotent() {
-    let path = temp_store_path("idempotent");
+    let path = crate::test_utils::temp_store_path("idempotent");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");

@@ -1,5 +1,5 @@
 use super::super::*;
-use super::{assistant, candidate, state, temp_store_path, user};
+use super::{assistant, candidate, state, user};
 
 use sha2::{Digest, Sha256};
 
@@ -45,7 +45,7 @@ fn installed_historical_wrapper_is_unchanged() {
 }
 #[test]
 fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
-    let path = temp_store_path("incremental");
+    let path = crate::test_utils::temp_store_path("incremental");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let messages = vec![
@@ -101,7 +101,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
         assistant("second answer"),
         assistant("third answer"),
     ];
-    let end_path = temp_store_path("incremental_end");
+    let end_path = crate::test_utils::temp_store_path("incremental_end");
     store::initialize(&end_path).unwrap();
     store::insert_test_session(&end_path, "session");
     let (end_source, end_policy) = checkpoint_digests(&end_messages, 1);
@@ -174,7 +174,7 @@ fn policy_digest_covers_every_ordered_system_even_after_boundary() {
 }
 #[test]
 fn version_one_checkpoint_is_invalidated() {
-    let path = temp_store_path("version_one");
+    let path = crate::test_utils::temp_store_path("version_one");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let messages = vec![user("old"), assistant("answer"), user("current")];

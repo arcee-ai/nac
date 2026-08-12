@@ -185,19 +185,10 @@ pub struct WorksetDefinition {
 mod tests {
     use super::*;
 
-    fn temp_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_store_test_{}_{}", label, unique))
-            .join("store.db")
-    }
 
     #[test]
     fn append_list_and_read_thread_data() {
-        let store_path = temp_store_path("append");
+        let store_path = crate::test_utils::temp_store_path("append");
         initialize(&store_path).unwrap();
 
         let session_id = "session-a";
@@ -239,7 +230,7 @@ mod tests {
 
     #[test]
     fn worker_context_uses_latest_source_episode() {
-        let store_path = temp_store_path("context");
+        let store_path = crate::test_utils::temp_store_path("context");
         initialize(&store_path).unwrap();
 
         let session_id = "session-b";
@@ -259,7 +250,7 @@ mod tests {
 
     #[test]
     fn delete_thread_removes_only_target_owned_rows() {
-        let store_path = temp_store_path("delete");
+        let store_path = crate::test_utils::temp_store_path("delete");
         initialize(&store_path).unwrap();
         insert_test_session(&store_path, "session-c");
 
@@ -319,7 +310,7 @@ mod tests {
 
     #[test]
     fn delete_thread_rejects_reserved_orchestrator_target() {
-        let store_path = temp_store_path("delete_reserved");
+        let store_path = crate::test_utils::temp_store_path("delete_reserved");
         initialize(&store_path).unwrap();
         insert_test_session(&store_path, "session-c");
 
@@ -395,7 +386,7 @@ mod tests {
 
     #[test]
     fn define_read_and_list_worksets() {
-        let store_path = temp_store_path("worksets");
+        let store_path = crate::test_utils::temp_store_path("worksets");
         initialize(&store_path).unwrap();
 
         let session_id = "session-workset";

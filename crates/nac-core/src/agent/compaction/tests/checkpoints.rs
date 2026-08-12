@@ -1,5 +1,5 @@
 use super::super::*;
-use super::{assistant, candidate, state, temp_store_path, user};
+use super::{assistant, candidate, state, user};
 
 use crate::store;
 use crate::store::orchestrator_compaction::{
@@ -9,7 +9,7 @@ use crate::types::{FunctionCall, Message, ToolCall};
 
 #[test]
 fn restore_falls_back_from_newest_invalid_checkpoint() {
-    let path = temp_store_path("fallback");
+    let path = crate::test_utils::temp_store_path("fallback");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let messages = vec![
@@ -70,7 +70,7 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
 }
 #[test]
 fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_changed_checkpoint() {
-    let path = temp_store_path("sample_refresh");
+    let path = crate::test_utils::temp_store_path("sample_refresh");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let messages = vec![
@@ -157,7 +157,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
 }
 #[test]
 fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
-    let path = temp_store_path("wrapper_only");
+    let path = crate::test_utils::temp_store_path("wrapper_only");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let messages = vec![
@@ -215,7 +215,7 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
 }
 #[test]
 fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use() {
-    let path = temp_store_path("repaired");
+    let path = crate::test_utils::temp_store_path("repaired");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let mut messages = vec![
@@ -291,7 +291,7 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
         },
     ];
     for (label, boundary) in [("user", 2), ("assistant", 3), ("end", messages.len())] {
-        let path = temp_store_path(label);
+        let path = crate::test_utils::temp_store_path(label);
         store::initialize(&path).unwrap();
         store::insert_test_session(&path, "session");
         let (source, policy) = checkpoint_digests(&messages, boundary);

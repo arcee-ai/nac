@@ -21,15 +21,6 @@ fn assistant(content: &str) -> Message {
     }
 }
 
-fn temp_store_path(label: &str) -> PathBuf {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir()
-        .join(format!("nac_agent_compaction_{label}_{unique}"))
-        .join("store.db")
-}
 
 fn state(path: PathBuf, threshold: Option<u64>) -> CompactionState {
     CompactionState::new(path, "session".to_string(), threshold)

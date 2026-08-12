@@ -298,15 +298,6 @@ fn digest_from_sqlite(value: Vec<u8>, column: usize) -> rusqlite::Result<[u8; 32
 mod tests {
     use super::*;
 
-    fn temp_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_compaction_checkpoint_{label}_{unique}"))
-            .join("store.db")
-    }
 
     fn checkpoint(
         session_id: &str,
@@ -331,7 +322,7 @@ mod tests {
 
     #[test]
     fn append_round_trips_exact_values_and_loads_newest_first() {
-        let path = temp_store_path("round_trip");
+        let path = crate::test_utils::temp_store_path("round_trip");
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
 
@@ -366,7 +357,7 @@ mod tests {
 
     #[test]
     fn append_rejects_missing_or_cross_session_parents_and_nonadvancing_boundaries() {
-        let path = temp_store_path("parents");
+        let path = crate::test_utils::temp_store_path("parents");
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
         insert_test_session(&path, "session-b");
@@ -409,7 +400,7 @@ mod tests {
 
     #[test]
     fn failed_appends_leave_no_rows_and_session_delete_cascades_checkpoint_chain() {
-        let path = temp_store_path("rollback_and_cascade");
+        let path = crate::test_utils::temp_store_path("rollback_and_cascade");
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
 
@@ -459,7 +450,7 @@ mod tests {
 
     #[test]
     fn loader_skips_malformed_rows_but_propagates_database_failures() {
-        let path = temp_store_path("malformed_fallback");
+        let path = crate::test_utils::temp_store_path("malformed_fallback");
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
         let valid = append_orchestrator_compaction_checkpoint(
@@ -499,7 +490,7 @@ mod tests {
             vec![valid]
         );
 
-        let corrupt_path = temp_store_path("query_failure");
+        let corrupt_path = crate::test_utils::temp_store_path("query_failure");
         std::fs::create_dir_all(corrupt_path.parent().unwrap()).unwrap();
         std::fs::write(&corrupt_path, b"not a sqlite database").unwrap();
         assert!(load_orchestrator_compaction_checkpoints(&corrupt_path, "session-a").is_err());
@@ -522,7 +513,7 @@ mod tests {
 
     #[test]
     fn append_rejects_values_above_supported_token_maximum() {
-        let path = temp_store_path("token_range");
+        let path = crate::test_utils::temp_store_path("token_range");
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
         let mut input = checkpoint("session-a", None, 2, "summary");

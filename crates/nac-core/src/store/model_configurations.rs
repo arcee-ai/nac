@@ -318,18 +318,9 @@ mod tests {
 
     use crate::store::initialize;
 
-    fn temp_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_model_config_test_{label}_{unique}"))
-            .join("store.db")
-    }
 
     fn initialized_store(label: &str) -> PathBuf {
-        let path = temp_store_path(label);
+        let path = crate::test_utils::temp_store_path(label);
         initialize(&path).unwrap();
         path
     }

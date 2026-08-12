@@ -1,6 +1,6 @@
 use super::super::tests::{
     compaction_response, test_active_service, test_agent, test_agent_with_compaction_threshold,
-    test_compaction_service, test_picker_service, test_store_path,
+    test_compaction_service, test_picker_service,
 };
 use super::*;
 use crate::events::CompactionSkipReason;
@@ -230,7 +230,7 @@ fn supplied_leases_are_rejected_for_the_wrong_session_or_store() {
     ));
     assert!(!parts.service.has_active_operation());
 
-    let other_store = test_store_path("lease_identity_other_store");
+    let other_store = crate::test_utils::temp_store_path("lease_identity_other_store");
     crate::store::initialize(&other_store).unwrap();
     let wrong_store_lease =
         sessions::SessionOperationLease::try_acquire(&other_store, "target-session").unwrap();
@@ -414,7 +414,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
     ]);
     let client = ModelClient::new_for_test_server(server.base_url.clone());
     let session_id = "sequential-context-sample";
-    let store_path = test_store_path("sequential_context_sample");
+    let store_path = crate::test_utils::temp_store_path("sequential_context_sample");
     let mut agent = test_agent_with_compaction_threshold(
         client.clone(),
         store_path.clone(),

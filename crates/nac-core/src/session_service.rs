@@ -3033,15 +3033,6 @@ pub(super) mod tests {
         .is_empty());
     }
 
-    pub(super) fn test_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_session_service_{label}_{unique}"))
-            .join("store.db")
-    }
 
     pub(super) fn test_agent(
         client: ModelClient,
@@ -3086,7 +3077,7 @@ pub(super) mod tests {
     }
 
     pub(super) fn test_picker_service(label: &str) -> SessionServiceParts {
-        let store_path = test_store_path(label);
+        let store_path = crate::test_utils::temp_store_path(label);
         let client = ModelClient::new_for_test();
         let agent = test_agent(client.clone(), store_path.clone(), None);
         SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
@@ -3105,7 +3096,7 @@ pub(super) mod tests {
         label: &str,
         session_id: &str,
     ) -> (SessionServiceParts, PathBuf) {
-        let store_path = test_store_path(label);
+        let store_path = crate::test_utils::temp_store_path(label);
         let client = ModelClient::new_for_test();
         let agent = test_agent(
             client.clone(),
@@ -3246,7 +3237,7 @@ pub(super) mod tests {
         session_id: &str,
         client: ModelClient,
     ) -> (SessionServiceParts, PathBuf) {
-        let store_path = test_store_path(label);
+        let store_path = crate::test_utils::temp_store_path(label);
         let mut agent = test_agent(
             client.clone(),
             store_path.clone(),
@@ -3678,7 +3669,7 @@ pub(super) mod tests {
     async fn store_backed_snapshot_is_live_during_a_real_run() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-        let store_path = test_store_path("real_run_live");
+        let store_path = crate::test_utils::temp_store_path("real_run_live");
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let (hit_tx, hit_rx) = std::sync::mpsc::channel::<()>();
         let server = ScriptedServer::start_observed(
@@ -4353,7 +4344,7 @@ pub(super) mod tests {
 
     #[test]
     fn from_orchestrator_run_config_exposes_metadata_and_init_snapshot() {
-        let store_path = test_store_path("active_init");
+        let store_path = crate::test_utils::temp_store_path("active_init");
         let client = ModelClient::new_for_test();
         let session_id = "session-1".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4406,7 +4397,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn finish_run_persists_snapshot_before_completion_event() {
-        let store_path = test_store_path("active_finish_persist");
+        let store_path = crate::test_utils::temp_store_path("active_finish_persist");
         let client = ModelClient::new_for_test();
         let session_id = "session-finish-persist".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4646,7 +4637,7 @@ pub(super) mod tests {
     async fn real_run_diffs_token_timing_from_the_run_start_store_count() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-        let store_path = test_store_path("baseline_real_run");
+        let store_path = crate::test_utils::temp_store_path("baseline_real_run");
         let server = ScriptedServer::start(vec![ScriptedResponse::json(
             "200 OK",
             serde_json::json!({
@@ -4767,7 +4758,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn finish_run_persists_token_usage() {
-        let store_path = test_store_path("active_finish_token_usage");
+        let store_path = crate::test_utils::temp_store_path("active_finish_token_usage");
         let client = ModelClient::new_for_test();
         let session_id = "session-finish-token-usage".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4884,7 +4875,7 @@ pub(super) mod tests {
         // round that dispatched workers), the accumulated token usage —
         // including worker thread tokens — must still be persisted so it is
         // not permanently lost.
-        let store_path = test_store_path("active_failed_token_usage");
+        let store_path = crate::test_utils::temp_store_path("active_failed_token_usage");
         let client = ModelClient::new_for_test();
         let session_id = "session-failed-token-usage".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4980,7 +4971,7 @@ pub(super) mod tests {
 
     #[test]
     fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
-        let store_path = test_store_path("failed_then_successful_token_usage");
+        let store_path = crate::test_utils::temp_store_path("failed_then_successful_token_usage");
         let client = ModelClient::new_for_test();
         let session_id = "session-failed-then-successful";
         let mut snapshot = sessions::new_snapshot(
@@ -5123,7 +5114,7 @@ pub(super) mod tests {
         // neither. The next run reuses that agent, and providers reject a
         // transcript whose assistant tool calls have no tool results — the
         // run-failure path must trim the dangling turn from both stores.
-        let store_path = test_store_path("failed_run_normalizes");
+        let store_path = crate::test_utils::temp_store_path("failed_run_normalizes");
         let server = ScriptedServer::start(vec![
             ScriptedResponse::json(
                 "200 OK",
@@ -5307,7 +5298,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
-        let store_path = test_store_path("active_persist_failure");
+        let store_path = crate::test_utils::temp_store_path("active_persist_failure");
         let store_parent = store_path.parent().unwrap().to_path_buf();
         // The store must be usable at agent construction time (the transcript
         // log writer opens it eagerly); break the path afterwards so only the
@@ -5400,7 +5391,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn cancelled_run_stays_cancelled_when_snapshot_persistence_fails() {
-        let store_path = test_store_path("cancel_persist_failure");
+        let store_path = crate::test_utils::temp_store_path("cancel_persist_failure");
         let store_parent = store_path.parent().unwrap().to_path_buf();
         crate::store::initialize(&store_path).unwrap();
         let client = ModelClient::new_for_test();
@@ -5460,7 +5451,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_agent_events_filters_agent_envelopes() {
-        let store_path = test_store_path("agent_event_adapter");
+        let store_path = crate::test_utils::temp_store_path("agent_event_adapter");
         let client = ModelClient::new_for_test();
         let session_id = "session-agent-events".to_string();
         crate::store::insert_test_session(&store_path, &session_id);
@@ -5570,7 +5561,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn mark_run_finishing_clears_submitted_user_message_before_persistence() {
-        let store_path = test_store_path("active_pending_cleared_on_finish");
+        let store_path = crate::test_utils::temp_store_path("active_pending_cleared_on_finish");
         let client = ModelClient::new_for_test();
         let session_id = "session-pending-clear".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -5832,7 +5823,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn failed_run_persists_messages_without_recording_new_duration() {
-        let store_path = test_store_path("active_failed_persist");
+        let store_path = crate::test_utils::temp_store_path("active_failed_persist");
         let client = ModelClient::new_for_test();
         let session_id = "session-failed-persist".to_string();
         let mut agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -5938,7 +5929,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn request_cancel_persists_marker_and_emits_terminal_event() {
-        let store_path = test_store_path("active_cancel_persist");
+        let store_path = crate::test_utils::temp_store_path("active_cancel_persist");
         let client = ModelClient::new_for_test();
         let session_id = "session-cancel-persist".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -6089,7 +6080,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn finish_run_without_active_session_snapshot_emits_completion_without_saving() {
-        let store_path = test_store_path("picker_noop");
+        let store_path = crate::test_utils::temp_store_path("picker_noop");
         let client = ModelClient::new_for_test();
         let agent = test_agent(client.clone(), store_path.clone(), None);
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {

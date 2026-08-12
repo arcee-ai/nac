@@ -229,15 +229,6 @@ mod tests {
     use crate::types::Message;
     use crate::TEST_ENV_LOCK;
 
-    fn temp_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_sessions_test_{}_{}", label, unique))
-            .join("store.db")
-    }
 
     fn test_snapshot(session_id: &str, created_at: &str, updated_at: &str) -> SessionSnapshot {
         let mut snapshot = new_snapshot(
@@ -268,7 +259,7 @@ mod tests {
     #[test]
     fn create_and_load_session_round_trip() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("round_trip");
+        let store_path = crate::test_utils::temp_store_path("round_trip");
 
         let mut snapshot = new_snapshot(
             "session-1".to_string(),
@@ -340,7 +331,7 @@ mod tests {
     #[test]
     fn session_load_rejects_threshold_above_supported_maximum() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("oversized_compaction_threshold");
+        let store_path = crate::test_utils::temp_store_path("oversized_compaction_threshold");
         let snapshot = test_snapshot(
             "oversized-threshold",
             "2026-01-01 00:00:00.000000000",
@@ -373,7 +364,7 @@ mod tests {
     #[test]
     fn load_session_migrates_legacy_schema_without_duration_history() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("legacy_duration_schema");
+        let store_path = crate::test_utils::temp_store_path("legacy_duration_schema");
         std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
         let messages_json = serde_json::to_string(&vec![Message::User {
             content: "hello".to_string(),
@@ -445,7 +436,7 @@ mod tests {
     #[test]
     fn save_session_persists_to_opened_store_not_path_recorded_in_row() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("persist_target");
+        let store_path = crate::test_utils::temp_store_path("persist_target");
         let foreign_store_path = store_path
             .parent()
             .unwrap()
@@ -522,7 +513,7 @@ mod tests {
     #[test]
     fn ssh_connection_round_trips_through_store_refresh_and_summaries() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("ssh_host_round_trip");
+        let store_path = crate::test_utils::temp_store_path("ssh_host_round_trip");
 
         let connection = SshConnection {
             host: "deploy@build-box".to_string(),
@@ -578,7 +569,7 @@ mod tests {
     #[test]
     fn load_last_session_returns_most_recent() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("latest");
+        let store_path = crate::test_utils::temp_store_path("latest");
 
         let first = new_snapshot(
             "session-1".to_string(),
@@ -621,7 +612,7 @@ mod tests {
     #[test]
     fn list_sessions_returns_summaries_in_presentation_order() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("list");
+        let store_path = crate::test_utils::temp_store_path("list");
 
         let first = new_snapshot(
             "session-1".to_string(),
@@ -701,7 +692,7 @@ mod tests {
     #[test]
     fn listing_and_raw_config_isolate_structurally_invalid_model_rows() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("raw_invalid_model_rows");
+        let store_path = crate::test_utils::temp_store_path("raw_invalid_model_rows");
         for (index, id) in ["healthy", "auto", "missing", "effort", "headers"]
             .into_iter()
             .enumerate()
@@ -794,7 +785,7 @@ mod tests {
     #[test]
     fn session_row_with_removed_sandbox_backend_loads_without_sandbox() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("removed_sandbox_backend");
+        let store_path = crate::test_utils::temp_store_path("removed_sandbox_backend");
         let snapshot = test_snapshot(
             "legacy-sandbox",
             "2026-01-01 00:00:00.000000000",
@@ -835,7 +826,7 @@ mod tests {
     #[test]
     fn session_row_with_podman_sandbox_backend_still_loads_with_sandbox() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("podman_sandbox_backend");
+        let store_path = crate::test_utils::temp_store_path("podman_sandbox_backend");
         let mut snapshot = test_snapshot(
             "podman-sandbox",
             "2026-01-01 00:00:00.000000000",
@@ -868,7 +859,7 @@ mod tests {
     #[test]
     fn api_key_env_and_extra_headers_round_trip_through_store() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("api_key_env_headers");
+        let store_path = crate::test_utils::temp_store_path("api_key_env_headers");
 
         let mut headers = BTreeMap::new();
         headers.insert("X-Custom-Header".to_string(), "custom-value".to_string());
@@ -928,7 +919,7 @@ mod tests {
     #[test]
     fn config_and_history_writes_preserve_each_other_in_both_orders() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("config_history_isolation");
+        let store_path = crate::test_utils::temp_store_path("config_history_isolation");
 
         for (session_id, config_first) in [
             ("history-then-config", false),
@@ -1035,7 +1026,7 @@ mod tests {
     #[test]
     fn concurrent_config_updates_use_revision_cas() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("config_revision_conflict");
+        let store_path = crate::test_utils::temp_store_path("config_revision_conflict");
         create_session(
             &store_path,
             &test_snapshot(
@@ -1088,7 +1079,7 @@ mod tests {
     #[test]
     fn legacy_session_without_api_key_env_loads_with_defaults() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("legacy_no_api_key_env");
+        let store_path = crate::test_utils::temp_store_path("legacy_no_api_key_env");
         std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
         let messages_json = serde_json::to_string(&vec![Message::User {
             content: "hello".to_string(),
@@ -1157,7 +1148,7 @@ mod tests {
     #[test]
     fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("delete_cascade");
+        let store_path = crate::test_utils::temp_store_path("delete_cascade");
 
         // Create a session
         let snapshot = new_snapshot(
@@ -1285,7 +1276,7 @@ mod tests {
     #[test]
     fn legacy_store_migrates_presentation_table_and_lists_defaults() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("presentation_migration");
+        let store_path = crate::test_utils::temp_store_path("presentation_migration");
         std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
         let messages_json = serde_json::to_string(&Vec::<Message>::new()).unwrap();
         {
@@ -1352,7 +1343,7 @@ mod tests {
     #[test]
     fn presentation_order_uses_creation_fallback_and_new_sessions_lead_unpinned() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("presentation_default_order");
+        let store_path = crate::test_utils::temp_store_path("presentation_default_order");
         let old = test_snapshot(
             "old",
             "2026-01-01 00:00:00.000000000",
@@ -1409,7 +1400,7 @@ mod tests {
     #[test]
     fn presentation_titles_are_normalized_validated_and_clearable() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("presentation_titles");
+        let store_path = crate::test_utils::temp_store_path("presentation_titles");
         create_session(
             &store_path,
             &test_snapshot(
@@ -1470,7 +1461,7 @@ mod tests {
     #[test]
     fn pin_moves_append_to_destination_without_disturbing_groups() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("presentation_pin_append");
+        let store_path = crate::test_utils::temp_store_path("presentation_pin_append");
         for (index, session_id) in ["a", "b", "c"].iter().enumerate() {
             create_session(
                 &store_path,
@@ -1516,7 +1507,7 @@ mod tests {
     #[test]
     fn reorders_groups_independently_and_rejects_conflicts_without_partial_writes() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("presentation_reorder");
+        let store_path = crate::test_utils::temp_store_path("presentation_reorder");
         for session_id in ["a", "b", "c"] {
             create_session(
                 &store_path,
@@ -1636,7 +1627,7 @@ mod tests {
     #[test]
     fn presentation_survives_snapshot_save_and_cascades_on_delete() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("presentation_snapshot_isolation");
+        let store_path = crate::test_utils::temp_store_path("presentation_snapshot_isolation");
         let mut stale_snapshot = test_snapshot(
             "session-presentation",
             "2026-01-01 00:00:00.000000000",
@@ -1674,7 +1665,7 @@ mod tests {
     #[test]
     fn presentation_writes_do_not_change_load_last_activity_order() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("presentation_load_last");
+        let store_path = crate::test_utils::temp_store_path("presentation_load_last");
         let active = test_snapshot(
             "active",
             "2026-01-01 00:00:00.000000000",
@@ -1698,7 +1689,7 @@ mod tests {
     #[test]
     fn save_session_run_state_preserves_messages_and_config_columns() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("run_state_sparing_save");
+        let store_path = crate::test_utils::temp_store_path("run_state_sparing_save");
         let mut snapshot = test_snapshot(
             "session-sparing",
             "2026-01-01 00:00:00.000000000",
@@ -1789,7 +1780,7 @@ mod tests {
     #[test]
     fn session_summaries_merge_blob_stats_with_transcript_log_tail() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("summary_blob_plus_log");
+        let store_path = crate::test_utils::temp_store_path("summary_blob_plus_log");
 
         // Never-fold session shape (step 4): a write-once blob (system head
         // ++ legacy prefix) plus the live transcript in the log.

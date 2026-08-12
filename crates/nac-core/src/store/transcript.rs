@@ -819,15 +819,6 @@ fn refresh_session_summary(conn: &Connection, session_id: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn temp_store_path(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("nac_transcript_{label}_{unique}"))
-            .join("store.db")
-    }
 
     fn set_snapshot_messages(path: &Path, session_id: &str, messages: &[Message]) {
         let connection = open_connection(path).unwrap();
@@ -957,7 +948,7 @@ mod tests {
 
     #[test]
     fn transcript_log_appends_read_back_in_order_with_tail_ranges() {
-        let path = temp_store_path("round_trip");
+        let path = crate::test_utils::temp_store_path("round_trip");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
         crate::store::insert_test_session(&path, "session-b");
@@ -998,7 +989,7 @@ mod tests {
 
     #[test]
     fn transcript_log_append_batch_assigns_contiguous_indices_and_is_empty_noop() {
-        let path = temp_store_path("append_batch");
+        let path = crate::test_utils::temp_store_path("append_batch");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
         set_snapshot_messages(
@@ -1082,7 +1073,7 @@ mod tests {
 
     #[test]
     fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
-        let path = temp_store_path("gap_repair");
+        let path = crate::test_utils::temp_store_path("gap_repair");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
         crate::store::insert_test_session(&path, "session-b");
@@ -1189,7 +1180,7 @@ mod tests {
 
     #[test]
     fn transcript_log_delete_from_truncates_tail_and_isolates_sessions() {
-        let path = temp_store_path("delete_from");
+        let path = crate::test_utils::temp_store_path("delete_from");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
         crate::store::insert_test_session(&path, "session-b");
@@ -1232,7 +1223,7 @@ mod tests {
 
     #[test]
     fn transcript_log_summary_refresh_ignores_blob_covered_rows() {
-        let path = temp_store_path("summary_covered_rows");
+        let path = crate::test_utils::temp_store_path("summary_covered_rows");
         initialize(&path).unwrap();
         let snapshot = crate::sessions::new_snapshot(
             "session-a".to_string(),
@@ -1327,7 +1318,7 @@ mod tests {
 
     #[test]
     fn transcript_log_read_tail_window_pages_backwards_from_the_extent() {
-        let path = temp_store_path("tail_window");
+        let path = crate::test_utils::temp_store_path("tail_window");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
 
@@ -1385,7 +1376,7 @@ mod tests {
 
     #[test]
     fn transcript_log_read_tail_window_fails_loudly_on_gaps_and_foreign_rows() {
-        let path = temp_store_path("tail_window_gaps");
+        let path = crate::test_utils::temp_store_path("tail_window_gaps");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
 
@@ -1430,7 +1421,7 @@ mod tests {
 
     #[test]
     fn transcript_log_reads_fail_loudly_on_foreign_rows() {
-        let path = temp_store_path("foreign_rows");
+        let path = crate::test_utils::temp_store_path("foreign_rows");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
 
@@ -1467,7 +1458,7 @@ mod tests {
 
     #[test]
     fn transcript_log_summary_stats_match_the_blob_visibility_predicate() {
-        let path = temp_store_path("summary_stats");
+        let path = crate::test_utils::temp_store_path("summary_stats");
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
         crate::store::insert_test_session(&path, "session-b");

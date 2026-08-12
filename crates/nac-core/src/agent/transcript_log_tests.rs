@@ -3,15 +3,6 @@
 //! blob ++ log restore merge, and crash/cancel log normalization.
 use super::*;
 
-fn test_store_path(label: &str) -> PathBuf {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir()
-        .join(format!("nac_agent_transcript_log_{label}_{unique}"))
-        .join("store.db")
-}
 
 fn transcript_test_agent(
     client: ModelClient,
@@ -168,7 +159,7 @@ fn transcript_log_gate_is_orchestrator_with_session_only() {
     // must never log, and neither must session-less (picker) orchestrators.
     let worker = transcript_test_agent(
         ModelClient::new_for_test(),
-        test_store_path("gate_worker"),
+        crate::test_utils::temp_store_path("gate_worker"),
         Some("session"),
         AgentMode::Worker,
     );
@@ -176,13 +167,13 @@ fn transcript_log_gate_is_orchestrator_with_session_only() {
 
     let picker = transcript_test_agent(
         ModelClient::new_for_test(),
-        test_store_path("gate_picker"),
+        crate::test_utils::temp_store_path("gate_picker"),
         None,
         AgentMode::Orchestrator,
     );
     assert!(picker.transcript_log.is_none());
 
-    let store_path = test_store_path("gate_orchestrator");
+    let store_path = crate::test_utils::temp_store_path("gate_orchestrator");
     crate::store::initialize(&store_path).unwrap();
     let orchestrator = transcript_test_agent(
         ModelClient::new_for_test(),
@@ -203,7 +194,7 @@ fn transcript_log_gate_is_orchestrator_with_session_only() {
 async fn worker_send_never_writes_transcript_log_rows() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = test_store_path("worker_send");
+    let store_path = crate::test_utils::temp_store_path("worker_send");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
@@ -233,7 +224,7 @@ async fn worker_send_never_writes_transcript_log_rows() {
 async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = test_store_path("commit_points");
+    let store_path = crate::test_utils::temp_store_path("commit_points");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let server = ScriptedServer::start(vec![
@@ -293,7 +284,7 @@ async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
 async fn steering_delivery_is_logged_after_the_ack() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = test_store_path("steering_commit");
+    let store_path = crate::test_utils::temp_store_path("steering_commit");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let queued = crate::store::queue_thread_steering(
@@ -342,7 +333,7 @@ async fn steering_delivery_is_logged_after_the_ack() {
 
 #[tokio::test]
 async fn restore_merges_log_tail_over_the_snapshot_blob() {
-    let store_path = test_store_path("merge");
+    let store_path = crate::test_utils::temp_store_path("merge");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let blob = vec![
@@ -401,7 +392,7 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
 
 #[tokio::test]
 async fn restore_with_no_log_tail_matches_the_plain_blob_path() {
-    let store_path = test_store_path("merge_empty");
+    let store_path = crate::test_utils::temp_store_path("merge_empty");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
 
@@ -439,7 +430,7 @@ async fn restore_with_no_log_tail_matches_the_plain_blob_path() {
 
 #[tokio::test]
 async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
-    let store_path = test_store_path("merge_trim");
+    let store_path = crate::test_utils::temp_store_path("merge_trim");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let blob = vec![
@@ -484,7 +475,7 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
 
 #[tokio::test]
 async fn restore_recovers_a_non_contiguous_log_tail() {
-    let store_path = test_store_path("merge_gap");
+    let store_path = crate::test_utils::temp_store_path("merge_gap");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let blob = vec![
@@ -549,7 +540,7 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
 
 #[tokio::test]
 async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
-    let store_path = test_store_path("merge_gap_snapshot_tool_turn");
+    let store_path = crate::test_utils::temp_store_path("merge_gap_snapshot_tool_turn");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let blob = vec![
@@ -617,7 +608,7 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
 
 #[tokio::test]
 async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
-    let store_path = test_store_path("merge_partial_recovery");
+    let store_path = crate::test_utils::temp_store_path("merge_partial_recovery");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let blob = vec![
@@ -694,7 +685,7 @@ async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
 
 #[tokio::test]
 async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() {
-    let store_path = test_store_path("merge_stale_snapshot_before_lease");
+    let store_path = crate::test_utils::temp_store_path("merge_stale_snapshot_before_lease");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let stale_blob = vec![
@@ -742,7 +733,7 @@ async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() 
 
 #[tokio::test]
 async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
-    let store_path = test_store_path("cancel");
+    let store_path = crate::test_utils::temp_store_path("cancel");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
 
@@ -801,7 +792,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
 
 #[tokio::test]
 async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
-    let store_path = test_store_path("cancel_straggler");
+    let store_path = crate::test_utils::temp_store_path("cancel_straggler");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
 
@@ -848,7 +839,7 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
 
 #[tokio::test]
 async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
-    let store_path = test_store_path("normalize_failed");
+    let store_path = crate::test_utils::temp_store_path("normalize_failed");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
 
@@ -899,7 +890,7 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
 async fn steering_log_failure_truncates_the_staged_messages() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = test_store_path("steering_log_failure");
+    let store_path = crate::test_utils::temp_store_path("steering_log_failure");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let queued = crate::store::queue_thread_steering(
@@ -996,7 +987,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
 async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = test_store_path("live_trigger");
+    let store_path = crate::test_utils::temp_store_path("live_trigger");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     // Queue steering so the run covers all four commit points: prompt,
@@ -1057,7 +1048,7 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
 async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = test_store_path("origin_stamp");
+    let store_path = crate::test_utils::temp_store_path("origin_stamp");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
@@ -1122,7 +1113,7 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
 async fn errored_turns_never_enter_the_transcript() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = test_store_path("errored_turn");
+    let store_path = crate::test_utils::temp_store_path("errored_turn");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     // HTTP 400 is non-retryable: the turn fails immediately, before the

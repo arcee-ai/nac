@@ -1,5 +1,5 @@
 use super::super::*;
-use super::{assistant, candidate, state, temp_store_path, user};
+use super::{assistant, candidate, state, user};
 use std::path::PathBuf;
 
 use crate::store;
@@ -287,7 +287,7 @@ fn safe_boundary_scanner_rejects_duplicate_unknown_orphan_missing_and_interleave
 }
 #[test]
 fn active_end_checkpoint_without_new_messages_is_already_compacted() {
-    let path = temp_store_path("already_compacted");
+    let path = crate::test_utils::temp_store_path("already_compacted");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let messages = vec![user("old")];
