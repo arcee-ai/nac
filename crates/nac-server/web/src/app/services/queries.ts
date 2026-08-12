@@ -401,13 +401,13 @@ export function useStoredKeyProviderModels(
  * empty into populated without a reload.
  */
 export function useManagedProviderModels(
-  backend: BackendKind,
+  backend: BackendKind | null,
   enabled: boolean,
 ) {
   return useQuery<ProviderModelList>({
-    queryKey: queryKeys.managedProviderModels(backend),
-    queryFn: () => api.listProviderModels({ backend }),
-    enabled,
+    queryKey: queryKeys.managedProviderModels(backend ?? ""),
+    queryFn: () => api.listProviderModels({ backend: backend! }),
+    enabled: enabled && backend !== null,
     retry: false,
     staleTime: 5 * 60_000,
   });

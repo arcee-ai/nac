@@ -222,11 +222,11 @@ export function buildSettingsPatch(
     patch.extra_headers = headers;
   }
 
-  // Compaction threshold: empty clears it (null), a number sets it. Left
-  // untouched when it matches the initial value so a save never rewrites it.
+  // Context limit: empty clears it (null), a number sets it. Left untouched
+  // when it matches the initial value so a save never rewrites it.
   const compactionRaw = values.orchestrator_compaction_threshold.trim();
   if (compactionRaw !== "" && !/^\d+$/.test(compactionRaw)) {
-    throw new Error("Compaction threshold must be a non-negative integer");
+    throw new Error("Context Limit must be a non-negative integer");
   }
   const compactionValue = compactionRaw === "" ? null : Number(compactionRaw);
   if (compactionValue !== initial.orchestrator_compaction_threshold) {

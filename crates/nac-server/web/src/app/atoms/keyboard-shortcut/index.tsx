@@ -1,38 +1,16 @@
 import type React from "react";
 import { cn } from "../../lib/cn";
-
-const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
-
-/** Names accepted in `keys`, rendered as the glyph the platform uses. */
-const SYMBOLS: Record<string, string> = {
-  ctrl: isMac ? "⌘" : "⌃",
-  control: isMac ? "⌘" : "⌃",
-  cmd: "⌘",
-  command: "⌘",
-  meta: isMac ? "⌘" : "⊞",
-  shift: "⇧",
-  alt: isMac ? "⌥" : "Alt",
-  option: isMac ? "⌥" : "Alt",
-  enter: "⏎",
-  return: "⏎",
-  esc: "⎋",
-  escape: "⎋",
-  tab: "⇥",
-  delete: "⌫",
-  backspace: "⌫",
-  space: "␣",
-  up: "↑",
-  down: "↓",
-  left: "←",
-  right: "→",
-};
-
-const glyph = (key: string) => SYMBOLS[key.toLowerCase()] ?? key.toUpperCase();
+import { keyGlyph } from "../../lib/shortcuts";
 
 interface KeyboardShortcutProps {
   keys: string[];
   /** Styled for a dark surface, such as the inside of a tooltip. */
   inversed?: boolean;
+  /**
+   * Spell the key out — TAB rather than ⇥ — where the glyph is the whole hint
+   * and has no combination around it to be read against.
+   */
+  spelled?: boolean;
   className?: string;
 }
 
@@ -40,6 +18,7 @@ interface KeyboardShortcutProps {
 const KeyboardShortcut: React.FC<KeyboardShortcutProps> = ({
   keys,
   inversed = false,
+  spelled = false,
   className = "",
 }) => {
   if (keys.length === 0) return null;
@@ -55,7 +34,7 @@ const KeyboardShortcut: React.FC<KeyboardShortcutProps> = ({
               : "text-basic-secondary border-secondary bg-input",
           )}
         >
-          {glyph(key)}
+          {spelled ? key : keyGlyph(key)}
         </kbd>
       ))}
     </div>

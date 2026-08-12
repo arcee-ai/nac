@@ -17,6 +17,34 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use reqwest::Response;
 use serde_json::Value;
+use tokio::time::{timeout, Duration};
+
+/// How long a streaming body may go silent before the read is abandoned. A
+/// provider that stops sending without closing the connection would otherwise
+/// hold a turn open forever. The bound sits far above any real gap between
+/// deltas, including the pause a slow backend takes before its first token.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(900);
+
+/// Renders an error together with its source chain. `reqwest::Error` displays
+/// only its own kind, and "error decoding response body" on its own cannot tell
+/// a connection the peer closed early from a reset HTTP/2 stream or a timed-out
+/// read — the causes that say which one it was are reachable only through
+/// `source`.
+pub(super) fn with_source_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut rendered = error.to_string();
+    let mut next = error.source();
+    while let Some(cause) = next {
+        let message = cause.to_string();
+        // Some transport errors already quote their cause in their own
+        // `Display`, and repeating it adds noise instead of detail.
+        if !rendered.ends_with(message.as_str()) {
+            rendered.push_str(": ");
+            rendered.push_str(&message);
+        }
+        next = cause.source();
+    }
+    rendered
+}
 
 #[derive(Debug)]
 pub(super) struct StreamFoldError {
@@ -230,10 +258,23 @@ impl SseReader {
                 }
             }
 
-            match self.body.next().await {
+            let read = match timeout(STREAM_IDLE_TIMEOUT, self.body.next()).await {
+                Ok(read) => read,
+                Err(_) => {
+                    return Some(Err(anyhow!(
+                        "model stream stalled: no data for {}s",
+                        STREAM_IDLE_TIMEOUT.as_secs()
+                    )))
+                }
+            };
+
+            match read {
                 Some(Ok(chunk)) => self.push_chunk(&chunk),
                 Some(Err(error)) => {
-                    return Some(Err(anyhow!("model stream failed mid-response: {error}")))
+                    return Some(Err(anyhow!(
+                        "model stream failed mid-response: {}",
+                        with_source_chain(&error)
+                    )))
                 }
                 None => {
                     // A trailing incomplete sequence would only appear if the

@@ -20,13 +20,16 @@ import {
   MessageBox,
   MessageBoxSize,
   MessageBoxVariant,
+  ShimmerLoader,
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
+import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import {
@@ -108,14 +111,15 @@ export function TranscriptRecoveryNotice({
   );
 }
 
-/** Index of the user turn that produced the newest model reply, if any. */
-function lastAnsweredUserIndex(turns: TranscriptTurn[]): number | null {
+/**
+ * Index of the user turn a resend addresses: the newest prompt, answered or
+ * not. A run that failed before writing anything leaves its prompt as the last
+ * turn, and that prompt is the one worth sending again — so the action sits on
+ * its own bubble instead of on the reply to the prompt before it.
+ */
+function resendTargetIndex(turns: TranscriptTurn[]): number | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
-    if (turns[index]?.kind !== "model") continue;
-    for (let prior = index - 1; prior >= 0; prior -= 1) {
-      if (turns[prior]?.kind === "user") return prior;
-    }
-    return null;
+    if (turns[index]?.kind === "user") return index;
   }
   return null;
 }
@@ -154,6 +158,9 @@ export function Transcript({
   const toast = useToast();
   const backend = snapshot?.metadata.backend ?? null;
   const toNotice = useErrorNotice(sessionId, backend);
+  // Read before the notice is built, since hook order cannot depend on whether
+  // this run failed.
+  const authErrorSuppressed = useAuthErrorSuppressed(backend, error);
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
   const olderMessages = useLoadOlderMessages(sessionId);
@@ -242,7 +249,7 @@ export function Transcript({
     throttleMs: 1000,
   });
 
-  const refreshIndex = useMemo(() => lastAnsweredUserIndex(turns), [turns]);
+  const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
   const actionsBusy = running || submitRun.isPending || regenerateRun.isPending;
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
@@ -374,10 +381,43 @@ export function Transcript({
   const runError = error && !running ? error : null;
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
-  const notice = errorNotice ?? (runError ? toNotice(runError) : null);
+  const notice =
+    errorNotice ??
+    (runError && !authErrorSuppressed ? toNotice(runError) : null);
+
+  // Nothing is worth revealing before the snapshot lands, unless the reason it
+  // never will is the notice standing in its place.
+  const revealed = useTranscriptReveal(
+    sessionId,
+    Boolean(snapshot) || errorNotice !== null,
+  );
+  // A load ends in a fade; a reveal that only turns the loader off would flash
+  // the gap between the two. Sliding the whole tree in and out of view on the
+  // same duration crossfades them instead.
+  const fade = revealed
+    ? "opacity-100 transition-opacity duration-300 ease-in-out"
+    : "opacity-0 transition-opacity duration-300 ease-in-out";
 
   return (
     <div className="relative flex-1 min-h-0">
+      {/* Rows the size of the messages they stand in for, over the space those
+          messages will fill. Laid out on top rather than in the flow, so the
+          transcript can already be mounted underneath — hidden, but measured,
+          which is what lets it open at its own bottom edge. */}
+      <div
+        role="status"
+        aria-label={revealed ? undefined : "Loading conversation"}
+        className={cn(
+          "pointer-events-none absolute inset-x-0 top-[96px] px-4 md:top-[72px] md:px-0",
+          revealed
+            ? "opacity-0 transition-opacity duration-150 ease-in-out"
+            : "opacity-100",
+        )}
+      >
+        <div className="mx-auto w-full max-w-[840px]">
+          <ShimmerLoader rows={3} rowClassName="h-[48px]" />
+        </div>
+      </div>
       {/* The starter prompts sit beside the transcript rather than inside it:
           the scroll region follows its own bottom edge, which would pin a
           column of prompts under the composer and cut off the first ones. */}
@@ -386,6 +426,7 @@ export function Transcript({
           className={cn(
             "absolute inset-x-0 top-[96px] flex overflow-auto px-4 md:top-[72px] md:px-0",
             isMobile ? "bottom-[128px]" : "bottom-[136px]",
+            fade,
           )}
         >
           <div className="m-auto w-full max-w-[840px]">
@@ -393,7 +434,10 @@ export function Transcript({
           </div>
         </div>
       ) : null}
-      <div ref={scrollRef} className="h-full overflow-auto">
+      <div
+        ref={scrollRef}
+        className={cn("h-full overflow-auto", fade, !revealed && "invisible")}
+      >
         {/* The top bar is fixed over this scroll region, so the first message
             needs to clear it. */}
         <div
@@ -433,10 +477,6 @@ export function Transcript({
                 </div>
               ) : null}
             </div>
-          ) : null}
-
-          {!snapshot && !errorNotice ? (
-            <div className="text-basic-muted label-small">Loading…</div>
           ) : null}
 
           <TranscriptRecoveryNotice

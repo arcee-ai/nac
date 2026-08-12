@@ -26,9 +26,10 @@ interface UserMessageProps {
    */
   messageIndex?: number;
   /**
-   * Answer this prompt again, discarding the reply it already produced. Only
-   * for the user turn that produced the latest model reply — older turns keep
-   * revert + copy only.
+   * Answer this prompt again, discarding whatever reply it already produced.
+   * Only for the newest prompt — older turns keep revert + copy only — and it
+   * is the newest prompt's own bubble that carries the action when a failed run
+   * left it unanswered.
    *
    * The handlers take the message they act on rather than closing over it, so
    * the transcript can pass the same function to every bubble and let the

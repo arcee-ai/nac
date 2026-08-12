@@ -14,6 +14,7 @@ import {
   Icon,
   IconName,
   Modal,
+  ShimmerLoader,
   TabButton,
   TabButtonSize,
 } from "@/app/atoms";
@@ -283,6 +284,35 @@ export function PanelRow({
       </span>
       {trailing}
     </TabButton>
+  );
+}
+
+/**
+ * Placeholder for a panel waiting on its first payload: rows the size of the
+ * ones on their way, rather than the word "Loading".
+ *
+ * Laid out as the split it is loading into — a short list beside a taller body
+ * — so the columns and the divider are already where the rows will land, and
+ * arriving data fills the panel instead of rebuilding it.
+ */
+export function PanelLoading({ listTitle }: { listTitle?: string }) {
+  return (
+    <PanelSplit
+      listTitle={listTitle}
+      list={
+        <div className="px-1">
+          <ShimmerLoader rows={2} rowClassName="h-6" />
+        </div>
+      }
+    >
+      <div
+        role="status"
+        aria-label={`Loading ${listTitle ?? "panel"}`}
+        className="flex flex-1 flex-col min-h-0 overflow-hidden p-4"
+      >
+        <ShimmerLoader rows={3} rowClassName="h-6" />
+      </div>
+    </PanelSplit>
   );
 }
 

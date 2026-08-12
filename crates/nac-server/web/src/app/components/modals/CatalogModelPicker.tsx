@@ -172,7 +172,13 @@ export function CatalogModelPicker({
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  // Where the arrow keys are, once they have been used at all: an opening list
+  // lights nothing, so the only highlight is one the reader is causing.
+  const [active, setActive] = useState<number | null>(null);
+  // Where the pointer is, while it is over a row at all. The highlight follows
+  // it and leaves with it, so a list the pointer has left keeps no row lit as
+  // though it were picked.
+  const [hovered, setHovered] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const tabSize = isMobile ? TabButtonSize.Large : TabButtonSize.Medium;
   const liveByBackend = useReadyManagedProviderModels(catalog);
@@ -182,28 +188,46 @@ export function CatalogModelPicker({
     [catalog, query, liveByBackend],
   );
   // A shorter list can leave the highlight past its end.
-  const index = Math.min(active, Math.max(rows.length - 1, 0));
+  const keyboardIndex =
+    active === null ? null : Math.min(active, Math.max(rows.length - 1, 0));
+  // The lit row, if any: the pointer outranks the keyboard while it is in the
+  // list, and neither has to be anywhere.
+  const index =
+    hovered !== null && hovered < rows.length ? hovered : keyboardIndex;
 
   // The highlight belongs to the list a query produced, so it is reset next to
   // the query itself: an effect would land a frame later, over rows the search
   // has already replaced.
   const search = (next: string) => {
     setQuery(next);
-    setActive(0);
+    setActive(null);
+    // A pointer resting over the list sends nothing while the rows change
+    // underneath it, so its position no longer means the row it meant.
+    setHovered(null);
   };
 
   // Keeps the keyboard highlight visible without scrolling the modal behind it.
+  // Only the keyboard's row: scrolling a row the pointer is already on would
+  // move the list out from under it.
   useEffect(() => {
-    if (!open) return;
+    if (!open || keyboardIndex === null) return;
     listRef.current
-      ?.querySelector(`[data-row="${index}"]`)
+      ?.querySelector(`[data-row="${keyboardIndex}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [open, index]);
+  }, [open, keyboardIndex]);
 
   const selected = rows.find(
     (row) =>
       row.provider.id === value?.backend && row.model.id === value?.model,
   );
+
+  // A dismissal under a resting pointer leaves no mouseleave behind, and a
+  // stale highlight of either kind would light a row on the way back in.
+  const close = () => {
+    setOpen(false);
+    setActive(null);
+    setHovered(null);
+  };
 
   const pick = (row: Row) => {
     onSelect({
@@ -220,15 +244,19 @@ export function CatalogModelPicker({
       event.preventDefault();
       if (!rows.length) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
-      setActive((current) => {
-        const next = Math.min(current, rows.length - 1) + step;
-        return (next + rows.length) % rows.length;
-      });
+      // From the lit row, so the keyboard carries on from where the pointer
+      // left the highlight rather than jumping back to its own last position.
+      // With nothing lit the first key lands on an end of the list.
+      const from = index ?? (step === 1 ? -1 : 0);
+      setActive((from + step + rows.length) % rows.length);
+      setHovered(null);
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      const row = rows[index];
+      // Nothing lit means the reader has only typed, so Enter takes the closest
+      // match rather than nothing at all.
+      const row = rows[index ?? 0];
       if (row) pick(row);
     }
   };
@@ -246,7 +274,7 @@ export function CatalogModelPicker({
   return (
     <Popover
       open={open}
-      onClose={() => setOpen(false)}
+      onClose={close}
       // Grows leftwards from the control column, which keeps a panel this wide
       // inside the dialog instead of hanging off its right edge.
       placement={PopoverPlacement.BottomLeft}
@@ -282,7 +310,7 @@ export function CatalogModelPicker({
           </div>
           <div
             ref={listRef}
-            className="flex flex-col flex-1 min-h-0 overflow-auto [&>*]:shrink-0"
+            className="flex flex-col flex-1 gap-1 min-h-0 overflow-auto [&>*]:shrink-0"
           >
             {rows.length === 0 ? (
               <p className="px-4 md:px-2 py-3 text-micro text-basic-muted">
@@ -318,14 +346,15 @@ export function CatalogModelPicker({
                     ) : null}
                     <TabButton
                       size={tabSize}
-                      variant={
-                        chosen
-                          ? TabButtonVariant.Accent
-                          : TabButtonVariant.Regular
-                      }
-                      active={position === index}
+                      variant={TabButtonVariant.Regular}
+                      active={chosen}
                       data-row={position}
-                      onMouseEnter={() => setActive(position)}
+                      onMouseEnter={() => setHovered(position)}
+                      onMouseLeave={() =>
+                        setHovered((current) =>
+                          current === position ? null : current,
+                        )
+                      }
                       onClick={() => pick(row)}
                     >
                       <span className="flex-1 min-w-0 text-left truncate">
@@ -353,7 +382,7 @@ export function CatalogModelPicker({
         size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
         content={ButtonContent.IconRight}
         disabled={!catalog}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         className="w-full md:w-[280px]"
       >

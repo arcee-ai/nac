@@ -702,9 +702,9 @@ export function ConfigurationsPanel({
           {source.kind === "new" ? (
             <>
               <ConfigRow
-                label="Provider"
+                label="Model Provider"
                 required
-                hint="Which provider the session talks to, and how it authenticates."
+                hint="Service that provides the models for this session."
                 control={
                   <SmallSelect
                     items={PROVIDER_ITEMS}
@@ -819,7 +819,7 @@ export function ConfigurationsPanel({
                     <Separator />
                     <ConfigRow
                       label="Default Model"
-                      hint="Model the session starts with; the login reaches all of these."
+                      hint="The NAC session will start with this default and may switch to another."
                       invalid={Boolean(modelListError)}
                       control={
                         <SmallSelect
@@ -844,7 +844,7 @@ export function ConfigurationsPanel({
                   <Separator />
                   <ConfigRow
                     label="Default Model"
-                    hint="Model the session starts with; the key reaches all of these."
+                    hint="The NAC session will start with this default and may switch to another."
                     control={
                       <SmallSelect
                         items={modelItems(validation.models)}

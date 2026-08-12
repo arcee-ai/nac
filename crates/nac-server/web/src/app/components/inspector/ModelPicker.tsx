@@ -7,10 +7,9 @@ import {
   ButtonVariant,
   Icon,
   IconName,
-  Loader,
-  LoaderSize,
   Popover,
   PopoverPlacement,
+  ShimmerLoader,
   TabButton,
   TabButtonSize,
   TabButtonVariant,
@@ -90,11 +89,14 @@ export function ModelPicker({
   };
 
   const rows = query.isFetching ? (
-    <div className="flex items-center gap-2 px-2 py-1">
-      <Loader size={LoaderSize.Micro} />
-      <span className="text-micro text-basic-muted">
-        Reading the model list…
-      </span>
+    // Rows the size of the ones the provider is about to name, so the panel
+    // does not resize under the pointer once the list lands.
+    <div
+      role="status"
+      aria-label="Reading the model list"
+      className="px-1 py-1"
+    >
+      <ShimmerLoader rows={3} rowClassName="h-6" />
     </div>
   ) : query.isError ? (
     <p className="px-2 py-1 text-micro text-error-primary">
@@ -130,12 +132,14 @@ export function ModelPicker({
       className="shrink-0 min-w-0"
       panelClassName="max-h-[280px] overflow-auto"
       content={
-        <>
-          <div className="px-1 py-1 code code-micro text-basic-tertiary truncate">
+        <div className="flex flex-col h-[180px]">
+          <div className="px-1 py-2 code code-micro text-basic-tertiary truncate shrink-0">
             {providerLabel(backend) || "Model"}
           </div>
-          {rows}
-        </>
+          <div className="flex flex-col overflow-y-auto flex-grow gap-1">
+            {rows}
+          </div>
+        </div>
       }
     >
       <Button
@@ -148,7 +152,7 @@ export function ModelPicker({
         onClick={() => setOpen((value) => !value)}
       >
         <Icon iconName={IconName.Brain} />
-        <span className="label-micro truncate max-w-[200px]">{current}</span>
+        <span className="label-micro truncate max-w-[104px]">{current}</span>
         <Icon
           iconName={IconName.Down}
           className={cn(

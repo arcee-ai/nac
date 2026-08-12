@@ -277,9 +277,7 @@ function SettingsForm({
       const values = next.kind === "resolved" ? next : next.request;
       setBackend(values.backend);
       setModel(values.model);
-      setBaseUrl(
-        values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "",
-      );
+      setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
       if (next.kind === "resolved") {
         setReasoning(next.reasoning_effort ?? "");
         setHeaders(headersToText(next.extra_headers ?? {}));
@@ -558,8 +556,8 @@ function SettingsForm({
               <>
                 <Separator />
                 <ConfigRow
-                  label="Reasoning"
-                  hint="Reasoning effort passed to the model."
+                  label="Reasoning Effort"
+                  hint="Higher effort for deeper reasoning and lower effort for faster responses."
                   control={
                     <SmallSelect
                       items={reasoningItems}
@@ -570,24 +568,29 @@ function SettingsForm({
                 />
                 <Separator />
                 <ConfigRow
-                  label="Orchestrator compaction threshold"
-                  hint="Context size that triggers compaction; 0 disables it."
+                  label="Context Limit"
+                  hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
                   control={
-                    <Input
-                      inputSize={
-                        isMobile ? InputSize.Large : InputSize.Medium
-                      }
-                      className={CONTROL_WIDTH}
-                      inputClassName="md:text-right"
-                      placeholder={compactionPlaceholder}
-                      inputMode="numeric"
-                      value={compaction}
-                      onChange={(event) => {
-                        compactionAutoRef.current = false;
-                        compactionRef.current = event.target.value;
-                        setCompaction(event.target.value);
-                      }}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        inputSize={
+                          isMobile ? InputSize.Large : InputSize.Medium
+                        }
+                        className={CONTROL_WIDTH}
+                        inputClassName="md:text-right"
+                        placeholder={compactionPlaceholder}
+                        inputMode="numeric"
+                        value={compaction}
+                        onChange={(event) => {
+                          compactionAutoRef.current = false;
+                          compactionRef.current = event.target.value;
+                          setCompaction(event.target.value);
+                        }}
+                      />
+                      <span className="shrink-0 text-micro text-basic-muted">
+                        tokens
+                      </span>
+                    </div>
                   }
                 />
                 <Separator />
@@ -597,7 +600,7 @@ function SettingsForm({
                     isMobile ? TextAreaSize.Large : TextAreaSize.Medium
                   }
                   hintText="Blank sends none; header values must be strings."
-                  placeholder='{ "X-Title": "nac" }'
+                  placeholder='{ "X-Title": "NAC" }'
                   value={headers}
                   onChange={(event) => setHeaders(event.target.value)}
                   textAreaClassName="h-[160px] resize-none font-mono"
@@ -647,10 +650,10 @@ function ApiKeyField({
   const isMobile = useIsMobile();
   const invalid = validation.status === "error";
   const hint = editing
-    ? "Paste the provider key. nac keeps it and hands the session a selector, never the secret."
+    ? "Paste the provider key. NAC keeps it and hands the session a selector, never the secret."
     : isGeneratedCredentialName(stored)
-      ? "Kept by nac for this session. Replacing it files a new key and leaves the old one where it is."
-      : `Read from ${stored}: the environment variable, or a key of that name kept by nac.`;
+      ? "Kept by NAC for this session. Replacing it files a new key and leaves the old one where it is."
+      : `Read from ${stored}: the environment variable, or a key of that name kept by NAC.`;
 
   return (
     <InputWrapper
@@ -765,7 +768,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
             loading={state.status === "starting"}
             onClick={() => void start(provider)}
           >
-            <span>Login again</span>
+            <span>Sign in again</span>
             <Icon iconName={IconName.External} />
           </Button>
         ) : (
@@ -778,7 +781,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
               iconName={IconName.CheckCircle}
               className="text-success-primary"
             />
-            <span className="label-small text-success-primary">Logged in</span>
+            <span className="label-small text-success-primary">Success</span>
           </div>
         )}
         <Button
@@ -788,7 +791,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
           loading={logout.isPending}
           onClick={() => void logout.mutateAsync(provider).catch(() => {})}
         >
-          Logout
+          Sign out
         </Button>
       </div>
     ) : (
@@ -799,7 +802,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
         loading={state.status === "starting"}
         onClick={() => void start(provider)}
       >
-        <span>Login</span>
+        <span>Sign in</span>
         <Icon iconName={IconName.External} />
       </Button>
     );
@@ -815,8 +818,8 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
       }
       hintText={
         signedIn
-          ? "Signed in through the browser; every session on this provider shares the login."
-          : "This provider signs in through the browser, and the session cannot run until it has."
+          ? "Sign in through your model provider to stay authenticated across sessions."
+          : "Sign in through your model provider to stay authenticated across sessions. The session cannot run until you do."
       }
     >
       <div className="flex items-center">{control}</div>

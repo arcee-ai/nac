@@ -25,6 +25,7 @@ import {
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import {
   PanelEmpty,
+  PanelLoading,
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
@@ -799,7 +800,7 @@ export function ThreadsView({
     return () => setSelectedThreadRunning(false);
   }, [currentRunning]);
 
-  if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
+  if (!snapshot) return <PanelLoading listTitle="Threads" />;
 
   return (
     <PanelSplit
