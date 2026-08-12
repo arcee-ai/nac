@@ -72,11 +72,7 @@ function lightStateFrom(
   const baseUrl =
     settings.base_url ?? (provider ? catalogBaseUrl(provider) : "");
   return {
-    pick: {
-      backend: backend as CatalogPick["backend"],
-      model: settings.model,
-      baseUrl,
-    },
+    pick: { backend, model: settings.model, baseUrl },
     effort: settings.reasoning_effort ?? "",
     apiKeyEnv: settings.api_key_env ?? null,
   };

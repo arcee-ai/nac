@@ -2610,10 +2610,19 @@ async fn create_model_config_handler(
         initial_prompt: request.initial_prompt,
         light_model: light,
     };
-    // No credential is written until every caller-controlled field, including
-    // the light model, has been normalized and validated.
     if let Some(name) = credential_name.as_deref() {
         store_api_key(name, api_key)?;
+    }
+    // The light model must resolve to a working client now, not at the first
+    // launch that picks this setup. Validation needs the credential above
+    // already stored, so a failure retires it again.
+    if let Some(light) = configuration.light_model.as_ref() {
+        if let Err(error) = nac_core::light_model::validate(light, &configuration.extra_headers) {
+            if let Some(name) = credential_name.as_deref() {
+                let _ = remove_api_key(name);
+            }
+            return Err(request_configuration_error(format!("{error:#}")).into());
+        }
     }
     let record = model_configurations::insert_model_configuration(
         &manager.inner.store_path,
@@ -2789,10 +2798,18 @@ async fn update_model_config_handler(
         },
     };
 
-    // As on create, light-model validation precedes credential storage. From
-    // here onward the database error path removes the new key atomically.
     if let Some((name, key)) = replacement_credential.as_ref() {
         store_api_key(name, key)?;
+    }
+    // As on create, the light model must resolve to a working client before
+    // the row is updated; a failure retires the just-stored key.
+    if let Some(light) = configuration.light_model.as_ref() {
+        if let Err(error) = nac_core::light_model::validate(light, &configuration.extra_headers) {
+            if let Some((name, _)) = replacement_credential.as_ref() {
+                let _ = remove_api_key(name);
+            }
+            return Err(request_configuration_error(format!("{error:#}")).into());
+        }
     }
     match model_configurations::update_model_configuration(
         &manager.inner.store_path,
@@ -2807,7 +2824,7 @@ async fn update_model_config_handler(
             let mut retired: std::collections::BTreeSet<&str> = existing
                 .light_model
                 .as_ref()
-                .and_then(light_model::light_credential)
+                .and_then(|light| light.api_key_env.as_deref())
                 .into_iter()
                 .chain(superseded.as_deref())
                 .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
@@ -2816,7 +2833,7 @@ async fn update_model_config_handler(
                 record
                     .light_model
                     .as_ref()
-                    .and_then(light_model::light_credential),
+                    .and_then(|light| light.api_key_env.as_deref()),
             ) {
                 retired.remove(kept);
             }
@@ -3013,7 +3030,7 @@ async fn delete_model_config_handler(
             record
                 .light_model
                 .as_ref()
-                .and_then(light_model::light_credential),
+                .and_then(|light| light.api_key_env.as_deref()),
         )
         .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
         .collect();

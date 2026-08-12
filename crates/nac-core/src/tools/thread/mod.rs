@@ -800,6 +800,14 @@ mod tests {
         rt
     }
 
+    fn test_client(model: &str, effort: crate::model::ReasoningEffort) -> ModelClient {
+        ModelClient::new_for_test_settings(
+            crate::model::BackendKind::OpenAiResponses,
+            model,
+            effort,
+        )
+    }
+
     #[test]
     fn dispatch_definition_skills_schema_depends_on_registry() {
         assert!(
@@ -821,11 +829,7 @@ mod tests {
 
     #[test]
     fn dispatch_definition_requires_weight_only_with_a_light_model() {
-        let light = ModelClient::new_for_test_settings(
-            crate::model::BackendKind::OpenAiResponses,
-            "gpt-5-mini",
-            crate::model::ReasoningEffort::Low,
-        );
+        let light = test_client("gpt-5-mini", crate::model::ReasoningEffort::Low);
 
         let single = dispatch_definition(None, None);
         assert!(single.function.parameters["properties"]
@@ -851,16 +855,8 @@ mod tests {
 
     #[test]
     fn dispatch_weight_parses_and_selects_the_matching_client() {
-        let light = ModelClient::new_for_test_settings(
-            crate::model::BackendKind::OpenAiResponses,
-            "gpt-5-mini",
-            crate::model::ReasoningEffort::Low,
-        );
-        let orchestrator = ModelClient::new_for_test_settings(
-            crate::model::BackendKind::OpenAiResponses,
-            "gpt-5.5",
-            crate::model::ReasoningEffort::High,
-        );
+        let light = test_client("gpt-5-mini", crate::model::ReasoningEffort::Low);
+        let orchestrator = test_client("gpt-5.5", crate::model::ReasoningEffort::High);
         let mut runtime = test_runtime();
         runtime.session_id = Some("session".to_string());
         let args = json!({ "name": "worker", "action": "run tests" });
