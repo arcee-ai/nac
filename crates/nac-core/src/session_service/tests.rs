@@ -4,6 +4,81 @@
     use crate::types::{FunctionCall, ToolCall};
     use std::collections::BTreeMap;
 
+    #[test]
+    fn response_timing_cumulative_usage_preserves_context_precedence_and_saturates() {
+        let client = ModelClient::new_for_test();
+        let mut snapshot = sessions::new_snapshot(
+            "timing".into(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.token_usages = vec![Some(crate::model::TokenUsage {
+            input_tokens: u64::MAX - 1,
+            orchestrator_context_tokens: 41,
+            ..Default::default()
+        })];
+        snapshot.unattributed_token_usage = Some(crate::model::TokenUsage {
+            input_tokens: 5,
+            ..Default::default()
+        });
+
+        let cumulative = ResponseTimingSnapshot::from(&snapshot)
+            .cumulative_token_usage
+            .unwrap();
+        assert_eq!(cumulative.input_tokens, u64::MAX);
+        assert_eq!(cumulative.orchestrator_context_tokens, 41);
+
+        snapshot
+            .unattributed_token_usage
+            .as_mut()
+            .unwrap()
+            .orchestrator_context_tokens = 73;
+        assert_eq!(
+            ResponseTimingSnapshot::from(&snapshot)
+                .cumulative_token_usage
+                .unwrap()
+                .orchestrator_context_tokens,
+            73
+        );
+    }
+
+    #[test]
+    fn response_timing_cumulative_usage_preserves_empty_semantics() {
+        let client = ModelClient::new_for_test();
+        let mut snapshot = sessions::new_snapshot(
+            "timing-empty".into(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            BTreeMap::new(),
+        );
+        assert!(
+            ResponseTimingSnapshot::from(&snapshot)
+                .cumulative_token_usage
+                .is_none()
+        );
+
+        snapshot.unattributed_token_usage = Some(Default::default());
+        assert_eq!(
+            ResponseTimingSnapshot::from(&snapshot).cumulative_token_usage,
+            Some(Default::default())
+        );
+    }
+
     fn thread_call(id: &str, arguments: &str) -> ToolCall {
         ToolCall {
             id: id.to_string(),

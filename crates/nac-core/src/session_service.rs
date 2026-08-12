@@ -88,36 +88,15 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
     fn from(snapshot: &SessionSnapshot) -> Self {
         let last_token_usage = snapshot.token_usages.last().cloned().flatten();
 
-        // Sum input/output/cache tokens across all non-None per-response
-        // entries.  `orchestrator_context_tokens` is a context-window size,
-        // not a cumulative metric, so it is set to the last non-None entry's
-        // value rather than summed.
-        let cumulative_token_usage = {
-            let non_none: Vec<&crate::model::TokenUsage> = snapshot
-                .token_usages
-                .iter()
-                .filter_map(|tu| tu.as_ref())
-                .collect();
-            if non_none.is_empty() && snapshot.unattributed_token_usage.is_none() {
-                None
-            } else {
-                let mut cumulative = crate::model::TokenUsage::default();
-                for u in &non_none {
-                    cumulative += (*u).clone();
-                }
-                cumulative.orchestrator_context_tokens = non_none
-                    .last()
-                    .map(|u| u.orchestrator_context_tokens)
-                    .unwrap_or(0);
-                if let Some(unattributed) = &snapshot.unattributed_token_usage {
-                    cumulative.add_cost_saturating(unattributed);
-                    if unattributed.orchestrator_context_tokens != 0 {
-                        cumulative.replace_context(unattributed.orchestrator_context_tokens);
-                    }
-                }
-                Some(cumulative)
+        let mut cumulative_token_usage =
+            crate::model::TokenUsage::aggregate(&snapshot.token_usages);
+        if let Some(unattributed) = &snapshot.unattributed_token_usage {
+            let cumulative = cumulative_token_usage.get_or_insert_default();
+            cumulative.add_cost_saturating(unattributed);
+            if unattributed.orchestrator_context_tokens != 0 {
+                cumulative.replace_context(unattributed.orchestrator_context_tokens);
             }
-        };
+        }
 
         Self {
             last_response_duration_ms: snapshot.last_response_duration_ms,
