@@ -1,7 +1,13 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
-import { AnchorPlacement, anchorClasses, anchorCoords } from "../../lib/anchor";
+import {
+  AnchorPlacement,
+  anchorClasses,
+  anchorCoords,
+  clippingAncestors,
+  visibleBounds,
+} from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 import BottomSheet from "./BottomSheet";
 
@@ -101,12 +107,17 @@ const Popover: React.FC<PopoverProps> & {
     const panel = panelRef.current;
     if (!trigger || !panel) return undefined;
 
+    // The trigger's own box — a dialog that scrolls its body, a card that hides
+    // its overflow — is where the panel is expected to appear, so it is kept
+    // inside it even though the portal frees it from the clipping.
+    const clippers = clippingAncestors(trigger);
     const place = () =>
       setCoords(
         anchorCoords(
           placement,
           trigger.getBoundingClientRect(),
           panel.getBoundingClientRect(),
+          visibleBounds(clippers),
         ),
       );
     place();

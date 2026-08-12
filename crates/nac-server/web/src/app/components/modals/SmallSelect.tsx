@@ -33,7 +33,10 @@ export function SmallSelect({
       itemSize={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
       variant={ButtonVariant.Ghost}
       placement={PopoverPlacement.CenterLeft}
-      panelClassName="max-h-[200px] overflow-auto min-w-[220px]"
+      // Every form this select appears in scrolls its own body, which clipped
+      // the list against the top of the box whenever the row sat near it.
+      sticky
+      panelClassName="max-h-[200px] overflow-auto min-w-[220px] max-w-[calc(100vw-16px)]"
     />
   );
 }
