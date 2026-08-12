@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -32,6 +32,7 @@ import {
 } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { useCompactionThreshold } from "@/app/hooks/useCompactionThreshold";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
@@ -151,7 +152,6 @@ function LaunchForm({
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
   const [reasoning, setReasoning] = useState("");
-  const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
   const [sandbox, setSandbox] = useState<SandboxState>(EMPTY_SANDBOX);
   const [headersOpen, setHeadersOpen] = useState(false);
@@ -201,38 +201,16 @@ function LaunchForm({
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
 
-  // Auto-suggest 70% of the selected model's context window as the compaction
-  // threshold. A manually entered value is preserved across model changes —
-  // the suggestion only fills the field when it is empty or was itself last
-  // auto-suggested.
-  const compactionRef = useRef("");
-  const compactionAutoRef = useRef(true);
-  const compactionPlaceholder = useMemo(() => {
-    const resolved = resolveCatalogModel(
-      catalog.data,
-      chosen?.backend,
-      chosen?.model,
-    );
-    const contextWindow = resolved.contextWindow;
-    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
-  }, [catalog.data, chosen?.backend, chosen?.model]);
-  useEffect(() => {
-    if (
-      compactionPlaceholder !== "auto" &&
-      (compactionRef.current === "" || compactionAutoRef.current)
-    ) {
-      compactionAutoRef.current = true;
-      compactionRef.current = compactionPlaceholder;
-      setCompaction(compactionPlaceholder);
-    }
-  }, [compactionPlaceholder]);
-
-  const onCompactionChange = (value: string) => {
-    setError(null);
-    compactionAutoRef.current = false;
-    compactionRef.current = value;
-    setCompaction(value);
-  };
+  const {
+    value: compaction,
+    placeholder: compactionPlaceholder,
+    onChange: onCompactionChange,
+  } = useCompactionThreshold({
+    catalog: catalog.data,
+    backend: chosen?.backend,
+    model: chosen?.model,
+    onManualChange: () => setError(null),
+  });
 
   /** Paths belong to whichever machine runs the session, so they do not carry over. */
   const changeMode = (next: Mode) => {

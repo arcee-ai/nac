@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -33,6 +32,7 @@ import {
 } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
+import { useCompactionThreshold } from "@/app/hooks/useCompactionThreshold";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -206,18 +206,6 @@ function ConfigurationForm({
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(record?.model ?? "");
   const [reasoning, setReasoning] = useState(record?.reasoning_effort ?? "");
-  const [compaction, setCompaction] = useState(
-    record?.orchestrator_compaction_threshold?.toString() ?? "",
-  );
-  // Track whether the compaction value was auto-suggested (vs. user-entered)
-  // so model changes don't clobber a manual value. The ref mirrors the state
-  // so the auto-suggest effect can read it without depending on the state.
-  const compactionRef = useRef(
-    record?.orchestrator_compaction_threshold?.toString() ?? "",
-  );
-  const compactionAutoRef = useRef(
-    record?.orchestrator_compaction_threshold == null,
-  );
   const [headers, setHeaders] = useState(() =>
     record && Object.keys(record.extra_headers).length
       ? JSON.stringify(record.extra_headers, null, 2)
@@ -237,26 +225,17 @@ function ConfigurationForm({
     REASONING_ITEMS,
   );
 
-  const compactionPlaceholder = useMemo(() => {
-    const resolved = resolveCatalogModel(catalog.data, backend, model);
-    const contextWindow = resolved.contextWindow;
-    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
-  }, [catalog.data, backend, model]);
-
-  // Auto-suggest 70% of the selected model's context window as the compaction
-  // threshold. A manually entered value is preserved across model changes —
-  // the suggestion only fills the field when it is empty or was itself last
-  // auto-suggested.
-  useEffect(() => {
-    if (
-      compactionPlaceholder !== "auto" &&
-      (compactionRef.current === "" || compactionAutoRef.current)
-    ) {
-      compactionAutoRef.current = true;
-      compactionRef.current = compactionPlaceholder;
-      setCompaction(compactionPlaceholder);
-    }
-  }, [compactionPlaceholder]);
+  const {
+    value: compaction,
+    placeholder: compactionPlaceholder,
+    onChange: onCompactionChange,
+  } = useCompactionThreshold({
+    catalog: catalog.data,
+    backend,
+    model,
+    initialValue: record?.orchestrator_compaction_threshold,
+    onManualChange: () => setError(""),
+  });
   const { signedIn } = useManagedSignIn(backend);
   const debouncedKey = useDebouncedValue(apiKey.trim(), KEY_DEBOUNCE_MS);
   // A saved setup keeps its key on the server; only a key typed here is ours
@@ -620,25 +599,16 @@ function ConfigurationForm({
             labelClassName="max-w-none"
             hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
             control={
-              <div className="flex items-center gap-2">
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  className="w-full md:w-[105px]"
-                  inputClassName="text-right"
-                  placeholder={compactionPlaceholder}
-                  inputMode="numeric"
-                  value={compaction}
-                  onChange={(event) => {
-                    setError("");
-                    compactionAutoRef.current = false;
-                    compactionRef.current = event.target.value;
-                    setCompaction(event.target.value);
-                  }}
-                />
-                <span className="shrink-0 text-micro text-basic-muted">
-                  tokens
-                </span>
-              </div>
+              <Input
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                className="w-full md:w-[105px]"
+                inputClassName="text-right"
+                placeholder={compactionPlaceholder}
+                inputMode="numeric"
+                value={compaction}
+                onChange={(event) => onCompactionChange(event.target.value)}
+              />
+
             }
           />
           <Separator />
