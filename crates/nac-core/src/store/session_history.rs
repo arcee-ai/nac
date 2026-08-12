@@ -187,7 +187,19 @@ fn query_event_rows(
          FROM thread_events
          WHERE session_id = ?1
            AND (?2 IS NULL OR id < ?2)
-           AND (?7 IS NULL OR instr(event_json, ?7) > 0)
+           AND (
+               ?7 IS NULL
+               OR CASE
+                   WHEN thread_name != ?8 THEN instr(event_json, ?7) > 0
+                   WHEN json_valid(event_json) = 0 THEN 1
+                   WHEN json_type(event_json, '$.nac_transcript_message.message') IS NOT 'text'
+                       THEN 1
+                   ELSE instr(
+                       json_extract(event_json, '$.nac_transcript_message.message'),
+                       ?7
+                   ) > 0
+               END
+           )
            {stream_predicate}
          ORDER BY id DESC
          LIMIT ?5"
@@ -205,7 +217,8 @@ fn query_event_rows(
             stream_name,
             i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX),
             i64::try_from(snapshot_len).unwrap_or(i64::MAX),
-            contains
+            contains,
+            ORCHESTRATOR_STEERING_TARGET
         ],
         |row| {
             let id = row.get::<_, i64>(0)?;
@@ -660,6 +673,55 @@ mod tests {
         assert!(payloads[0].contains("new cancelled event"));
         assert!(payloads[1].contains("old cancelled event"));
         assert!(payloads[2].contains("cancelled snapshot"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn literal_filter_matches_visible_orchestrator_payload_not_envelope() {
+        let path = temp_store("literal_filter_orchestrator");
+        crate::store::initialize(&path).unwrap();
+        insert_snapshot(
+            &path,
+            "session-a",
+            &[Message::User {
+                content: "message in snapshot payload".to_string(),
+            }],
+        );
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            &encode_transcript_log_entry(
+                1,
+                &Message::Assistant {
+                    content: Some("ordinary tail payload".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let recent = load_session_history_events(
+            &path,
+            "session-a",
+            &HistoryEventStream::Orchestrator,
+            Some("message"),
+            HistoryEventPhase::Events { before_id: None },
+            10,
+        )
+        .unwrap();
+        assert_eq!(recent.events.len(), 1);
+        assert_eq!(recent.events[0].source, HistoryEventSource::Snapshot);
+        assert!(recent.events[0]
+            .payload_json
+            .contains("message in snapshot payload"));
+        assert!(recent.next_phase.is_none());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
     #[test]
