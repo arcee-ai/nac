@@ -19,7 +19,10 @@
 //! `ArceeAuth` and `ArceeApi` backends.
 
 use super::data::{GeneratedModel, GeneratedProvider};
-use super::overlay::{atomic_replace, overlay_dir, unix_now, REFRESH_CADENCE_SECS, REFRESH_TIMEOUT};
+use super::overlay::{
+    atomic_replace, is_within_refresh_cadence, overlay_dir, read_sidecar, unix_now,
+    write_sidecar, RefreshSidecar, REFRESH_TIMEOUT,
+};
 use super::{CatalogWarning, ModelCatalog, ModelSource};
 use crate::model::{BackendKind, ReasoningEffort, ARCEE_AUTH_CANONICAL_BASE_URL};
 use serde::{Deserialize, Serialize};
@@ -42,36 +45,6 @@ fn arcee_overlay_json_path(home: &Path) -> PathBuf {
 
 fn arcee_sidecar_path(home: &Path) -> PathBuf {
     overlay_dir(home).join(SIDECAR_FILE_NAME)
-}
-
-// ---------------------------------------------------------------------------
-// Sidecar (cadence gate)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ArceeOverlaySidecar {
-    fetched_at_unix: u64,
-}
-
-fn read_sidecar(path: &Path) -> Option<ArceeOverlaySidecar> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
-}
-
-fn write_sidecar(path: &Path, sidecar: &ArceeOverlaySidecar) {
-    match serde_json::to_string_pretty(sidecar).map(|json| json + "\n") {
-        Ok(json) => {
-            if let Err(error) = atomic_replace(path, &json) {
-                eprintln!(
-                    "nac: model catalog: failed to persist arcee overlay sidecar {}: {error}",
-                    path.display()
-                );
-            }
-        }
-        Err(error) => {
-            eprintln!("nac: model catalog: failed to serialize arcee overlay sidecar: {error}")
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -119,9 +92,9 @@ pub(crate) async fn refresh_arcee_once() -> ArceeRefreshOutcome {
     };
     let now = unix_now();
     let sidecar_path = arcee_sidecar_path(&home);
-    let sidecar = read_sidecar(&sidecar_path);
+    let sidecar: Option<RefreshSidecar> = read_sidecar(&sidecar_path);
     if let Some(sidecar) = &sidecar {
-        if now.saturating_sub(sidecar.fetched_at_unix) < REFRESH_CADENCE_SECS {
+        if is_within_refresh_cadence(sidecar.fetched_at_unix, now) {
             return ArceeRefreshOutcome::SkippedCadence;
         }
     }
@@ -167,7 +140,8 @@ pub(crate) async fn refresh_arcee_once() -> ArceeRefreshOutcome {
     }
     write_sidecar(
         &sidecar_path,
-        &ArceeOverlaySidecar { fetched_at_unix: now },
+        &RefreshSidecar { fetched_at_unix: now },
+        "arcee overlay",
     );
     super::reload();
     ArceeRefreshOutcome::Updated { models: model_count }

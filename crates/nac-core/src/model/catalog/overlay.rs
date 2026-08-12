@@ -29,6 +29,7 @@
 use super::data::{GeneratedModel, GeneratedProvider};
 use super::{CatalogWarning, ModelCatalog, ModelSource, ThinkingLevelMap};
 use crate::model::BackendKind;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
@@ -204,27 +205,37 @@ pub(super) struct OverlaySidecar {
     pub(super) url: String,
 }
 
-pub(super) fn read_sidecar(path: &Path) -> Option<OverlaySidecar> {
+/// Revalidation state for overlays that only need a cadence gate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct RefreshSidecar {
+    pub(super) fetched_at_unix: u64,
+}
+
+pub(super) fn read_sidecar<T: DeserializeOwned>(path: &Path) -> Option<T> {
     let raw = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
 /// Best-effort sidecar write; losing it only means the next start
 /// revalidates unconditionally.
-pub(super) fn write_sidecar(path: &Path, sidecar: &OverlaySidecar) {
+pub(super) fn write_sidecar<T: Serialize>(path: &Path, sidecar: &T, diagnostic_label: &str) {
     match serde_json::to_string_pretty(sidecar).map(|json| json + "\n") {
         Ok(json) => {
             if let Err(error) = atomic_replace(path, &json) {
                 eprintln!(
-                    "nac: model catalog: failed to persist overlay etag sidecar {}: {error}",
+                    "nac: model catalog: failed to persist {diagnostic_label} sidecar {}: {error}",
                     path.display()
                 );
             }
         }
         Err(error) => {
-            eprintln!("nac: model catalog: failed to serialize overlay etag sidecar: {error}")
+            eprintln!("nac: model catalog: failed to serialize {diagnostic_label} sidecar: {error}")
         }
     }
+}
+
+pub(super) fn is_within_refresh_cadence(fetched_at_unix: u64, now: u64) -> bool {
+    now.saturating_sub(fetched_at_unix) < REFRESH_CADENCE_SECS
 }
 
 /// Result of one overlay refresh attempt; the spawn wrapper logs from it
@@ -256,10 +267,9 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
     };
     let now = unix_now();
     let sidecar_path = overlay_etag_path(&home);
-    let sidecar = read_sidecar(&sidecar_path);
+    let sidecar: Option<OverlaySidecar> = read_sidecar(&sidecar_path);
     if let Some(sidecar) = &sidecar {
-        if sidecar.url == url && now.saturating_sub(sidecar.fetched_at_unix) < REFRESH_CADENCE_SECS
-        {
+        if sidecar.url == url && is_within_refresh_cadence(sidecar.fetched_at_unix, now) {
             return RefreshOutcome::SkippedCadence;
         }
     }
@@ -313,6 +323,7 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
                 fetched_at_unix: now,
                 url: url.to_string(),
             },
+            "overlay etag",
         );
         return RefreshOutcome::NotModified;
     }
@@ -364,6 +375,7 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
             fetched_at_unix: now,
             url: url.to_string(),
         },
+        "overlay etag",
     );
     super::reload();
     RefreshOutcome::Updated { models, warnings }

@@ -4,9 +4,10 @@
 
 use super::data;
 use super::overlay::{
-    format_unix_utc, is_utc_iso8601, map_models_dev, overlay_dir, read_sidecar,
-    refresh_overlay_once, spawn_overlay_refresh, unix_now, write_sidecar, OverlaySidecar,
-    RefreshOutcome, DEFAULT_MODELS_DEV_URL, REFRESH_CADENCE_SECS,
+    format_unix_utc, is_utc_iso8601, is_within_refresh_cadence, map_models_dev, overlay_dir,
+    read_sidecar, refresh_overlay_once, spawn_overlay_refresh, unix_now, write_sidecar,
+    OverlaySidecar, RefreshOutcome, RefreshSidecar, DEFAULT_MODELS_DEV_URL,
+    REFRESH_CADENCE_SECS,
 };
 use super::test_support::{write_overlay, EnvGuard, TempHome};
 use super::*;
@@ -56,7 +57,43 @@ fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64, url
             fetched_at_unix,
             url: url.to_string(),
         },
+        "overlay etag",
     );
+}
+
+#[test]
+fn shared_sidecars_round_trip_and_reject_missing_or_malformed_files() {
+    let home = TempHome::new("shared-sidecar");
+    let path = home.path().join("nested/refresh.sidecar");
+    let sidecar = RefreshSidecar { fetched_at_unix: 123 };
+
+    write_sidecar(&path, &sidecar, "test overlay");
+
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{\n  \"fetched_at_unix\": 123\n}\n"
+    );
+    assert_eq!(read_sidecar::<RefreshSidecar>(&path), Some(sidecar));
+    assert_eq!(
+        read_sidecar::<RefreshSidecar>(&home.path().join("missing")),
+        None
+    );
+    std::fs::write(&path, "not json").unwrap();
+    assert_eq!(read_sidecar::<RefreshSidecar>(&path), None);
+}
+
+#[test]
+fn refresh_cadence_has_strict_boundary_and_tolerates_future_timestamps() {
+    let now = 100_000;
+    assert!(is_within_refresh_cadence(
+        now - (REFRESH_CADENCE_SECS - 1),
+        now
+    ));
+    assert!(!is_within_refresh_cadence(
+        now - REFRESH_CADENCE_SECS,
+        now
+    ));
+    assert!(is_within_refresh_cadence(now + 1, now));
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +162,7 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     assert!(generated_at >= baseline_generated_at.as_str());
 
     // The sidecar records the response ETag and the fetch time.
-    let sidecar = read_sidecar(&env.sidecar_path()).expect("sidecar written");
+    let sidecar: OverlaySidecar = read_sidecar(&env.sidecar_path()).expect("sidecar written");
     assert_eq!(sidecar.etag.as_deref(), Some("\"overlay-etag-1\""));
     assert!(sidecar.fetched_at_unix >= started_at);
     assert!(sidecar.fetched_at_unix <= unix_now());
@@ -207,7 +244,7 @@ async fn refresh_sends_sidecar_etag_for_revalidation() {
         requests[0].headers.get("if-none-match").map(String::as_str),
         Some("\"sidecar-etag\"")
     );
-    let sidecar = read_sidecar(&env.sidecar_path()).unwrap();
+    let sidecar: OverlaySidecar = read_sidecar(&env.sidecar_path()).unwrap();
     assert_eq!(sidecar.etag.as_deref(), Some("\"new-etag\""));
 }
 
@@ -234,7 +271,7 @@ async fn refresh_304_without_overlay_keeps_baseline_and_bumps_sidecar() {
     let metadata = resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.source, ModelSource::Baseline);
     // The sidecar clock advances (cadence) and keeps the revalidated ETag.
-    let sidecar = read_sidecar(&env.sidecar_path()).expect("sidecar written on 304");
+    let sidecar: OverlaySidecar = read_sidecar(&env.sidecar_path()).expect("sidecar written on 304");
     assert_eq!(sidecar.etag, None);
     assert!(sidecar.fetched_at_unix >= started_at);
 }
@@ -275,7 +312,7 @@ async fn refresh_304_preserves_an_existing_overlay() {
         resolve(BackendKind::DeepSeekChat, "deepseek-v8-preexisting").source,
         ModelSource::Overlay
     );
-    let sidecar = read_sidecar(&env.sidecar_path()).unwrap();
+    let sidecar: OverlaySidecar = read_sidecar(&env.sidecar_path()).unwrap();
     assert_eq!(sidecar.etag, None);
     assert!(sidecar.fetched_at_unix > 0);
 }
@@ -316,7 +353,7 @@ async fn refresh_http_error_preserves_existing_overlay_and_sidecar() {
         std::fs::read_to_string(env.overlay_path()).unwrap(),
         overlay_bytes
     );
-    let sidecar = read_sidecar(&env.sidecar_path()).unwrap();
+    let sidecar: OverlaySidecar = read_sidecar(&env.sidecar_path()).unwrap();
     assert_eq!(sidecar.fetched_at_unix, 0);
     assert_eq!(
         resolve(BackendKind::DeepSeekChat, "deepseek-v8-preexisting").source,
@@ -487,7 +524,7 @@ async fn stale_cadence_refetches() {
 
     assert_eq!(outcome, RefreshOutcome::NotModified);
     assert_eq!(server.finish().len(), 1);
-    let sidecar = read_sidecar(&env.sidecar_path()).unwrap();
+    let sidecar: OverlaySidecar = read_sidecar(&env.sidecar_path()).unwrap();
     assert!(sidecar.fetched_at_unix >= started_at);
 }
 
@@ -1034,18 +1071,18 @@ fn is_utc_iso8601_checks_shape() {
 fn sidecar_round_trips_and_corrupt_sidecar_is_ignored() {
     let home = TempHome::new("sidecar");
     let path = overlay_dir(home.path()).join("overlay.etag");
-    assert_eq!(read_sidecar(&path), None);
+    assert_eq!(read_sidecar::<OverlaySidecar>(&path), None);
 
     let sidecar = OverlaySidecar {
         etag: Some("\"e\"".to_string()),
         fetched_at_unix: 42,
         url: "https://models.dev/api.json".to_string(),
     };
-    write_sidecar(&path, &sidecar);
+    write_sidecar(&path, &sidecar, "overlay etag");
     assert_eq!(read_sidecar(&path), Some(sidecar));
 
     std::fs::write(&path, "{ corrupt").unwrap();
-    assert_eq!(read_sidecar(&path), None);
+    assert_eq!(read_sidecar::<OverlaySidecar>(&path), None);
 }
 
 #[tokio::test]
