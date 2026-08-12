@@ -189,27 +189,16 @@ mod tests {
     use tokio::sync::Mutex;
 
     fn local_runtime() -> ToolRuntime {
-        local_runtime_at(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        crate::tools::test_runtime_at(
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            None,
+        )
     }
 
     fn local_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
-        let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
-        ToolRuntime {
-            command_cancellation: crate::tools::ThreadCancellation::default(),
-            config_cwd: workspace_cwd.clone(),
-            workspace_cwd,
-            store_path: PathBuf::new(),
-            session_id: None,
-            worker_executable: None,
-            active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
-            event_sink: EventSink::none(),
-            backend,
-            mcp: None,
-            skills: None,
-            terminal_manager: crate::terminal::TerminalManager::new(),
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
-        }
+
+        crate::tools::test_runtime_at(workspace_cwd, None)
+
     }
 
     fn sandbox_runtime_at(host_cwd: PathBuf, read_only: bool) -> ToolRuntime {

@@ -243,11 +243,8 @@ fn make_session_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventSink;
     use serde_json::json;
     use std::process::Command;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     #[cfg(unix)]
     use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -259,23 +256,16 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn test_runtime() -> ToolRuntime {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        ToolRuntime {
-            config_cwd: cwd.clone(),
-            workspace_cwd: cwd.clone(),
-            store_path: PathBuf::new(),
-            session_id: None,
-            worker_executable: None,
-            active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
-            event_sink: EventSink::none(),
-            backend: crate::sandbox::execution_backend_from_sandbox(None, &cwd),
-            mcp: None,
-            skills: None,
-            terminal_manager: crate::terminal::TerminalManager::new(),
-            command_cancellation: crate::tools::ThreadCancellation::default(),
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
-        }
+
+        crate::tools::test_runtime_at(
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            None,
+        )
+    }
+
+    fn test_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
+        crate::tools::test_runtime_at(workspace_cwd, None)
+
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {

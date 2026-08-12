@@ -821,14 +821,21 @@ mod discovery_tool_definition_tests {
 /// and no MCP / skills / worker executable.
 #[cfg(test)]
 pub(crate) fn test_runtime() -> ToolRuntime {
-    let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    test_runtime_at(
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        Some("test-session"),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn test_runtime_at(workspace_cwd: PathBuf, session_id: Option<&str>) -> ToolRuntime {
     let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
     ToolRuntime {
         command_cancellation: crate::tools::ThreadCancellation::default(),
         config_cwd: workspace_cwd.clone(),
         workspace_cwd,
         store_path: PathBuf::new(),
-        session_id: Some("test-session".to_string()),
+        session_id: session_id.map(str::to_string),
         worker_executable: None,
         active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
         event_sink: EventSink::none(),
