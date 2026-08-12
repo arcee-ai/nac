@@ -77,8 +77,6 @@ export type Message =
     }
   | { role: "tool"; tool_call_id: string; content: string };
 
-export type MessageRole = Message["role"];
-
 export interface SessionSummarySnapshot {
   session_id: string;
   cwd: string;
@@ -515,8 +513,6 @@ export type AgentEvent =
   /** A refusal from the provider, reported verbatim rather than reduced. */
   | { type: "model_error"; thread_name?: string; message: string }
   | { type: "run_finished"; thread_name?: string };
-
-export type AgentEventType = AgentEvent["type"];
 
 /** `nac_core::events::SessionEvent`, internally tagged on `type`. */
 export type SessionEvent =
@@ -993,10 +989,6 @@ export interface SlashCommandDefinition {
   accepts_arguments: boolean;
 }
 
-export interface SubmitPromptRequest {
-  prompt: string;
-}
-
 export interface SubmitPromptResponse {
   run_id: string;
   client_id: string | null;
@@ -1011,11 +1003,6 @@ export type CompactSessionResponse =
       reason: CompactionSkipReason;
     };
 
-export interface RevertSessionRequest {
-  /** Snapshot index of the user message to go back to; it is dropped too. */
-  message_idx: number;
-}
-
 export interface RevertSessionResponse {
   transcript_len: number;
   messages_removed: number;
@@ -1024,15 +1011,6 @@ export interface RevertSessionResponse {
   revisions_removed: number;
   /** Threads the discarded messages dispatched and nothing else refers to. */
   threads_removed: number;
-}
-
-export interface RegenerateSessionRequest {
-  /** Snapshot index of the user message to answer again. */
-  message_idx: number;
-}
-
-export interface SteeringRequest {
-  instruction: string;
 }
 
 export interface OrchestratorSteeringResponse {
