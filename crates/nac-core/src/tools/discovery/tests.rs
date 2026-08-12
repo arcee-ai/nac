@@ -1,10 +1,35 @@
 use std::fs;
+use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 
 use super::execute;
-fn fixture_runtime() -> (crate::tools::ToolRuntime, std::path::PathBuf) {
+
+struct Fixture(crate::tools::ToolRuntime, PathBuf);
+
+impl Deref for Fixture {
+    type Target = crate::tools::ToolRuntime;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::Permissions::from_mode(0o700);
+            let _ = fs::set_permissions(self.1.join("locked"), permissions);
+        }
+        let _ = fs::remove_dir_all(&self.1);
+    }
+}
+
+fn fixture_runtime() -> (Fixture, PathBuf) {
     let root = std::env::temp_dir().join(format!("nac-discovery-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(root.join("src")).expect("create src fixture");
     fs::create_dir_all(root.join("target")).expect("create target fixture");
@@ -41,7 +66,7 @@ fn fixture_runtime() -> (crate::tools::ToolRuntime, std::path::PathBuf) {
     runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Local {
         workspace_cwd: root.clone(),
     });
-    (runtime, root)
+    (Fixture(runtime, root.clone()), root)
 }
 
 async fn podman_runtime(root: &std::path::Path) -> crate::tools::ToolRuntime {
@@ -107,12 +132,11 @@ async fn glob_respects_defaults_and_returns_stable_paths() {
         .await,
     );
     assert_eq!(model_shaped["entries"], output["entries"]);
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn grep_paginates_every_match_once() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let first = parsed(
         execute(
             "grep",
@@ -149,7 +173,6 @@ async fn grep_paginates_every_match_once() {
     assert_eq!(second["matches"][0]["path"], "src/b.rs");
     assert_eq!(second["truncated"], false);
     assert!(second["next_cursor"].is_null());
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -230,7 +253,7 @@ async fn grep_accepts_file_roots() {
 
 #[tokio::test]
 async fn invalid_patterns_and_outside_roots_are_explicit_errors() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let invalid = execute("glob", json!({"pattern": "["}), &runtime).await;
     assert!(invalid.is_error);
     assert_eq!(
@@ -268,7 +291,6 @@ async fn invalid_patterns_and_outside_roots_are_explicit_errors() {
         serde_json::from_str::<Value>(&unreadable.content).expect("error JSON")["error"]["code"],
         "unreadable_path"
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -285,7 +307,6 @@ async fn tilde_prefixed_relative_roots_are_not_shell_expanded() {
         .await,
     );
     assert_eq!(output["entries"][0]["path"], "~cache/item.rs");
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[cfg(unix)]
@@ -311,12 +332,11 @@ async fn unreadable_directories_are_reported_without_hiding_readable_results() {
         .expect("errors")
         .iter()
         .any(|error| error["code"] == "unreadable_path" && error["path"] == "locked"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn explicit_options_include_hidden_ignored_and_generated_paths() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let output = parsed(
         execute(
             "glob",
@@ -347,7 +367,6 @@ async fn explicit_options_include_hidden_ignored_and_generated_paths() {
             "target/generated.rs",
         ]
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -370,12 +389,11 @@ async fn generated_tree_names_only_exclude_directories() {
     assert!(!paths.contains(&".git"));
     assert!(!paths.contains(&"node_modules"));
     assert!(!paths.contains(&"target"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn nested_gitignore_negation_is_applied_before_matching() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let output = parsed(
         execute(
             "glob",
@@ -386,7 +404,6 @@ async fn nested_gitignore_negation_is_applied_before_matching() {
     );
     assert_eq!(output["entries"].as_array().expect("entries").len(), 1);
     assert_eq!(output["entries"][0]["path"], "nested/keep.txt");
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -402,12 +419,11 @@ async fn scoped_search_does_not_enumerate_ancestor_siblings_for_gitignore() {
         .expect("errors")
         .iter()
         .all(|error| error["code"] != "entry_limit"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn grep_supports_context_case_modes_and_path_globs() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let context = parsed(
         execute(
             "grep",
@@ -470,12 +486,11 @@ async fn grep_supports_context_case_modes_and_path_globs() {
         .await,
     );
     assert_eq!(insensitive["matches"].as_array().expect("matches").len(), 2);
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn grep_multiline_controls_cross_line_matches() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let single_line = parsed(
         execute(
             "grep",
@@ -507,12 +522,11 @@ async fn grep_multiline_controls_cross_line_matches() {
     );
     assert_eq!(multiline["matches"].as_array().expect("matches").len(), 1);
     assert_eq!(multiline["matches"][0]["line"], 1);
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn grep_deduplicates_overlapping_roots_and_reports_binary_files() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let matches = parsed(
         execute(
             "grep",
@@ -537,12 +551,11 @@ async fn grep_deduplicates_overlapping_roots_and_reports_binary_files() {
         .expect("errors")
         .iter()
         .any(|error| error["code"] == "binary_file" && error["path"] == "binary.dat"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn invalid_regex_limits_and_mismatched_cursors_are_errors() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let invalid_regex = execute("grep", json!({"pattern": "("}), &runtime).await;
     assert!(invalid_regex.is_error);
     assert_eq!(
@@ -571,7 +584,6 @@ async fn invalid_regex_limits_and_mismatched_cursors_are_errors() {
         serde_json::from_str::<Value>(&mismatched.content).expect("error JSON")["error"]["code"],
         "invalid_cursor"
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -614,7 +626,6 @@ async fn dispatch_path_bounds_long_match_text() {
         serde_json::from_str::<Value>(&malformed.content).expect("error JSON")["error"]["code"],
         "invalid_cursor"
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -644,7 +655,6 @@ async fn rust_regex_engine_handles_pathological_patterns_in_linear_time() {
         started.elapsed() < std::time::Duration::from_secs(2),
         "linear-time regex search exceeded two seconds"
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -697,7 +707,6 @@ async fn aborting_native_search_stops_promptly() {
     })
     .await
     .expect("cancelled content search worker must stop");
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[cfg(unix)]
@@ -750,7 +759,6 @@ async fn symlink_escapes_are_structured_and_never_followed() {
         .expect("errors")
         .iter()
         .all(|error| error["path"] != "escape"));
-    fs::remove_dir_all(root).expect("remove fixture");
     fs::remove_dir_all(outside).expect("remove outside fixture");
 }
 
@@ -779,7 +787,6 @@ async fn special_files_are_rejected_without_blocking_native_reads() {
     .expect("special-file read must not block")
     .expect_err("special file must be rejected");
     assert_eq!(error.code, "unreadable_path");
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[cfg(unix)]
@@ -843,7 +850,6 @@ async fn workspace_metadata_preserves_existing_missing_and_symlink_kinds() {
     );
 
     workspace.close().await;
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -962,7 +968,6 @@ async fn invalid_utf8_entries_do_not_hide_valid_siblings() {
         .expect("errors")
         .iter()
         .any(|error| error["code"] == "invalid_utf8_path"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1111,7 +1116,6 @@ async fn ssh_and_local_backends_return_identical_discovery_pages() {
             remote_cwd.display()
         );
     }
-    fs::remove_dir_all(root).expect("remove fixture");
     fs::remove_dir_all(fake_bin).expect("remove fake ssh bin");
 }
 
@@ -1133,7 +1137,7 @@ async fn tools_work_without_external_search_binaries_on_path() {
     }
     let _path_guard = crate::test_utils::EnvVarGuard::set("PATH", &isolated_path);
 
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let glob = parsed(execute("glob", json!({"pattern": "**/*.rs"}), &runtime).await);
     assert_eq!(glob["entries"].as_array().expect("entries").len(), 2);
     let grep = parsed(
@@ -1149,7 +1153,6 @@ async fn tools_work_without_external_search_binaries_on_path() {
         .await,
     );
     assert_eq!(grep["matches"].as_array().expect("matches").len(), 2);
-    fs::remove_dir_all(root).expect("remove fixture");
     fs::remove_dir_all(isolated_path).expect("remove isolated PATH");
 }
 
@@ -1216,7 +1219,6 @@ async fn scoped_roots_inherit_workspace_ignore_rules() {
         .as_array()
         .expect("matches")
         .is_empty());
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1243,7 +1245,6 @@ async fn multiline_context_starts_after_the_match_end() {
     );
     assert_eq!(output["matches"][0]["before"], json!(["before"]));
     assert_eq!(output["matches"][0]["after"], json!(["middle"]));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1288,12 +1289,11 @@ async fn byte_limited_pages_have_exact_continuation_cursors() {
         .map(|index| format!("src/{index:04}-{}/match.rs", "x".repeat(180)))
         .collect();
     assert_eq!(paths, expected);
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn aggregate_arrays_and_version_specific_regexes_are_rejected() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let roots: Vec<String> = (0..33).map(|index| format!("root-{index}")).collect();
     let excessive = execute("grep", json!({"pattern": "x", "roots": roots}), &runtime).await;
     assert!(excessive.is_error);
@@ -1308,7 +1308,6 @@ async fn aggregate_arrays_and_version_specific_regexes_are_rejected() {
         serde_json::from_str::<Value>(&unsupported.content).expect("error JSON")["error"]["code"],
         "invalid_regex"
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1350,7 +1349,6 @@ async fn rust_pattern_engines_handle_unicode_and_supported_syntax() {
         serde_json::from_str::<Value>(&invalid.content).expect("error JSON")["error"]["code"],
         "invalid_regex"
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1378,7 +1376,6 @@ async fn context_materialization_has_a_cumulative_byte_limit() {
         .expect("errors")
         .iter()
         .any(|error| error["code"] == "materialized_limit"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1415,12 +1412,11 @@ async fn newline_heavy_files_stop_at_the_line_index_budget() {
         .expect("errors")
         .iter()
         .any(|error| error["code"] == "line_limit"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
 async fn directory_enumeration_stops_at_its_input_budget() {
-    let (runtime, root) = fixture_runtime();
+    let (runtime, _root) = fixture_runtime();
     let mut filesystem = super::WorkspaceFs::open(&runtime)
         .await
         .expect("open fixture filesystem");
@@ -1431,7 +1427,6 @@ async fn directory_enumeration_stops_at_its_input_budget() {
     };
     assert_eq!(error.code, "entry_limit");
     filesystem.close().await;
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1466,7 +1461,6 @@ async fn gitignore_literals_invalid_rules_and_caret_classes_match_git() {
         .map(|entry| entry["path"].as_str().expect("path"))
         .collect();
     assert_eq!(text_paths, vec!["a.txt"]);
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1497,7 +1491,6 @@ async fn ignore_rules_have_cumulative_count_and_byte_limits() {
     fs::write(root.join("literal\\"), "x").expect("write backslash filename fixture");
     let parity = parsed(execute("glob", json!({"pattern": "literal*"}), &runtime).await);
     assert!(parity["entries"].as_array().expect("entries").is_empty());
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1510,7 +1503,6 @@ async fn normalized_noop_ignore_lines_do_not_consume_rule_budget() {
         .expect("errors")
         .iter()
         .all(|error| error["code"] != "ignore_limit"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1549,7 +1541,6 @@ async fn exact_match_cap_does_not_hide_later_files() {
     assert_eq!(paths.len(), 10_001);
     assert_eq!(paths.last().map(String::as_str), Some("src/cap-z.txt"));
     assert!(errors.iter().all(|error| error["code"] != "match_limit"));
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1594,7 +1585,6 @@ async fn per_file_match_cap_does_not_hide_later_files() {
             .count(),
         1
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[tokio::test]
@@ -1649,5 +1639,4 @@ async fn aggregate_record_cap_stays_bounded_after_per_file_caps() {
             .count(),
         1
     );
-    fs::remove_dir_all(root).expect("remove fixture");
 }
