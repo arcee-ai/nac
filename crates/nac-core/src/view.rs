@@ -353,19 +353,6 @@ pub fn load_thread_episodes(
         .map(|episodes| episodes.into_iter().map(Into::into).collect())
 }
 
-pub fn load_all_thread_episodes(
-    store_path: &Path,
-    session_id: Option<&str>,
-) -> Result<HashMap<String, Vec<EpisodeSnapshot>>> {
-    let Some(session_id) = session_id else {
-        return Ok(HashMap::new());
-    };
-    let episodes = store::load_all_dispatches(store_path, session_id)?;
-    Ok(episodes
-        .into_iter()
-        .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))
-        .collect())
-}
 
 pub(crate) fn load_all_thread_episodes_with_connection(
     conn: &rusqlite::Connection,
