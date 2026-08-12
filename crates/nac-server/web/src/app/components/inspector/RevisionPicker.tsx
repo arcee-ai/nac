@@ -12,50 +12,10 @@ import {
 import { cn } from "@/app/lib/cn";
 import { formatStoreTime } from "@/app/lib/format";
 import { errorMessage } from "@/app/providers/ToastProvider";
+import { RevisionRowButton } from "@/app/components/inspector/RevisionRowButton";
 import { revisionOrdinal, revisionTitle } from "@/app/lib/revisions";
 import { useWorkspaceRevisions } from "@/app/services/queries";
 import type { WorkspaceRevision } from "@/app/types/api";
-
-function Row({
-  title,
-  subtitle,
-  trailing,
-  selected,
-  onClick,
-}: {
-  title: string;
-  subtitle: string | null;
-  trailing?: React.ReactNode;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="flex items-start gap-2 w-full p-1 rounded-[4px] text-left btn-ghost"
-      onClick={onClick}
-    >
-      <Icon
-        iconName={selected ? IconName.Check : IconName.History}
-        size={16}
-        className="shrink-0 mt-[2px]"
-      />
-      <span className="flex-1 min-w-0 flex flex-col">
-        <span className="label-micro text-btn-secondary truncate">{title}</span>
-        {subtitle ? (
-          <span className="label-micro text-basic-muted truncate">
-            {subtitle}
-          </span>
-        ) : null}
-      </span>
-      {trailing ? (
-        <span className="shrink-0 flex items-center gap-1 code code-small mt-[2px]">
-          {trailing}
-        </span>
-      ) : null}
-    </button>
-  );
-}
 
 /**
  * The snapshot chip in the box footer, switching the panels between the live
@@ -99,7 +59,8 @@ export function RevisionPicker({
       className="min-w-0"
       content={
         <>
-          <Row
+          <RevisionRowButton
+            variant="compact"
             title="Working tree"
             subtitle="The files as they are right now"
             selected={selected == null}
@@ -172,7 +133,8 @@ function RevisionRow({
 }) {
   const prompt = revision.label.trim();
   return (
-    <Row
+    <RevisionRowButton
+      variant="compact"
       title={`${revisionTitle(ordinal)} · ${formatStoreTime(revision.created_at)}`}
       subtitle={prompt || null}
       selected={selected}
