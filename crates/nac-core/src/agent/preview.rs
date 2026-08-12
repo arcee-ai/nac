@@ -125,7 +125,7 @@ pub(crate) fn key_arg_preview(
         "thread_read" | "thread_delete" => {
             get_str("name").unwrap_or_else(|| truncate_string(args_preview, 120))
         }
-        "threads" => "list".to_string(),
+        "threads" | "workset_list" => "list".to_string(),
         "workset_define" => {
             let id = get_str("id").unwrap_or_default();
             let goal = get_str("goal").unwrap_or_default();
@@ -138,7 +138,6 @@ pub(crate) fn key_arg_preview(
             }
         }
         "workset_read" => get_str("id").unwrap_or_else(|| truncate_string(args_preview, 120)),
-        "workset_list" => "list".to_string(),
         _ if tool_name.starts_with("mcp__") => {
             for key in &[
                 "query",
@@ -286,6 +285,7 @@ pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
     let exit_code = parsed.get("exit_code").and_then(|value| value.as_i64());
     let more = ellipsis(lines.len());
 
+
     match (status, exit_code, summary) {
         ("completed", Some(0), Some(summary)) => Some(format!("{summary}{more}")),
         ("completed", Some(code), Some(summary)) => Some(format!("exit {code}: {summary}{more}")),
@@ -298,6 +298,7 @@ pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
         ("spawn_error", _, None) => Some("spawn error".to_string()),
         (_, _, Some(summary)) => Some(format!("{summary}{more}")),
         (_, _, None) => parsed
+
             .get("session_name")
             .and_then(|value| value.as_str())
             .map(|session| format!("session {session}")),

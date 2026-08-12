@@ -144,16 +144,16 @@ impl SshBackend {
         Ok(())
     }
 
-    pub(crate) fn resolve_path(&self, path: &str) -> Result<PathBuf> {
+    pub(crate) fn resolve_path(&self, path: &str) -> PathBuf {
         let requested = PathBuf::from(path);
         if requested.is_absolute() || path == "~" || path.starts_with("~/") {
-            return Ok(requested);
+            return requested;
         }
 
         if self.remote_cwd.is_absolute() {
-            Ok(self.remote_cwd.join(requested))
+            self.remote_cwd.join(requested)
         } else {
-            Ok(requested)
+            requested
         }
     }
 
@@ -342,11 +342,11 @@ mod tests {
     fn paths_resolve_against_remote_cwd_without_local_checks() {
         let backend = backend();
         assert_eq!(
-            backend.resolve_path("src/lib.rs").unwrap(),
+            backend.resolve_path("src/lib.rs"),
             PathBuf::from("/srv/work/project/src/lib.rs")
         );
         assert_eq!(
-            backend.resolve_path("/etc/hosts").unwrap(),
+            backend.resolve_path("/etc/hosts"),
             PathBuf::from("/etc/hosts")
         );
     }
@@ -354,12 +354,9 @@ mod tests {
     #[test]
     fn relative_paths_stay_relative_when_remote_cwd_is_tilde_for_file_io() {
         let backend = SshBackend::new("build-box".to_string(), PathBuf::from("~"));
+        assert_eq!(backend.resolve_path("note.txt"), PathBuf::from("note.txt"));
         assert_eq!(
-            backend.resolve_path("note.txt").unwrap(),
-            PathBuf::from("note.txt")
-        );
-        assert_eq!(
-            backend.resolve_path("~/note.txt").unwrap(),
+            backend.resolve_path("~/note.txt"),
             PathBuf::from("~/note.txt")
         );
     }

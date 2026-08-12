@@ -93,6 +93,8 @@ impl WorkerTimeoutTrace {
             }
             AgentEvent::Error { .. }
             | AgentEvent::ModelError { .. }
+            | AgentEvent::ThreadStarted { .. }
+            | AgentEvent::ThreadFinished { .. }
             | AgentEvent::TokenUsageUpdated { .. }
             | AgentEvent::ThreadLog { .. }
             | AgentEvent::ThreadSteeringQueued { .. }
@@ -105,7 +107,6 @@ impl WorkerTimeoutTrace {
             | AgentEvent::OrchestratorCompactionCompleted { .. }
             | AgentEvent::OrchestratorCompactionSkipped { .. }
             | AgentEvent::OrchestratorCompactionFailed { .. } => {}
-            AgentEvent::ThreadStarted { .. } | AgentEvent::ThreadFinished { .. } => {}
         }
     }
 

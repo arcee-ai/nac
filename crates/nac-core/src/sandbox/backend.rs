@@ -78,7 +78,7 @@ impl ExecutionBackend {
                 }
             }
             Self::Sandbox(session) => session.resolve_path(path),
-            Self::Ssh(ssh) => ssh.resolve_path(path),
+            Self::Ssh(ssh) => Ok(ssh.resolve_path(path)),
         }
     }
 
