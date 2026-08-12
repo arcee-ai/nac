@@ -572,12 +572,6 @@ pub struct ResumePickerRunConfig {
     pub worker_executable: Option<PathBuf>,
 }
 
-pub enum RunState {
-    Orchestrator { run_config: OrchestratorRunConfig },
-    ResumePicker(ResumePickerRunConfig),
-    ManagedWorker(ManagedWorkerRunConfig),
-}
-
 pub(crate) fn effective_sandbox_options(
     options: SandboxOptions,
     config: &NacConfig,

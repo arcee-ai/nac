@@ -32,10 +32,6 @@ impl BackendKind {
             Self::ArceeApi => "arcee-api",
         }
     }
-
-    pub fn is_arcee(self) -> bool {
-        matches!(self, Self::ArceeAuth | Self::ArceeApi)
-    }
 }
 
 impl std::fmt::Display for BackendKind {

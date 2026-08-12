@@ -505,10 +505,6 @@ impl SessionEventBus {
         self.sender.subscribe()
     }
 
-    pub fn subscribe_assistant_deltas(&self) -> AssistantStreamDeltaReceiver {
-        self.delta_sender.subscribe()
-    }
-
     /// Publish one slice of live model output. Dropped when nobody is watching,
     /// which is the common case for a run started from the CLI.
     pub fn emit_assistant_delta(&self, delta: AssistantStreamDelta) {

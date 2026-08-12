@@ -706,10 +706,6 @@ impl SessionService {
         }
     }
 
-    pub async fn attach_client(&self) -> Result<SessionClientAttachment> {
-        self.connect_client().attach().await
-    }
-
     pub fn subscribe_events(&self) -> SessionEventReceiver {
         self.event_bus.subscribe()
     }
@@ -913,13 +909,6 @@ impl SessionService {
             &self.metadata.store_path,
             self.metadata.session_id.as_deref(),
             thread_name,
-        )
-    }
-
-    pub fn all_thread_episodes(&self) -> Result<HashMap<String, Vec<EpisodeSnapshot>>> {
-        view::load_all_thread_episodes(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
         )
     }
 
