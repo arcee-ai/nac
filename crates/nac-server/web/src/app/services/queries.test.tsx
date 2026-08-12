@@ -148,6 +148,9 @@ describe("session-list polling split", () => {
     const delayedStats = deferred<ManagedSessionSummary[]>();
     let baseRead = 0;
     let statsRead = 0;
+    // Hold the empty base response until after the late stats merge is
+    // asserted — otherwise a 5ms base poll can race past the merge window.
+    let allowEmptyBase = false;
     requests.listSessions.mockImplementation((workspaceStats: boolean) => {
       if (workspaceStats) {
         statsRead += 1;
@@ -156,7 +159,7 @@ describe("session-list polling split", () => {
       }
       baseRead += 1;
       if (baseRead === 1) return Promise.resolve([session("kept", "old")]);
-      if (baseRead === 2) return Promise.resolve([session("kept", "new")]);
+      if (!allowEmptyBase) return Promise.resolve([session("kept", "new")]);
       return Promise.resolve([]);
     });
     const client = new QueryClient({
@@ -189,6 +192,7 @@ describe("session-list polling split", () => {
       ]);
     });
 
+    allowEmptyBase = true;
     await waitFor(() => {
       expect(renderedData(renderer)).toEqual([]);
       expect(statsRead).toBeGreaterThanOrEqual(2);
