@@ -468,6 +468,30 @@ export function ConfigurationsPanel({
         : Boolean(resolved);
 
   const keyInvalid = validation.status === "error";
+  const renderApiKeyRow = (hint: string, verticalOnMobile = false) => (
+    <ConfigRow
+      label="API Key"
+      required
+      verticalOnMobile={verticalOnMobile}
+      invalid={keyInvalid}
+      hint={hint}
+      control={
+        <Input
+          inputSize={
+            verticalOnMobile && isMobile ? InputSize.Large : InputSize.Medium
+          }
+          className={CONTROL_WIDTH}
+          type="password"
+          autoComplete="off"
+          placeholder="Paste the provider key"
+          leadingSlot={<KeyStatus status={validation.status} />}
+          validation={keyInvalid}
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+      }
+    />
+  );
   // A login that cannot read the model index leaves the same empty list as a
   // provider with nothing to offer, so saying which one it is has to be explicit.
   const modelListError = loginQuery.isError
@@ -640,36 +664,12 @@ export function ConfigurationsPanel({
                             }
                           />
                           <Separator />
-                          <ConfigRow
-                            label="API Key"
-                            required
-                            verticalOnMobile
-                            invalid={keyInvalid}
-                            hint={
-                              catalogProvider?.auth_hint
-                                ? `Stored in NAC once the setup is saved, or set ${catalogProvider.auth_hint} on the server instead.`
-                                : "Stored in NAC under a generated name once the setup is saved."
-                            }
-                            control={
-                              <Input
-                                inputSize={
-                                  isMobile ? InputSize.Large : InputSize.Medium
-                                }
-                                className={CONTROL_WIDTH}
-                                type="password"
-                                autoComplete="off"
-                                placeholder="Paste the provider key"
-                                leadingSlot={
-                                  <KeyStatus status={validation.status} />
-                                }
-                                validation={keyInvalid}
-                                value={apiKey}
-                                onChange={(event) =>
-                                  setApiKey(event.target.value)
-                                }
-                              />
-                            }
-                          />
+                          {renderApiKeyRow(
+                            catalogProvider?.auth_hint
+                              ? `Stored in NAC once the setup is saved, or set ${catalogProvider.auth_hint} on the server instead.`
+                              : "Stored in NAC under a generated name once the setup is saved.",
+                            true,
+                          )}
                         </>
                       )}
                     </>
@@ -756,25 +756,9 @@ export function ConfigurationsPanel({
               {needsKey ? (
                 <>
                   <Separator />
-                  <ConfigRow
-                    label="API Key"
-                    required
-                    invalid={keyInvalid}
-                    hint="Stored in NAC under a generated name once the setup is saved."
-                    control={
-                      <Input
-                        inputSize={InputSize.Medium}
-                        className={CONTROL_WIDTH}
-                        type="password"
-                        autoComplete="off"
-                        placeholder="Paste the provider key"
-                        leadingSlot={<KeyStatus status={validation.status} />}
-                        validation={keyInvalid}
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                      />
-                    }
-                  />
+                  {renderApiKeyRow(
+                    "Stored in NAC under a generated name once the setup is saved.",
+                  )}
                 </>
               ) : null}
               {provider === CUSTOM ? (
