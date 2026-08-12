@@ -271,7 +271,9 @@ pub async fn execute_parsed_dispatch(
         return ToolResult {
             content: format!("{TOOL_CALL_CANCELLED_MARKER} {}", failure.message),
             is_error: true,
+
         };
+
     }
 
     let timed_out = failure.status == store::EpisodeStatus::TimedOut;
