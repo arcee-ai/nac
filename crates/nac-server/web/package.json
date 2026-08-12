@@ -9,8 +9,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
-    "sync-file-icons": "node scripts/sync-file-icons.mjs",
-    "preview": "vite preview"
+    "sync-file-icons": "node scripts/sync-file-icons.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
