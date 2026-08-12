@@ -32,24 +32,11 @@ jobs:
         working-directory: crates/nac-server/web
         run: npm ci
 
-      - name: Lint and typecheck the web app
-        working-directory: crates/nac-server/web
-        run: |
-          npm run lint
-          npm run typecheck
-
       # The build output is committed so that building nac-web never needs Node.
-      # Rebuilding it here catches a commit that changed `web/` without shipping
-      # the matching bundle.
-      - name: Check the committed frontend build is current
-        working-directory: crates/nac-server/web
-        run: |
-          npm run build
-          if [ -n "$(git status --porcelain -- ../assets/dist)" ]; then
-            echo "::error::crates/nac-server/assets/dist is stale; run 'npm --prefix crates/nac-server/web run build' and commit the result"
-            git status --porcelain -- ../assets/dist
-            exit 1
-          fi
+      # The Make targets also enforce that changes under `web/` ship the matching
+      # bundle and keep local and CI frontend validation in sync.
+      - name: Validate the web app
+        run: make test-web test-assets
 
       - name: Run nac-server tests
         run: cargo test -p nac-server --locked

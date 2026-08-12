@@ -1,4 +1,4 @@
-.PHONY: all build dev release install test test-rust test-assets check fmt clippy clean help
+.PHONY: all build dev release install test test-rust test-web test-assets check fmt clippy clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -66,11 +66,17 @@ release:
 install:
 	$(CARGO) install --path crates/$(PKG) --bin $(BIN) --locked --force --root $(INSTALL_ROOT)
 
-## Run workspace Rust tests and web asset checks
-test: test-rust test-assets
+## Run workspace Rust tests and web validation
+# Keep test-web exactly once in this dependency list; test-assets intentionally
+# covers only lint, typechecking, and committed-bundle freshness.
+test: test-rust test-web test-assets
 
 test-rust:
 	$(CARGO) test --workspace --locked
+
+## Run frontend unit tests
+test-web:
+	npm --prefix $(WEB_DIR) test
 
 # Mirrors the release workflow: the bundle under assets/dist is committed, so a
 # stale one has to fail here rather than in CI.
@@ -110,8 +116,9 @@ help:
 		'  dev          Build and run nac-web, then open it in the default browser' \
 		'  release      Build nac-web (release)' \
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
-		'  test         Run Rust tests and web asset checks' \
+		'  test         Run Rust tests and all web validation' \
 		'  test-rust    Run cargo test --workspace --locked' \
+		'  test-web     Run frontend unit tests' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  check        Run cargo check --workspace --locked' \
 		'  fmt          Run rustfmt' \
