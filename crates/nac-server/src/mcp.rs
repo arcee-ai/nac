@@ -156,7 +156,6 @@ impl NacMcpService {
             api_key_env: field(params.api_key_env),
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
-            mixed_models: RequestField::Omitted,
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -561,7 +560,6 @@ impl NacMcpService {
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
-            mixed_models: RequestField::Omitted,
         };
         match self
             .manager

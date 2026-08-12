@@ -6,7 +6,6 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::mixed_mode::MixedModeConfig;
 use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
@@ -22,7 +21,6 @@ pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
     load_session, load_session_config, reorder_sessions, save_session, save_session_run_state,
     session_exists, update_raw_session_config, update_session_config, update_session_presentation,
-    MALFORMED_MIXED_MODELS_DIAGNOSTIC,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
@@ -44,8 +42,6 @@ pub struct RawSessionConfig {
     pub reasoning_effort: Option<String>,
     pub api_key_env: Option<String>,
     pub extra_headers_json: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mixed_models: Option<MixedModeConfig>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub config_version: i64,
     /// Structural parse failures in the persisted values. These are diagnostics,
@@ -113,8 +109,6 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
-    /// Mixed-mode tier models; `None` keeps single-model behavior.
-    pub mixed_models: Option<MixedModeConfig>,
     /// Absolute compaction threshold captured for this orchestrator session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
     pub orchestrator_compaction_threshold: Option<u64>,
@@ -232,7 +226,6 @@ impl From<anyhow::Error> for SessionPresentationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mixed_mode::MixedTierSettings;
     use crate::types::Message;
     use crate::TEST_ENV_LOCK;
 
@@ -340,55 +333,6 @@ mod tests {
                 .orchestrator_context_tokens,
             330
         );
-
-        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-    }
-
-    #[test]
-    fn mixed_models_round_trip_through_session_store() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let store_path = temp_store_path("mixed_models_round_trip");
-
-        let mixed = MixedModeConfig {
-            easy: MixedTierSettings {
-                model: "small-model".to_string(),
-                backend: Some(BackendKind::OpenAiResponses),
-                base_url: Some("https://api.openai.com/v1".to_string()),
-                api_key_env: Some("OPENAI_API_KEY".to_string()),
-                reasoning_effort: Some(ReasoningEffort::Low),
-            },
-            medium: MixedTierSettings {
-                model: "medium-model".to_string(),
-                backend: None,
-                base_url: None,
-                api_key_env: None,
-                reasoning_effort: None,
-            },
-            hard: MixedTierSettings {
-                model: "large-model".to_string(),
-                backend: Some(BackendKind::AnthropicMessages),
-                base_url: None,
-                api_key_env: None,
-                reasoning_effort: Some(ReasoningEffort::High),
-            },
-        };
-        let mut snapshot = test_snapshot(
-            "mixed-session",
-            "2026-01-01 00:00:00.000000000",
-            "2026-01-01 00:00:00.000000000",
-        );
-        snapshot.mixed_models = Some(mixed.clone());
-        create_session(&store_path, &snapshot).unwrap();
-
-        let loaded = load_session(&store_path, "mixed-session").unwrap();
-        assert_eq!(loaded.mixed_models, Some(mixed));
-
-        // Clearing the configuration returns the session to single-model mode.
-        let mut cleared = loaded;
-        cleared.mixed_models = None;
-        update_session_config(&store_path, &cleared).unwrap();
-        let reloaded = load_session(&store_path, "mixed-session").unwrap();
-        assert_eq!(reloaded.mixed_models, None);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

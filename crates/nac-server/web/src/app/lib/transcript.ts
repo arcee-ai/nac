@@ -13,11 +13,9 @@ import {
   type ThreadLogLine,
 } from "@/app/lib/threadLog";
 import type { RuntimeThread } from "@/app/store/runtimeStore";
-import { MIXED_TIERS } from "@/app/types/api";
 import type {
   AgentEvent,
   SessionSnapshotResponse,
-  ThreadComplexity,
   ToolCall,
 } from "@/app/types/api";
 
@@ -60,8 +58,6 @@ export interface TranscriptThread {
   name: string;
   /** What the orchestrator asked the thread to do. */
   action: string;
-  /** Mixed-mode tier the dispatch was classified into, if any. */
-  complexity: ThreadComplexity | null;
   /** What the thread reported once it was done, or its action before then. */
   summary: string;
   /** Commands the thread has issued, oldest first, for the tail on its card. */
@@ -313,10 +309,7 @@ function describeThread(
   finishedNames: Set<string>,
 ): TranscriptThread {
   const name = threadName(call);
-  const args = parseArguments(call);
-  const action = text(args.action);
-  const rawComplexity = text(args.complexity);
-  const complexity = MIXED_TIERS.find((tier) => tier === rawComplexity) ?? null;
+  const action = text(parseArguments(call).action);
   const result = results.get(call.id) ?? null;
   // The stream is keyed by name and only ever describes the dispatch running
   // now, which is the newest one. Handing it to the earlier cards of that name
@@ -352,7 +345,6 @@ function describeThread(
     key: identity,
     name,
     action,
-    complexity,
     summary: result || action,
     // The persisted events are what a reload falls back on, and the stream is
     // what carries the commands issued since the last snapshot.

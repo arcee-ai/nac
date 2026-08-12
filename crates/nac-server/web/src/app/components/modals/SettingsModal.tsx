@@ -30,10 +30,6 @@ import {
 } from "@/app/components/modals/ConfigurationsPanel";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
-import {
-  MixedModelsSection,
-  type MixedSelection,
-} from "@/app/components/modals/MixedModelsSection";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
@@ -47,10 +43,8 @@ import {
   type Validation,
 } from "@/app/lib/apiKey";
 import {
-  inheritPrimaryCredential,
   buildSettingsPatch,
   managedLaunchBaseUrl,
-  sameMixedModels,
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
@@ -74,7 +68,6 @@ import {
 } from "@/app/store/sshConnectionStore";
 import type {
   BackendKind,
-  MixedModels,
   RawSessionConfig,
   SessionMetadata,
   SessionSummarySnapshot,
@@ -219,7 +212,6 @@ export function SettingsModal({
       open={open}
       id={id}
       initial={initial}
-      initialMixed={config?.mixed_models ?? null}
       summary={entry.summary}
       diagnostics={config?.diagnostics ?? []}
       onClose={onClose}
@@ -232,7 +224,6 @@ function SettingsForm({
   open,
   id,
   initial,
-  initialMixed,
   summary,
   diagnostics,
   onClose,
@@ -240,8 +231,6 @@ function SettingsForm({
   open: boolean;
   id: string;
   initial: SettingsInitialValues;
-  /** The mixed tiers the session currently runs with, if any. */
-  initialMixed: MixedModels | null;
   /** Carries the presentation version the title save has to match. */
   summary: SessionSummarySnapshot;
   diagnostics: string[];
@@ -277,20 +266,9 @@ function SettingsForm({
   const compactionAutoRef = useRef(
     initial.orchestrator_compaction_threshold == null,
   );
-  const [mixed, setMixed] = useState<MixedSelection>({
-    mode: initialMixed ? "mixed" : "single",
-    mixed: initialMixed,
-  });
   const [error, setError] = useState("");
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [advanced, setAdvanced] = useState(false);
-
-  // A malformed stored mixed config loads as null with only a diagnostic; the
-  // server then refuses patches that omit mixed_models, so saving must always
-  // send an explicit repair or clear.
-  const mixedNeedsRepair = diagnostics.some((diagnostic) =>
-    diagnostic.startsWith("malformed stored mixed models"),
-  );
 
   const onConfigurationChange = useCallback(
     (next: LaunchModelSelection | null) => {
@@ -429,24 +407,6 @@ function SettingsForm({
     } catch (validationError) {
       setError(errorMessage(validationError));
       return;
-    }
-
-    if (mixed.mode === "mixed") {
-      if (!mixed.mixed) {
-        setError("Complete the easy, medium and hard tiers before saving.");
-        return;
-      }
-      const finalMixed = inheritPrimaryCredential(
-        mixed.mixed,
-        selected.backend,
-        selected.api_key_env,
-        initial.api_key_env,
-      );
-      if (mixedNeedsRepair || !sameMixedModels(finalMixed, initialMixed)) {
-        patch.mixed_models = finalMixed;
-      }
-    } else if (initialMixed || mixedNeedsRepair) {
-      patch.mixed_models = null;
     }
 
     setError("");
@@ -646,10 +606,6 @@ function SettingsForm({
             ) : null}
           </div>
         </ConfigurationsPanel>
-
-        <Separator />
-
-        <MixedModelsSection initial={initialMixed} onChange={setMixed} />
 
         {error ? (
           <p className="text-error-primary text-micro">{error}</p>

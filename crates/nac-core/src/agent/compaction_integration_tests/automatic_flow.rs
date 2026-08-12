@@ -30,7 +30,6 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            mixed_clients: None,
         },
     )
     .unwrap();

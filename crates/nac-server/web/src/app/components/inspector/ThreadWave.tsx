@@ -124,11 +124,6 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           >
             {thread.name}
           </span>
-          {thread.complexity && (
-            <span className="shrink-0 rounded-[3px] bg-elevation-level-3 px-1 text-[9px] uppercase tracking-wide text-basic-muted">
-              {thread.complexity}
-            </span>
-          )}
         </div>
         {running || cancelled ? (
           <ThreadLogTail

@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::events::AgentEvent;
-use crate::model::{ModelClient, ThreadComplexity};
+use crate::model::ModelClient;
 use crate::skills::SkillRegistry;
 use crate::store;
 use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
@@ -12,66 +12,10 @@ mod worker;
 pub(crate) use worker::worker_model_arguments_for_test;
 use worker::{run_worker, WorkerInvocation};
 
-/// The three tier worker clients a mixed-mode session resolves at
-/// launch/resume. Each client carries its own catalog metadata, so dispatch
-/// routing and prompt descriptions share the same identities.
-#[derive(Clone)]
-pub(crate) struct MixedDispatchClients {
-    pub easy: ModelClient,
-    pub medium: ModelClient,
-    pub hard: ModelClient,
-}
-
-impl MixedDispatchClients {
-    pub fn for_tier(&self, complexity: ThreadComplexity) -> &ModelClient {
-        match complexity {
-            ThreadComplexity::Easy => &self.easy,
-            ThreadComplexity::Medium => &self.medium,
-            ThreadComplexity::Hard => &self.hard,
-        }
-    }
-
-    pub fn describe_tiers(&self) -> String {
-        let mut description = String::new();
-        for (complexity, client) in [
-            (ThreadComplexity::Easy, &self.easy),
-            (ThreadComplexity::Medium, &self.medium),
-            (ThreadComplexity::Hard, &self.hard),
-        ] {
-            let mut traits = Vec::new();
-            if let Some(effort) = client.reasoning_effort() {
-                traits.push(format!("effort: {}", effort.as_str()));
-            }
-            let cost = client.cost_rates();
-            if cost.input > 0.0 || cost.output > 0.0 {
-                traits.push(format!(
-                    "~${}/${} per 1M tokens in/out",
-                    cost.input, cost.output
-                ));
-            }
-            let traits = if traits.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", traits.join(", "))
-            };
-            description.push_str(&format!(
-                "\n- {}: {}{}",
-                complexity.as_str(),
-                client.model,
-                traits
-            ));
-        }
-        description
-    }
-}
-
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
 
-pub fn dispatch_definition(
-    skills: Option<&SkillRegistry>,
-    mixed: Option<&MixedDispatchClients>,
-) -> ToolDefinition {
+pub fn dispatch_definition(skills: Option<&SkillRegistry>) -> ToolDefinition {
     use serde_json::json;
 
     let mut parameters = json!({
@@ -88,18 +32,6 @@ pub fn dispatch_definition(
         },
         "required": ["name", "action"]
     });
-
-    if let Some(mixed) = mixed {
-        parameters["properties"]["complexity"] = json!({
-            "type": "string",
-            "enum": ["easy", "medium", "hard"],
-            "description": format!(
-                "Difficulty classification for this dispatch; selects the configured tier:{}",
-                mixed.describe_tiers()
-            )
-        });
-        parameters["required"] = json!(["name", "action", "complexity"]);
-    }
 
     if let Some(registry) = skills {
         let catalog = registry.catalog_entries();
@@ -182,8 +114,6 @@ pub struct ParsedDispatchParams {
     pub scheduled_skills: Vec<String>,
     pub session_id: String,
     pub timeout_secs: u64,
-    /// Mixed-mode difficulty tier; `None` outside mixed mode.
-    pub complexity: Option<ThreadComplexity>,
 }
 
 /// Parse tool args into [`ParsedDispatchParams`].  Pure — no side effects.
@@ -197,18 +127,6 @@ pub fn parse_dispatch_args(
     let scheduled_skills = resolve_scheduled_skills(args, runtime.skills.as_deref())?;
     let session_id = require_session(runtime)?.to_string();
     let timeout_secs = resolve_thread_timeout_secs(args, runtime.thread_timeout_secs);
-    let complexity = if runtime.mixed_clients.is_some() {
-        Some(
-            require_str(args, "complexity")?
-                .parse::<ThreadComplexity>()
-                .map_err(|error| ToolResult {
-                    content: format!("Error: {error}"),
-                    is_error: true,
-                })?,
-        )
-    } else {
-        None
-    };
 
     Ok(ParsedDispatchParams {
         thread_name,
@@ -218,26 +136,7 @@ pub fn parse_dispatch_args(
         scheduled_skills,
         session_id,
         timeout_secs,
-        complexity,
     })
-}
-
-/// Select the model client a dispatch runs with. A complexity is only parsed
-/// when mixed mode is enabled, so its presence selects the matching tier.
-pub(crate) fn select_dispatch_client(
-    params: &ParsedDispatchParams,
-    runtime: &ToolRuntime,
-    orchestrator_client: &ModelClient,
-) -> ModelClient {
-    match params.complexity {
-        Some(complexity) => runtime
-            .mixed_clients
-            .as_deref()
-            .expect("a parsed complexity requires mixed-mode clients")
-            .for_tier(complexity)
-            .clone(),
-        None => orchestrator_client.clone(),
-    }
 }
 
 /// Execute a dispatch from already-parsed params.  Emits `ThreadStarted`,
@@ -257,7 +156,6 @@ pub async fn execute_parsed_dispatch(
         scheduled_skills,
         session_id,
         timeout_secs,
-        complexity: _,
     } = params;
     let Some(cancellation) = runtime.active_threads.start(&thread_name, &dispatch_id) else {
         close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
@@ -400,7 +298,6 @@ pub async fn execute_dispatch(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let client = select_dispatch_client(&params, runtime, client);
     let thread_name = params.thread_name.clone();
     let dispatch_id = params.dispatch_id.clone();
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
@@ -412,7 +309,7 @@ pub async fn execute_dispatch(
             is_error: true,
         };
     }
-    let result = execute_parsed_dispatch(params, runtime, &client).await;
+    let result = execute_parsed_dispatch(params, runtime, client).await;
     if let Some(session_id) = runtime.session_id.as_deref() {
         close_thread_dispatch(runtime, session_id, &thread_name, &dispatch_id);
     }
@@ -683,14 +580,12 @@ mod tests {
 
     #[test]
     fn dispatch_definition_skills_schema_depends_on_registry() {
-        assert!(
-            dispatch_definition(None, None).function.parameters["properties"]
-                .get("skills")
-                .is_none()
-        );
+        assert!(dispatch_definition(None).function.parameters["properties"]
+            .get("skills")
+            .is_none());
 
         let registry = test_registry();
-        let definition = dispatch_definition(Some(&registry), None);
+        let definition = dispatch_definition(Some(&registry));
         let skills = &definition.function.parameters["properties"]["skills"];
         assert_eq!(skills["items"]["enum"], json!(["lint", "review"]));
         assert_eq!(skills["uniqueItems"], true);
@@ -790,7 +685,6 @@ mod tests {
             scheduled_skills: Vec::new(),
             session_id: "test-session".to_string(),
             timeout_secs: 30,
-            complexity: None,
         };
         assert!(mark_thread_active(&runtime, "worker", "dispatch"));
 
@@ -911,188 +805,6 @@ mod tests {
 
         let params = parse_dispatch_args(&args, &runtime).unwrap();
         assert_eq!(params.timeout_secs, DEFAULT_THREAD_TIMEOUT_SECS);
-    }
-
-    // ------------------------------------------------------------------
-    // mixed mode
-    // ------------------------------------------------------------------
-
-    fn routing_client(
-        backend: crate::model::BackendKind,
-        model: &str,
-        effort: crate::model::ReasoningEffort,
-    ) -> ModelClient {
-        ModelClient::new_for_test_settings(backend, model, effort)
-    }
-
-    fn mixed_runtime() -> ToolRuntime {
-        use crate::model::{BackendKind, ReasoningEffort};
-
-        let mut runtime = test_runtime();
-        runtime.mixed_clients = Some(Arc::new(MixedDispatchClients {
-            easy: routing_client(
-                BackendKind::AnthropicMessages,
-                "easy-model",
-                ReasoningEffort::Low,
-            ),
-            medium: routing_client(
-                BackendKind::TogetherChat,
-                "medium-model",
-                ReasoningEffort::Medium,
-            ),
-            hard: routing_client(
-                BackendKind::FireworksChat,
-                "hard-model",
-                ReasoningEffort::High,
-            ),
-        }));
-        runtime
-    }
-
-    #[test]
-    fn dispatch_definition_mixed_mode_requires_complexity() {
-        let clients = MixedDispatchClients {
-            easy: ModelClient::new_for_test(),
-            medium: ModelClient::new_for_test(),
-            hard: ModelClient::new_for_test(),
-        };
-        let definition = dispatch_definition(None, Some(&clients));
-        let parameters = &definition.function.parameters;
-        assert_eq!(
-            parameters["properties"]["complexity"]["enum"],
-            json!(["easy", "medium", "hard"])
-        );
-        assert_eq!(
-            parameters["required"],
-            json!(["name", "action", "complexity"])
-        );
-
-        // Single mode keeps the schema untouched.
-        let single = dispatch_definition(None, None);
-        assert!(single.function.parameters["properties"]
-            .get("complexity")
-            .is_none());
-        assert_eq!(
-            single.function.parameters["required"],
-            json!(["name", "action"])
-        );
-    }
-
-    #[test]
-    fn parse_dispatch_args_requires_complexity_in_mixed_mode() {
-        let runtime = mixed_runtime();
-        let err =
-            parse_dispatch_args(&json!({ "name": "t1", "action": "work" }), &runtime).unwrap_err();
-        assert!(err.is_error);
-        assert!(err.content.contains("'complexity'"));
-
-        let err = parse_dispatch_args(
-            &json!({ "name": "t1", "action": "work", "complexity": "extreme" }),
-            &runtime,
-        )
-        .unwrap_err();
-        assert!(err.content.contains("unsupported complexity"));
-
-        let params = parse_dispatch_args(
-            &json!({ "name": "t1", "action": "work", "complexity": "hard" }),
-            &runtime,
-        )
-        .unwrap();
-        assert_eq!(params.complexity, Some(ThreadComplexity::Hard));
-    }
-
-    #[test]
-    fn parse_dispatch_args_ignores_complexity_outside_mixed_mode() {
-        let runtime = test_runtime();
-        let params =
-            parse_dispatch_args(&json!({ "name": "t1", "action": "work" }), &runtime).unwrap();
-        assert_eq!(params.complexity, None);
-    }
-
-    #[test]
-    fn select_dispatch_client_routes_distinct_tier_identities() {
-        use crate::model::{BackendKind, ReasoningEffort};
-
-        let orchestrator = routing_client(
-            BackendKind::OpenAiResponses,
-            "orchestrator-model",
-            ReasoningEffort::Xhigh,
-        );
-
-        let runtime = test_runtime();
-        let params =
-            parse_dispatch_args(&json!({ "name": "t1", "action": "w" }), &runtime).unwrap();
-        let client = select_dispatch_client(&params, &runtime, &orchestrator);
-        assert_eq!(client.model, "orchestrator-model");
-        assert_eq!(client.backend(), BackendKind::OpenAiResponses);
-        assert_eq!(client.reasoning_effort(), Some(ReasoningEffort::Xhigh));
-
-        let runtime = mixed_runtime();
-        let expected = [
-            (
-                "easy",
-                "easy-model",
-                BackendKind::AnthropicMessages,
-                ReasoningEffort::Low,
-            ),
-            (
-                "medium",
-                "medium-model",
-                BackendKind::TogetherChat,
-                ReasoningEffort::Medium,
-            ),
-            (
-                "hard",
-                "hard-model",
-                BackendKind::FireworksChat,
-                ReasoningEffort::High,
-            ),
-        ];
-        for (complexity, model, backend, effort) in expected {
-            let params = parse_dispatch_args(
-                &json!({ "name": "t1", "action": "w", "complexity": complexity }),
-                &runtime,
-            )
-            .unwrap();
-            let client = select_dispatch_client(&params, &runtime, &orchestrator);
-            assert_eq!(client.model, model);
-            assert_eq!(client.backend(), backend);
-            assert_eq!(client.reasoning_effort(), Some(effort));
-        }
-    }
-
-    #[test]
-    fn selected_tier_identity_reaches_worker_cli_transport() {
-        use crate::model::{BackendKind, ReasoningEffort};
-
-        let runtime = mixed_runtime();
-        let orchestrator = routing_client(
-            BackendKind::OpenAiResponses,
-            "orchestrator-model",
-            ReasoningEffort::Xhigh,
-        );
-        let params = parse_dispatch_args(
-            &json!({ "name": "t1", "action": "w", "complexity": "hard" }),
-            &runtime,
-        )
-        .unwrap();
-        let selected = select_dispatch_client(&params, &runtime, &orchestrator);
-
-        assert_eq!(
-            super::worker::worker_model_arguments_for_test(&selected),
-            vec![
-                "--api-model",
-                "hard-model",
-                "--api-base-url",
-                "https://api.openai.com/v1",
-                "--backend",
-                "fireworks-chat",
-                "--effort",
-                "high",
-                "--extra-headers",
-                "{}",
-            ]
-        );
     }
 
     #[test]

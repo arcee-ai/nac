@@ -26,28 +26,6 @@ export type ReasoningEffort =
   | "xhigh"
   | "max";
 
-/** Mixed-mode dispatch difficulty, serialized lowercase. */
-export const MIXED_TIERS = ["easy", "medium", "hard"] as const;
-export type ThreadComplexity = (typeof MIXED_TIERS)[number];
-
-/**
- * One mixed tier's worker model. Same shape on records and requests: the
- * credential is always a selector name, never a key value.
- */
-export interface MixedTierSettings {
-  model: string;
-  backend?: BackendKind | null;
-  base_url?: string | null;
-  api_key_env?: string | null;
-  reasoning_effort?: ReasoningEffort | null;
-}
-
-/**
- * Mixed-mode dispatch routing: the orchestrator classifies each dispatch and
- * the classification selects a user-configured worker model per tier.
- */
-export type MixedModels = Record<ThreadComplexity, MixedTierSettings>;
-
 export interface StoreInfo {
   root_cwd: string;
   store_path: string;
@@ -666,8 +644,6 @@ export interface RawSessionConfig {
   extra_headers_json: string | null;
   orchestrator_compaction_threshold: number | null;
   config_version: number;
-  /** Present when the session runs in mixed mode. */
-  mixed_models?: MixedModels;
   /** Non-empty when the row needs a repair PATCH. */
   diagnostics?: string[];
 }
@@ -999,8 +975,6 @@ export interface ModelConfigurationRecord {
   extra_headers: Record<string, string>;
   orchestrator_compaction_threshold: number | null;
   initial_prompt: string | null;
-  /** Present when the setup saves mixed-mode tiers. */
-  mixed_models?: MixedModels;
   created_at: string;
   updated_at: string;
 }
@@ -1019,7 +993,6 @@ export interface CreateModelConfigurationRequest {
   extra_headers?: Record<string, string>;
   orchestrator_compaction_threshold?: number | null;
   initial_prompt?: string | null;
-  mixed_models?: MixedModels | null;
 }
 
 /**
@@ -1037,7 +1010,6 @@ export interface UpdateModelConfigurationRequest {
   extra_headers?: RequestField<Record<string, string>>;
   orchestrator_compaction_threshold?: RequestField<number>;
   initial_prompt?: RequestField<string>;
-  mixed_models?: RequestField<MixedModels>;
 }
 
 /** A configuration the server checked end to end, with the models it allows. */
@@ -1082,8 +1054,6 @@ export interface CreateSessionRequest {
   api_key_env?: RequestField<string>;
   extra_headers?: RequestField<Record<string, string>>;
   orchestrator_compaction_threshold?: RequestField<number>;
-  /** Omit or null for single-model; a value launches in mixed mode. */
-  mixed_models?: RequestField<MixedModels>;
   ssh_host?: string | null;
   /** Null leaves the port and the key to ssh and to `~/.ssh/config`. */
   ssh_port?: number | null;
@@ -1099,8 +1069,6 @@ export interface UpdateConfigRequest {
   api_key_env?: RequestField<string>;
   extra_headers?: RequestField<Record<string, string>>;
   orchestrator_compaction_threshold?: RequestField<number>;
-  /** Omit to keep; null returns the session to single-model mode. */
-  mixed_models?: RequestField<MixedModels>;
 }
 
 export interface UpdateSessionPresentationRequest {

@@ -34,8 +34,6 @@ pub mod edit;
 pub mod exec_command;
 pub mod read;
 pub mod thread;
-
-use thread::MixedDispatchClients;
 pub mod workset;
 pub mod write;
 
@@ -380,8 +378,6 @@ pub struct ToolRuntime {
     /// API costs are included in the session totals.  `orchestrator_context_tokens` is
     /// intentionally NOT accumulated here — it stays orchestrator-only.
     pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
-    /// Mixed-mode tier worker clients; `None` keeps single-model dispatch.
-    pub mixed_clients: Option<Arc<MixedDispatchClients>>,
 }
 
 pub(crate) fn resolve_workspace_path(runtime: &ToolRuntime, path: impl AsRef<Path>) -> PathBuf {
@@ -658,12 +654,9 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
     tools
 }
 
-pub fn orchestrator_tool_definitions(
-    skills: Option<&SkillRegistry>,
-    mixed: Option<&MixedDispatchClients>,
-) -> Vec<ToolDefinition> {
+pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<ToolDefinition> {
     vec![
-        thread::dispatch_definition(skills, mixed),
+        thread::dispatch_definition(skills),
         thread::threads_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
@@ -799,7 +792,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
-        mixed_clients: None,
     }
 }
 

@@ -46,7 +46,6 @@ import {
 import type {
   BackendKind,
   CreateModelConfigurationRequest,
-  MixedModels,
 } from "@/app/types/api";
 
 /** What the panel hands the launch form once a provider setup is complete. */
@@ -60,8 +59,6 @@ export type LaunchModelSelection =
       api_key_env: string | null;
       reasoning_effort: string | null;
       extra_headers: Record<string, string> | null;
-      /** Mixed tiers a saved setup carries, for the launch form to seed from. */
-      mixed_models: MixedModels | null;
     };
 
 export interface ConfigurationsPanelInitial {
@@ -324,7 +321,6 @@ export function ConfigurationsPanel({
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
         extra_headers: initial.extra_headers,
-        mixed_models: null,
       };
     }
 
@@ -342,7 +338,6 @@ export function ConfigurationsPanel({
           api_key_env: needsKey ? (catalogProvider?.auth_hint ?? null) : null,
           reasoning_effort: null,
           extra_headers: null,
-          mixed_models: null,
         };
       }
       // A managed provider is waiting on its login, which nothing here can
@@ -417,7 +412,6 @@ export function ConfigurationsPanel({
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
       extra_headers: savedRecord?.extra_headers ?? null,
-      mixed_models: savedRecord?.mixed_models ?? null,
     };
   }, [
     source.kind,

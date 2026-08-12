@@ -16,8 +16,9 @@ export const PROTOCOL_ITEMS: SelectItem[] = PROVIDER_KINDS.map((kind) => ({
   label: providerLabel(kind),
 }));
 
-/** Just the effort levels, one per ReasoningEffort variant. */
-export const EFFORT_LEVEL_OPTIONS: SelectItem[] = [
+export const REASONING_OPTIONS: SelectItem[] = [
+  { id: "", label: "Inherit config" },
+  { id: CLEAR_EFFORT, label: "Clear configured effort" },
   { id: "none", label: "None" },
   { id: "minimal", label: "Minimal" },
   { id: "low", label: "Low" },
@@ -25,12 +26,6 @@ export const EFFORT_LEVEL_OPTIONS: SelectItem[] = [
   { id: "high", label: "High" },
   { id: "xhigh", label: "X-High" },
   { id: "max", label: "Max" },
-];
-
-export const REASONING_OPTIONS: SelectItem[] = [
-  { id: "", label: "Inherit config" },
-  { id: CLEAR_EFFORT, label: "Clear configured effort" },
-  ...EFFORT_LEVEL_OPTIONS,
 ];
 
 /** The choices that are not an effort level, and so always apply. */

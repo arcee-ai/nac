@@ -1278,7 +1278,6 @@ dependencies = [
  "include_dir",
  "nac-core",
  "rmcp",
- "rusqlite",
  "serde",
  "serde_json",
  "tokio",

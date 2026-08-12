@@ -177,7 +177,6 @@ mod tests {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: Some("AGENTS.md worker instructions".to_string()),
                 thread_timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
-                mixed_clients: None,
             },
         )
         .expect("agent config must be valid");

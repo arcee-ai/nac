@@ -3080,7 +3080,6 @@ pub(super) mod tests {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                mixed_clients: None,
             },
         )
         .expect("agent config must be valid")
