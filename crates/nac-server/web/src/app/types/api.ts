@@ -26,6 +26,21 @@ export type ReasoningEffort =
   | "xhigh"
   | "max";
 
+/** Dispatch weight class when a light model is configured, serialized lowercase. */
+export type DispatchWeight = "light" | "heavy";
+
+/**
+ * The optional light worker model. Same shape on records and requests: the
+ * credential is always a selector name, never a key value.
+ */
+export interface LightModelSettings {
+  model: string;
+  backend?: BackendKind | null;
+  base_url?: string | null;
+  api_key_env?: string | null;
+  reasoning_effort?: ReasoningEffort | null;
+}
+
 export interface StoreInfo {
   root_cwd: string;
   store_path: string;
@@ -657,6 +672,8 @@ export interface RawSessionConfig {
   extra_headers_json: string | null;
   orchestrator_compaction_threshold: number | null;
   config_version: number;
+  /** Present when the session runs with a light worker model. */
+  light_model?: LightModelSettings;
   /** Non-empty when the row needs a repair PATCH. */
   diagnostics?: string[];
 }
@@ -986,6 +1003,8 @@ export interface ModelConfigurationRecord {
   extra_headers: Record<string, string>;
   orchestrator_compaction_threshold: number | null;
   initial_prompt: string | null;
+  /** Present when the setup saves a light worker model. */
+  light_model?: LightModelSettings;
   created_at: string;
   updated_at: string;
 }
@@ -1004,6 +1023,7 @@ export interface CreateModelConfigurationRequest {
   extra_headers?: Record<string, string>;
   orchestrator_compaction_threshold?: number | null;
   initial_prompt?: string | null;
+  light_model?: LightModelSettings | null;
 }
 
 /**
@@ -1021,6 +1041,7 @@ export interface UpdateModelConfigurationRequest {
   extra_headers?: RequestField<Record<string, string>>;
   orchestrator_compaction_threshold?: RequestField<number>;
   initial_prompt?: RequestField<string>;
+  light_model?: RequestField<LightModelSettings>;
 }
 
 /** A configuration the server checked end to end, with the models it allows. */
@@ -1065,6 +1086,8 @@ export interface CreateSessionRequest {
   api_key_env?: RequestField<string>;
   extra_headers?: RequestField<Record<string, string>>;
   orchestrator_compaction_threshold?: RequestField<number>;
+  /** Omit or null for single-model; a value launches with a light worker model. */
+  light_model?: RequestField<LightModelSettings>;
   ssh_host?: string | null;
   /** Null leaves the port and the key to ssh and to `~/.ssh/config`. */
   ssh_port?: number | null;
@@ -1080,6 +1103,8 @@ export interface UpdateConfigRequest {
   api_key_env?: RequestField<string>;
   extra_headers?: RequestField<Record<string, string>>;
   orchestrator_compaction_threshold?: RequestField<number>;
+  /** Omit to keep; null returns the session to single-model mode. */
+  light_model?: RequestField<LightModelSettings>;
 }
 
 export interface UpdateSessionPresentationRequest {

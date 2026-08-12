@@ -17,7 +17,7 @@ use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
 mod dag;
-pub(crate) mod preview;
+mod preview;
 mod tool_exec;
 
 #[cfg(test)]
@@ -102,7 +102,8 @@ pub struct AgentConfig {
     pub extra_tool_defs: Vec<ToolDefinition>,
     pub agents_md_message: Option<String>,
     pub thread_timeout_secs: u64,
-    pub command_output_limits: crate::terminal::CommandOutputLimits,
+    /// Light worker model client; `None` keeps single-model dispatch.
+    pub light_client: Option<Arc<ModelClient>>,
 }
 
 pub struct Agent {
@@ -137,6 +138,19 @@ struct TranscriptLogSink {
     writer: Arc<crate::store::TranscriptLogWriter>,
     session_id: String,
     store_path: PathBuf,
+}
+
+/// Light-model addendum to the orchestrator system prompt: names the light
+/// model so weight classification has a real signal.
+fn light_model_prompt_guidance(light: &ModelClient) -> String {
+    format!(
+        "\n\nA light worker model is configured. Every thread dispatch requires a \
+         weight classification: light routes the dispatch to the light model — {} — \
+         and heavy runs your own model. Classify by the genuine difficulty of the \
+         bounded action: light for mechanical or well-scoped work (setup, running \
+         tests, simple edits), heavy for work needing real reasoning or broad context.",
+        tools::thread::describe_light_model(light)
+    )
 }
 
 fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
@@ -264,18 +278,24 @@ impl Agent {
             _ => None,
         };
 
-        let (system_prompt, mut tool_defs) = match config.mode {
+        let (mut system_prompt, mut tool_defs) = match config.mode {
             AgentMode::Worker => (
                 render_worker_system_prompt(&cwd),
                 tools::worker_tool_definitions(),
             ),
             AgentMode::Orchestrator => (
                 render_orchestrator_system_prompt(&cwd, thread_timeout_secs),
-                tools::orchestrator_tool_definitions(config.skills.as_deref()),
+                tools::orchestrator_tool_definitions(
+                    config.skills.as_deref(),
+                    config.light_client.as_deref(),
+                ),
             ),
         };
         if config.mode == AgentMode::Worker {
             tool_defs.extend(config.extra_tool_defs);
+        }
+        if let Some(light) = config.light_client.as_deref() {
+            system_prompt.push_str(&light_model_prompt_guidance(light));
         }
 
         let mut messages = vec![Message::System {
@@ -311,9 +331,7 @@ impl Agent {
             &local_paths,
         )?;
         let terminal_manager = match config.mode {
-            AgentMode::Worker => crate::terminal::TerminalManager::for_worker_with_limits(
-                config.command_output_limits,
-            )?,
+            AgentMode::Worker => crate::terminal::TerminalManager::for_worker(),
             AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
         };
         Ok(Self {
@@ -333,9 +351,9 @@ impl Agent {
                 mcp: config.mcp,
                 skills: config.skills,
                 terminal_manager,
-                command_cancellation: crate::tools::ThreadCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
+                light_client: config.light_client,
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -356,7 +374,6 @@ impl Agent {
         Self::with_config(
             client,
             AgentConfig {
-                command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
@@ -376,6 +393,7 @@ impl Agent {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
             },
         )
         .expect("default test agent config must be valid")
@@ -649,16 +667,6 @@ impl Agent {
             )
             .await;
 
-            if self.tool_runtime.command_cancellation.is_cancelled() {
-                let error = anyhow!("worker command cancelled");
-                self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
-                    message: error.to_string(),
-                });
-                self.tool_runtime.terminal_manager.remove_all().await;
-                return Err(error);
-            }
-
             // Fold worker token usage (from thread dispatches) into the
             // orchestrator's accumulated usage. Only cost fields are summed;
             // orchestrator context stays ordinary-orchestrator-only.
@@ -691,10 +699,6 @@ impl Agent {
                 return Err(error);
             }
         }
-    }
-
-    pub(crate) fn command_cancellation(&self) -> crate::tools::ThreadCancellation {
-        self.tool_runtime.command_cancellation.clone()
     }
 
     #[cfg(test)]

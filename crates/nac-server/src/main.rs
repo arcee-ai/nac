@@ -435,11 +435,7 @@ async fn run() -> Result<()> {
 async fn run_server(cli: ServerCli) -> Result<()> {
     let bind = cli.bind_addr();
     let launch_cwd = std::env::current_dir()?;
-    let root_cwd = resolve_project_directory(
-        &launch_cwd,
-        cli.directory.as_deref(),
-        cli.yes,
-    )?;
+    let root_cwd = resolve_project_directory(&launch_cwd, cli.directory.as_deref(), cli.yes)?;
     eprintln!("project: {}", root_cwd.display());
     let manager = SessionManager::new(ServerOptions {
         root_cwd,
@@ -500,8 +496,7 @@ fn resolve_project_directory(
         .read_line(&mut answer)
         .context("failed to read project folder confirmation")?;
     let answer = answer.trim();
-    if answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
-    {
+    if answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes") {
         return Ok(default);
     }
     if !(answer.eq_ignore_ascii_case("n") || answer.eq_ignore_ascii_case("no")) {
@@ -605,6 +600,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .map(OptionalModelOption::Value)
                 .unwrap_or_default(),
             extra_headers: cli.model.extra_headers,
+            light_model: None,
         },
         sandbox: SandboxOptions {
             sandbox: cli.sandbox.sandbox,

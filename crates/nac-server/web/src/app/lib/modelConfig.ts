@@ -1,8 +1,63 @@
 // Model and credential rules shared by the launch and settings modals: managed
-// backends with a fixed base URL, credential modes, reasoning-effort clearing
-// and extra-header validation. Ported from the legacy UI unchanged.
+// backends with a fixed base URL, credential modes, light-model credential
+// inheritance, reasoning-effort clearing and extra-header validation.
 
-import type { UpdateConfigRequest } from "@/app/types/api";
+import type {
+  BackendKind,
+  LightModelSettings,
+  UpdateConfigRequest,
+} from "@/app/types/api";
+
+export function inheritPrimaryCredential(
+  light: LightModelSettings,
+  primaryBackend: BackendKind,
+  primaryApiKeyEnv: string | null,
+  previousApiKeyEnv: string | null = null,
+): LightModelSettings {
+  return {
+    ...light,
+    api_key_env:
+      light.backend === primaryBackend &&
+      (!light.api_key_env || light.api_key_env === previousApiKeyEnv)
+        ? primaryApiKeyEnv
+        : light.api_key_env,
+  };
+}
+
+/**
+ * Drop a light-model credential that came from inheriting the launch's
+ * primary key. That selector is launch-specific (a typed key is stored under
+ * a generated name), so remembering it would replay a name that may no longer
+ * exist; a null credential re-inherits the next launch's primary.
+ */
+export function withoutInheritedCredential(
+  light: LightModelSettings,
+  primaryApiKeyEnv: string | null,
+): LightModelSettings {
+  return {
+    ...light,
+    api_key_env:
+      primaryApiKeyEnv !== null && light.api_key_env === primaryApiKeyEnv
+        ? null
+        : light.api_key_env,
+  };
+}
+
+/** Field-by-field comparison, so serialization order can never fake a change. */
+export function sameLightModel(
+  left: LightModelSettings | null,
+  right: LightModelSettings | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.model === right.model &&
+    (left.backend ?? null) === (right.backend ?? null) &&
+    (left.base_url ?? null) === (right.base_url ?? null) &&
+    (left.api_key_env ?? null) === (right.api_key_env ?? null) &&
+    (left.reasoning_effort ?? null) === (right.reasoning_effort ?? null)
+  );
+}
 
 export const MANAGED_LAUNCH_BASE_URLS: Record<string, string> = {
   "arcee-auth": "https://api.arcee.ai/api/v1",

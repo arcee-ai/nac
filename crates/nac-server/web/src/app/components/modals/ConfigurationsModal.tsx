@@ -28,6 +28,10 @@ import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { ManagedAuthCallout } from "@/app/components/modals/ManagedAuthCallout";
 import {
+  LightModelSection,
+  type LightSelection,
+} from "@/app/components/modals/LightModelSection";
+import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
@@ -224,6 +228,10 @@ function ConfigurationForm({
       : "",
   );
   const [prompt, setPrompt] = useState(record?.initial_prompt ?? "");
+  const [light, setLight] = useState<LightSelection>({
+    mode: record?.light_model ? "dual" : "single",
+    light: record?.light_model ?? null,
+  });
   const [error, setError] = useState("");
 
   const name = nameDraft ?? autoName(backend, takenNames);
@@ -344,6 +352,12 @@ function ConfigurationForm({
       return;
     }
 
+    if (light.mode === "dual" && !light.light) {
+      setError("Pick the light model before saving.");
+      return;
+    }
+    const lightModel = light.mode === "dual" ? light.light : null;
+
     try {
       if (record) {
         const patch: UpdateModelConfigurationRequest = {
@@ -354,6 +368,7 @@ function ConfigurationForm({
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
+          light_model: lightModel,
         };
         // Omitted keeps what is stored, which is the only way to leave a
         // credential or a hand-written gateway URL alone.
@@ -376,6 +391,7 @@ function ConfigurationForm({
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
+          light_model: lightModel,
         });
         onSaved(saved.config_id);
         toast.success(`Configuration ${saved.name} created`);
@@ -640,6 +656,11 @@ function ConfigurationForm({
                 </span>
               </div>
             }
+          />
+          <Separator />
+          <LightModelSection
+            initial={record?.light_model ?? null}
+            onChange={setLight}
           />
           <Separator />
           <TextArea

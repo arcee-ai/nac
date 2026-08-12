@@ -46,6 +46,7 @@ import {
 import type {
   BackendKind,
   CreateModelConfigurationRequest,
+  LightModelSettings,
 } from "@/app/types/api";
 
 /** What the panel hands the launch form once a provider setup is complete. */
@@ -59,6 +60,13 @@ export type LaunchModelSelection =
       api_key_env: string | null;
       reasoning_effort: string | null;
       extra_headers: Record<string, string> | null;
+      /**
+       * Light model for the launch form to seed from. A saved setup is
+       * authoritative: its light model, or `null` for an explicitly
+       * single-model setup. `undefined` means the source carries no opinion
+       * (catalog and file launches), so the form keeps its own memory.
+       */
+      light_model: LightModelSettings | null | undefined;
     };
 
 export interface ConfigurationsPanelInitial {
@@ -321,6 +329,7 @@ export function ConfigurationsPanel({
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
         extra_headers: initial.extra_headers,
+        light_model: undefined,
       };
     }
 
@@ -338,6 +347,7 @@ export function ConfigurationsPanel({
           api_key_env: needsKey ? (catalogProvider?.auth_hint ?? null) : null,
           reasoning_effort: null,
           extra_headers: null,
+          light_model: undefined,
         };
       }
       // A managed provider is waiting on its login, which nothing here can
@@ -412,6 +422,7 @@ export function ConfigurationsPanel({
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
       extra_headers: savedRecord?.extra_headers ?? null,
+      light_model: savedRecord ? (savedRecord.light_model ?? null) : undefined,
     };
   }, [
     source.kind,

@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::light_model::LightModelSettings;
 use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
@@ -17,6 +18,7 @@ mod snapshot;
 mod summary;
 
 pub(crate) use db::list_sessions_with_connection;
+pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
 pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
     load_session, load_session_config, reorder_sessions, save_session, save_session_run_state,
@@ -42,6 +44,9 @@ pub struct RawSessionConfig {
     pub reasoning_effort: Option<String>,
     pub api_key_env: Option<String>,
     pub extra_headers_json: Option<String>,
+    /// Light worker model; `None` keeps single-model dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light_model: Option<LightModelSettings>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub config_version: i64,
     /// Structural parse failures in the persisted values. These are diagnostics,
@@ -109,6 +114,8 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
+    /// Light worker model; `None` keeps single-model dispatch.
+    pub light_model: Option<LightModelSettings>,
     /// Absolute compaction threshold captured for this orchestrator session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
     pub orchestrator_compaction_threshold: Option<u64>,
@@ -333,6 +340,59 @@ mod tests {
                 .orchestrator_context_tokens,
             330
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn light_model_round_trips_and_malformed_json_is_a_diagnostic() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("light_model");
+        let mut snapshot = test_snapshot(
+            "light",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        snapshot.light_model = Some(LightModelSettings {
+            model: "gpt-5-mini".to_string(),
+            backend: Some(BackendKind::OpenAiResponses),
+            base_url: None,
+            api_key_env: Some("OPENAI_API_KEY".to_string()),
+            reasoning_effort: Some(ReasoningEffort::Low),
+        });
+        create_session(&store_path, &snapshot).unwrap();
+
+        let loaded = load_session(&store_path, "light").unwrap();
+        assert_eq!(loaded.light_model, snapshot.light_model);
+        let raw = load_session_config(&store_path, "light").unwrap();
+        assert_eq!(raw.light_model, snapshot.light_model);
+        assert!(raw.diagnostics.is_empty());
+
+        // Clearing through a config update returns the row to single-model.
+        let mut cleared = raw.clone();
+        cleared.light_model = None;
+        assert_eq!(update_raw_session_config(&store_path, &cleared).unwrap(), 1);
+        assert_eq!(
+            load_session_config(&store_path, "light")
+                .unwrap()
+                .light_model,
+            None
+        );
+
+        // Malformed stored JSON surfaces as a diagnostic, not a silent clear.
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET light_model_json = '{broken' WHERE session_id = 'light'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let broken = load_session_config(&store_path, "light").unwrap();
+        assert_eq!(broken.light_model, None);
+        assert!(broken
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.starts_with(MALFORMED_LIGHT_MODEL_DIAGNOSTIC)));
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

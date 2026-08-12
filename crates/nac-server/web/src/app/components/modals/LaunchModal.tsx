@@ -27,6 +27,10 @@ import {
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
 import {
+  LightModelSection,
+  type LightSelection,
+} from "@/app/components/modals/LightModelSection";
+import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
 } from "@/app/components/modals/options";
@@ -35,7 +39,10 @@ import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
+import { loadLastLight, storeLastLight } from "@/app/lib/lastLight";
 import {
+  inheritPrimaryCredential,
+  withoutInheritedCredential,
   CLEAR_EFFORT,
   csv,
   launchLocationFromValues,
@@ -158,6 +165,10 @@ function LaunchForm({
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
+  const [light, setLight] = useState<LightSelection>({
+    mode: "single",
+    light: null,
+  });
   const [error, setError] = useState<FormError | null>(null);
   // The host this form has actually reached. Everything remote — the working
   // directory above all — is meaningless until one connection has answered, so
@@ -200,6 +211,22 @@ function LaunchForm({
     setSelection(next);
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
+
+  const onLight = useCallback((next: LightSelection) => {
+    setLight(next);
+    setError((current) => (current?.field === "config" ? null : current));
+  }, []);
+
+  // A resolved saved setup is authoritative for its light model — including
+  // an explicitly single-model one (`null`). Sources with no opinion (catalog
+  // and file launches, `undefined`) fall back to the last light model a
+  // session launched with. The key remounts the section when the seed changes.
+  const lastLight = useMemo(() => loadLastLight(), []);
+  const savedLight =
+    selection?.kind === "resolved" && selection.light_model !== undefined
+      ? selection.light_model
+      : lastLight;
+  const savedLightKey = JSON.stringify(savedLight);
 
   // Auto-suggest 70% of the selected model's context window as the compaction
   // threshold. A manually entered value is preserved across model changes —
@@ -281,6 +308,13 @@ function LaunchForm({
       });
       return;
     }
+    if (light.mode === "dual" && !light.light) {
+      setError({
+        field: "config",
+        message: "Pick the light model before creating a session.",
+      });
+      return;
+    }
 
     let headers: Record<string, string> | undefined;
     try {
@@ -297,7 +331,11 @@ function LaunchForm({
     let configuredEffort: string | null;
     try {
       if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync(selection.request);
+        const request =
+          light.mode === "dual" && light.light
+            ? { ...selection.request, light_model: light.light }
+            : selection.request;
+        const record = await createModelConfig.mutateAsync(request);
         backend = record.backend as BackendKind;
         model = record.model;
         baseUrl = record.base_url;
@@ -319,6 +357,11 @@ function LaunchForm({
       return;
     }
 
+    const launchLight =
+      light.mode === "dual" && light.light
+        ? inheritPrimaryCredential(light.light, backend, apiKeyEnv)
+        : null;
+
     const body: CreateSessionRequest = {
       // The connection that answered, rather than what the fields hold now:
       // this is the one already proved to work.
@@ -338,6 +381,7 @@ function LaunchForm({
           : reasoning || configuredEffort || null,
     };
     if (headers !== undefined) body.extra_headers = headers;
+    if (launchLight) body.light_model = launchLight;
 
     const threshold = nullable(compaction);
     if (threshold !== null)
@@ -358,6 +402,9 @@ function LaunchForm({
     try {
       const snapshot = await createSession.mutateAsync(body);
       const newId = snapshot.metadata.session_id;
+      storeLastLight(
+        launchLight && withoutInheritedCredential(launchLight, apiKeyEnv),
+      );
       toast.success("Session created");
 
       // A title is presentation state, so it is applied after creation.
@@ -539,6 +586,12 @@ function LaunchForm({
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
+              <LightModelSection
+                key={savedLightKey}
+                initial={savedLight}
+                onChange={onLight}
+              />
+              <Separator />
               <ConfigRow
                 label="Reasoning Effort"
                 hint="Higher effort for deeper reasoning and lower effort for faster responses."
