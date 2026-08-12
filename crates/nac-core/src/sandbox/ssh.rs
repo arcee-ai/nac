@@ -67,6 +67,42 @@ impl SshBackend {
         command
     }
 
+    pub(crate) fn sftp_workspace_path(&self) -> PathBuf {
+        let Some(path) = self.remote_cwd.to_str() else {
+            return self.remote_cwd.clone();
+        };
+        if path == "~" {
+            return PathBuf::from(".");
+        }
+        if let Some(path) = path.strip_prefix("~/") {
+            return if path.is_empty() {
+                PathBuf::from(".")
+            } else {
+                PathBuf::from(path)
+            };
+        }
+        self.remote_cwd.clone()
+    }
+    pub(crate) fn sftp_command(&self) -> Result<Command> {
+        prepare_control_socket_dir(&self.control_path).with_context(|| {
+            format!(
+                "failed to create ssh control directory for {}",
+                self.control_path.display()
+            )
+        })?;
+        let mut command = Command::new("ssh");
+        command.args(self.ssh_args());
+        command.arg("-s");
+        command.arg("--");
+        command.arg(&self.connection.host);
+        command.arg("sftp");
+        command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        command.kill_on_drop(true);
+        Ok(command)
+    }
+
     fn remote_command_in_dir(
         &self,
         dir: &Path,
@@ -332,6 +368,20 @@ mod tests {
             backend.resolve_path("~/note.txt").unwrap(),
             PathBuf::from("~/note.txt")
         );
+    }
+
+    #[test]
+    fn sftp_workspace_paths_support_relative_absolute_and_tilde_roots() {
+        let relative = SshBackend::new("build-box".to_string(), PathBuf::from("repo"));
+        assert_eq!(relative.sftp_workspace_path(), PathBuf::from("repo"));
+        let absolute = SshBackend::new("build-box".to_string(), PathBuf::from("/srv/repo"));
+        assert_eq!(absolute.sftp_workspace_path(), PathBuf::from("/srv/repo"));
+        let home = SshBackend::new("build-box".to_string(), PathBuf::from("~"));
+        assert_eq!(home.sftp_workspace_path(), PathBuf::from("."));
+        let home_slash = SshBackend::new("build-box".to_string(), PathBuf::from("~/"));
+        assert_eq!(home_slash.sftp_workspace_path(), PathBuf::from("."));
+        let home_repo = SshBackend::new("build-box".to_string(), PathBuf::from("~/repo"));
+        assert_eq!(home_repo.sftp_workspace_path(), PathBuf::from("repo"));
     }
 
     #[test]

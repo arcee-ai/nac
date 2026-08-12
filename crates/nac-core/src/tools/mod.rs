@@ -30,8 +30,11 @@ pub(crate) const REMOTE_FILE_LOCK_RETRY_INTERVAL: Duration = Duration::from_mill
 const REMOTE_FILE_LOCK_BUSY_EXIT_CODE: i32 = 75;
 const REMOTE_FILE_LOCK_BUSY_MARKER: &str = "NAC_FILE_LOCK_BUSY";
 
+mod discovery;
 pub mod edit;
 pub mod exec_command;
+pub mod glob;
+pub mod grep;
 pub mod read;
 pub mod thread;
 pub mod workset;
@@ -647,6 +650,8 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
             }),
         ),
     ];
+    tools.push(glob::definition());
+    tools.push(grep::definition());
 
     tools.push(exec_command::exec_command_definition());
     tools.push(exec_command::write_stdin_definition());
@@ -733,6 +738,8 @@ pub async fn execute_tool(
         "read" => read::execute(args, runtime).await,
         "write" => write::execute(args, runtime).await,
         "edit" => edit::execute(args, runtime).await,
+        "glob" => glob::execute(args, runtime).await,
+        "grep" => grep::execute(args, runtime).await,
         "exec_command" => match exec_command::execute_exec_command(&args, runtime).await {
             Ok(content) => ToolResult {
                 content,
@@ -764,6 +771,59 @@ pub async fn execute_tool(
             content: format!("Error: unknown tool '{}'", unknown),
             is_error: true,
         },
+    }
+}
+
+#[cfg(test)]
+mod discovery_tool_definition_tests {
+    use super::worker_tool_definitions;
+
+    #[test]
+    fn every_worker_receives_complete_glob_and_grep_definitions_once() {
+        let definitions = worker_tool_definitions();
+        for name in ["glob", "grep"] {
+            let matches: Vec<_> = definitions
+                .iter()
+                .filter(|definition| definition.function.name == name)
+                .collect();
+            assert_eq!(matches.len(), 1, "{name} must be defined exactly once");
+            let schema = &matches[0].function.parameters;
+            assert_eq!(schema["type"], "object");
+            assert_eq!(schema["additionalProperties"], false);
+            assert!(schema["required"]
+                .as_array()
+                .expect("required array")
+                .iter()
+                .any(|value| value == "pattern"));
+            assert_eq!(schema["properties"]["limit"]["maximum"], 1000);
+            assert!(schema["properties"]["cursor"].is_object());
+        }
+
+        let grep = definitions
+            .iter()
+            .find(|definition| definition.function.name == "grep")
+            .expect("grep definition");
+        assert_eq!(
+            grep.function.parameters["properties"]["case"]["enum"],
+            serde_json::json!(["smart", "sensitive", "insensitive"])
+        );
+        for property in [
+            "roots",
+            "regex",
+            "case",
+            "globs",
+            "context",
+            "multiline",
+            "gitignore",
+            "hidden",
+            "limit",
+            "cursor",
+        ] {
+            assert!(
+                grep.function.parameters["properties"][property].is_object(),
+                "missing grep property {property}"
+            );
+        }
     }
 }
 
