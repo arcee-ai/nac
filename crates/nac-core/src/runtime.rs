@@ -11,8 +11,8 @@ use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
-    managed_backend_base_url, BackendKind, EffectiveModelSettings, ModelClient,
-    ModelConfigurationError, ReasoningEffort,
+    managed_backend_base_url, resolve_model_metadata, BackendKind, EffectiveModelSettings,
+    ModelClient, ModelConfigurationError, ReasoningEffort,
 };
 use crate::paths::PathContext;
 /// Public because callers outside this crate build the connections that sessions
@@ -1174,6 +1174,12 @@ async fn build_resume_config_from_snapshot(
     let paths = PathContext::new(&workspace_cwd);
     let stored_model = snapshot.model.clone();
     let stored_base_url = snapshot.base_url.clone();
+    let stored_reasoning_effort = snapshot.reasoning_effort;
+    let thinking_level_map =
+        resolve_model_metadata(snapshot.backend, &stored_model).thinking_level_map;
+    if stored_reasoning_effort.is_some_and(|effort| !thinking_level_map.is_supported(effort)) {
+        snapshot.reasoning_effort = thinking_level_map.max_supported_effort();
+    }
     let snapshot_settings = EffectiveModelSettings::new(
         snapshot.backend,
         stored_model.clone(),
@@ -1192,6 +1198,9 @@ async fn build_resume_config_from_snapshot(
         anyhow::bail!(
             "stored session model settings are invalid; settings repair required: model and base_url must be stored in normalized nonblank form"
         );
+    }
+    if snapshot.reasoning_effort != stored_reasoning_effort {
+        snapshot.config_version = sessions::update_session_config(&store_path, &snapshot)?;
     }
     let client = ModelClient::from_effective_settings(snapshot_settings)
         .map_err(|error| {
@@ -1497,6 +1506,48 @@ mod tests {
         }
     }
 
+    async fn create_and_resume_effort_snapshot(
+        store_path: &Path,
+        root: &Path,
+        key_name: &str,
+        session_id: &str,
+        backend: BackendKind,
+        model: &str,
+        stored_effort: ReasoningEffort,
+    ) -> SessionSnapshot {
+        let base_url = match backend {
+            BackendKind::TogetherChat => "https://api.together.xyz/v1",
+            BackendKind::ArceeApi => "https://api.arcee.ai/api/v1",
+            _ => unreachable!(),
+        };
+        let snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            model.to_string(),
+            base_url.to_string(),
+            backend,
+            Some(stored_effort),
+            None,
+            None,
+            Vec::new(),
+            Some(key_name.to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(store_path, &snapshot).unwrap();
+        build_resume_config_for_session(
+            store_path.to_path_buf(),
+            session_id,
+            &NacConfig::default(),
+            root.to_path_buf(),
+            None,
+        )
+        .await
+        .unwrap()
+        .session
+        .into_snapshot()
+        .unwrap()
+    }
+
     /// A config whose `[model]` section resolves through the catalog:
     /// gpt-5.2 is unique to openai-responses, so the backend, the catalog
     /// endpoint default and the conventional credential variable all come
@@ -1508,7 +1559,8 @@ mod tests {
     }
 
     #[test]
-    fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_out_of_range_values() {
+    fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_out_of_range_values(
+    ) {
         // No request: defaults to 70% of the context window (rounded).
         assert_eq!(
             effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
@@ -2698,6 +2750,117 @@ X-Config = "yes"
             normalize_gpu_device("nvidia.com/gpu=mig1:0"),
             "nvidia.com/gpu=mig1:0"
         );
+    }
+
+    #[tokio::test]
+    async fn resume_durably_migrates_only_unsupported_persisted_efforts() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_RESUME_EFFORT_MIGRATION_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("resume_effort_migration")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
+
+        for (session_id, backend, model, stored_effort, expected_effort, expected_version) in [
+            (
+                "unsupported-effort",
+                BackendKind::TogetherChat,
+                "deepseek-ai/DeepSeek-V4-Pro",
+                ReasoningEffort::Medium,
+                Some(ReasoningEffort::Max),
+                1,
+            ),
+            (
+                "supported-effort",
+                BackendKind::TogetherChat,
+                "deepseek-ai/DeepSeek-V4-Pro",
+                ReasoningEffort::High,
+                Some(ReasoningEffort::High),
+                0,
+            ),
+            (
+                "no-explicit-efforts",
+                BackendKind::ArceeApi,
+                "model",
+                ReasoningEffort::Low,
+                None,
+                1,
+            ),
+        ] {
+            let active = create_and_resume_effort_snapshot(
+                &store_path,
+                &root,
+                key_name,
+                session_id,
+                backend,
+                model,
+                stored_effort,
+            )
+            .await;
+            assert_eq!(active.reasoning_effort, expected_effort);
+            assert_eq!(active.config_version, expected_version);
+
+            let stored = sessions::load_session(&store_path, session_id).unwrap();
+            assert_eq!(stored.reasoning_effort, expected_effort);
+            assert_eq!(stored.config_version, expected_version);
+        }
+
+        unsafe { std::env::remove_var(key_name) };
+        let snapshot = sessions::new_snapshot(
+            "missing-credential".to_string(),
+            root.clone(),
+            "deepseek-ai/DeepSeek-V4-Pro".to_string(),
+            "https://api.together.xyz/v1".to_string(),
+            BackendKind::TogetherChat,
+            Some(ReasoningEffort::Medium),
+            None,
+            None,
+            Vec::new(),
+            Some(key_name.to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        assert!(build_resume_config_for_session(
+            store_path.clone(),
+            "missing-credential",
+            &NacConfig::default(),
+            root.clone(),
+            None,
+        )
+        .await
+        .is_err());
+        let stored = sessions::load_session(&store_path, "missing-credential").unwrap();
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Max));
+        assert_eq!(stored.config_version, 1);
+
+        unsafe { std::env::set_var(key_name, "test-key") };
+        let resumed_again = build_resume_config_for_session(
+            store_path.clone(),
+            "unsupported-effort",
+            &NacConfig::default(),
+            root.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resumed_again
+                .session
+                .into_snapshot()
+                .unwrap()
+                .config_version,
+            1,
+            "an already-migrated effort must not cause another write"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
     }
 
     #[tokio::test]

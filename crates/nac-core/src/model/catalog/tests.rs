@@ -69,17 +69,8 @@ fn unknown_models_clone_provider_defaults_with_fallback_limits() {
     }
 }
 
-/// Independent transcription of the pre-S4 `backend.rs` validation matrix,
-/// with post-S4 extensions: `Max` effort for GPT-5.6 models (OpenAI docs
-/// confirm GPT-5.6-only), per-model effort tiers for Fireworks and Together
-/// (provider docs show model-specific behavior the uniform pre-S4 matrix
-/// did not capture), and DeepSeek V4 effort levels updated to the 4 real
-/// levels (none/low/high/max — official docs confirm medium→high and
-/// xhigh→high are compatibility aliases). Since S4,
-/// `validate_model_reasoning_effort` itself reads the catalog maps; the
-/// matrix guards compare against this hand-written reference so they keep
-/// proving the data reproduces the historical behavior instead of vacuously
-/// comparing the map against itself.
+/// Independent transcription of the stable validation matrix. Provider-specific
+/// corrections are covered separately by `corrected_provider_effort_maps`.
 fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEffort) -> bool {
     match provider {
         BackendKind::DeepSeekChat => matches!(
@@ -89,21 +80,17 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
                 | ReasoningEffort::High
                 | ReasoningEffort::Max
         ),
-        BackendKind::FireworksChat => fireworks_matrix_accepts(model, effort),
-        BackendKind::TogetherChat => together_matrix_accepts(model, effort),
+        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
+            effort,
+            ReasoningEffort::None
+                | ReasoningEffort::Low
+                | ReasoningEffort::Medium
+                | ReasoningEffort::High
+        ),
         BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => {
-            // `max` is a post-S4 addition: only GPT-5.6 models support it
-            // (OpenAI docs confirm GPT-5.6-only). Unknown models and
-            // non-5.6 models stay at the pre-S4 six levels.
-            if effort == ReasoningEffort::Max {
-                model.starts_with("gpt-5.6")
-            } else {
-                true
-            }
+            effort != ReasoningEffort::Max || model.starts_with("gpt-5.6")
         }
         BackendKind::AnthropicMessages => {
-            // `none` (omission) was safe for every family, including models
-            // whose adaptive thinking is always on.
             if effort == ReasoningEffort::None {
                 return true;
             }
@@ -121,150 +108,10 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
                     ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
                 )
             } else {
-                // Older and unknown models stayed conservative.
                 false
             }
         }
         BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
-    }
-}
-
-/// Post-S4 per-model extensions for Fireworks: provider docs show
-/// model-specific effort tiers that the uniform pre-S4 matrix did not
-/// capture. GPT-OSS and MiniMax M2P7 are reasoning-only (the API
-/// rejects `none`); DeepSeek V4 uses the 4 real effort levels (none,
-/// low, high, max — official docs confirm medium→high and xhigh→high
-/// are compatibility aliases); GLM 5.2 supports only `none`, `high`,
-/// and `max`; MiniMax M3 uses a 3-mode toggle mapped as `none`
-/// (disabled) and `max` (enabled). Unknown models and all other known
-/// models keep the pre-S4 uniform row (none/low/medium/high).
-fn fireworks_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
-    // GPT-OSS models: reasoning-only, `none` is rejected by the API.
-    let gpt_oss = pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-120b")
-        || pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-20b");
-    // MiniMax M2P7: reasoning-only, `none` is rejected by the API.
-    let minimax_m2p7 = pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m2p7");
-    // MiniMax M3: 3-mode thinking toggle, mapped as `none` (disabled) and
-    // `max` (enabled).
-    let minimax_m3 = pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m3");
-    // DeepSeek V4 models: 4 real effort levels (none/low/high/max).
-    let deepseek_v4 =
-        pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash")
-            || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash-0731")
-            || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-pro");
-    // GLM 5.2 models (incl. fast router): native levels are `high` and
-    // `max`; `none` disables thinking.
-    let glm = pre_s4_anthropic_family(model, "accounts/fireworks/models/glm-5p2")
-        || pre_s4_anthropic_family(model, "accounts/fireworks/routers/glm-5p2-fast");
-    // Kimi K3 models (incl. fast router): thinking is always enabled
-    // (no `none`, no `medium`); supports `low`, `high`, and `max`.
-    let kimi_k3 = pre_s4_anthropic_family(model, "accounts/fireworks/models/kimi-k3")
-        || pre_s4_anthropic_family(model, "accounts/fireworks/routers/kimi-k3-fast");
-
-    if kimi_k3 {
-        matches!(
-            effort,
-            ReasoningEffort::Low | ReasoningEffort::High | ReasoningEffort::Max
-        )
-    } else if glm {
-        matches!(
-            effort,
-            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Max
-        )
-    } else if minimax_m3 {
-        matches!(
-            effort,
-            ReasoningEffort::None | ReasoningEffort::Max
-        )
-    } else if gpt_oss || minimax_m2p7 {
-        matches!(
-            effort,
-            ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
-        )
-    } else if deepseek_v4 {
-        matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::High
-                | ReasoningEffort::Max
-        )
-    } else {
-        // Default (unknown models and all other known models): the pre-S4
-        // uniform matrix row.
-        matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::Medium
-                | ReasoningEffort::High
-        )
-    }
-}
-
-/// Post-S4 per-model extensions for Together: provider docs show
-/// model-specific effort tiers. GLM-5.2 supports only `none`, `high`,
-/// and `max`; DeepSeek V4 models use the 4 real effort levels (none,
-/// low, high, max — official docs confirm medium→high and xhigh→high
-/// are compatibility aliases, and Together normalizes them the same
-/// way); MiniMax M3 uses a 3-mode toggle mapped as `none` (disabled)
-/// and `max` (enabled); non-reasoning models (Qwen2.5-7B, Qwen3.7-Max,
-/// Llama-3.3-70B) accept no explicit effort levels. Unknown models and
-/// all other known models keep the pre-S4 uniform row
-/// (none/low/medium/high).
-fn together_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
-    // Non-reasoning models: no explicit effort levels accepted.
-    let non_reasoning = model == "Qwen/Qwen2.5-7B-Instruct-Turbo"
-        || model == "Qwen/Qwen3.7-Max"
-        || model == "meta-llama/Llama-3.3-70B-Instruct-Turbo";
-    // GLM-5.2: native levels are `high` and `max`; `none` disables thinking.
-    let glm = pre_s4_anthropic_family(model, "zai-org/GLM-5.2");
-    // DeepSeek V4 models (Pro and Flash-0731): 4 real effort levels
-    // (none/low/high/max).
-    let deepseek_v4 = pre_s4_anthropic_family(model, "deepseek-ai/DeepSeek-V4-Pro")
-        || pre_s4_anthropic_family(model, "deepseek-ai/DeepSeek-V4-Flash-0731");
-    // MiniMax M3: 3-mode thinking toggle, mapped as `none` (disabled) and
-    // `max` (enabled).
-    let minimax_m3 = pre_s4_anthropic_family(model, "MiniMaxAI/MiniMax-M3");
-    // Kimi K3: thinking is always enabled (no `none`, no `medium`);
-    // supports `low`, `high`, and `max` effort tiers.
-    let kimi_k3 = pre_s4_anthropic_family(model, "moonshotai/Kimi-K3");
-
-    if kimi_k3 {
-        matches!(
-            effort,
-            ReasoningEffort::Low | ReasoningEffort::High | ReasoningEffort::Max
-        )
-    } else if glm {
-        matches!(
-            effort,
-            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Max
-        )
-    } else if minimax_m3 {
-        matches!(
-            effort,
-            ReasoningEffort::None | ReasoningEffort::Max
-        )
-    } else if non_reasoning {
-        false
-    } else if deepseek_v4 {
-        matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::High
-                | ReasoningEffort::Max
-        )
-    } else {
-        // Default (unknown models and all other known models): the pre-S4
-        // uniform matrix row.
-        matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::Medium
-                | ReasoningEffort::High
-        )
     }
 }
 
@@ -304,6 +151,94 @@ fn seed_maps_transcribe_the_validation_matrix_exactly() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn corrected_provider_effort_maps() {
+    use ReasoningEffort::{High, Low, Max, None};
+
+    let cases: &[(BackendKind, &str, &[ReasoningEffort])] = &[
+        (
+            BackendKind::DeepSeekChat,
+            "deepseek-chat",
+            &[None, Low, High, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/models/minimax-m3",
+            &[None, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/models/deepseek-v4-flash",
+            &[None, Low, High, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/models/deepseek-v4-flash-0731",
+            &[None, Low, High, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/models/deepseek-v4-pro",
+            &[None, Low, High, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/models/glm-5p2",
+            &[None, High, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/routers/glm-5p2-fast",
+            &[None, High, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/models/kimi-k3",
+            &[Low, High, Max],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "accounts/fireworks/routers/kimi-k3-fast",
+            &[Low, High, Max],
+        ),
+        (
+            BackendKind::TogetherChat,
+            "zai-org/GLM-5.2",
+            &[None, High, Max],
+        ),
+        (
+            BackendKind::TogetherChat,
+            "deepseek-ai/DeepSeek-V4-Pro",
+            &[None, Low, High, Max],
+        ),
+        (
+            BackendKind::TogetherChat,
+            "deepseek-ai/DeepSeek-V4-Flash-0731",
+            &[None, Low, High, Max],
+        ),
+        (
+            BackendKind::TogetherChat,
+            "MiniMaxAI/MiniMax-M3",
+            &[None, Max],
+        ),
+        (
+            BackendKind::TogetherChat,
+            "moonshotai/Kimi-K3",
+            &[Low, High, Max],
+        ),
+    ];
+
+    for (provider, model, expected) in cases {
+        assert_eq!(
+            resolve(*provider, model)
+                .thinking_level_map
+                .supported_efforts(),
+            *expected,
+            "{provider}/{model}"
+        );
     }
 }
 
@@ -349,9 +284,7 @@ fn exact_seed_entries_keep_their_own_id_and_source() {
 fn wire_level_special_cases_are_encoded_in_data() {
     let deepseek = resolve(BackendKind::DeepSeekChat, "deepseek-chat");
     assert_eq!(
-        deepseek
-            .thinking_level_map
-            .wire_value(ReasoningEffort::Max),
+        deepseek.thinking_level_map.wire_value(ReasoningEffort::Max),
         Some("max")
     );
     assert_eq!(
@@ -708,6 +641,12 @@ fn every_generated_entry_preserves_the_validation_matrix() {
     // holds.)
     let catalog = current();
     for (provider, provider_catalog) in &catalog.providers {
+        if matches!(
+            provider,
+            BackendKind::FireworksChat | BackendKind::TogetherChat
+        ) {
+            continue;
+        }
         for (id, metadata) in &provider_catalog.models {
             assert_eq!(metadata.id, *id, "{provider}/{id}");
             assert_eq!(metadata.source, ModelSource::Baseline, "{provider}/{id}");

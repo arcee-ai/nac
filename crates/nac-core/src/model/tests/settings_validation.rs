@@ -323,12 +323,7 @@ fn managed_backends_materialize_only_absent_base_urls() {
 }
 
 #[test]
-fn effective_settings_remap_orphaned_effort_to_highest_supported_level() {
-    // Effective settings never reject an orphaned effort: a session-stored
-    // effort the resolved model no longer supports falls back to the model's
-    // highest supported level (or None when the model accepts no explicit
-    // efforts). Defense-in-depth rejection still happens at the request
-    // builder via validate_model_reasoning_effort, tested separately below.
+fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence() {
     let all = [
         ReasoningEffort::None,
         ReasoningEffort::Minimal,
@@ -338,19 +333,59 @@ fn effective_settings_remap_orphaned_effort_to_highest_supported_level() {
         ReasoningEffort::Xhigh,
         ReasoningEffort::Max,
     ];
-    let cases: &[(BackendKind, &str)] = &[
-        (BackendKind::DeepSeekChat, "model"),
-        (BackendKind::FireworksChat, "model"),
-        (BackendKind::TogetherChat, "model"),
-        (BackendKind::OpenAiResponses, "model"),
-        (BackendKind::ChatGptCodexResponses, "model"),
-        (BackendKind::AnthropicMessages, "claude-opus-4-6"),
-        (BackendKind::ArceeAuth, "model"),
-        (BackendKind::ArceeApi, "model"),
+    let cases: &[(BackendKind, &str, &[ReasoningEffort])] = &[
+        (
+            BackendKind::DeepSeekChat,
+            "model",
+            &[
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::High,
+                ReasoningEffort::Max,
+            ],
+        ),
+        (
+            BackendKind::FireworksChat,
+            "model",
+            &[
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+        ),
+        (
+            BackendKind::TogetherChat,
+            "model",
+            &[
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+        ),
+        (BackendKind::OpenAiResponses, "model", &all[..all.len() - 1]),
+        (
+            BackendKind::ChatGptCodexResponses,
+            "model",
+            &all[..all.len() - 1],
+        ),
+        (
+            BackendKind::AnthropicMessages,
+            "claude-opus-4-6",
+            &[
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::Xhigh,
+            ],
+        ),
+        (BackendKind::ArceeAuth, "model", &[]),
+        (BackendKind::ArceeApi, "model", &[]),
     ];
 
-    for (backend, model) in cases {
-        // An absent effort is always valid for every backend.
+    for (backend, model, supported) in cases {
         EffectiveModelSettings::new(
             *backend,
             (*model).into(),
@@ -360,34 +395,25 @@ fn effective_settings_remap_orphaned_effort_to_highest_supported_level() {
             std::collections::BTreeMap::new(),
         )
         .expect("absent effort must be valid for every backend");
-
-        let map = test_resolved(*backend, model).thinking_level_map;
         for effort in all {
-            let settings = EffectiveModelSettings::new(
+            let result = EffectiveModelSettings::new(
                 *backend,
                 (*model).into(),
                 "https://example.com/v1".into(),
                 Some(effort),
                 None,
                 std::collections::BTreeMap::new(),
-            )
-            .unwrap_or_else(|error| {
-                panic!("{backend} {} should remap, not reject: {error:#}", effort.as_str())
-            });
-            if map.is_supported(effort) {
-                assert_eq!(
-                    settings.reasoning_effort,
-                    Some(effort),
-                    "{backend}: supported effort {} should pass through unchanged",
-                    effort.as_str()
-                );
+            );
+            if supported.contains(&effort) {
+                result.unwrap_or_else(|error| {
+                    panic!("{backend} rejected {}: {error:#}", effort.as_str())
+                });
             } else {
-                assert_eq!(
-                    settings.reasoning_effort,
-                    map.max_supported_effort(),
-                    "{backend}: orphaned effort {} should fall back to highest supported",
-                    effort.as_str()
-                );
+                let error =
+                    result.expect_err("unsupported effort must fail effective settings validation");
+                assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+                assert!(error.to_string().contains(effort.as_str()), "{error:#}");
+                assert!(error.to_string().contains(backend.as_str()), "{error:#}");
             }
         }
     }
@@ -553,27 +579,4 @@ fn adapters_translate_effort_through_the_catalog_map() {
     .unwrap();
     assert_eq!(anthropic["thinking"], json!({"type": "adaptive"}));
     assert_eq!(anthropic["output_config"]["effort"], "tier-four");
-}
-
-#[test]
-fn orphaned_effort_falls_back_to_highest_supported_level() {
-    // claude-sonnet-4-6 supports none/low/medium/high but not xhigh or max.
-    // A session storing xhigh (orphaned by a catalog update) must remap onto
-    // the model's highest supported level (high) rather than reject the
-    // session. The old narrow migration only handled xhigh→max when max was
-    // supported; the general fallback covers any orphaned effort.
-    let settings = EffectiveModelSettings::from_optional(
-        Some(BackendKind::AnthropicMessages),
-        Some("claude-sonnet-4-6".to_string()),
-        None,
-        Some(ReasoningEffort::Xhigh),
-        None,
-        std::collections::BTreeMap::new(),
-    )
-    .expect("orphaned effort should remap, not reject");
-    assert_eq!(
-        settings.reasoning_effort,
-        Some(ReasoningEffort::High),
-        "xhigh should fall back to the highest supported level (high)"
-    );
 }

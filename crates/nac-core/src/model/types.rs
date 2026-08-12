@@ -221,20 +221,6 @@ impl EffectiveModelSettings {
         // session). Managed backends never auto-select.
         let api_key_env = api_key_env.or_else(|| backend::auto_select_api_key_env(backend));
         let resolved = catalog::resolve(backend, &model);
-        // Orphaned-effort fallback: a session may store an effort level the
-        // resolved model no longer supports (e.g. xhigh on Anthropic models
-        // that now expose max directly, or any effort dropped by a catalog
-        // update). Remap an unsupported effort onto the model's highest
-        // supported level rather than rejecting the session. This is a
-        // one-time migration — the session stores the remapped value on next
-        // save.
-        let reasoning_effort = reasoning_effort.and_then(|effort| {
-            if resolved.thinking_level_map.is_supported(effort) {
-                Some(effort)
-            } else {
-                resolved.thinking_level_map.max_supported_effort()
-            }
-        });
         super::backend::validate_model_reasoning_effort_with_map(
             backend,
             &model,
