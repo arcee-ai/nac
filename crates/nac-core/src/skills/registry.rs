@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use super::*;
 
 #[derive(Clone)]
@@ -99,7 +101,8 @@ impl SkillRegistry {
 
         let mut content = format!("<skill_content name=\"{}\">\n", escape_xml(&skill.name));
         if let Some(compatibility) = &skill.compatibility {
-            content.push_str(&format!("Compatibility: {}\n\n", compatibility));
+            write!(content, "Compatibility: {}\n\n", compatibility)
+                .expect("writing to String cannot fail");
         }
         content.push_str(&skill.body);
         if !skill.body.ends_with('\n') {
@@ -107,15 +110,18 @@ impl SkillRegistry {
         }
         content.push('\n');
 
-        content.push_str(&format!(
-            "Skill directory: {}\n",
+        writeln!(
+            content,
+            "Skill directory: {}",
             skill.skill_root_visible.display()
-        ));
+        )
+        .expect("writing to String cannot fail");
         content.push_str("Relative paths in this skill are relative to the skill directory.\n");
         if !skill.resources.is_empty() {
             content.push_str("<skill_resources>\n");
             for resource in &skill.resources {
-                content.push_str(&format!("  <file>{}</file>\n", escape_xml(resource)));
+                writeln!(content, "  <file>{}</file>", escape_xml(resource))
+                    .expect("writing to String cannot fail");
             }
             content.push_str("</skill_resources>\n");
         }

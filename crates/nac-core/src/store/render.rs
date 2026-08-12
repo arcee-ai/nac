@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use super::*;
 
 pub fn render_self_context(thread_name: &str, episodes: &[EpisodeRecord]) -> Option<String> {
@@ -7,13 +9,15 @@ pub fn render_self_context(thread_name: &str, episodes: &[EpisodeRecord]) -> Opt
 
     let mut rendered = format!("Retained history for thread \"{}\":", thread_name);
     for (index, episode) in episodes.iter().enumerate() {
-        rendered.push_str(&format!(
+        write!(
+            rendered,
             "\n\n=== Episode {} | {} | action: {} ===\n{}",
             index + 1,
             episode.created_at,
             episode.action,
             episode.content
-        ));
+        )
+        .expect("writing to String cannot fail");
     }
     Some(rendered)
 }
@@ -36,13 +40,15 @@ pub fn render_thread_document(thread_name: &str, episodes: &[EpisodeRecord]) -> 
         episodes.len()
     );
     for (index, episode) in episodes.iter().enumerate() {
-        rendered.push_str(&format!(
+        write!(
+            rendered,
             "\n\n=== Episode {} | {} | action: {} ===\n{}",
             index + 1,
             episode.created_at,
             episode.action,
             episode.content
-        ));
+        )
+        .expect("writing to String cannot fail");
     }
     rendered
 }
@@ -54,22 +60,26 @@ pub fn render_workset_document(workset: &WorksetRecord) -> String {
         workset.status,
         workset.items.len()
     );
-    rendered.push_str(&format!(
+    write!(
+        rendered,
         "\nsummary: {}",
         if workset.summary.is_empty() {
             "(none)"
         } else {
             &workset.summary
         }
-    ));
-    rendered.push_str(&format!("\ngoal: {}", workset.goal));
+    )
+    .expect("writing to String cannot fail");
+    write!(rendered, "\ngoal: {}", workset.goal).expect("writing to String cannot fail");
     if let Some(recipe) = workset.verification_recipe.as_deref() {
-        rendered.push_str(&format!("\nverification: {}", recipe));
+        write!(rendered, "\nverification: {}", recipe).expect("writing to String cannot fail");
     }
-    rendered.push_str(&format!(
+    write!(
+        rendered,
         "\ncreated: {} | updated: {}",
         workset.created_at, workset.updated_at
-    ));
+    )
+    .expect("writing to String cannot fail");
 
     if workset.items.is_empty() {
         rendered.push_str("\n\nNo workset items defined.");
@@ -83,16 +93,21 @@ pub fn render_workset_document(workset: &WorksetRecord) -> String {
         } else {
             item.depends_on.join(", ")
         };
-        rendered.push_str(&format!(
+        write!(
+            rendered,
             "\n\n{}. [{}] {}",
             item.position, item.role, item.title
-        ));
-        rendered.push_str(&format!("\n   scope: {}", item.scope));
-        rendered.push_str(&format!("\n   depends on: {}", dependencies));
-        rendered.push_str(&format!("\n   description: {}", item.description));
-        rendered.push_str(&format!("\n   acceptance: {}", item.acceptance));
+        )
+        .expect("writing to String cannot fail");
+        write!(rendered, "\n   scope: {}", item.scope).expect("writing to String cannot fail");
+        write!(rendered, "\n   depends on: {}", dependencies)
+            .expect("writing to String cannot fail");
+        write!(rendered, "\n   description: {}", item.description)
+            .expect("writing to String cannot fail");
+        write!(rendered, "\n   acceptance: {}", item.acceptance)
+            .expect("writing to String cannot fail");
         if let Some(notes) = item.notes.as_deref() {
-            rendered.push_str(&format!("\n   notes: {}", notes));
+            write!(rendered, "\n   notes: {}", notes).expect("writing to String cannot fail");
         }
     }
     rendered
@@ -105,12 +120,14 @@ pub fn render_workset_list(worksets: &[WorksetSummary]) -> String {
 
     let mut rendered = String::from("Worksets:");
     for workset in worksets {
-        rendered.push_str(&format!(
+        write!(
+            rendered,
             "\n- {} | {} | {} item(s) | updated {}",
             workset.id, workset.status, workset.item_count, workset.updated_at
-        ));
+        )
+        .expect("writing to String cannot fail");
         if !workset.summary.is_empty() {
-            rendered.push_str(&format!("\n  {}", workset.summary));
+            write!(rendered, "\n  {}", workset.summary).expect("writing to String cannot fail");
         }
     }
     rendered

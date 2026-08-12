@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use std::collections::BTreeMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -129,10 +131,12 @@ impl WorkerTimeoutTrace {
 
                 let mut reason = String::from("The thread timed out at tool calls:");
                 for (call_id, call) in &self.active_tool_calls {
-                    reason.push_str(&format!("\n- {} {}", call.name, call_id));
+                    write!(reason, "\n- {} {}", call.name, call_id)
+                        .expect("writing to String cannot fail");
                     match call.args_detail.as_deref() {
                         Some(args_detail) => {
-                            reason.push_str(&format!("\n  arguments: {}", args_detail));
+                            write!(reason, "\n  arguments: {}", args_detail)
+                                .expect("writing to String cannot fail");
                         }
                         None => reason.push_str("\n  arguments: <not captured>"),
                     }

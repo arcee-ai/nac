@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use serde_json::Value;
@@ -109,13 +110,13 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
     }
 
     let text = String::from_utf8_lossy(&raw).into_owned();
-    let lines: Vec<&str> = text.lines().collect();
-    let total_lines = lines.len();
-    let selected: Vec<&str> = lines.iter().skip(offset).take(limit).copied().collect();
-
+    let total_lines = text.lines().count();
+    let mut selected_len = 0;
     let mut output = String::new();
-    for (idx, line) in selected.iter().enumerate() {
-        output.push_str(&format!("{:4}| {}\n", offset + idx + 1, line));
+    for (idx, line) in text.lines().skip(offset).take(limit).enumerate() {
+        writeln!(output, "{:4}| {}", offset + idx + 1, line)
+            .expect("writing to String cannot fail");
+        selected_len += 1;
     }
 
     if output.len() > MAX_OUTPUT_BYTES {
@@ -124,14 +125,17 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
             end -= 1;
         }
         output.truncate(end);
-        output.push_str(&format!("\n... (truncated, {} total lines)", total_lines));
-    } else if offset + selected.len() < total_lines {
-        output.push_str(&format!(
+        write!(output, "\n... (truncated, {} total lines)", total_lines)
+            .expect("writing to String cannot fail");
+    } else if offset + selected_len < total_lines {
+        write!(
+            output,
             "\n... (showing lines {}-{} of {})",
             offset + 1,
-            offset + selected.len(),
+            offset + selected_len,
             total_lines
-        ));
+        )
+        .expect("writing to String cannot fail");
     }
 
     ToolResult {
@@ -241,11 +245,34 @@ mod tests {
         .await;
 
         assert!(!result.is_error, "Got error: {}", result.content);
-        assert!(result
-            .content
-            .starts_with(&format!("   1| {}", "a".repeat(29_993))));
-        assert!(!result.content.contains('€'));
-        assert!(result.content.ends_with("... (truncated, 1 total lines)"));
+        assert_eq!(
+            result.content,
+            format!(
+                "   1| {}\n... (truncated, 1 total lines)",
+                "a".repeat(29_993)
+            )
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn pagination_preserves_exact_line_numbers_and_continuation() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nac_read_pagination_{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("lines.txt"), "alpha\nbeta\ngamma\n").unwrap();
+
+        let result = execute(
+            json!({ "path": "lines.txt", "offset": 1, "limit": 1 }),
+            &local_runtime_at(dir.clone()),
+        )
+        .await;
+
+        assert!(!result.is_error, "Got error: {}", result.content);
+        assert_eq!(result.content, "   2| beta\n\n... (showing lines 2-2 of 3)");
         let _ = std::fs::remove_dir_all(dir);
     }
 

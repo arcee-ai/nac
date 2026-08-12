@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use serde_json::Value;
 
 use crate::events::AgentEvent;
@@ -41,9 +43,11 @@ pub fn dispatch_definition(skills: Option<&SkillRegistry>) -> ToolDefinition {
                 "Worker skill names to preload before this dispatch. Pass skills when the task clearly matches them; workers cannot activate skills themselves. Compact catalog:",
             );
             for entry in &catalog {
-                description.push_str(&format!("\n- {}: {}", entry.name, entry.description));
+                write!(description, "\n- {}: {}", entry.name, entry.description)
+                    .expect("writing to String cannot fail");
                 if let Some(compatibility) = &entry.compatibility {
-                    description.push_str(&format!(" (compatibility: {})", compatibility));
+                    write!(description, " (compatibility: {})", compatibility)
+                        .expect("writing to String cannot fail");
                 }
             }
 
@@ -503,12 +507,14 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
 
     let mut output = String::from("Active threads:");
     for thread in threads {
-        output.push_str(&format!(
+        write!(
+            output,
             "\n- {} | {} episodes | created {} | updated {}",
             thread.name, thread.episode_count, thread.created_at, thread.updated_at
-        ));
+        )
+        .expect("writing to String cannot fail");
         if let Some(action) = thread.latest_action.as_deref() {
-            output.push_str(&format!(" | last action: {}", action));
+            write!(output, " | last action: {}", action).expect("writing to String cannot fail");
         }
     }
 
