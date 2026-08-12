@@ -565,7 +565,13 @@ fn arcee_passthrough_without_output_limit_gets_a_large_safe_default() {
 
 #[test]
 fn manifest_sha256_pins_the_embedded_catalog() {
-    let manifest = data::parse_manifest().expect("embedded manifest parses");
+    #[derive(serde::Deserialize)]
+    struct ManifestHash {
+        sha256: String,
+    }
+
+    let manifest: ManifestHash = serde_json::from_str(data::GENERATED_MANIFEST_JSON)
+        .expect("embedded manifest parses");
     assert!(!manifest.sha256.is_empty());
     let digest = sha2::Sha256::digest(data::GENERATED_CATALOG_JSON.as_bytes());
     let hex = digest

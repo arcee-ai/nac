@@ -88,13 +88,10 @@ pub(super) struct GeneratedModel {
     pub(super) clear_thinking: bool,
 }
 
-/// Sidecar manifest fields: the sha pins the embedded pair (tests), the
-/// timestamp drives the stale-overlay guard, and the ETag seeds overlay
-/// revalidation when no sidecar exists yet.
+/// Sidecar manifest fields: the timestamp drives the stale-overlay guard, and
+/// the ETag seeds overlay revalidation when no sidecar exists yet.
 #[derive(Debug, Deserialize)]
 pub(crate) struct GeneratedManifest {
-    #[allow(dead_code)] // asserted by the manifest hash test only
-    pub(crate) sha256: String,
     pub(crate) generated_at: String,
     pub(crate) models_dev_etag: Option<String>,
 }
