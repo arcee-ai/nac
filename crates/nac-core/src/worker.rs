@@ -1,8 +1,9 @@
 use std::collections::HashSet;
+use std::io::BufRead;
 use std::path::PathBuf;
 
+use crate::tools::ThreadCancellation;
 use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::agent::Agent;
 use crate::skills::SkillRegistry;
@@ -88,6 +89,30 @@ async fn commit_managed_worker_episode(
     Ok(())
 }
 
+fn spawn_cancellation_listener(
+    command_cancellation: ThreadCancellation,
+    #[cfg(test)] ready: Option<std::sync::mpsc::Sender<()>>,
+) {
+    std::thread::spawn(move || {
+        let stdin = std::io::stdin();
+        let lines = stdin.lock().lines();
+        #[cfg(test)]
+        if let Some(ready) = ready {
+            let _ = ready.send(());
+        }
+        for line in lines {
+            let Ok(line) = line else {
+                break;
+            };
+            if line.trim() == "cancel" {
+                eprintln!("{MANAGED_WORKER_CANCEL_ACK}");
+                command_cancellation.cancel();
+                break;
+            }
+        }
+    });
+}
+
 pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()> {
     let ManagedWorkerRunConfig {
         mut agent,
@@ -97,20 +122,12 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
         action,
     } = run_config;
 
-    let command_cancellation = agent.command_cancellation();
-    let cancellation_listener = tokio::spawn(async move {
-        let mut lines = BufReader::new(tokio::io::stdin()).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if line.trim() == "cancel" {
-                eprintln!("{MANAGED_WORKER_CANCEL_ACK}");
-                command_cancellation.cancel();
-                break;
-            }
-        }
-    });
-
+    spawn_cancellation_listener(
+        agent.command_cancellation(),
+        #[cfg(test)]
+        None,
+    );
     let send_result = agent.send(&action).await;
-    cancellation_listener.abort();
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
     println!("{}", response);
@@ -125,6 +142,9 @@ mod tests {
     use crate::model::ModelClient;
     use crate::skills::SkillRecord;
     use crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS;
+    use std::io::{Read, Write};
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
 
     fn test_registry() -> SkillRegistry {
         SkillRegistry::load_for_test(vec![SkillRecord {
@@ -135,6 +155,86 @@ mod tests {
             body: "Review body instructions.".to_string(),
             resources: Vec::new(),
         }])
+    }
+
+    #[tokio::test]
+    async fn cancellation_listener_process_helper() {
+        let Some(mode) = std::env::var_os("NAC_CANCELLATION_LISTENER_HELPER") else {
+            return;
+        };
+        let cancellation = ThreadCancellation::default();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        spawn_cancellation_listener(cancellation.clone(), Some(ready_tx));
+        ready_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("cancellation listener did not start reading");
+        if mode == "wait-cancel" {
+            tokio::time::timeout(Duration::from_secs(2), cancellation.cancelled())
+                .await
+                .expect("cancellation listener did not cancel");
+        }
+    }
+
+    fn assert_child_exits(child: &mut Child, panic_message: &str) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                return;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let _ = child.wait();
+                panic!("{panic_message}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn cancellation_listener_does_not_hold_runtime_open_with_parent_stdin() {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "worker::tests::cancellation_listener_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_CANCELLATION_LISTENER_HELPER", "exit")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let _open_stdin = child.stdin.take().unwrap();
+        assert_child_exits(&mut child, "cancellation listener held the runtime open");
+    }
+
+    #[test]
+    fn cancellation_listener_acknowledges_and_delivers_cancel() {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "worker::tests::cancellation_listener_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_CANCELLATION_LISTENER_HELPER", "wait-cancel")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut open_stdin = child.stdin.take().unwrap();
+        open_stdin.write_all(b"cancel\n").unwrap();
+        open_stdin.flush().unwrap();
+        assert_child_exits(&mut child, "cancellation listener ignored cancel");
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        assert!(stderr.contains(MANAGED_WORKER_CANCEL_ACK));
     }
 
     #[test]
