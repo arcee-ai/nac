@@ -306,7 +306,7 @@ fn git_head_blob(repo: Repo<'_>, relpath: &str) -> Result<Option<GitBlobRef>> {
     else {
         return Ok(None);
     };
-    parse_ls_tree_blob(&raw)
+    parse_git_blob(&raw, GitBlobSource::Tree)
 }
 
 fn git_tree_blob(repo: Repo<'_>, rev: &str, relpath: &str) -> Result<Option<GitBlobRef>> {
@@ -314,7 +314,7 @@ fn git_tree_blob(repo: Repo<'_>, rev: &str, relpath: &str) -> Result<Option<GitB
         repo,
         &["--literal-pathspecs", "ls-tree", "-z", rev, "--", relpath],
     )?;
-    parse_ls_tree_blob(&raw)
+    parse_git_blob(&raw, GitBlobSource::Tree)
 }
 
 fn git_index_blob(repo: Repo<'_>, relpath: &str) -> Result<Option<GitBlobRef>> {
@@ -322,50 +322,40 @@ fn git_index_blob(repo: Repo<'_>, relpath: &str) -> Result<Option<GitBlobRef>> {
         repo,
         &["--literal-pathspecs", "ls-files", "-z", "-s", "--", relpath],
     )?;
-    parse_ls_files_stage0_blob(&raw)
+    parse_git_blob(&raw, GitBlobSource::Index)
 }
 
-fn parse_ls_tree_blob(raw: &[u8]) -> Result<Option<GitBlobRef>> {
-    for record in nul_records(raw) {
-        let (meta, _) = split_once_byte(record, b'\t')
-            .ok_or_else(|| anyhow!("unexpected git ls-tree output"))?;
-        let meta = std::str::from_utf8(meta).context("git ls-tree output is not valid UTF-8")?;
-        let mut parts = meta.split_whitespace();
-        let mode = parts
-            .next()
-            .ok_or_else(|| anyhow!("unexpected git ls-tree mode"))?;
-        let kind = parts
-            .next()
-            .ok_or_else(|| anyhow!("unexpected git ls-tree object type"))?;
-        let oid = parts
-            .next()
-            .ok_or_else(|| anyhow!("unexpected git ls-tree object id"))?;
-        if kind == "blob" {
-            return Ok(Some(GitBlobRef {
-                oid: oid.to_string(),
-                mode: mode.to_string(),
-            }));
-        }
-    }
-    Ok(None)
+#[derive(Clone, Copy)]
+enum GitBlobSource {
+    Tree,
+    Index,
 }
 
-fn parse_ls_files_stage0_blob(raw: &[u8]) -> Result<Option<GitBlobRef>> {
+fn parse_git_blob(raw: &[u8], source: GitBlobSource) -> Result<Option<GitBlobRef>> {
+    let (command, second_field, third_field) = match source {
+        GitBlobSource::Tree => ("ls-tree", "object type", "object id"),
+        GitBlobSource::Index => ("ls-files", "object id", "stage"),
+    };
+
     for record in nul_records(raw) {
         let (meta, _) = split_once_byte(record, b'\t')
-            .ok_or_else(|| anyhow!("unexpected git ls-files output"))?;
-        let meta = std::str::from_utf8(meta).context("git ls-files output is not valid UTF-8")?;
+            .ok_or_else(|| anyhow!("unexpected git {command} output"))?;
+        let meta = std::str::from_utf8(meta)
+            .with_context(|| format!("git {command} output is not valid UTF-8"))?;
         let mut parts = meta.split_whitespace();
-        let mode = parts
-            .next()
-            .ok_or_else(|| anyhow!("unexpected git ls-files mode"))?;
-        let oid = parts
-            .next()
-            .ok_or_else(|| anyhow!("unexpected git ls-files object id"))?;
-        let stage = parts
-            .next()
-            .ok_or_else(|| anyhow!("unexpected git ls-files stage"))?;
-        if stage == "0" {
+        let mut next = |field| {
+            parts
+                .next()
+                .ok_or_else(|| anyhow!("unexpected git {command} {field}"))
+        };
+        let mode = next("mode")?;
+        let second = next(second_field)?;
+        let third = next(third_field)?;
+        let (oid, qualifies) = match source {
+            GitBlobSource::Tree => (third, second == "blob"),
+            GitBlobSource::Index => (second, third == "0"),
+        };
+        if qualifies {
             return Ok(Some(GitBlobRef {
                 oid: oid.to_string(),
                 mode: mode.to_string(),
@@ -729,6 +719,151 @@ fn git_failure(target: &GitTarget, args: &[&str], output: &Output) -> anyhow::Er
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_blob(raw: &[u8], source: GitBlobSource, mode: &str, oid: &str) {
+        let blob = parse_git_blob(raw, source).unwrap().unwrap();
+        assert_eq!(blob.mode, mode);
+        assert_eq!(blob.oid, oid);
+    }
+
+    #[test]
+    fn git_blob_parser_handles_source_layouts() {
+        assert_blob(
+            b"100755 blob tree-oid\tfile\0",
+            GitBlobSource::Tree,
+            "100755",
+            "tree-oid",
+        );
+        assert_blob(
+            b"120000 index-oid 0\tfile\0",
+            GitBlobSource::Index,
+            "120000",
+            "index-oid",
+        );
+    }
+
+    #[test]
+    fn git_blob_parser_scans_for_qualifying_records() {
+        assert_blob(
+            b"040000 tree ignored\tdir\0opaque blob selected\tfile\0",
+            GitBlobSource::Tree,
+            "opaque",
+            "selected",
+        );
+        assert_blob(
+            b"100644 one 1\ta\0100644 two 2\tb\0100644 three 3\tc\0100644 zero 0\td\0",
+            GitBlobSource::Index,
+            "100644",
+            "zero",
+        );
+        assert!(
+            parse_git_blob(b"040000 tree ignored\tdir\0", GitBlobSource::Tree)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_git_blob(b"100644 ignored 2\tfile\0", GitBlobSource::Index)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn git_blob_parser_preserves_source_specific_malformed_errors() {
+        let cases: &[(&[u8], GitBlobSource, &str)] = &[
+            (
+                b"record",
+                GitBlobSource::Tree,
+                "unexpected git ls-tree output",
+            ),
+            (
+                b"record",
+                GitBlobSource::Index,
+                "unexpected git ls-files output",
+            ),
+            (
+                b"\tfile",
+                GitBlobSource::Tree,
+                "unexpected git ls-tree mode",
+            ),
+            (
+                b"100644\tfile",
+                GitBlobSource::Tree,
+                "unexpected git ls-tree object type",
+            ),
+            (
+                b"100644 blob\tfile",
+                GitBlobSource::Tree,
+                "unexpected git ls-tree object id",
+            ),
+            (
+                b"\tfile",
+                GitBlobSource::Index,
+                "unexpected git ls-files mode",
+            ),
+            (
+                b"100644\tfile",
+                GitBlobSource::Index,
+                "unexpected git ls-files object id",
+            ),
+            (
+                b"100644 oid\tfile",
+                GitBlobSource::Index,
+                "unexpected git ls-files stage",
+            ),
+        ];
+
+        for &(raw, source, expected) in cases {
+            assert_eq!(
+                parse_git_blob(raw, source).unwrap_err().to_string(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn git_blob_parser_decodes_metadata_but_not_paths() {
+        assert_eq!(
+            parse_git_blob(b"100644 bl\xffob oid\tfile", GitBlobSource::Tree)
+                .unwrap_err()
+                .to_string(),
+            "git ls-tree output is not valid UTF-8"
+        );
+        assert_eq!(
+            parse_git_blob(b"100644 o\xffid 0\tfile", GitBlobSource::Index)
+                .unwrap_err()
+                .to_string(),
+            "git ls-files output is not valid UTF-8"
+        );
+        assert_blob(
+            b"100644 blob oid\tbad-\xff-path",
+            GitBlobSource::Tree,
+            "100644",
+            "oid",
+        );
+        assert_blob(
+            b"100644 oid 0\tbad-\xff-path",
+            GitBlobSource::Index,
+            "100644",
+            "oid",
+        );
+    }
+
+    #[test]
+    fn git_blob_parser_validates_records_before_filtering() {
+        assert_eq!(
+            parse_git_blob(b"040000 tree\tdir", GitBlobSource::Tree)
+                .unwrap_err()
+                .to_string(),
+            "unexpected git ls-tree object id"
+        );
+        assert_eq!(
+            parse_git_blob(b"100644 oid\tfile", GitBlobSource::Index)
+                .unwrap_err()
+                .to_string(),
+            "unexpected git ls-files stage"
+        );
+    }
 
     #[test]
     fn workspace_diff_path_validation_rejects_unsafe_paths() {
