@@ -1065,6 +1065,18 @@ struct GrepPlan {
     context: usize,
 }
 
+enum GrepRoot {
+    Directory,
+    File(u64),
+    Diagnostic(Record),
+}
+
+impl GrepRoot {
+    fn contains_descendants(&self) -> bool {
+        matches!(self, Self::Directory)
+    }
+}
+
 pub(crate) async fn execute(tool: &'static str, args: Value, runtime: &ToolRuntime) -> ToolResult {
     if !args.is_object() {
         return error_result(
@@ -1184,14 +1196,16 @@ async fn run_grep(
     }
     roots.sort();
     roots.dedup();
-    let mut minimal_roots = Vec::<String>::new();
+    let mut grep_roots = Vec::<(String, GrepRoot)>::new();
     for root in roots {
-        if minimal_roots.iter().any(|parent| {
-            root == *parent || parent.is_empty() || root.starts_with(&format!("{parent}/"))
+        if grep_roots.iter().any(|(parent, kind)| {
+            kind.contains_descendants()
+                && (root == *parent || parent.is_empty() || root.starts_with(&format!("{parent}/")))
         }) {
             continue;
         }
-        minimal_roots.push(root);
+        let kind = classify_grep_root(fs, &root).await?;
+        grep_roots.push((root, kind));
     }
 
     let globs_value = object.get("globs").cloned().unwrap_or_else(|| json!([]));
@@ -1218,10 +1232,11 @@ async fn run_grep(
     let mut seen = HashSet::new();
     let mut walk_budget = WalkBudget { entries: 0 };
     let mut ignore_state = IgnoreState::new();
-    for root in minimal_roots {
-        let records = walk_root(
+    for (root, kind) in grep_roots {
+        let records = collect_grep_root(
             fs,
             &root,
+            kind,
             common.hidden,
             common.gitignore,
             &mut walk_budget,
@@ -1305,6 +1320,106 @@ async fn run_grep(
     paginate("grep", args, records, common.limit)
 }
 
+async fn classify_grep_root(fs: &mut WorkspaceFs, root: &str) -> SearchResult<GrepRoot> {
+    if root.is_empty() {
+        return Ok(GrepRoot::Directory);
+    }
+
+    if let Some((parent_path, _)) = root.rsplit_once('/') {
+        let mut parent = String::new();
+        for component in parent_path.split('/') {
+            parent = join_path(&parent, component);
+            match fs.path_kind(&parent).await? {
+                EntryKind::Directory => {}
+                EntryKind::Symlink => {
+                    return Ok(GrepRoot::Diagnostic(fs.symlink_diagnostic(&parent).await));
+                }
+                EntryKind::File | EntryKind::Other => {
+                    return Err(SearchError::at(
+                        "not_directory",
+                        "search root ancestor is not a directory",
+                        parent,
+                    ));
+                }
+            }
+        }
+    }
+
+    let Some((kind, size)) = fs.optional_path_metadata(root).await? else {
+        return Err(SearchError::at(
+            "unreadable_path",
+            "search root does not exist",
+            root,
+        ));
+    };
+    match kind {
+        EntryKind::Directory => Ok(GrepRoot::Directory),
+        EntryKind::File => Ok(GrepRoot::File(size)),
+        EntryKind::Symlink => Ok(GrepRoot::Diagnostic(fs.symlink_diagnostic(root).await)),
+        EntryKind::Other => Err(SearchError::at(
+            "not_directory",
+            "search root is not a directory or regular file",
+            root,
+        )),
+    }
+}
+
+async fn collect_grep_root(
+    fs: &mut WorkspaceFs,
+    root: &str,
+    kind: GrepRoot,
+    hidden: bool,
+    gitignore: bool,
+    walk_budget: &mut WalkBudget,
+    ignore_state: &mut IgnoreState,
+    cancellation: &Arc<AtomicBool>,
+) -> SearchResult<Vec<Record>> {
+    match kind {
+        GrepRoot::Directory => {
+            walk_directory_root(
+                fs,
+                root,
+                hidden,
+                gitignore,
+                walk_budget,
+                ignore_state,
+                cancellation,
+            )
+            .await
+        }
+        GrepRoot::Diagnostic(record) => Ok(vec![record]),
+        GrepRoot::File(size) => {
+            if !hidden && is_hidden(root) {
+                return Ok(Vec::new());
+            }
+
+            let mut inherited = Vec::new();
+            let mut records = Vec::new();
+            if gitignore {
+                for ancestor in ancestors_before(root) {
+                    if !ancestor.is_empty() && ignored(fs.root(), &ancestor, true, &inherited) {
+                        return Ok(records);
+                    }
+                    let (layer, diagnostics) = load_ignore(fs, &ancestor, ignore_state).await?;
+                    records.extend(diagnostics);
+                    if let Some(layer) = layer {
+                        inherited.push(layer);
+                    }
+                }
+                if ignored(fs.root(), root, false, &inherited) {
+                    return Ok(records);
+                }
+            }
+            records.push(Record::Entry(json!({
+                "path": root,
+                "kind": "file",
+                "size": size,
+            })));
+            Ok(records)
+        }
+    }
+}
+
 async fn walk_root(
     fs: &mut WorkspaceFs,
     root: &str,
@@ -1314,8 +1429,6 @@ async fn walk_root(
     ignore_state: &mut IgnoreState,
     cancellation: &Arc<AtomicBool>,
 ) -> SearchResult<Vec<Record>> {
-    let mut inherited = Vec::new();
-    let mut records = Vec::new();
     if !root.is_empty() {
         let mut prefix = String::new();
         for component in root.split('/') {
@@ -1323,8 +1436,7 @@ async fn walk_root(
             match fs.path_kind(&prefix).await? {
                 EntryKind::Directory => {}
                 EntryKind::Symlink => {
-                    records.push(fs.symlink_diagnostic(&prefix).await);
-                    return Ok(records);
+                    return Ok(vec![fs.symlink_diagnostic(&prefix).await]);
                 }
                 EntryKind::File | EntryKind::Other => {
                     return Err(SearchError::at(
@@ -1336,6 +1448,29 @@ async fn walk_root(
             }
         }
     }
+    walk_directory_root(
+        fs,
+        root,
+        hidden,
+        gitignore,
+        walk_budget,
+        ignore_state,
+        cancellation,
+    )
+    .await
+}
+
+async fn walk_directory_root(
+    fs: &mut WorkspaceFs,
+    root: &str,
+    hidden: bool,
+    gitignore: bool,
+    walk_budget: &mut WalkBudget,
+    ignore_state: &mut IgnoreState,
+    cancellation: &Arc<AtomicBool>,
+) -> SearchResult<Vec<Record>> {
+    let mut inherited = Vec::new();
+    let mut records = Vec::new();
     if gitignore {
         for ancestor in ancestors_before(root) {
             let (layer, diagnostics) = load_ignore(fs, &ancestor, ignore_state).await?;
