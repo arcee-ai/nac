@@ -403,7 +403,9 @@ function LaunchForm({
       size={ButtonSize.Medium}
       variant={ButtonVariant.Ghost}
       placement={PopoverPlacement.BottomLeft}
-      panelClassName="max-h-64 overflow-auto"
+      // The dialog scrolls its own body, which would clip the list.
+      sticky
+      panelClassName="max-h-64 overflow-auto min-w-[220px]"
     />
   );
 
