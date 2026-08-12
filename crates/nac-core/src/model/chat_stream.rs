@@ -3,12 +3,12 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use super::sse::{provider_stream_error, StreamFold, StreamFoldError};
-use super::stream::{DeltaSink, ModelStreamDelta};
+use super::stream::{DeltaSink, ModelStreamDelta, ObservableDeltaSink};
 
 /// Rebuilds a chat-completions response out of its stream chunks, so the
 /// buffered parsers stay the only place that reads a provider's response shape.
 pub(super) struct ChatStreamFold<'sink> {
-    on_delta: DeltaSink<'sink>,
+    deltas: ObservableDeltaSink<'sink>,
     /// The field the buffered parser will read reasoning back out of, so the
     /// rebuilt response matches what the provider would have sent unstreamed.
     reasoning_field: &'sink str,
@@ -20,7 +20,6 @@ pub(super) struct ChatStreamFold<'sink> {
     /// in the call list: identity comes once and the arguments accumulate.
     tool_calls: BTreeMap<u64, PartialToolCall>,
     saw_choice: bool,
-    observable_delta: bool,
 }
 
 #[derive(Default)]
@@ -34,7 +33,7 @@ struct PartialToolCall {
 impl<'sink> ChatStreamFold<'sink> {
     pub fn new(on_delta: DeltaSink<'sink>, reasoning_field: &'sink str) -> Self {
         Self {
-            on_delta,
+            deltas: ObservableDeltaSink::new(on_delta),
             reasoning_field,
             content: String::new(),
             reasoning: String::new(),
@@ -42,14 +41,6 @@ impl<'sink> ChatStreamFold<'sink> {
             usage: None,
             tool_calls: BTreeMap::new(),
             saw_choice: false,
-            observable_delta: false,
-        }
-    }
-
-    fn emit(&mut self, delta: ModelStreamDelta) {
-        if let Some(on_delta) = self.on_delta.filter(|_| !delta.is_empty()) {
-            self.observable_delta = true;
-            on_delta(delta);
         }
     }
 
@@ -114,7 +105,7 @@ impl StreamFold for ChatStreamFold<'_> {
         };
         if let Some(text) = delta.get("content").and_then(Value::as_str) {
             self.content.push_str(text);
-            self.emit(ModelStreamDelta::text(text));
+            self.deltas.emit(ModelStreamDelta::text(text));
         }
         if let Some(reasoning) = delta
             .get("reasoning_content")
@@ -122,7 +113,7 @@ impl StreamFold for ChatStreamFold<'_> {
             .and_then(Value::as_str)
         {
             self.reasoning.push_str(reasoning);
-            self.emit(ModelStreamDelta::reasoning(reasoning));
+            self.deltas.emit(ModelStreamDelta::reasoning(reasoning));
         }
         if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
             self.absorb_tool_calls(tool_calls);
@@ -131,7 +122,7 @@ impl StreamFold for ChatStreamFold<'_> {
         Ok(())
     }
     fn has_observable_delta(&self) -> bool {
-        self.observable_delta
+        self.deltas.has_observable_delta()
     }
 
     fn finish(self) -> Result<Value, StreamFoldError> {
@@ -176,5 +167,43 @@ impl StreamFold for ChatStreamFold<'_> {
             response["usage"] = usage;
         }
         Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn chat_fold_delivers_only_nonempty_text_and_reasoning_deltas() {
+        let (send, receive) = mpsc::channel();
+        let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
+        let mut fold = ChatStreamFold::new(Some(&sink), "reasoning_content");
+
+        for event in [
+            json!({"choices": [{"delta": {"content": ""}}]}),
+            json!({"choices": [{"delta": {"content": "answer"}}]}),
+            json!({"choices": [{"delta": {"reasoning_content": "thinking"}}]}),
+            json!({"choices": [{"delta": {"reasoning": "more"}}]}),
+        ] {
+            fold.push(&event).unwrap();
+        }
+
+        assert!(fold.has_observable_delta());
+        assert_eq!(
+            receive.try_iter().collect::<Vec<_>>(),
+            vec![
+                ModelStreamDelta::text("answer"),
+                ModelStreamDelta::reasoning("thinking"),
+                ModelStreamDelta::reasoning("more"),
+            ]
+        );
+
+        let mut unobserved = ChatStreamFold::new(None, "reasoning_content");
+        unobserved
+            .push(&json!({"choices": [{"delta": {"content": "hidden"}}]}))
+            .unwrap();
+        assert!(!unobserved.has_observable_delta());
     }
 }

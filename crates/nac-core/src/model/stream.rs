@@ -38,6 +38,32 @@ impl ModelStreamDelta {
 /// is watching, which keeps the plain non-streaming request shape in play.
 pub type DeltaSink<'a> = Option<&'a (dyn Fn(ModelStreamDelta) + Send + Sync)>;
 
+/// Delivers nonempty deltas to a live sink and records when output became observable.
+pub(super) struct ObservableDeltaSink<'sink> {
+    sink: DeltaSink<'sink>,
+    observable_delta: bool,
+}
+
+impl<'sink> ObservableDeltaSink<'sink> {
+    pub(super) fn new(sink: DeltaSink<'sink>) -> Self {
+        Self {
+            sink,
+            observable_delta: false,
+        }
+    }
+
+    pub(super) fn emit(&mut self, delta: ModelStreamDelta) {
+        if let Some(sink) = self.sink.filter(|_| !delta.is_empty()) {
+            self.observable_delta = true;
+            sink(delta);
+        }
+    }
+
+    pub(super) fn has_observable_delta(&self) -> bool {
+        self.observable_delta
+    }
+}
+
 /// How often batched deltas reach their destination. Below roughly this rate the
 /// text is already arriving faster than the eye follows, and every event costs a
 /// broadcast plus a React render.
@@ -102,5 +128,36 @@ impl<F: Fn(ModelStreamDelta)> CoalescedDeltas<F> {
         if !delta.is_empty() {
             (self.forward)(delta);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn observable_delta_sink_tracks_only_nonempty_delivery_to_live_sink() {
+        let (send, receive) = mpsc::channel();
+        let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
+        let mut observed = ObservableDeltaSink::new(Some(&sink));
+
+        observed.emit(ModelStreamDelta::text(""));
+        assert!(!observed.has_observable_delta());
+        observed.emit(ModelStreamDelta::text("answer"));
+        assert!(observed.has_observable_delta());
+        observed.emit(ModelStreamDelta::reasoning("thinking"));
+        assert!(observed.has_observable_delta());
+        assert_eq!(
+            receive.try_iter().collect::<Vec<_>>(),
+            vec![
+                ModelStreamDelta::text("answer"),
+                ModelStreamDelta::reasoning("thinking"),
+            ]
+        );
+
+        let mut unobserved = ObservableDeltaSink::new(None);
+        unobserved.emit(ModelStreamDelta::text("hidden"));
+        assert!(!unobserved.has_observable_delta());
     }
 }

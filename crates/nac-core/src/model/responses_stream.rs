@@ -1,40 +1,31 @@
 use serde_json::Value;
 
 use super::sse::{StreamFold, StreamFoldError};
-use super::stream::{DeltaSink, ModelStreamDelta};
+use super::stream::{DeltaSink, ModelStreamDelta, ObservableDeltaSink};
 
 /// Folds a Responses-API event stream into the final `response` object, handing
 /// text and reasoning to the sink as they arrive. Shared by the OpenAI and Codex
 /// backends, which speak the same event vocabulary.
 pub(super) struct ResponsesStreamFold<'sink> {
-    on_delta: DeltaSink<'sink>,
+    deltas: ObservableDeltaSink<'sink>,
     final_response: Option<Value>,
     /// Items collected from `output_item.done`, used when the terminal event
     /// arrives with an empty `output` array.
     output_items: Vec<(usize, Value)>,
-    observable_delta: bool,
 }
 
 impl<'sink> ResponsesStreamFold<'sink> {
     pub fn new(on_delta: DeltaSink<'sink>) -> Self {
         Self {
-            on_delta,
+            deltas: ObservableDeltaSink::new(on_delta),
             final_response: None,
             output_items: Vec::new(),
-            observable_delta: false,
         }
     }
 
     fn emit(&mut self, event: &Value, build: impl Fn(&str) -> ModelStreamDelta) {
-        let Some(on_delta) = self.on_delta else {
-            return;
-        };
         if let Some(text) = event.get("delta").and_then(Value::as_str) {
-            let delta = build(text);
-            if !delta.is_empty() {
-                self.observable_delta = true;
-                on_delta(delta);
-            }
+            self.deltas.emit(build(text));
         }
     }
 }
@@ -90,7 +81,7 @@ impl StreamFold for ResponsesStreamFold<'_> {
     }
 
     fn has_observable_delta(&self) -> bool {
-        self.observable_delta
+        self.deltas.has_observable_delta()
     }
 
     fn is_complete(&self) -> bool {
@@ -198,21 +189,28 @@ mod tests {
     }
 
     #[test]
-    fn tracks_only_nonempty_deltas_delivered_to_a_live_sink() {
+    fn responses_fold_maps_text_and_reasoning_deltas_to_sink() {
         let (send, receive) = mpsc::channel();
         let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
         let mut observed = ResponsesStreamFold::new(Some(&sink));
-        observed
-            .push(&json!({"type": "response.output_text.delta", "delta": ""}))
-            .unwrap();
-        assert!(!observed.has_observable_delta());
-        observed
-            .push(&json!({"type": "response.reasoning_text.delta", "delta": "thinking"}))
-            .unwrap();
+        for event in [
+            json!({"type": "response.output_text.delta", "delta": ""}),
+            json!({"type": "response.output_text.delta", "delta": "answer"}),
+            json!({"type": "response.reasoning_summary_text.delta", "delta": "thinking"}),
+            json!({"type": "response.reasoning_text.delta", "delta": "more"}),
+            json!({"type": "response.output_text.delta"}),
+            json!({"type": "response.output_text.delta", "delta": 7}),
+        ] {
+            observed.push(&event).unwrap();
+        }
         assert!(observed.has_observable_delta());
         assert_eq!(
             receive.try_iter().collect::<Vec<_>>(),
-            vec![ModelStreamDelta::reasoning("thinking")]
+            vec![
+                ModelStreamDelta::text("answer"),
+                ModelStreamDelta::reasoning("thinking"),
+                ModelStreamDelta::reasoning("more"),
+            ]
         );
 
         let mut unobserved = ResponsesStreamFold::new(None);

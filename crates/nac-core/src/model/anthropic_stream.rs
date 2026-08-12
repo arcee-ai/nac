@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use super::sse::{provider_stream_error, StreamFold, StreamFoldError};
-use super::stream::{DeltaSink, ModelStreamDelta};
+use super::stream::{DeltaSink, ModelStreamDelta, ObservableDeltaSink};
 
 /// Rebuilds an Anthropic Messages response out of its event stream.
 ///
@@ -13,13 +13,12 @@ use super::stream::{DeltaSink, ModelStreamDelta};
 /// arrives in its own delta and the response is unusable for a follow-up turn
 /// without it.
 pub(super) struct AnthropicStreamFold<'sink> {
-    on_delta: DeltaSink<'sink>,
+    deltas: ObservableDeltaSink<'sink>,
     blocks: BTreeMap<u64, PartialBlock>,
     stop_reason: Option<String>,
     input_usage: Option<Value>,
     output_tokens: Option<u64>,
     saw_message: bool,
-    observable_delta: bool,
 }
 
 struct PartialBlock {
@@ -31,20 +30,12 @@ struct PartialBlock {
 impl<'sink> AnthropicStreamFold<'sink> {
     pub fn new(on_delta: DeltaSink<'sink>) -> Self {
         Self {
-            on_delta,
+            deltas: ObservableDeltaSink::new(on_delta),
             blocks: BTreeMap::new(),
             stop_reason: None,
             input_usage: None,
             output_tokens: None,
             saw_message: false,
-            observable_delta: false,
-        }
-    }
-
-    fn emit(&mut self, delta: ModelStreamDelta) {
-        if let Some(on_delta) = self.on_delta.filter(|_| !delta.is_empty()) {
-            self.observable_delta = true;
-            on_delta(delta);
         }
     }
 
@@ -106,13 +97,13 @@ impl StreamFold for AnthropicStreamFold<'_> {
                     Some("text_delta") => {
                         if let Some(text) = delta.get("text").and_then(Value::as_str) {
                             self.append(index, "text", text);
-                            self.emit(ModelStreamDelta::text(text));
+                            self.deltas.emit(ModelStreamDelta::text(text));
                         }
                     }
                     Some("thinking_delta") => {
                         if let Some(thinking) = delta.get("thinking").and_then(Value::as_str) {
                             self.append(index, "thinking", thinking);
-                            self.emit(ModelStreamDelta::reasoning(thinking));
+                            self.deltas.emit(ModelStreamDelta::reasoning(thinking));
                         }
                     }
                     Some("signature_delta") => {
@@ -151,7 +142,7 @@ impl StreamFold for AnthropicStreamFold<'_> {
         Ok(())
     }
     fn has_observable_delta(&self) -> bool {
-        self.observable_delta
+        self.deltas.has_observable_delta()
     }
 
     fn finish(self) -> Result<Value, StreamFoldError> {
@@ -203,4 +194,45 @@ fn parse_tool_input(partial_json: &str) -> Value {
         return json!({});
     }
     serde_json::from_str(partial_json).unwrap_or_else(|_| json!({}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn anthropic_fold_delivers_only_nonempty_text_and_thinking_deltas() {
+        let (send, receive) = mpsc::channel();
+        let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
+        let mut fold = AnthropicStreamFold::new(Some(&sink));
+
+        for event in [
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "answer"}}),
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "thinking_delta", "thinking": "thinking"}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "signature_delta", "signature": "signed"}}),
+            json!({"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "tool", "name": "run"}}),
+            json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+        ] {
+            fold.push(&event).unwrap();
+        }
+
+        assert!(fold.has_observable_delta());
+        assert_eq!(
+            receive.try_iter().collect::<Vec<_>>(),
+            vec![
+                ModelStreamDelta::text("answer"),
+                ModelStreamDelta::reasoning("thinking"),
+            ]
+        );
+
+        let mut unobserved = AnthropicStreamFold::new(None);
+        unobserved
+            .push(&json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hidden"}}))
+            .unwrap();
+        assert!(!unobserved.has_observable_delta());
+    }
 }
