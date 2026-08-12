@@ -271,17 +271,29 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
     table
 }
 
-fn servers_table(document: &mut DocumentMut) -> &mut Table {
+/// A hand-written `mcp_servers = { ... }` inline table is converted to a
+/// standard table so its entries survive the edit; anything else non-table
+/// under the key is rejected rather than silently overwritten.
+fn servers_table(document: &mut DocumentMut) -> ConfigurationResult<&mut Table> {
     let item = document
         .as_table_mut()
         .entry("mcp_servers")
         .or_insert(Item::Table(Table::new()));
     if item.as_table_mut().is_none() {
-        *item = Item::Table(Table::new());
+        let inline = item
+            .as_value()
+            .and_then(|value| value.as_inline_table())
+            .cloned()
+            .ok_or_else(|| {
+                McpServerConfigurationStoreError::InvalidInput(
+                    "'mcp_servers' in config.toml is not a table".to_string(),
+                )
+            })?;
+        *item = Item::Table(inline.into_table());
     }
     let table = item.as_table_mut().expect("just ensured a table");
     table.set_implicit(true);
-    table
+    Ok(table)
 }
 
 pub fn list_mcp_server_configurations(
@@ -316,7 +328,7 @@ pub fn insert_mcp_server_configuration(
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
     let mut document = read_document(path)?;
-    let servers = servers_table(&mut document);
+    let servers = servers_table(&mut document)?;
     if servers.contains_key(&record.name) {
         return Err(McpServerConfigurationStoreError::DuplicateName(
             record.name.clone(),
@@ -336,7 +348,7 @@ pub fn update_mcp_server_configuration(
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
     let mut document = read_document(path)?;
-    let servers = servers_table(&mut document);
+    let servers = servers_table(&mut document)?;
     if !servers.contains_key(name) {
         return Err(McpServerConfigurationStoreError::NotFound(name.to_string()));
     }
@@ -356,7 +368,7 @@ pub fn update_mcp_server_configuration(
 /// Returns whether a configuration was actually removed.
 pub fn delete_mcp_server_configuration(path: &Path, name: &str) -> ConfigurationResult<bool> {
     let mut document = read_document(path)?;
-    let servers = servers_table(&mut document);
+    let servers = servers_table(&mut document)?;
     if servers.remove(name).is_none() {
         return Ok(false);
     }
@@ -480,6 +492,33 @@ mod tests {
                     && headers["Authorization"] == "Bearer secret-token"
         ));
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn an_inline_mcp_servers_table_survives_a_save() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "mcp_servers = { existing = { transport = \"stdio\", command = \"npx\" } }\n",
+        )
+        .unwrap();
+
+        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
+
+        let names: Vec<String> = list_mcp_server_configurations(&path)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.name)
+            .collect();
+        assert_eq!(names, vec!["existing".to_string(), "example".to_string()]);
+
+        std::fs::write(&path, "mcp_servers = \"not a table\"\n").unwrap();
+        assert!(matches!(
+            insert_mcp_server_configuration(&path, http_server("example")).unwrap_err(),
+            McpServerConfigurationStoreError::InvalidInput(_)
+        ));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
