@@ -129,32 +129,56 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
 
 /// Post-S4 per-model extensions for Fireworks: provider docs show
 /// model-specific effort tiers that the uniform pre-S4 matrix did not
-/// capture. GPT-OSS and MiniMax models are reasoning-only (the API
-/// rejects `none`); DeepSeek V4 and GLM 5.2 support an `xhigh` tier
-/// (wire "max") above high. Unknown models and all other known models
-/// keep the pre-S4 uniform row (none/low/medium/high).
+/// capture. GPT-OSS and MiniMax M2P7 are reasoning-only (the API
+/// rejects `none`); DeepSeek V4 supports an `xhigh` tier (wire "max")
+/// above high; GLM 5.2 supports only `none`, `high`, and `max`; MiniMax
+/// M3 uses a 3-mode toggle mapped as `none` (disabled) and `max`
+/// (enabled). Unknown models and all other known models keep the
+/// pre-S4 uniform row (none/low/medium/high).
 fn fireworks_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
     // GPT-OSS models: reasoning-only, `none` is rejected by the API.
     let gpt_oss = pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-120b")
         || pre_s4_anthropic_family(model, "accounts/fireworks/models/gpt-oss-20b");
-    // MiniMax models: reasoning-only, `none` is rejected by the API.
-    let minimax = pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m2p7")
-        || pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m3");
+    // MiniMax M2P7: reasoning-only, `none` is rejected by the API.
+    let minimax_m2p7 = pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m2p7");
+    // MiniMax M3: 3-mode thinking toggle, mapped as `none` (disabled) and
+    // `max` (enabled).
+    let minimax_m3 = pre_s4_anthropic_family(model, "accounts/fireworks/models/minimax-m3");
     // DeepSeek V4 models: support `xhigh` (wire "max") above high.
     let deepseek_v4 =
         pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash")
             || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-flash-0731")
             || pre_s4_anthropic_family(model, "accounts/fireworks/models/deepseek-v4-pro");
-    // GLM 5.2 models (incl. fast router): support `xhigh` (wire "max").
+    // GLM 5.2 models (incl. fast router): native levels are `high` and
+    // `max`; `none` disables thinking.
     let glm = pre_s4_anthropic_family(model, "accounts/fireworks/models/glm-5p2")
         || pre_s4_anthropic_family(model, "accounts/fireworks/routers/glm-5p2-fast");
+    // Kimi K3 models (incl. fast router): thinking is always enabled
+    // (no `none`, no `medium`); supports `low`, `high`, and `max`.
+    let kimi_k3 = pre_s4_anthropic_family(model, "accounts/fireworks/models/kimi-k3")
+        || pre_s4_anthropic_family(model, "accounts/fireworks/routers/kimi-k3-fast");
 
-    if gpt_oss || minimax {
+    if kimi_k3 {
+        matches!(
+            effort,
+            ReasoningEffort::Low | ReasoningEffort::High | ReasoningEffort::Max
+        )
+    } else if glm {
+        matches!(
+            effort,
+            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Max
+        )
+    } else if minimax_m3 {
+        matches!(
+            effort,
+            ReasoningEffort::None | ReasoningEffort::Max
+        )
+    } else if gpt_oss || minimax_m2p7 {
         matches!(
             effort,
             ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
         )
-    } else if deepseek_v4 || glm {
+    } else if deepseek_v4 {
         matches!(
             effort,
             ReasoningEffort::None
@@ -177,23 +201,46 @@ fn fireworks_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
 }
 
 /// Post-S4 per-model extensions for Together: provider docs show
-/// model-specific effort tiers. GLM-5.2 and DeepSeek V4 Pro support
-/// `max` above high; non-reasoning models (Qwen2.5-7B, Qwen3.7-Max,
-/// Llama-3.3-70B) accept no explicit effort levels. Unknown models
-/// and all other known models keep the pre-S4 uniform row
-/// (none/low/medium/high).
+/// model-specific effort tiers. GLM-5.2 supports only `none`, `high`,
+/// and `max`; DeepSeek V4 Pro supports `max` above high; MiniMax M3
+/// uses a 3-mode toggle mapped as `none` (disabled) and `max` (enabled);
+/// non-reasoning models (Qwen2.5-7B, Qwen3.7-Max, Llama-3.3-70B) accept
+/// no explicit effort levels. Unknown models and all other known models
+/// keep the pre-S4 uniform row (none/low/medium/high).
 fn together_matrix_accepts(model: &str, effort: ReasoningEffort) -> bool {
     // Non-reasoning models: no explicit effort levels accepted.
     let non_reasoning = model == "Qwen/Qwen2.5-7B-Instruct-Turbo"
         || model == "Qwen/Qwen3.7-Max"
         || model == "meta-llama/Llama-3.3-70B-Instruct-Turbo";
-    // GLM-5.2 and DeepSeek V4 Pro: support `max` above high.
-    let max_tier = pre_s4_anthropic_family(model, "zai-org/GLM-5.2")
-        || pre_s4_anthropic_family(model, "deepseek-ai/DeepSeek-V4-Pro");
+    // GLM-5.2: native levels are `high` and `max`; `none` disables thinking.
+    let glm = pre_s4_anthropic_family(model, "zai-org/GLM-5.2");
+    // DeepSeek V4 Pro: support `max` above high.
+    let deepseek_v4_pro = pre_s4_anthropic_family(model, "deepseek-ai/DeepSeek-V4-Pro");
+    // MiniMax M3: 3-mode thinking toggle, mapped as `none` (disabled) and
+    // `max` (enabled).
+    let minimax_m3 = pre_s4_anthropic_family(model, "MiniMaxAI/MiniMax-M3");
+    // Kimi K3: thinking is always enabled (no `none`, no `medium`);
+    // supports `low`, `high`, and `max` effort tiers.
+    let kimi_k3 = pre_s4_anthropic_family(model, "moonshotai/Kimi-K3");
 
-    if non_reasoning {
+    if kimi_k3 {
+        matches!(
+            effort,
+            ReasoningEffort::Low | ReasoningEffort::High | ReasoningEffort::Max
+        )
+    } else if glm {
+        matches!(
+            effort,
+            ReasoningEffort::None | ReasoningEffort::High | ReasoningEffort::Max
+        )
+    } else if minimax_m3 {
+        matches!(
+            effort,
+            ReasoningEffort::None | ReasoningEffort::Max
+        )
+    } else if non_reasoning {
         false
-    } else if max_tier {
+    } else if deepseek_v4_pro {
         matches!(
             effort,
             ReasoningEffort::None

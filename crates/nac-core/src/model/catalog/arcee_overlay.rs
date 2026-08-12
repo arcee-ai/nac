@@ -404,18 +404,26 @@ fn parse_pricing_rate(value: Option<&str>) -> f64 {
 /// model, which rejects all `reasoning_effort` values).
 fn passthrough_effort_map(model_id: &str) -> Option<super::ThinkingLevelMap> {
     let entries: &[(ReasoningEffort, &str)] = match model_id {
-        "deepseek-ai/deepseek-v4-pro" | "deepseek/deepseek-v4-flash-latest" | "zai-org/glm-5.2" => &[
+        "deepseek-ai/deepseek-v4-pro" | "deepseek/deepseek-v4-flash-latest" => &[
             (ReasoningEffort::None, "none"),
             (ReasoningEffort::Low, "low"),
             (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
             (ReasoningEffort::Xhigh, "max"),
         ],
-        "moonshotai/kimi-k3" | "minimaxai/minimax-m3" => &[
+        "zai-org/glm-5.2" => &[
             (ReasoningEffort::None, "none"),
-            (ReasoningEffort::Low, "low"),
-            (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Max, "max"),
+        ],
+        "moonshotai/kimi-k3" => &[
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Max, "max"),
+        ],
+        "minimaxai/minimax-m3" => &[
+            (ReasoningEffort::None, "none"),
+            (ReasoningEffort::Max, "max"),
         ],
         _ => return None,
     };
