@@ -70,9 +70,9 @@ export function ResolvedRows({
   return (
     <>
       <ConfigRow
-        label="Provider"
+        label="Model Provider"
         required
-        hint="Which provider the session talks to, and how it authenticates."
+        hint="Service that provides the models for this session."
         control={
           <SmallSelect
             items={PROTOCOL_ITEMS}
@@ -87,7 +87,7 @@ export function ResolvedRows({
           <ConfigRow
             label="API Key"
             required
-            hint="Held by nac for this configuration; save a new setup to use a different key."
+            hint="Held by NAC for this configuration; save a new setup to use a different key."
             control={
               <Input
                 inputSize={InputSize.Medium}
@@ -111,7 +111,7 @@ export function ResolvedRows({
         <ConfigRow
           label="Default Model"
           invalid={failedListing}
-          hint="Model the session starts with; the key reaches all of these."
+          hint="The NAC session will start with this default and may switch to another."
           control={
             <SmallSelect
               items={failedListing ? [] : modelChoices}

@@ -78,7 +78,7 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
             loading={logout.isPending}
             onClick={() => void logout.mutateAsync(provider).catch(() => {})}
           >
-            Logout
+            Sign out
           </Button>
         )}
         {expired ? (
@@ -89,7 +89,7 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
             loading={state.status === "starting"}
             onClick={() => void start(provider)}
           >
-            <span>Login again</span>
+            <span>Sign in again</span>
             <Icon iconName={IconName.External} />
           </Button>
         ) : (
@@ -110,7 +110,7 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
         loading={state.status === "starting"}
         onClick={() => void start(provider)}
       >
-        <span>Login</span>
+        <span>Sign in</span>
         <Icon iconName={IconName.External} />
       </Button>
     );
@@ -119,7 +119,7 @@ export function AuthenticationRow({ backend }: { backend: BackendKind }) {
     <ConfigRow
       label="Authentication"
       invalid={failed || expired}
-      hint="Signs in through the browser; every session on this provider shares the login."
+      hint="Sign in through your model provider to stay authenticated across sessions."
       control={
         <div className="flex flex-col items-end gap-1">
           {control}

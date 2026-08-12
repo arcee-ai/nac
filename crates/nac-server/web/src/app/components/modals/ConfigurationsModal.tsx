@@ -498,9 +498,9 @@ function ConfigurationForm({
       >
         <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
           <ConfigRow
-            label="Provider"
+            label="Model Provider"
             required
-            hint="Which provider the session talks to, and how it authenticates."
+            hint="Service that provides the models for this session."
             control={
               <SmallSelect
                 items={PROVIDER_ITEMS}
@@ -537,7 +537,7 @@ function ConfigurationForm({
               verticalOnMobile
               hint={
                 record
-                  ? "Held by nac for this configuration; type a new key to replace it."
+                  ? "Held by NAC for this configuration; type a new key to replace it."
                   : "Stored in NAC under a generated name once the setup is saved."
               }
               control={
@@ -578,7 +578,7 @@ function ConfigurationForm({
           <ConfigRow
             label="Default Model"
             required
-            hint="Model sessions started from this setup begin with."
+            hint="Sessions started from this setup begin with this default and may switch to another."
             verticalOnMobile={models.length ? false : true}
             control={
               models.length ? (
@@ -601,8 +601,8 @@ function ConfigurationForm({
           />
           <Separator />
           <ConfigRow
-            label="Reasoning"
-            hint="Reasoning effort passed to the model."
+            label="Reasoning Effort"
+            hint="Higher effort for deeper reasoning and lower effort for faster responses."
             control={
               <SmallSelect
                 items={reasoningItems}
@@ -613,32 +613,37 @@ function ConfigurationForm({
           />
           <Separator />
           <ConfigRow
-            label="Orchestrator compaction threshold"
+            label="Context Limit"
             verticalOnMobile
             labelClassName="max-w-none"
-            hint="Context size that triggers compaction; 0 disables it."
+            hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
             control={
-              <Input
-                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                className="w-full md:w-[105px]"
-                inputClassName="text-right"
-                placeholder={compactionPlaceholder}
-                inputMode="numeric"
-                value={compaction}
-                onChange={(event) => {
-                  setError("");
-                  compactionAutoRef.current = false;
-                  compactionRef.current = event.target.value;
-                  setCompaction(event.target.value);
-                }}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  className="w-full md:w-[105px]"
+                  inputClassName="text-right"
+                  placeholder={compactionPlaceholder}
+                  inputMode="numeric"
+                  value={compaction}
+                  onChange={(event) => {
+                    setError("");
+                    compactionAutoRef.current = false;
+                    compactionRef.current = event.target.value;
+                    setCompaction(event.target.value);
+                  }}
+                />
+                <span className="shrink-0 text-micro text-basic-muted">
+                  tokens
+                </span>
+              </div>
             }
           />
           <Separator />
           <TextArea
             label="Extra headers (JSON object)"
             hintText="Blank sends none; header values must be strings."
-            placeholder='{"X-Title": "nac"}'
+            placeholder='{"X-Title": "NAC"}'
             value={headers}
             onChange={(event) => edit(setHeaders)(event.target.value)}
             textAreaClassName="h-[108px] resize-none"

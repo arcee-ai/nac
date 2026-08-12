@@ -1,10 +1,9 @@
 import { lazy, Suspense } from "react";
 
 import { cn } from "@/app/lib/cn";
+import { loadMarkdownRenderer } from "@/app/lib/markdownChunk";
 
-// The parser and the highlighter together outweigh the rest of the app, and
-// nothing outside the inspector renders markdown, so they load on demand.
-const MarkdownRenderer = lazy(() => import("./markdown-renderer"));
+const MarkdownRenderer = lazy(loadMarkdownRenderer);
 
 interface MarkdownProps {
   children: string;

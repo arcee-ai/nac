@@ -24,10 +24,7 @@ import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import {
-  RUN_CANCELLED_MARKER,
-  type ModelTurn,
-} from "@/app/lib/transcript";
+import { RUN_CANCELLED_MARKER, type ModelTurn } from "@/app/lib/transcript";
 import type { WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -80,7 +77,8 @@ interface ModelMessageProps {
   userText?: string;
   /**
    * Answer the preceding prompt again. Only the model turn that answered the
-   * latest user message gets this — older turns keep revert + copy only.
+   * newest user message gets this — older turns keep revert + copy only, and a
+   * newest prompt nothing answered keeps the action on its own bubble.
    */
   onRefresh?: ((messageIndex: number) => void) | null;
   /** Restore the session to the snapshot at the preceding prompt. */

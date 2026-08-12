@@ -1,9 +1,17 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 
 import { DeleteModal } from "@/app/components/modals/DeleteModal";
 import { LaunchModal } from "@/app/components/modals/LaunchModal";
 import { RenameModal } from "@/app/components/modals/RenameModal";
 import { SettingsModal } from "@/app/components/modals/SettingsModal";
+import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
+import { NEW_SESSION_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCancelRun, useTogglePin } from "@/app/services/queries";
 import { pushLocalEvent } from "@/app/store/runtimeStore";
@@ -76,6 +84,15 @@ export function SessionActionsProvider({
     [openModal, togglePin, cancelRun, toast],
   );
 
+  // Launching is the one action reachable from anywhere, so it is the one bound
+  // to a key; the rest all need a session picked out first.
+  useKeyboardShortcuts(
+    useMemo(
+      () => [{ keys: NEW_SESSION_KEYS, onTrigger: () => setModal("launch") }],
+      [],
+    ),
+  );
+
   const close = () => setModal(null);
 
   return (
@@ -84,7 +101,11 @@ export function SessionActionsProvider({
       <LaunchModal open={modal === "launch"} onClose={close} />
       <RenameModal open={modal === "rename"} onClose={close} summary={target} />
       <DeleteModal open={modal === "delete"} onClose={close} summary={target} />
-      <SettingsModal open={modal === "settings"} id={settingsId} onClose={close} />
+      <SettingsModal
+        open={modal === "settings"}
+        id={settingsId}
+        onClose={close}
+      />
     </SessionActionsContext.Provider>
   );
 }
@@ -92,7 +113,9 @@ export function SessionActionsProvider({
 export function useSessionActions(): SessionActions {
   const ctx = useContext(SessionActionsContext);
   if (!ctx) {
-    throw new Error("useSessionActions must be used within SessionActionsProvider");
+    throw new Error(
+      "useSessionActions must be used within SessionActionsProvider",
+    );
   }
   return ctx;
 }

@@ -136,8 +136,8 @@ function nestedMessage(value: unknown): string | null {
 /** Copy shared by the two ways a login stops working. */
 const SIGN_IN_AGAIN: HumanError = {
   title: "There was a problem with authentication",
-  description: "Please log back in to continue using the API.",
-  fix: { kind: "login", label: "Login again" },
+  description: "Please sign back in to continue using the API.",
+  fix: { kind: "login", label: "Sign in again" },
 };
 
 /**
@@ -205,8 +205,8 @@ export function humanError(
   if (has("arcee auth is not configured")) {
     return {
       title: "Not signed in to Arcee",
-      description: "Log in to continue using the API.",
-      fix: { kind: "login", label: "Login" },
+      description: "Sign in to continue using the API.",
+      fix: { kind: "login", label: "Sign in" },
     };
   }
   const keyRejected = has(

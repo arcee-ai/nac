@@ -2,7 +2,7 @@ use super::anthropic_stream::AnthropicStreamFold;
 use super::chat_stream::ChatStreamFold;
 use super::pseudo_tool_calls::finalize_chat_tool_recovery;
 use super::responses_stream::ResponsesStreamFold;
-use super::sse::{read_sse_response, StreamFold};
+use super::sse::{read_sse_response, with_source_chain, StreamFold};
 use super::*;
 use anyhow::Context;
 
@@ -189,7 +189,7 @@ async fn read_response_body(
     let status = response.status();
     response.text().await.map_err(|error| ModelHttpError {
         status: Some(status.as_u16()),
-        message: format!("Failed to read response body: {}", error),
+        message: format!("Failed to read response body: {}", with_source_chain(&error)),
     })
 }
 
@@ -764,7 +764,11 @@ impl ModelClient {
                 Err(e) => {
                     last_error = ModelHttpError {
                         status: None,
-                        message: format!("HTTP request failed for {}: {}", url, e),
+                        message: format!(
+                            "HTTP request failed for {}: {}",
+                            url,
+                            with_source_chain(&e)
+                        ),
                     };
                     if attempt < 9 {
                         sleep(super::backoff_duration(attempt)).await;

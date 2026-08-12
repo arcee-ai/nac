@@ -325,7 +325,7 @@ export default function DesignPreviewPage() {
           <div className="p-4 flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-4">
               <Avatar name="Aleksy" size={AvatarSize.Small} />
-              <Avatar name="Nac Orchestrator" />
+              <Avatar name="NAC Orchestrator" />
               <Avatar name="Opus" size={AvatarSize.Large} />
               <Avatar name="🛠" glyph size={AvatarSize.Large} />
               <Avatar

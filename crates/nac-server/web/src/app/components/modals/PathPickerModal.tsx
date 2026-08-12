@@ -111,8 +111,8 @@ function PathPicker({
           : kind === "file"
             ? "Select File"
             : ssh
-              ? `Select Working Directory on ${ssh.ssh_host}`
-              : "Select Working Directory")
+              ? `Select Working Folder on ${ssh.ssh_host}`
+              : "Select Working Folder")
       }
       size={ModalSize.Wide}
       flush

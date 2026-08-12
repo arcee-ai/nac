@@ -89,17 +89,27 @@ export function formatTokensCompact(n: number | null | undefined): string {
 }
 
 /**
- * Spend for the chat input bar. Anything that is not a positive amount reads
- * as "--": zero means the catalog has no rates for the model, so naming a
- * price would be a claim the backend never made.
+ * Spend wherever it is shown — the chat input bar and the session cards.
+ * Anything that is not a positive amount reads as "--": zero means the catalog
+ * has no rates for the model, so naming a price would be a claim the backend
+ * never made.
+ *
+ * A cent is the smallest figure worth printing, and a spend under one is
+ * reported as the bound it is under. Rounding it to "$0.00" would read as free,
+ * and spelling it out as "$0.00726" is more digits than a status bar can be
+ * read at a glance for — neither says what the number is actually good for,
+ * which is knowing the session has cost next to nothing so far.
+ *
+ * The space is non-breaking: the two halves say nothing apart, and the bar this
+ * sits in is tight enough to wrap them.
  */
 export function formatCostMicros(micros: number | null | undefined): string {
   if (micros == null) return "--";
   const value = Math.round(Number(micros));
   if (!Number.isFinite(value) || value <= 0) return "--";
   const dollars = value / 1_000_000;
-  if (dollars >= 0.01) return `$${dollars.toFixed(2)}`;
-  return `$${Number(dollars.toPrecision(3))}`;
+  if (dollars < 0.01) return "<\u00a0$0.01";
+  return `$${dollars.toFixed(2)}`;
 }
 
 /** Clock for a running session card: MM:SS, widening to H:MM:SS past an hour. */

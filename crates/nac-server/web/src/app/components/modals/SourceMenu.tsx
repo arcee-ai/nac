@@ -59,11 +59,7 @@ export function SourceMenu({
       <div className="flex flex-col shrink-0 [&>*]:shrink-0">
         <TabButton
           size={tabSize}
-          variant={
-            source === "catalog"
-              ? TabButtonVariant.Accent
-              : TabButtonVariant.Regular
-          }
+          variant={TabButtonVariant.Regular}
           active={source === "catalog"}
           onClick={() => pick({ kind: "catalog" })}
         >
@@ -72,11 +68,7 @@ export function SourceMenu({
         </TabButton>
         <TabButton
           size={tabSize}
-          variant={
-            source === "new"
-              ? TabButtonVariant.Accent
-              : TabButtonVariant.Regular
-          }
+          variant={TabButtonVariant.Regular}
           active={source === "new"}
           onClick={() => pick({ kind: "new" })}
         >
@@ -85,11 +77,7 @@ export function SourceMenu({
         </TabButton>
         <TabButton
           size={tabSize}
-          variant={
-            source === "file"
-              ? TabButtonVariant.Accent
-              : TabButtonVariant.Regular
-          }
+          variant={TabButtonVariant.Regular}
           active={source === "file"}
           onClick={() => pick({ kind: "file" })}
         >
@@ -105,11 +93,7 @@ export function SourceMenu({
               <div key={entry.id} className="flex items-center gap-1">
                 <TabButton
                   size={tabSize}
-                  variant={
-                    activeId === entry.id
-                      ? TabButtonVariant.Accent
-                      : TabButtonVariant.Regular
-                  }
+                  variant={TabButtonVariant.Regular}
                   active={activeId === entry.id}
                   className="flex-1 min-w-0"
                   onClick={() => pick({ kind: "saved", configId: entry.id })}

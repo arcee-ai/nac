@@ -1,6 +1,6 @@
 use super::auth_store::ensure_open_credential_file_is_safe;
 use super::responses_stream::ResponsesStreamFold;
-use super::sse::{read_sse_response, StreamFold, StreamFoldError};
+use super::sse::{read_sse_response, with_source_chain, StreamFold, StreamFoldError};
 use super::*;
 use anyhow::Context;
 use fs2::FileExt;
@@ -964,7 +964,7 @@ async fn post_codex_json_with_retry_delay(
             Err(e) => {
                 last_error = CodexRequestError {
                     status: None,
-                    message: format!("HTTP request failed for {url}: {e}"),
+                    message: format!("HTTP request failed for {url}: {}", with_source_chain(&e)),
                     retryable_stream: false,
                     observable_delta: false,
                 };

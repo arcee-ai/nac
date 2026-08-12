@@ -20,6 +20,7 @@ import {
   StickyButton,
   StickyInput,
   StickyInputVariant,
+  Tooltip,
 } from "@/app/atoms";
 import {
   SessionCard,
@@ -30,6 +31,7 @@ import { SessionsEmptyState } from "@/app/components/sessions/SessionsEmptyState
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
+import { NEW_SESSION_KEYS } from "@/app/lib/shortcuts";
 import {
   isNoOpMove,
   pinGroup,
@@ -233,11 +235,7 @@ export default function SessionsListPage() {
   }, []);
 
   const moveTo = useCallback(
-    async (
-      sessionId: string,
-      targetPinned: boolean,
-      targetIndex: number,
-    ) => {
+    async (sessionId: string, targetPinned: boolean, targetIndex: number) => {
       if (isNoOpMove(all, sessionId, targetPinned, targetIndex)) {
         clearDrag();
         return;
@@ -427,14 +425,20 @@ export default function SessionsListPage() {
   };
 
   const newButton = (
-    <Button
-      variant={ButtonVariant.Primary}
-      size={ButtonSize.Medium}
-      content={ButtonContent.IconLeft}
-      onClick={actions.launch}
+    <Tooltip
+      title="New session"
+      keyboardShortcuts={NEW_SESSION_KEYS}
+      position={Tooltip.Position.BottomLeft}
     >
-      <Icon iconName={IconName.Add} size={16} /> New
-    </Button>
+      <Button
+        variant={ButtonVariant.Primary}
+        size={ButtonSize.Medium}
+        content={ButtonContent.IconLeft}
+        onClick={actions.launch}
+      >
+        <Icon iconName={IconName.Add} size={16} /> New
+      </Button>
+    </Tooltip>
   );
 
   // Pinned under the bar rather than scrolling with the cards, so search and

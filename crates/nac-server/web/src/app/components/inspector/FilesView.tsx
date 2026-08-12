@@ -15,6 +15,7 @@ import {
 import { CommitPopover } from "@/app/components/inspector/CommitPopover";
 import {
   PanelEmpty,
+  PanelLoading,
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
@@ -709,7 +710,7 @@ export function FilesView({
     );
   }
   if (isLoading || !listing) {
-    return <PanelEmpty>Loading…</PanelEmpty>;
+    return <PanelLoading listTitle="Files" />;
   }
 
   return (
