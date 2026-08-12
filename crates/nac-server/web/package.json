@@ -14,6 +14,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
     "clsx": "^2.1.1",
+    "highlight.js": "^11.11.1",
     "lowlight": "^3.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
