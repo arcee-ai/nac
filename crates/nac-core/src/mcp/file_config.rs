@@ -76,9 +76,10 @@ impl From<anyhow::Error> for McpServerConfigurationStoreError {
 type ConfigurationResult<T> = std::result::Result<T, McpServerConfigurationStoreError>;
 
 /// The `config.toml` the dashboard edits: the same file every session parses
-/// when a worker launches.
-pub fn mcp_config_path() -> Option<PathBuf> {
-    crate::paths::nac_config_path()
+/// when a worker launches. Resolved through a `PathContext` so a relative
+/// `NAC_HOME`/`XDG_CONFIG_HOME` lands on the same file the registry reads.
+pub fn mcp_config_path(cwd: &Path) -> Option<PathBuf> {
+    crate::paths::PathContext::new(cwd).nac_config_path()
 }
 
 /// Longest accepted display name. Names are shown in a list, so a runaway
@@ -166,7 +167,9 @@ fn read_document(path: &Path) -> ConfigurationResult<DocumentMut> {
 }
 
 /// Writes through a sibling temp file and a rename, so a crash mid-write
-/// never leaves a truncated config behind.
+/// never leaves a truncated config behind. The existing file's permissions
+/// carry over to the temp file — header and env values may be secrets, so a
+/// user's `0600` must survive a dashboard save.
 fn write_document(path: &Path, document: &DocumentMut) -> ConfigurationResult<()> {
     let io_error = |error: std::io::Error| {
         McpServerConfigurationStoreError::Store(anyhow!(
@@ -179,6 +182,9 @@ fn write_document(path: &Path, document: &DocumentMut) -> ConfigurationResult<()
     }
     let temp = path.with_extension("toml.tmp");
     std::fs::write(&temp, document.to_string()).map_err(io_error)?;
+    if let Ok(metadata) = std::fs::metadata(path) {
+        std::fs::set_permissions(&temp, metadata.permissions()).map_err(io_error)?;
+    }
     std::fs::rename(&temp, path).map_err(io_error)?;
     Ok(())
 }
@@ -420,6 +426,23 @@ mod tests {
 
         assert!(delete_mcp_server_configuration(&path, "renamed").unwrap());
         assert!(list_mcp_server_configurations(&path).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_save_keeps_the_existing_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

@@ -165,8 +165,8 @@ fn view(record: McpServerConfigurationRecord) -> McpServerView {
     }
 }
 
-fn config_path() -> Result<PathBuf, ApiError> {
-    mcp::mcp_config_path().ok_or_else(|| {
+fn config_path(manager: &SessionManager) -> Result<PathBuf, ApiError> {
+    mcp::mcp_config_path(manager.root_cwd()).ok_or_else(|| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "no home directory to resolve config.toml under".to_string(),
@@ -281,8 +281,10 @@ async fn refresh_library_cache(
     entries
 }
 
-pub async fn list_servers_handler() -> Result<Json<McpServerList>, ApiError> {
-    let servers = mcp::list_mcp_server_configurations(&config_path()?)?
+pub async fn list_servers_handler(
+    State(manager): State<SessionManager>,
+) -> Result<Json<McpServerList>, ApiError> {
+    let servers = mcp::list_mcp_server_configurations(&config_path(&manager)?)?
         .into_iter()
         .map(view)
         .collect();
@@ -290,6 +292,7 @@ pub async fn list_servers_handler() -> Result<Json<McpServerList>, ApiError> {
 }
 
 pub async fn create_server_handler(
+    State(manager): State<SessionManager>,
     payload: Result<Json<CreateMcpServerRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<McpServerView>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
@@ -305,16 +308,17 @@ pub async fn create_server_handler(
         library_id: request.library_id,
     };
     let _write = CONFIG_WRITE.lock().await;
-    let record = mcp::insert_mcp_server_configuration(&config_path()?, configuration)?;
+    let record = mcp::insert_mcp_server_configuration(&config_path(&manager)?, configuration)?;
     Ok((StatusCode::CREATED, Json(view(record))))
 }
 
 pub async fn update_server_handler(
+    State(manager): State<SessionManager>,
     AxumPath(server_name): AxumPath<String>,
     payload: Result<Json<UpdateMcpServerRequest>, JsonRejection>,
 ) -> Result<Json<McpServerView>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    let path = config_path()?;
+    let path = config_path(&manager)?;
     let _write = CONFIG_WRITE.lock().await;
     let existing = mcp::load_mcp_server_configuration(&path, &server_name)?;
 
@@ -368,10 +372,11 @@ pub async fn update_server_handler(
 }
 
 pub async fn delete_server_handler(
+    State(manager): State<SessionManager>,
     AxumPath(server_name): AxumPath<String>,
 ) -> Result<StatusCode, ApiError> {
     let _write = CONFIG_WRITE.lock().await;
-    if !mcp::delete_mcp_server_configuration(&config_path()?, &server_name)? {
+    if !mcp::delete_mcp_server_configuration(&config_path(&manager)?, &server_name)? {
         return Err(McpServerConfigurationStoreError::NotFound(server_name).into());
     }
     Ok(StatusCode::NO_CONTENT)
@@ -385,7 +390,7 @@ pub async fn test_server_handler(
 
     let stored = match request.stored_name.as_deref() {
         Some(stored_name) => Some(mcp::load_mcp_server_configuration(
-            &config_path()?,
+            &config_path(&manager)?,
             stored_name,
         )?),
         None => None,
