@@ -442,7 +442,7 @@ fn validation_error_messages_are_preserved_verbatim() {
             BackendKind::DeepSeekChat,
             "model",
             ReasoningEffort::Minimal,
-            "invalid model configuration: reasoning effort 'minimal' is not supported by backend 'deepseek-chat'; supported values: none, low, high, or xhigh",
+            "invalid model configuration: reasoning effort 'minimal' is not supported by backend 'deepseek-chat'; supported values: none, low, high, or max",
         ),
         (
             BackendKind::FireworksChat,
