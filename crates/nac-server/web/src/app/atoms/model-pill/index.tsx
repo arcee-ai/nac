@@ -49,7 +49,7 @@ const ModelPill: React.FC<ModelPillProps> & { Size: typeof ModelPillSize } = ({
     {!active ? (
       <div
         aria-hidden
-        className="absolute inset-0 rounded-full bg-gradient-to-b from-[var(--color-fill-basic-muted)] to-transparent [html.light_&]:bg-gradient-to-t"
+        className="absolute inset-0 rounded-full bg-gradient-to-b from-[var(--color-fill-basic-muted)] to-transparent"
       />
     ) : null}
     <Icon
