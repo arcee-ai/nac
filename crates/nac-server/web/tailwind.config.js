@@ -4,14 +4,6 @@ const config = {
   theme: {
     extend: {
       keyframes: {
-        "spin-reverse": {
-          "0%": { transform: "rotate(0deg)" },
-          "100%": { transform: "rotate(-360deg)" },
-        },
-        "spin-reverse-slow": {
-          "0%": { transform: "rotate(0deg)" },
-          "100%": { transform: "rotate(-360deg)" },
-        },
         progress: {
           "0%": { transform: "translateX(-100%)" },
           "100%": { transform: "translateX(100%)" },
@@ -20,39 +12,10 @@ const config = {
           "0%": { backgroundPosition: "200% 0" },
           "100%": { backgroundPosition: "-200% 0" },
         },
-        "text-shimmer": {
-          "0%": {
-            backgroundPosition: "200% 0",
-          },
-          "100%": {
-            backgroundPosition: "-200% 0",
-          },
-        },
-        "loader-gradient-move": {
-          "0%": { backgroundPosition: "200% 0%" },
-          "100%": { backgroundPosition: "0% 0%" },
-        },
-        "pulse-opacity": {
-          "0%": { opacity: "0" },
-          "50%": { opacity: "1" },
-          "100%": { opacity: "0" },
-        },
       },
       animation: {
-        "spin-reverse": "spin-reverse 1s linear infinite",
-        "spin-slow": "spin 1.5s linear infinite",
-        "spin-reverse-slow": "spin-reverse-slow 1.5s linear infinite",
         progress: "progress 1.5s ease-in-out infinite",
         shimmer: "shimmer 2s linear infinite",
-        "text-shimmer": "text-shimmer 2s linear infinite",
-        "loader-gradient-move": "loader-gradient-move 2s linear infinite",
-        "pulse-opacity": "pulse-opacity 1s ease-in-out infinite",
-      },
-      backgroundImage: {
-        "text-shimmer":
-          "linear-gradient(90deg, var(--color-text-accent-primary), var(--color-text-accent-tertiary), var(--color-text-accent-primary))",
-        "text-shimmer-dark":
-          "linear-gradient(90deg, var(--color-text-accent-primary), var(--color-text-accent-tertiary), var(--color-text-accent-primary))",
       },
       backgroundColor: {
         "accent-primary": "var(--color-bg-accent-primary)",
