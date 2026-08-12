@@ -94,10 +94,6 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
     })
 }
 
-pub fn expand_user_prompt(prompt: &str) -> String {
-    prompt.to_string()
-}
-
 pub fn display_prompt_from_message(content: &str) -> String {
     workset_command_display_prompt(content).unwrap_or_else(|| content.to_string())
 }
@@ -148,7 +144,6 @@ mod tests {
                 message: "usage: /compact".to_string(),
             }
         );
-        assert_eq!(expand_user_prompt("/compact"), "/compact");
     }
 
     #[test]

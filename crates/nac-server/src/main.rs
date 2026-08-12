@@ -574,7 +574,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         None if cli.ssh_host.is_some() => launch_cwd.clone(),
         None => workspace_cwd.clone(),
     };
-    let config = load_managed_worker_runtime_config(&config_cwd)?;
+    let config = runtime::NacConfig::load_without_model_from_cwd(&config_cwd)?;
     let options = ManagedWorkerOptions {
         workspace_cwd,
         config_cwd: Some(config_cwd),
@@ -708,10 +708,6 @@ async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
     .await
 }
 
-fn load_managed_worker_runtime_config(config_cwd: &std::path::Path) -> Result<runtime::NacConfig> {
-    runtime::NacConfig::load_without_model_from_cwd(config_cwd)
-}
-
 fn resolve_cli_cwd(
     launch_cwd: &std::path::Path,
     directory: Option<&std::path::Path>,
@@ -761,7 +757,7 @@ thread_timeout_secs = 7200
             std::env::set_var("NAC_HOME", &root);
         }
 
-        let config = load_managed_worker_runtime_config(&root).unwrap();
+        let config = runtime::NacConfig::load_without_model_from_cwd(&root).unwrap();
         assert_eq!(
             config.storage.store_path.as_deref(),
             Some(std::path::Path::new("worker-store.db"))
