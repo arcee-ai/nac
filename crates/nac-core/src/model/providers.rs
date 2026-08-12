@@ -60,19 +60,19 @@ pub struct ProviderModel {
 /// rather than at the OpenAI-shaped path; every other supported provider
 /// speaks the OpenAI shape where the base URL already includes any version
 /// segment.
-fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
+fn models_url(backend: BackendKind, base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     match backend {
-        BackendKind::AnthropicMessages => Some(format!("{trimmed}/v1/models")),
-        BackendKind::ChatGptCodexResponses => Some(format!(
+        BackendKind::AnthropicMessages => format!("{trimmed}/v1/models"),
+        BackendKind::ChatGptCodexResponses => format!(
             "{trimmed}/codex/models?client_version={CODEX_MODEL_INDEX_CLIENT_VERSION}"
-        )),
+        ),
         BackendKind::OpenAiResponses
         | BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
         | BackendKind::ArceeApi
-        | BackendKind::ArceeAuth => Some(format!("{trimmed}/models")),
+        | BackendKind::ArceeAuth => format!("{trimmed}/models"),
     }
 }
 
@@ -86,7 +86,7 @@ fn model_index_url(backend: BackendKind, base_url: &str) -> Result<String> {
     if matches!(backend, BackendKind::ArceeApi | BackendKind::ArceeAuth) {
         return Ok(arcee::models_url(base_url)?.to_string());
     }
-    models_url(backend, base_url).ok_or_else(|| anyhow!("backend '{backend}' has no model index"))
+    Ok(models_url(backend, base_url))
 }
 
 fn model_from_value(value: &Value) -> Option<ProviderModel> {
@@ -303,8 +303,9 @@ mod tests {
                 "{backend} is classified inconsistently"
             );
             let base_url = provider_default_base_url(backend).expect("default base URL");
+            let url = models_url(backend, base_url);
             assert!(
-                models_url(backend, base_url).is_some(),
+                url.ends_with("models") || url.contains("models?"),
                 "{backend} has no model index"
             );
         }
@@ -314,16 +315,16 @@ mod tests {
     fn model_index_follows_each_provider_rest_shape() {
         assert_eq!(
             models_url(BackendKind::AnthropicMessages, "https://api.anthropic.com"),
-            Some("https://api.anthropic.com/v1/models".to_string())
+            "https://api.anthropic.com/v1/models"
         );
         assert_eq!(
             models_url(BackendKind::OpenAiResponses, "https://api.openai.com/v1"),
-            Some("https://api.openai.com/v1/models".to_string())
+            "https://api.openai.com/v1/models"
         );
         // A pasted URL often carries a trailing slash; it must not double up.
         assert_eq!(
             models_url(BackendKind::TogetherChat, "https://api.together.xyz/v1/"),
-            Some("https://api.together.xyz/v1/models".to_string())
+            "https://api.together.xyz/v1/models"
         );
         // Codex keeps its index off the OpenAI-shaped path, and hides every
         // model unless the request says which client version is asking.
@@ -332,9 +333,9 @@ mod tests {
                 BackendKind::ChatGptCodexResponses,
                 "https://chatgpt.com/backend-api"
             ),
-            Some(format!(
+            format!(
                 "https://chatgpt.com/backend-api/codex/models?client_version={CODEX_MODEL_INDEX_CLIENT_VERSION}"
-            ))
+            )
         );
     }
 

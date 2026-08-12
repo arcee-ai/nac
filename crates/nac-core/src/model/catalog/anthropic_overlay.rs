@@ -296,11 +296,7 @@ fn map_anthropic_api_response(body: &str) -> Result<Vec<AnthropicOverlayEntry>, 
     let mut entries = Vec::new();
     for item in items {
         match serde_json::from_value::<AnthropicApiModel>(item.clone()) {
-            Ok(model) => {
-                if let Some(entry) = map_anthropic_model(&model) {
-                    entries.push(entry);
-                }
-            }
+            Ok(model) => entries.push(map_anthropic_model(&model)),
             Err(error) => {
                 eprintln!(
                     "nac: model catalog: skipping anthropic model entry: {error}"
@@ -315,10 +311,12 @@ fn map_anthropic_api_response(body: &str) -> Result<Vec<AnthropicOverlayEntry>, 
     Ok(entries)
 }
 
-/// Map a single Anthropic API model to an overlay entry. Returns `None` when
-/// the model has no capabilities worth overlaying (e.g. a model with no
-/// effort support and no thinking — the baseline already has the right data).
-fn map_anthropic_model(model: &AnthropicApiModel) -> Option<AnthropicOverlayEntry> {
+/// Map a single Anthropic API model to an overlay entry.
+///
+/// Every deserialized model contributes an entry: even without advertised
+/// capabilities, its identity and optional token limits can refresh the
+/// baseline while conservative capability defaults preserve existing behavior.
+fn map_anthropic_model(model: &AnthropicApiModel) -> AnthropicOverlayEntry {
     let caps = model.capabilities.as_ref();
 
     // Thinking support.
@@ -379,7 +377,7 @@ fn map_anthropic_model(model: &AnthropicApiModel) -> Option<AnthropicOverlayEntr
         .filter(|&m| m > 0)
         .map(|m| m.min(context_window.unwrap_or(u64::MAX)));
 
-    Some(AnthropicOverlayEntry {
+    AnthropicOverlayEntry {
         id: model.id.clone(),
         display_name: model.display_name.clone(),
         context_window,
@@ -390,7 +388,7 @@ fn map_anthropic_model(model: &AnthropicApiModel) -> Option<AnthropicOverlayEntr
         enabled_thinking,
         context_management,
         clear_thinking,
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -558,4 +556,26 @@ pub fn spawn_anthropic_model_refresh() {
             | AnthropicRefreshOutcome::SkippedNoCredential => {}
         }
     });
+}
+
+#[cfg(test)]
+mod mapping_tests {
+    use super::*;
+
+    #[test]
+    fn models_without_capabilities_still_map() {
+        let entries = map_anthropic_api_response(
+            r#"{"data":[{"id":"claude-future","display_name":"Claude Future"}]}"#,
+        )
+        .expect("model maps");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "claude-future");
+        assert_eq!(entries[0].display_name.as_deref(), Some("Claude Future"));
+        assert!(!entries[0].reasoning);
+        assert_eq!(
+            entries[0].thinking_level_map.0,
+            BTreeMap::from([(ReasoningEffort::None, Some("none".to_string()))])
+        );
+    }
 }
