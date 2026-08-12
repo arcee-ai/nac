@@ -32,7 +32,6 @@
     "@locator/babel-jsx": "^0.5.1",
     "@locator/runtime": "^0.5.1",
     "@tailwindcss/vite": "^4.3.3",
-    "@tanstack/react-query-devtools": "^5.101.4",
     "@testing-library/react": "^16.3.2",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^26.1.2",
