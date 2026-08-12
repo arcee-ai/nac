@@ -7,6 +7,7 @@ use anyhow::Context;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CLIENT_ID: &str = "nac-cli";
@@ -511,7 +512,11 @@ pub(super) fn arcee_auth_status() -> Result<()> {
         println!("base_url: {}", snapshot.base_url.unwrap_or_default());
         println!(
             "access token: {}",
-            expiry_status(snapshot.expires_at_ms.unwrap_or_default())
+            format_expiry_at(
+                snapshot.expires_at_ms.unwrap_or_default(),
+                now_ms(),
+                "valid for"
+            )
         );
     } else {
         println!("Arcee auth: not signed in");
@@ -768,7 +773,7 @@ async fn request_token_refresh(
         _ => Err(anyhow!(
             "Arcee token refresh failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate_diagnostic(&body)
         )),
     }
 }
@@ -893,7 +898,7 @@ async fn request_device_code(client: &Client, service: &ArceeAuthService) -> Res
         return Err(anyhow!(
             "Arcee device-code request failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate_diagnostic(&body)
         ));
     }
 
@@ -1009,7 +1014,7 @@ where
                 return Err(anyhow!(
                     "Arcee device authorization failed with HTTP {}: {}",
                     status.as_u16(),
-                    truncate(&body)
+                    truncate_diagnostic(&body)
                 ))
             }
         }
@@ -1032,32 +1037,8 @@ fn string_field(value: &Value, key: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("Arcee device-code response did not include {key}"))
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
-}
-
-fn expiry_status(expires_at_ms: u64) -> String {
-    let now = now_ms();
-    if expires_at_ms <= now {
-        let seconds = now.saturating_sub(expires_at_ms) / 1000;
-        format!("expired {seconds}s ago")
-    } else {
-        let seconds = expires_at_ms.saturating_sub(now) / 1000;
-        format!("valid for {seconds}s")
-    }
-}
-
 fn user_agent() -> String {
     format!("nac/{}", env!("CARGO_PKG_VERSION"))
-}
-
-fn truncate(value: &str) -> String {
-    value.chars().take(500).collect()
 }
 
 fn arcee_redirect_error(
@@ -1068,13 +1049,13 @@ fn arcee_redirect_error(
     body: &str,
 ) -> anyhow::Error {
     let location = location
-        .map(|value| format!(" Location: {}.", truncate(value)))
+        .map(|value| format!(" Location: {}.", truncate_diagnostic(value)))
         .unwrap_or_default();
     anyhow!(
         "Arcee {action} received HTTP {} redirect from {url}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
         status.as_u16(),
         location,
-        truncate(body)
+        truncate_diagnostic(body)
     )
 }
 

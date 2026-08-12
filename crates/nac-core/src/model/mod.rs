@@ -16,6 +16,29 @@ fn backoff_duration(attempt: usize) -> Duration {
     Duration::from_millis((delay_ms as f64 * jitter) as u64)
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn format_expiry_at(expires_at_ms: u64, now_ms: u64, active_prefix: &str) -> String {
+    if expires_at_ms <= now_ms {
+        let seconds = now_ms.saturating_sub(expires_at_ms) / 1000;
+        format!("expired {seconds}s ago")
+    } else {
+        let seconds = expires_at_ms.saturating_sub(now_ms) / 1000;
+        format!("{active_prefix} {seconds}s")
+    }
+}
+
+fn truncate_diagnostic(value: &str) -> String {
+    value.chars().take(500).collect()
+}
+
 fn retryable_http_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 408 | 409 | 429) || status.is_server_error()
 }

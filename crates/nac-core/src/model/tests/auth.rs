@@ -517,3 +517,33 @@ fn codex_status_and_logout_ignore_legacy_shaped_arcee_auth_json() {
     assert_eq!(std::fs::read(&auth_path).unwrap(), before);
     assert!(!canonical_path.exists());
 }
+
+#[test]
+fn managed_auth_expiry_formatting_preserves_boundaries_and_prefixes() {
+    assert_eq!(format_expiry_at(1_000, 1_000, "in"), "expired 0s ago");
+    assert_eq!(format_expiry_at(999, 1_000, "in"), "expired 0s ago");
+    assert_eq!(format_expiry_at(0, 2_999, "in"), "expired 2s ago");
+    assert_eq!(format_expiry_at(3_999, 1_000, "in"), "in 2s");
+    assert_eq!(format_expiry_at(3_999, 1_000, "valid for"), "valid for 2s");
+    assert_eq!(
+        format_expiry_at(0, u64::MAX, "in"),
+        format!("expired {}s ago", u64::MAX / 1_000)
+    );
+}
+
+#[test]
+fn managed_auth_diagnostic_truncation_has_a_500_character_boundary() {
+    let exactly_500 = "x".repeat(500);
+    assert_eq!(truncate_diagnostic(&exactly_500), exactly_500);
+
+    let over_limit = format!("{}y", "x".repeat(500));
+    assert_eq!(truncate_diagnostic(&over_limit), "x".repeat(500));
+}
+
+#[test]
+fn managed_auth_diagnostic_truncation_counts_unicode_characters() {
+    let over_limit = format!("{}tail", "🦀".repeat(500));
+    let truncated = truncate_diagnostic(&over_limit);
+    assert_eq!(truncated, "🦀".repeat(500));
+    assert_eq!(truncated.chars().count(), 500);
+}

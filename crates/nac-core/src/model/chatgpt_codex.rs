@@ -15,7 +15,6 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::form_urlencoded;
@@ -417,7 +416,7 @@ pub fn codex_auth_status() -> Result<()> {
         println!("account: {}", snapshot.account.unwrap_or_default());
         println!(
             "expires: {}",
-            expiry_status(snapshot.expires_at_ms.unwrap_or_default())
+            format_expiry_at(snapshot.expires_at_ms.unwrap_or_default(), now_ms(), "in")
         );
     } else {
         println!("Codex auth: not signed in");
@@ -489,7 +488,7 @@ async fn request_device_code(client: &Client) -> Result<DeviceCode> {
         return Err(anyhow!(
             "Codex device-code request failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate_diagnostic(&body)
         ));
     }
 
@@ -702,7 +701,7 @@ async fn poll_device_code(client: &Client, device: &DeviceCode) -> Result<Author
             return Err(anyhow!(
                 "Codex device authorization failed with HTTP {}: {}",
                 status.as_u16(),
-                truncate(&body)
+                truncate_diagnostic(&body)
             ));
         }
 
@@ -767,7 +766,7 @@ async fn parse_token_response(response: reqwest::Response, label: &str) -> Resul
         return Err(anyhow!(
             "{label} failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate_diagnostic(&body)
         ));
     }
     serde_json::from_str(&body).with_context(|| format!("failed to parse {label} response"))
@@ -1018,7 +1017,7 @@ async fn post_codex_json_with_retry_delay(
             message: format!(
                 "HTTP {} from {url}: {}",
                 status.as_u16(),
-                truncate(&response_body)
+                truncate_diagnostic(&response_body)
             ),
             retryable_stream: false,
             observable_delta: false,
@@ -1092,7 +1091,7 @@ fn parse_codex_success_body(
             status: Some(status),
             message: format!(
                 "Failed to parse SSE response from {url}: {error}\nBody: {}",
-                truncate(response_body)
+                truncate_diagnostic(response_body)
             ),
             retryable_stream: error.is_retryable(),
             observable_delta: false,
@@ -1103,7 +1102,7 @@ fn parse_codex_success_body(
         status: Some(status),
         message: format!(
             "Failed to parse response from {url}: {error}\nBody: {}",
-            truncate(response_body)
+            truncate_diagnostic(response_body)
         ),
         retryable_stream: false,
         observable_delta: false,
@@ -1324,32 +1323,8 @@ fn interval_secs(value: Option<&Value>) -> Option<u64> {
     }
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
-}
-
-fn expiry_status(expires_at_ms: u64) -> String {
-    let now = now_ms();
-    if expires_at_ms <= now {
-        let seconds = now.saturating_sub(expires_at_ms) / 1000;
-        format!("expired {seconds}s ago")
-    } else {
-        let seconds = expires_at_ms.saturating_sub(now) / 1000;
-        format!("in {}s", seconds)
-    }
-}
-
 fn codex_user_agent() -> String {
     format!("nac/{}", env!("CARGO_PKG_VERSION"))
-}
-
-fn truncate(value: &str) -> String {
-    value.chars().take(500).collect()
 }
 
 #[cfg(test)]
