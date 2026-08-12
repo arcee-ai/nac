@@ -360,7 +360,13 @@ impl super::Agent {
             .as_mut()
             .expect("compaction state exists after activation")
             .prepare(&self.messages, &self.tool_defs);
-        (prepared, Ok(CompactionResult::Compacted { compaction_id, projected_context: projected }))
+        (
+            prepared,
+            Ok(CompactionResult::Compacted {
+                compaction_id,
+                projected_context: projected,
+            }),
+        )
     }
 
     fn account_summary_usage(

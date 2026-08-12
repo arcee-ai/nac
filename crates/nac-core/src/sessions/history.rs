@@ -91,12 +91,11 @@ impl HistorySessionRow {
             });
         }
         let workspace = match self.sandbox_json.as_deref() {
-            Some(json) => {
-                let spec = deserialize_sandbox(Some(json.to_string()))?
-                    .context("stored sandbox session had no sandbox specification")?;
-                crate::sandbox::host_workdir_from_spec(&spec)
-                    .context("stored sandbox workdir does not map to a host mount")?
-            }
+            Some(json) => match deserialize_sandbox(Some(json.to_string()))? {
+                Some(spec) => crate::sandbox::host_workdir_from_spec(&spec)
+                    .context("stored sandbox workdir does not map to a host mount")?,
+                None => cwd,
+            },
             None => cwd,
         };
         Ok(WorkspaceKey::Local(workspace))
@@ -491,6 +490,39 @@ mod tests {
                 .unwrap()
                 .orchestrator_message_count,
             0
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn unavailable_sandbox_backend_falls_back_to_cwd_for_workspace_identity() {
+        let path = temp_store("unavailable_backend");
+        crate::store::initialize(&path).unwrap();
+        insert_session(&path, "current", "/workspace/a", "2026-01-03T00:00:00Z");
+        insert_session(&path, "same", "/workspace/a", "2026-01-02T00:00:00Z");
+        let conn = crate::store::open_runtime_connection(&path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET sandbox_json = ?1",
+            params![
+                r#"{
+                "backend": "removed",
+                "image": "unused",
+                "workdir": "/workspace",
+                "mounts": []
+            }"#
+            ],
+        )
+        .unwrap();
+
+        let workspace =
+            list_history_sessions(&path, "current", HistoryNamespace::Workspace, None, 10).unwrap();
+        assert_eq!(
+            workspace
+                .sessions
+                .iter()
+                .map(|session| session.session_id.as_str())
+                .collect::<Vec<_>>(),
+            ["current", "same"]
         );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

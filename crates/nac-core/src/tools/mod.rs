@@ -369,6 +369,7 @@ pub struct ToolRuntime {
     pub config_cwd: PathBuf,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
+    pub session_history_enabled: bool,
     pub worker_executable: Option<PathBuf>,
     pub active_threads: Arc<ActiveThreadRegistry>,
     pub event_sink: EventSink,
@@ -736,6 +737,12 @@ pub async fn execute_tool(
         };
         return registry.call_tool(name, args).await;
     }
+    if matches!(name, "session_list" | "session_open") && !runtime.session_history_enabled {
+        return ToolResult {
+            content: "Error: session history tools are only available to workers".to_string(),
+            is_error: true,
+        };
+    }
 
     match name {
         "read" => read::execute(args, runtime).await,
@@ -781,7 +788,7 @@ pub async fn execute_tool(
 
 #[cfg(test)]
 mod discovery_tool_definition_tests {
-    use super::worker_tool_definitions;
+    use super::*;
 
     #[test]
     fn every_worker_receives_complete_glob_and_grep_definitions_once() {
@@ -830,6 +837,24 @@ mod discovery_tool_definition_tests {
             );
         }
     }
+    #[tokio::test]
+    async fn session_history_dispatch_rejects_orchestrator_runtime() {
+        let mut runtime = test_runtime();
+        runtime.session_history_enabled = false;
+        let result = execute_tool(
+            "session_open",
+            serde_json::json!({}),
+            &runtime,
+            &crate::model::ModelClient::new_for_test(),
+        )
+        .await;
+
+        assert!(result.is_error);
+        assert_eq!(
+            result.content,
+            "Error: session history tools are only available to workers"
+        );
+    }
 }
 
 // ------------------------------------------------------------------
@@ -848,6 +873,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         workspace_cwd,
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
+        session_history_enabled: true,
         worker_executable: None,
         active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
         event_sink: EventSink::none(),

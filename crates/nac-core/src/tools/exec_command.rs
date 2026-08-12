@@ -213,6 +213,7 @@ mod tests {
             workspace_cwd,
             store_path: PathBuf::new(),
             session_id: None,
+            session_history_enabled: true,
             worker_executable: None,
             active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
             event_sink: EventSink::none(),

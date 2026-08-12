@@ -64,7 +64,9 @@ pub(crate) struct HistoryEventPage {
 struct RawEventRow {
     id: i64,
     thread_name: String,
-    event_json: String,
+    event_json: Option<String>,
+    payload_chars: i64,
+    payload_syntax_valid: bool,
     created_at: String,
 }
 
@@ -180,24 +182,51 @@ fn query_event_rows(
         HistoryEventStream::Thread { .. } => " AND thread_name = ?4 AND ?6 >= 0",
     };
     let sql = format!(
-        "SELECT id, thread_name,
-                length(CAST(event_json AS BLOB)),
-                CASE WHEN length(CAST(event_json AS BLOB)) <= ?3 THEN event_json ELSE NULL END,
-                created_at
-         FROM thread_events
-         WHERE session_id = ?1
-           AND (?2 IS NULL OR id < ?2)
-           AND (
+        "WITH candidates AS (
+             SELECT id,
+                    thread_name,
+                    event_json,
+                    created_at,
+                    CASE
+                        WHEN thread_name = ?8
+                         AND json_valid(event_json) != 0
+                         AND json_type(
+                             event_json,
+                             '$.nac_transcript_message.message'
+                         ) IS 'text'
+                        THEN json_extract(
+                            event_json,
+                            '$.nac_transcript_message.message'
+                        )
+                        ELSE event_json
+                    END AS payload
+             FROM thread_events
+             WHERE session_id = ?1
+               AND (?2 IS NULL OR id < ?2)
+         )
+         SELECT id,
+                thread_name,
+                CASE WHEN length(CAST(event_json AS BLOB)) <= ?3
+                     THEN event_json
+                     ELSE NULL
+                END,
+                created_at,
+                length(payload),
+                json_valid(event_json) != 0
+         FROM candidates
+         WHERE (
                ?7 IS NULL
                OR CASE
-                   WHEN thread_name != ?8 THEN instr(event_json, ?7) > 0
-                   WHEN json_valid(event_json) = 0 THEN 1
-                   WHEN json_type(event_json, '$.nac_transcript_message.message') IS NOT 'text'
+                   WHEN thread_name = ?8
+                    AND (
+                        json_valid(event_json) = 0
+                        OR json_type(
+                            event_json,
+                            '$.nac_transcript_message.message'
+                        ) IS NOT 'text'
+                    )
                        THEN 1
-                   ELSE instr(
-                       json_extract(event_json, '$.nac_transcript_message.message'),
-                       ?7
-                   ) > 0
+                   ELSE instr(payload, ?7) > 0
                END
            )
            {stream_predicate}
@@ -218,24 +247,16 @@ fn query_event_rows(
             i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX),
             i64::try_from(snapshot_len).unwrap_or(i64::MAX),
             contains,
-            ORCHESTRATOR_STEERING_TARGET
+            ORCHESTRATOR_STEERING_TARGET,
         ],
         |row| {
-            let id = row.get::<_, i64>(0)?;
-            let byte_len = row.get::<_, i64>(2)?;
-            let event_json = row.get::<_, Option<String>>(3)?.ok_or_else(|| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    3,
-                    rusqlite::types::Type::Text,
-                    format!("history event row {id} is {byte_len} bytes (max {MAX_EVENT_BYTES})")
-                        .into(),
-                )
-            })?;
             Ok(RawEventRow {
-                id,
+                id: row.get(0)?,
                 thread_name: row.get(1)?,
-                event_json,
-                created_at: row.get(4)?,
+                event_json: row.get(2)?,
+                created_at: row.get(3)?,
+                payload_chars: row.get(4)?,
+                payload_syntax_valid: row.get(5)?,
             })
         },
     )?;
@@ -252,8 +273,43 @@ fn normalize_event_row(
     row: RawEventRow,
     contains: Option<&str>,
 ) -> Result<HistoryEventRecord> {
+    if !row.payload_syntax_valid {
+        let kind = if row.thread_name == ORCHESTRATOR_STEERING_TARGET {
+            "transcript"
+        } else {
+            "worker"
+        };
+        return Err(anyhow!(
+            "corrupt_history: thread_events row {} contains syntactically invalid {kind} JSON",
+            row.id
+        ));
+    }
+    if row.event_json.is_none() {
+        let payload_chars = usize::try_from(row.payload_chars)
+            .context("oversized history payload length was negative or overflowed")?;
+        let stream = if row.thread_name == ORCHESTRATOR_STEERING_TARGET {
+            HistoryEventStreamRef::Orchestrator
+        } else {
+            HistoryEventStreamRef::Thread {
+                thread_name: row.thread_name.clone(),
+            }
+        };
+        return Ok(HistoryEventRecord {
+            source: HistoryEventSource::ThreadEvent,
+            source_id: row.id,
+            session_id: session_id.to_string(),
+            stream,
+            event_type: "oversized_unparsed_event".to_string(),
+            created_at: Some(row.created_at),
+            payload_json: String::new(),
+            payload_start_char: 0,
+            payload_chars,
+            payload_truncated: true,
+        });
+    }
+    let event_json = row.event_json.as_deref().expect("checked above");
     if row.thread_name == ORCHESTRATOR_STEERING_TARGET {
-        let entry = decode_transcript_log_entry(&row.event_json).ok_or_else(|| {
+        let entry = decode_transcript_log_entry(event_json).ok_or_else(|| {
             anyhow!(
                 "corrupt_history: thread_events row {} under '{}' is not a transcript message",
                 row.id,
@@ -277,7 +333,7 @@ fn normalize_event_row(
         return Ok(record);
     }
 
-    let event: AgentEvent = serde_json::from_str(&row.event_json).with_context(|| {
+    let event: AgentEvent = serde_json::from_str(event_json).with_context(|| {
         format!(
             "corrupt_history: thread_events row {} contains an invalid worker event",
             row.id
@@ -732,6 +788,233 @@ mod tests {
         assert_eq!(chars, payload.chars().count());
         assert!(start > 0);
         assert!(truncated);
+    }
+
+    #[test]
+    fn oversized_worker_event_returns_marker_and_preserves_pagination() {
+        let path = temp_store("oversized_worker_event");
+        crate::store::initialize(&path).unwrap();
+        insert_snapshot(&path, "session-a", &[]);
+        let thread_name = "worker-a";
+        for message in [
+            "needle in older event".to_string(),
+            format!(
+                "{}needle in oversized event",
+                "x".repeat(MAX_EVENT_BYTES as usize)
+            ),
+            "newest event".to_string(),
+        ] {
+            crate::store::append_thread_event(
+                &path,
+                "session-a",
+                thread_name,
+                &serde_json::to_string(&AgentEvent::Error {
+                    thread_name: Some(thread_name.to_string()),
+                    message,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let stream = HistoryEventStream::Thread {
+            thread_name: thread_name.to_string(),
+        };
+
+        let newest = load_session_history_events(
+            &path,
+            "session-a",
+            &stream,
+            None,
+            HistoryEventPhase::Events { before_id: None },
+            1,
+        )
+        .unwrap();
+        assert_eq!(newest.events[0].event_type, "error");
+        let oversized = load_session_history_events(
+            &path,
+            "session-a",
+            &stream,
+            None,
+            newest.next_phase.unwrap(),
+            1,
+        )
+        .unwrap();
+        assert_eq!(oversized.events[0].event_type, "oversized_unparsed_event");
+        assert!(oversized.events[0].payload_json.is_empty());
+        assert!(oversized.events[0].payload_truncated);
+        let older = load_session_history_events(
+            &path,
+            "session-a",
+            &stream,
+            None,
+            oversized.next_phase.unwrap(),
+            1,
+        )
+        .unwrap();
+        assert!(older.events[0]
+            .payload_json
+            .contains("needle in older event"));
+        assert!(older.next_phase.is_none());
+
+        let filtered = load_session_history_events(
+            &path,
+            "session-a",
+            &stream,
+            Some("needle"),
+            HistoryEventPhase::Events { before_id: None },
+            1,
+        )
+        .unwrap();
+        assert_eq!(filtered.events[0].event_type, "oversized_unparsed_event");
+        assert!(filtered.events[0].payload_json.is_empty());
+        let filtered_older = load_session_history_events(
+            &path,
+            "session-a",
+            &stream,
+            Some("needle"),
+            filtered.next_phase.unwrap(),
+            1,
+        )
+        .unwrap();
+        assert!(filtered_older.events[0]
+            .payload_json
+            .contains("needle in older event"));
+        assert!(filtered_older.next_phase.is_none());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn oversized_orchestrator_marker_uses_canonical_payload_length() {
+        let path = temp_store("oversized_orchestrator_event");
+        crate::store::initialize(&path).unwrap();
+        insert_snapshot(&path, "session-a", &[]);
+        let message = Message::Assistant {
+            content: Some(format!("{}tail", "x".repeat(MAX_EVENT_BYTES as usize))),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
+        };
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            &encode_transcript_log_entry(0, &message).unwrap(),
+        )
+        .unwrap();
+
+        let page = load_session_history_events(
+            &path,
+            "session-a",
+            &HistoryEventStream::Orchestrator,
+            Some("\"content\""),
+            HistoryEventPhase::Events { before_id: None },
+            10,
+        )
+        .unwrap();
+        assert_eq!(page.events.len(), 1);
+        let event = &page.events[0];
+        assert_eq!(event.event_type, "oversized_unparsed_event");
+        assert!(event.payload_json.is_empty());
+        assert_eq!(
+            event.payload_chars,
+            serde_json::to_string(&message).unwrap().chars().count()
+        );
+        assert!(event.payload_truncated);
+        assert!(page.next_phase.is_none());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn oversized_structurally_unvalidated_rows_return_explicit_markers() {
+        let path = temp_store("oversized_structurally_invalid");
+        crate::store::initialize(&path).unwrap();
+        let padding = "x".repeat(MAX_EVENT_BYTES as usize);
+        for session_id in ["worker-session", "orchestrator-session"] {
+            insert_snapshot(&path, session_id, &[]);
+        }
+        crate::store::append_thread_event(
+            &path,
+            "worker-session",
+            "worker-a",
+            &serde_json::json!({
+                "type": "error",
+                "padding": padding
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let invalid_message = serde_json::json!({
+            "unexpected": "x".repeat(MAX_EVENT_BYTES as usize)
+        })
+        .to_string();
+        crate::store::append_thread_event(
+            &path,
+            "orchestrator-session",
+            ORCHESTRATOR_STEERING_TARGET,
+            &serde_json::json!({
+                "nac_transcript_message": {
+                    "idx": 0,
+                    "kind": "user",
+                    "message": invalid_message
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        for (session_id, stream) in [
+            (
+                "worker-session",
+                HistoryEventStream::Thread {
+                    thread_name: "worker-a".to_string(),
+                },
+            ),
+            ("orchestrator-session", HistoryEventStream::Orchestrator),
+        ] {
+            let page = load_session_history_events(
+                &path,
+                session_id,
+                &stream,
+                None,
+                HistoryEventPhase::Events { before_id: None },
+                10,
+            )
+            .unwrap();
+            assert_eq!(page.events.len(), 1);
+            assert_eq!(page.events[0].event_type, "oversized_unparsed_event");
+            assert!(page.events[0].payload_json.is_empty());
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn oversized_malformed_reserved_row_remains_corrupt_history() {
+        let path = temp_store("oversized_malformed_reserved");
+        crate::store::initialize(&path).unwrap();
+        insert_snapshot(&path, "session-a", &[]);
+        let malformed = format!("{{\"payload\":\"{}", "x".repeat(MAX_EVENT_BYTES as usize));
+        crate::store::append_thread_event(
+            &path,
+            "session-a",
+            ORCHESTRATOR_STEERING_TARGET,
+            &malformed,
+        )
+        .unwrap();
+
+        let error = load_session_history_events(
+            &path,
+            "session-a",
+            &HistoryEventStream::Orchestrator,
+            Some("not present"),
+            HistoryEventPhase::Events { before_id: None },
+            10,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("corrupt_history"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

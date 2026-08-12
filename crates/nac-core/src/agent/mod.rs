@@ -328,6 +328,7 @@ impl Agent {
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
                 session_id: config.session_id,
+                session_history_enabled: mode == AgentMode::Worker,
                 active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,

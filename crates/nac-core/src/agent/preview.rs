@@ -171,6 +171,27 @@ pub(super) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
     if trimmed.is_empty() && !result.is_error {
         return "ok".to_string();
     }
+    if matches!(name, "session_list" | "session_open") {
+        if result.is_error {
+            return "session history request failed".to_string();
+        }
+        let parsed = serde_json::from_str::<serde_json::Value>(trimmed).ok();
+        let returned = parsed
+            .as_ref()
+            .and_then(|value| value.get("returned_items"))
+            .and_then(serde_json::Value::as_u64);
+        let has_more = parsed
+            .as_ref()
+            .and_then(|value| value.get("has_more"))
+            .and_then(serde_json::Value::as_bool);
+        return match (returned, has_more) {
+            (Some(returned), Some(true)) => {
+                format!("session history: {returned} items, more available")
+            }
+            (Some(returned), Some(false)) => format!("session history: {returned} items"),
+            _ => "session history result".to_string(),
+        };
+    }
 
     if name == "exec_command" {
         if let Some(summary) = preview_exec_command_result(trimmed) {

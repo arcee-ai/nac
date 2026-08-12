@@ -741,13 +741,24 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             name,
             content_preview,
             is_error,
-        } => AgentEvent::ToolCallFinished {
-            thread_name,
-            call_id,
-            name,
-            content_preview,
-            is_error,
-        },
+        } => {
+            let content_preview = if matches!(name.as_str(), "session_list" | "session_open") {
+                if is_error {
+                    "session history request failed".to_string()
+                } else {
+                    "session history request completed".to_string()
+                }
+            } else {
+                content_preview
+            };
+            AgentEvent::ToolCallFinished {
+                thread_name,
+                call_id,
+                name,
+                content_preview,
+                is_error,
+            }
+        }
         AgentEvent::ThreadStarted {
             name,
             source_threads,
@@ -2042,6 +2053,13 @@ mod tests {
             content_preview: "exit 7: test result".to_string(),
             is_error: true,
         });
+        bus_sink.emit(AgentEvent::ToolCallFinished {
+            thread_name: Some("worker".to_string()),
+            call_id: "call-session-open-result".to_string(),
+            name: "session_open".to_string(),
+            content_preview: "CANARY_HISTORY_PAYLOAD".to_string(),
+            is_error: false,
+        });
         bus_sink.emit(AgentEvent::Error {
             thread_name: Some("worker".to_string()),
             message: "CANARY_ERROR".to_string(),
@@ -2114,7 +2132,7 @@ mod tests {
 
         let records =
             crate::store::load_all_thread_events(&path, "session-safe-events", 20).unwrap();
-        assert_eq!(records["worker"].len(), 6);
+        assert_eq!(records["worker"].len(), 7);
         let serialized = records["worker"]
             .iter()
             .map(|record| record.event_json.as_str())
@@ -2123,6 +2141,7 @@ mod tests {
         assert!(!serialized.contains("CANARY"));
         assert!(serialized.contains("/safe/work"));
         assert!(serialized.contains("exit 7: test result"));
+        assert!(serialized.contains("session history request completed"));
         assert!(serialized.contains("operation failed"));
         assert!(serialized.contains("thread dispatched"));
         assert!(serialized.contains("thread timed out"));

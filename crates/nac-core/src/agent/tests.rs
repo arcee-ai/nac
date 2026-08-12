@@ -132,6 +132,26 @@ fn exec_command_result_preview_includes_nonzero_exit() {
 }
 
 #[test]
+fn session_history_result_preview_excludes_payloads() {
+    let canary = "private-history-canary";
+    let result = ToolResult {
+        content: serde_json::json!({
+            "events": [{
+                "payload_json": canary
+            }],
+            "returned_items": 1,
+            "has_more": true
+        })
+        .to_string(),
+        is_error: false,
+    };
+
+    let preview = preview_tool_result("session_open", &result);
+    assert_eq!(preview, "session history: 1 items, more available");
+    assert!(!preview.contains(canary));
+}
+
+#[test]
 fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
     let client = ModelClient::new_for_test();
     let registry = Arc::new(crate::skills::SkillRegistry::load_for_test(vec![
