@@ -492,7 +492,7 @@ pub struct Generation {
 /// carries 150+) cannot break regeneration; drift inside a consumed
 /// provider is a hard error.
 pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
-    let raw: BTreeMap<String, serde_json::Value> =
+    let mut raw: BTreeMap<String, serde_json::Value> =
         serde_json::from_str(api_json).context("parsing models.dev api.json")?;
     let overrides: OverridesDoc =
         toml::from_str(overrides_toml).context("parsing overrides.toml")?;
@@ -504,13 +504,13 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
     let mut matched_overrides: Vec<(String, String)> = Vec::new();
 
     for (models_dev_id, nac_id) in PROVIDER_MAP {
-        let Some(raw_provider) = raw.get(models_dev_id) else {
+        let Some(raw_provider) = raw.remove(models_dev_id) else {
             bail!(
                 "models.dev provider '{models_dev_id}' is missing from api.json (renamed or \
                  removed upstream — update PROVIDER_MAP deliberately)"
             );
         };
-        let provider: ModelsDevProvider = serde_json::from_value(raw_provider.clone())
+        let provider: ModelsDevProvider = serde_json::from_value(raw_provider)
             .with_context(|| format!("decoding models.dev provider '{models_dev_id}'"))?;
         let provider_override = overrides.providers.get(nac_id);
         let default_base_url =

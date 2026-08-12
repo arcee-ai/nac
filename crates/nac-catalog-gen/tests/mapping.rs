@@ -371,6 +371,31 @@ fn overrides_reject_unknown_providers_efforts_and_empty_wires() {
 }
 
 #[test]
+fn missing_and_malformed_consumed_providers_keep_contextual_errors() {
+    let mut missing: serde_json::Value = serde_json::from_str(&api_json("", "")).unwrap();
+    missing.as_object_mut().unwrap().remove("openai");
+    let error = format!(
+        "{:#}",
+        gen::generate(&missing.to_string(), EMPTY_OVERRIDES).unwrap_err()
+    );
+    assert!(
+        error.contains("models.dev provider 'openai' is missing from api.json"),
+        "{error}"
+    );
+
+    let mut malformed: serde_json::Value = serde_json::from_str(&api_json("", "")).unwrap();
+    malformed["openai"]["models"] = serde_json::json!([]);
+    let error = format!(
+        "{:#}",
+        gen::generate(&malformed.to_string(), EMPTY_OVERRIDES).unwrap_err()
+    );
+    assert!(
+        error.contains("decoding models.dev provider 'openai'"),
+        "{error}"
+    );
+}
+
+#[test]
 fn unrelated_providers_with_drifted_schemas_are_ignored() {
     // The top level parses tolerantly; only nac's five providers are
     // strictly decoded, so drift elsewhere cannot break regeneration.
