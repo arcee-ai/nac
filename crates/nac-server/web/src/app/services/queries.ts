@@ -380,12 +380,12 @@ export function useUpdateMcpServer() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
-      configId,
+      serverName,
       payload,
     }: {
-      configId: string;
+      serverName: string;
       payload: UpdateMcpServerRequest;
-    }) => api.updateMcpServer(configId, payload),
+    }) => api.updateMcpServer(serverName, payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
     },
@@ -395,7 +395,7 @@ export function useUpdateMcpServer() {
 export function useDeleteMcpServer() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (configId: string) => api.deleteMcpServer(configId),
+    mutationFn: (serverName: string) => api.deleteMcpServer(serverName),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
     },

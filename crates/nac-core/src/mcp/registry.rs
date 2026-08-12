@@ -45,8 +45,8 @@ pub(super) struct NacMcpClientHandler {
 }
 
 /// Servers defined in `config.toml`, or an empty map when the file is absent,
-/// unreadable or invalid. A broken file only disables the file-defined
-/// servers; stored ones still load.
+/// unreadable or invalid — a broken file disables MCP rather than failing
+/// the session.
 fn file_servers_for_policy(
     paths: &PathContext,
     transport_policy: McpTransportPolicy,
@@ -81,45 +81,16 @@ fn file_servers_for_policy(
     }
 }
 
-/// Servers saved through the dashboard. A store that cannot be read only
-/// costs its own servers, never the file-defined ones.
-fn stored_servers(store_path: &Path) -> BTreeMap<String, McpServerConfig> {
-    let records = match crate::store::list_mcp_server_configurations(store_path) {
-        Ok(records) => records,
-        Err(error) => {
-            eprintln!("Stored MCP servers could not be read and will be skipped: {error}");
-            return BTreeMap::new();
-        }
-    };
-    let mut servers = BTreeMap::new();
-    for record in records {
-        match server_config_from_record(&record) {
-            Ok(config) => {
-                servers.insert(record.name, config);
-            }
-            Err(error) => {
-                eprintln!(
-                    "Stored MCP server '{}' is malformed and will be skipped: {:#}",
-                    record.name, error
-                );
-            }
-        }
-    }
-    servers
-}
-
 impl McpRegistry {
     pub async fn load(
         cwd: &Path,
         sandbox: Option<&SandboxSession>,
         paths: &PathContext,
-        store_path: Option<&Path>,
     ) -> Result<Option<Arc<Self>>> {
         Self::load_with_policy(
             cwd,
             sandbox,
             paths,
-            store_path,
             McpTransportPolicy::All,
             McpRootPolicy::Workspace,
         )
@@ -130,26 +101,10 @@ impl McpRegistry {
         cwd: &Path,
         sandbox: Option<&SandboxSession>,
         paths: &PathContext,
-        store_path: Option<&Path>,
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
     ) -> Result<Option<Arc<Self>>> {
-        // `config.toml` is the baseline; servers stored by the dashboard merge
-        // over it and override a file server with the same name. A stored
-        // server the policy disallows is dropped before the merge so it never
-        // displaces a usable file server of the same name.
-        let mut servers = file_servers_for_policy(paths, transport_policy);
-        if let Some(store_path) = store_path {
-            for (name, config) in stored_servers(store_path) {
-                if !transport_policy.allows(&config.transport) {
-                    eprintln!(
-                        "Skipping stored MCP server '{name}': transport is disabled by policy"
-                    );
-                    continue;
-                }
-                servers.insert(name, config);
-            }
-        }
+        let servers = file_servers_for_policy(paths, transport_policy);
         if servers.is_empty() {
             return Ok(None);
         }

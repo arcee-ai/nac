@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
-mod mcp_server_configurations;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod render;
@@ -18,7 +17,6 @@ mod transcript;
 mod worksets;
 mod workspace_revisions;
 
-pub use mcp_server_configurations::*;
 pub use model_configurations::*;
 pub use render::*;
 pub use schema::{default_store_path, initialize};

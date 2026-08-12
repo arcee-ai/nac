@@ -810,11 +810,11 @@ export interface McpLibraryResponse {
 }
 
 /**
- * A stored MCP server. `env` and `headers` values are redacted previews:
- * a `${ENV_VAR}` reference echoes back verbatim, a literal comes back masked.
+ * A saved MCP server from `config.toml`, keyed by name. `env` and `headers`
+ * values are redacted previews: a `${ENV_VAR}` reference echoes back verbatim,
+ * a literal comes back masked.
  */
 export interface McpServerView {
-  config_id: string;
   name: string;
   enabled: boolean;
   transport: McpTransport;
@@ -824,8 +824,6 @@ export interface McpServerView {
   url: string | null;
   headers: Record<string, string>;
   library_id: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface McpServerList {
@@ -861,9 +859,9 @@ export interface UpdateMcpServerRequest {
   library_id?: RequestField<string>;
 }
 
-/** Probe a draft or stored server; null map values borrow stored secrets. */
+/** Probe a draft or saved server; null map values borrow stored secrets. */
 export interface TestMcpServerRequest {
-  config_id?: string | null;
+  stored_name?: string | null;
   name?: string | null;
   transport?: McpTransport | null;
   command?: string | null;

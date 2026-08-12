@@ -1,11 +1,9 @@
 use super::*;
 
-// 12 adds the mcp_server_configurations table. 12 rather than 11 because an
-// intermediate revision of this branch used 11 (and later 12) for a since-
-// removed migration, and `open_runtime_connection` returns early whenever the
-// stored version already equals this one — a store left at 11 must still pass
-// through `open_connection` to pick up the table. (10 added the
-// ssh_configurations table; 9 added the per-session ssh port and key columns.)
+// 12 carries the same schema as 10 (which added the ssh_configurations table;
+// 9 added the per-session ssh port and key columns): versions 11 and 12 were
+// claimed by since-removed migrations of intermediate branch revisions, so
+// they stay burned rather than reused for something different.
 const STORE_SCHEMA_VERSION: i64 = 12;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
@@ -203,7 +201,6 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
     )?;
     create_model_configurations_table(&transaction)?;
     create_ssh_configurations_table(&transaction)?;
-    create_mcp_server_configurations_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -637,36 +634,6 @@ fn create_ssh_configurations_table(conn: &Connection) -> Result<()> {
              updated_at TEXT NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_ssh_configurations_name ON ssh_configurations(name);",
-    )?;
-    Ok(())
-}
-
-/// Named MCP servers the dashboard manages.
-///
-/// Global rather than per-session (no foreign key): the merged set of file and
-/// stored servers is resolved when a run starts. Rows here override a
-/// `config.toml` server with the same name. Values in `env_json` and
-/// `headers_json` may hold `${ENV_VAR}` references or literals; the HTTP API
-/// never echoes a literal back in full.
-fn create_mcp_server_configurations_table(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS mcp_server_configurations (
-             config_id TEXT PRIMARY KEY,
-             name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
-             enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-             transport TEXT NOT NULL
-                 CHECK (transport IN ('stdio', 'streamable_http')),
-             command TEXT,
-             args_json TEXT NOT NULL DEFAULT '[]',
-             env_json TEXT NOT NULL DEFAULT '{}',
-             url TEXT,
-             headers_json TEXT NOT NULL DEFAULT '{}',
-             library_id TEXT,
-             created_at TEXT NOT NULL,
-             updated_at TEXT NOT NULL
-         );
-         CREATE INDEX IF NOT EXISTS idx_mcp_server_configurations_name
-             ON mcp_server_configurations(name);",
     )?;
     Ok(())
 }

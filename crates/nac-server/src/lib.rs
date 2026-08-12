@@ -771,10 +771,6 @@ pub struct ReplayGapEvent {
 }
 
 impl SessionManager {
-    pub(crate) fn store_path(&self) -> &std::path::Path {
-        &self.inner.store_path
-    }
-
     pub(crate) fn root_cwd(&self) -> &std::path::Path {
         &self.inner.root_cwd
     }
@@ -2063,9 +2059,12 @@ fn api_router(manager: SessionManager) -> Router {
             "/mcp_library/servers",
             get(mcp_api::list_servers_handler).post(mcp_api::create_server_handler),
         )
-        .route("/mcp_library/servers/test", post(mcp_api::test_server_handler))
         .route(
-            "/mcp_library/servers/{config_id}",
+            "/mcp_library/servers/test",
+            post(mcp_api::test_server_handler),
+        )
+        .route(
+            "/mcp_library/servers/{server_name}",
             patch(mcp_api::update_server_handler).delete(mcp_api::delete_server_handler),
         )
         .route("/auth", get(managed_auth::list_handler))
@@ -5047,7 +5046,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
-                        },
+                    },
                 )
                 .await
                 .unwrap_err();
@@ -5089,7 +5088,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
-                        },
+                    },
                 )
                 .await
                 .unwrap_err();
@@ -5124,7 +5123,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
-                        },
+                    },
                 )
                 .await
                 .unwrap_err();
@@ -7346,7 +7345,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
-                        },
+                    },
                 )
                 .await
                 .unwrap_err();
@@ -7439,7 +7438,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
-                        },
+                    },
                 )
                 .await
                 .unwrap_err();

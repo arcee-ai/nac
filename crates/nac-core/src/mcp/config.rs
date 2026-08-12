@@ -16,6 +16,10 @@ struct RawMcpConfigFile {
 pub struct McpServerConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Library catalog entry the dashboard created this server from. Only the
+    /// dashboard reads it; the connect path ignores it.
+    #[serde(default)]
+    pub library_id: Option<String>,
     #[serde(flatten)]
     pub transport: McpTransportConfig,
 }
@@ -35,36 +39,6 @@ pub enum McpTransportConfig {
         #[serde(default)]
         headers: BTreeMap<String, String>,
     },
-}
-
-/// A stored server row as the connect path understands it. The row was
-/// validated on the way into the store, so a malformed one is a bug reported
-/// rather than silently skipped by the caller.
-pub(super) fn server_config_from_record(
-    record: &crate::store::McpServerConfigurationRecord,
-) -> Result<McpServerConfig> {
-    let transport = match record.transport.as_str() {
-        crate::store::MCP_TRANSPORT_STDIO => McpTransportConfig::Stdio {
-            command: record
-                .command
-                .clone()
-                .ok_or_else(|| anyhow!("stored stdio MCP server carries no command"))?,
-            args: record.args.clone(),
-            env: record.env.clone(),
-        },
-        crate::store::MCP_TRANSPORT_STREAMABLE_HTTP => McpTransportConfig::StreamableHttp {
-            url: record
-                .url
-                .clone()
-                .ok_or_else(|| anyhow!("stored HTTP MCP server carries no url"))?,
-            headers: record.headers.clone(),
-        },
-        other => bail!("stored MCP server has unsupported transport '{other}'"),
-    };
-    Ok(McpServerConfig {
-        enabled: record.enabled,
-        transport,
-    })
 }
 
 pub(super) fn default_config_path(paths: &PathContext) -> Option<PathBuf> {

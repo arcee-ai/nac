@@ -1261,6 +1261,7 @@ dependencies = [
  "sha2",
  "tokio",
  "toml",
+ "toml_edit",
  "url",
  "uuid",
 ]

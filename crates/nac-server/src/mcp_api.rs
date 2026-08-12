@@ -1,11 +1,14 @@
-//! HTTP surface for the MCP library and the stored MCP servers.
+//! HTTP surface for the MCP library and the servers in `config.toml`.
 //!
-//! Secret handling mirrors the credential endpoints: header and env values are
-//! write-only. A response only ever carries a `${ENV_VAR}` reference verbatim
-//! or a masked preview of a literal, and an update request may send null for a
-//! value to keep what is stored.
+//! Servers live in the same `config.toml` a session parses when a worker
+//! launches, keyed by name; a save is visible to the next run with no reload
+//! step. Secret handling mirrors the credential endpoints: header and env
+//! values are write-only. A response only ever carries a `${ENV_VAR}`
+//! reference verbatim or a masked preview of a literal, and an update request
+//! may send null for a value to keep what is stored.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use axum::extract::{rejection::JsonRejection, Path as AxumPath, State};
@@ -25,11 +28,10 @@ pub struct McpLibraryResponse {
     pub entries: Vec<mcp::McpLibraryEntry>,
 }
 
-/// A stored server as the dashboard sees it: env and header values are
+/// A saved server as the dashboard sees it: env and header values are
 /// redacted, everything else round-trips.
 #[derive(Debug, Clone, Serialize)]
 pub struct McpServerView {
-    pub config_id: String,
     pub name: String,
     pub enabled: bool,
     pub transport: String,
@@ -39,8 +41,6 @@ pub struct McpServerView {
     pub url: Option<String>,
     pub headers: BTreeMap<String, String>,
     pub library_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,12 +97,12 @@ pub struct UpdateMcpServerRequest {
     pub library_id: RequestField<String>,
 }
 
-/// Probes a server before anything is saved. Either names a stored server or
+/// Probes a server before anything is saved. Either names a saved server or
 /// carries the draft inline; inline map values may be null to borrow the
-/// stored value when `config_id` is also given.
+/// stored value when `stored_name` is also given.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TestMcpServerRequest {
-    pub config_id: Option<String>,
+    pub stored_name: Option<String>,
     pub name: Option<String>,
     pub transport: Option<String>,
     pub command: Option<String>,
@@ -155,7 +155,6 @@ fn view(record: McpServerConfigurationRecord) -> McpServerView {
     McpServerView {
         env: redact_map(&record.env),
         headers: redact_map(&record.headers),
-        config_id: record.config_id,
         name: record.name,
         enabled: record.enabled,
         transport: record.transport,
@@ -163,10 +162,21 @@ fn view(record: McpServerConfigurationRecord) -> McpServerView {
         args: record.args,
         url: record.url,
         library_id: record.library_id,
-        created_at: record.created_at,
-        updated_at: record.updated_at,
     }
 }
+
+fn config_path() -> Result<PathBuf, ApiError> {
+    mcp::mcp_config_path().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "no home directory to resolve config.toml under".to_string(),
+        )
+    })
+}
+
+/// Serializes config.toml edits: each write rewrites the whole file from a
+/// fresh read, so two concurrent saves must not interleave.
+static CONFIG_WRITE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Settles a map edit against the stored map: the sent map replaces the whole
 /// thing, but a null value borrows the stored value for that key.
@@ -271,10 +281,8 @@ async fn refresh_library_cache(
     entries
 }
 
-pub async fn list_servers_handler(
-    State(manager): State<SessionManager>,
-) -> Result<Json<McpServerList>, ApiError> {
-    let servers = mcp::list_mcp_server_configurations(manager.store_path())?
+pub async fn list_servers_handler() -> Result<Json<McpServerList>, ApiError> {
+    let servers = mcp::list_mcp_server_configurations(&config_path()?)?
         .into_iter()
         .map(view)
         .collect();
@@ -282,11 +290,9 @@ pub async fn list_servers_handler(
 }
 
 pub async fn create_server_handler(
-    State(manager): State<SessionManager>,
     payload: Result<Json<CreateMcpServerRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<McpServerView>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    let id = uuid::Uuid::new_v4();
     let configuration = NewMcpServerConfiguration {
         name: request.name,
         enabled: request.enabled,
@@ -298,18 +304,19 @@ pub async fn create_server_handler(
         headers: request.headers,
         library_id: request.library_id,
     };
-    let record =
-        mcp::insert_mcp_server_configuration(manager.store_path(), &id.to_string(), configuration)?;
+    let _write = CONFIG_WRITE.lock().await;
+    let record = mcp::insert_mcp_server_configuration(&config_path()?, configuration)?;
     Ok((StatusCode::CREATED, Json(view(record))))
 }
 
 pub async fn update_server_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
+    AxumPath(server_name): AxumPath<String>,
     payload: Result<Json<UpdateMcpServerRequest>, JsonRejection>,
 ) -> Result<Json<McpServerView>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    let existing = mcp::load_mcp_server_configuration(manager.store_path(), &config_id)?;
+    let path = config_path()?;
+    let _write = CONFIG_WRITE.lock().await;
+    let existing = mcp::load_mcp_server_configuration(&path, &server_name)?;
 
     let configuration = NewMcpServerConfiguration {
         name: match request.name {
@@ -356,17 +363,16 @@ pub async fn update_server_handler(
         },
     };
 
-    let record =
-        mcp::update_mcp_server_configuration(manager.store_path(), &config_id, configuration)?;
+    let record = mcp::update_mcp_server_configuration(&path, &server_name, configuration)?;
     Ok(Json(view(record)))
 }
 
 pub async fn delete_server_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
+    AxumPath(server_name): AxumPath<String>,
 ) -> Result<StatusCode, ApiError> {
-    if !mcp::delete_mcp_server_configuration(manager.store_path(), &config_id)? {
-        return Err(McpServerConfigurationStoreError::NotFound(config_id).into());
+    let _write = CONFIG_WRITE.lock().await;
+    if !mcp::delete_mcp_server_configuration(&config_path()?, &server_name)? {
+        return Err(McpServerConfigurationStoreError::NotFound(server_name).into());
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -377,10 +383,10 @@ pub async fn test_server_handler(
 ) -> Result<Json<TestMcpServerResponse>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
 
-    let stored = match request.config_id.as_deref() {
-        Some(config_id) => Some(mcp::load_mcp_server_configuration(
-            manager.store_path(),
-            config_id,
+    let stored = match request.stored_name.as_deref() {
+        Some(stored_name) => Some(mcp::load_mcp_server_configuration(
+            &config_path()?,
+            stored_name,
         )?),
         None => None,
     };
@@ -435,6 +441,7 @@ pub async fn test_server_handler(
             }
             McpServerConfig {
                 enabled: true,
+                library_id: None,
                 transport: McpTransportConfig::Stdio { command, args, env },
             }
         }
@@ -473,6 +480,7 @@ pub async fn test_server_handler(
             }
             McpServerConfig {
                 enabled: true,
+                library_id: None,
                 transport: McpTransportConfig::StreamableHttp { url, headers },
             }
         }

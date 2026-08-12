@@ -192,9 +192,8 @@ function McpServersManager({
   const [template, setTemplate] = useState<McpLibraryEntry | null>(null);
   const [customDraft, setCustomDraft] = useState(false);
   const [footer, setFooter] = useState<ReactNode>(null);
-  const selected = picked ?? servers.at(-1)?.config_id ?? DRAFT;
-  const record =
-    servers.find((entry) => entry.config_id === selected) ?? null;
+  const selected = picked ?? servers.at(-1)?.name ?? DRAFT;
+  const record = servers.find((entry) => entry.name === selected) ?? null;
   const drafting = selected === DRAFT;
 
   const pick = (id: string) => {
@@ -231,7 +230,7 @@ function McpServersManager({
           draftSelected={drafting}
           onSelectDraft={() => pick(DRAFT)}
           entries={servers.map((entry) => ({
-            id: entry.config_id,
+            id: entry.name,
             name: entry.name,
           }))}
           selectedId={selected}
@@ -249,7 +248,7 @@ function McpServersManager({
           />
         ) : (
           <McpServerForm
-            key={record ? record.config_id : (template?.id ?? "custom")}
+            key={record ? record.name : (template?.id ?? "custom")}
             record={record}
             template={template}
             libraryEntry={libraryEntry}
@@ -624,7 +623,7 @@ function McpServerForm({
   libraryEntry: McpLibraryEntry | null;
   onBack: () => void;
   onClose: () => void;
-  onSaved: (configId: string) => void;
+  onSaved: (serverName: string) => void;
   onDeleted: () => void;
   setFooter: (footer: ReactNode) => void;
   isMobile: boolean;
@@ -698,11 +697,11 @@ function McpServerForm({
             transport === "streamable_http" ? literalsOnly(headerMap) : {},
           library_id: template?.id ?? null,
         });
-        onSaved(created.config_id);
+        onSaved(created.name);
         toast.success("MCP server saved.");
       } else {
-        await updateServer.mutateAsync({
-          configId: record.config_id,
+        const updated = await updateServer.mutateAsync({
+          serverName: record.name,
           payload: {
             name: name.trim(),
             enabled,
@@ -714,6 +713,7 @@ function McpServerForm({
             headers: transport === "streamable_http" ? headerMap : {},
           },
         });
+        onSaved(updated.name);
         toast.success("MCP server updated.");
       }
     } catch (error) {
@@ -724,7 +724,7 @@ function McpServerForm({
   const remove = async () => {
     if (!record) return;
     try {
-      await deleteServer.mutateAsync(record.config_id);
+      await deleteServer.mutateAsync(record.name);
       onDeleted();
       toast.success("MCP server deleted.");
     } catch (error) {
@@ -746,7 +746,7 @@ function McpServerForm({
     setTools(null);
     try {
       const result = await testServer.mutateAsync({
-        config_id: record?.config_id ?? null,
+        stored_name: record?.name ?? null,
         name: name.trim() || null,
         transport,
         command: transport === "stdio" ? command.trim() : null,

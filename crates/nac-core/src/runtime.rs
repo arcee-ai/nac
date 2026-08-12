@@ -988,7 +988,6 @@ pub async fn build_managed_worker_config(
             &workspace_cwd,
             None,
             &config_paths,
-            Some(&store_path),
             McpTransportPolicy::StreamableHttpOnly,
             McpRootPolicy::None,
         )
@@ -998,13 +997,7 @@ pub async fn build_managed_worker_config(
     } else {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &workspace_paths)?;
-        let mcp = McpRegistry::load(
-            &workspace_cwd,
-            sandbox.as_ref(),
-            &workspace_paths,
-            Some(&store_path),
-        )
-        .await?;
+        let mcp = McpRegistry::load(&workspace_cwd, sandbox.as_ref(), &workspace_paths).await?;
         let (skill_workspace, visibility) = if sandbox.is_some() {
             (None, SkillPathVisibility::Hidden)
         } else {
@@ -1515,7 +1508,8 @@ mod tests {
     }
 
     #[test]
-    fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_out_of_range_values() {
+    fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_out_of_range_values(
+    ) {
         // No request: defaults to 70% of the context window (rounded).
         assert_eq!(
             effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
