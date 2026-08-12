@@ -333,6 +333,7 @@ fn wire_level_special_cases_are_encoded_in_data() {
 
 #[test]
 fn effective_settings_resolve_catalog_metadata_at_construction() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let settings = EffectiveModelSettings::from_optional(
         Some(BackendKind::DeepSeekChat),
         Some("deepseek-v4-flash".to_string()),
@@ -497,6 +498,7 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
 
 #[test]
 fn generated_baseline_merges_real_models_dev_data_over_the_seeds() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     // A generated entry per models.dev provider: real limits, display name,
     // baseline source, and the provider default's compat inherited.
     let cases = [
