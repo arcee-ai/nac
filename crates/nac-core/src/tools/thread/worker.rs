@@ -258,6 +258,7 @@ pub(super) async fn run_worker(
     let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
     let (cancel_ack_tx, mut cancel_ack_rx) = watch::channel(false);
+    let stderr_cancellation = cancellation.clone();
     let stderr_handle = tokio::spawn(async move {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
@@ -313,6 +314,7 @@ pub(super) async fn run_worker(
         (output, usage, model_error)
     });
 
+    let stdout_cancellation = cancellation.clone();
     let stdout = child.stdout.take().unwrap();
     let stdout_handle = tokio::spawn(async move {
         let reader = BufReader::new(stdout);

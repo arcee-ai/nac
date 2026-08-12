@@ -284,7 +284,7 @@ pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
         .and_then(|value| value.as_str())
         .unwrap_or("completed");
     let exit_code = parsed.get("exit_code").and_then(|value| value.as_i64());
-    let more = ellipsis(output_lines.len());
+    let more = ellipsis(lines.len());
 
     match (status, exit_code, summary) {
         ("completed", Some(0), Some(summary)) => Some(format!("{summary}{more}")),
