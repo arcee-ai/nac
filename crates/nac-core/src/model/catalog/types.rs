@@ -93,6 +93,14 @@ impl ThinkingLevelMap {
             .map(|(effort, _)| *effort)
             .collect()
     }
+
+    /// The highest supported effort level, or `None` when the model accepts
+    /// no explicit effort levels. Used by the orphaned-effort fallback in
+    /// `EffectiveModelSettings::from_optional` to remap a session-stored
+    /// effort the model no longer supports onto its current top tier.
+    pub fn max_supported_effort(&self) -> Option<ReasoningEffort> {
+        self.supported_efforts().last().copied()
+    }
 }
 
 /// Cost rates in USD per 1M tokens. All-zero = unknown (pi's zero-cost
