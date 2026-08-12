@@ -52,6 +52,8 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const CURSOR_VERSION: u64 = 1;
 
 #[cfg(test)]
+const CANCELLATION_FIXTURE_PATH: &str = "src/cancellation-worker-fixture.txt";
+#[cfg(test)]
 static ACTIVE_SEARCH_TASKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 #[cfg(test)]
 static PAUSE_SEARCH_TASKS: AtomicBool = AtomicBool::new(false);
@@ -1798,9 +1800,12 @@ async fn search_file(
     let initial_materialized_bytes = *materialized_bytes;
     match tokio::task::spawn_blocking(move || {
         #[cfg(test)]
-        let _active_search = ActiveSearchTask::begin();
+        let _active_search = (path == CANCELLATION_FIXTURE_PATH).then(ActiveSearchTask::begin);
         #[cfg(test)]
-        while PAUSE_SEARCH_TASKS.load(Ordering::Acquire) && !cancellation.load(Ordering::Acquire) {
+        while path == CANCELLATION_FIXTURE_PATH
+            && PAUSE_SEARCH_TASKS.load(Ordering::Acquire)
+            && !cancellation.load(Ordering::Acquire)
+        {
             std::thread::yield_now();
         }
         let mut materialized_bytes = initial_materialized_bytes;

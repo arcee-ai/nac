@@ -657,8 +657,11 @@ async fn aborting_native_search_stops_promptly() {
     }
 
     let (runtime, root) = fixture_runtime();
-    fs::write(root.join("src/large.txt"), vec![b'a'; 8 * 1024 * 1024])
-        .expect("write cancellation fixture");
+    fs::write(
+        root.join(super::CANCELLATION_FIXTURE_PATH),
+        vec![b'a'; 8 * 1024 * 1024],
+    )
+    .expect("write cancellation fixture");
     super::PAUSE_SEARCH_TASKS.store(true, std::sync::atomic::Ordering::Release);
     let _pause_guard = PauseGuard;
     let task = tokio::spawn(async move {
@@ -666,7 +669,7 @@ async fn aborting_native_search_stops_promptly() {
             "grep",
             json!({
                 "pattern": "not-present",
-                "globs": ["src/large.txt"],
+                "globs": [super::CANCELLATION_FIXTURE_PATH],
                 "case": "sensitive"
             }),
             &runtime,
