@@ -13,12 +13,12 @@ mod workspace_diff;
 mod workspace_files;
 
 pub use workspace_diff::{
-    revision_file_diff, workspace_file_diff, WorkspaceDiffHunk, WorkspaceDiffLine,
-    WorkspaceDiffSection, WorkspaceDiffStage, WorkspaceFileDiff,
+    revision_file_diff, validate_workspace_relpath, workspace_file_diff, WorkspaceDiffHunk,
+    WorkspaceDiffLine, WorkspaceDiffSection, WorkspaceDiffStage, WorkspaceFileDiff,
 };
 pub use workspace_files::{
-    list_files, list_revision_files, read_file, read_revision_file, WorkspaceFileContent,
-    WorkspaceFileList,
+    list_files, list_revision_files, open_local_path, read_file, read_revision_file,
+    OpenLocalPathResult, WorkspaceFileContent, WorkspaceFileList,
 };
 
 pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;
@@ -86,7 +86,15 @@ pub struct EpisodeSnapshot {
     pub session_id: String,
     pub action: String,
     pub content: String,
+    /// `ok` for a retained handoff, otherwise how the dispatch died. Snapshots
+    /// written before dispatch outcomes were recorded only held handoffs.
+    #[serde(default = "retained_episode_status")]
+    pub status: String,
     pub created_at: String,
+}
+
+fn retained_episode_status() -> String {
+    store::EpisodeStatus::Ok.as_str().to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -232,6 +240,7 @@ impl From<store::EpisodeRecord> for EpisodeSnapshot {
             session_id: episode.session_id,
             action: episode.action,
             content: episode.content,
+            status: episode.status,
             created_at: episode.created_at,
         }
     }
@@ -340,7 +349,7 @@ pub fn load_thread_episodes(
     let Some(session_id) = session_id else {
         return Ok(Vec::new());
     };
-    store::thread_read(store_path, session_id, thread_name)
+    store::thread_dispatches(store_path, session_id, thread_name)
         .map(|episodes| episodes.into_iter().map(Into::into).collect())
 }
 
@@ -351,7 +360,7 @@ pub fn load_all_thread_episodes(
     let Some(session_id) = session_id else {
         return Ok(HashMap::new());
     };
-    let episodes = store::load_all_episodes(store_path, session_id)?;
+    let episodes = store::load_all_dispatches(store_path, session_id)?;
     Ok(episodes
         .into_iter()
         .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))
@@ -365,7 +374,7 @@ pub(crate) fn load_all_thread_episodes_with_connection(
     let Some(session_id) = session_id else {
         return Ok(HashMap::new());
     };
-    let episodes = store::load_all_episodes_with_connection(conn, session_id)?;
+    let episodes = store::load_all_dispatches_with_connection(conn, session_id)?;
     Ok(episodes
         .into_iter()
         .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))

@@ -89,17 +89,27 @@ export function formatTokensCompact(n: number | null | undefined): string {
 }
 
 /**
- * Spend for the chat input bar. Anything that is not a positive amount reads
- * as "--": zero means the catalog has no rates for the model, so naming a
- * price would be a claim the backend never made.
+ * Spend wherever it is shown — the chat input bar and the session cards.
+ * Anything that is not a positive amount reads as "--": zero means the catalog
+ * has no rates for the model, so naming a price would be a claim the backend
+ * never made.
+ *
+ * A cent is the smallest figure worth printing, and a spend under one is
+ * reported as the bound it is under. Rounding it to "$0.00" would read as free,
+ * and spelling it out as "$0.00726" is more digits than a status bar can be
+ * read at a glance for — neither says what the number is actually good for,
+ * which is knowing the session has cost next to nothing so far.
+ *
+ * The space is non-breaking: the two halves say nothing apart, and the bar this
+ * sits in is tight enough to wrap them.
  */
 export function formatCostMicros(micros: number | null | undefined): string {
   if (micros == null) return "--";
   const value = Math.round(Number(micros));
   if (!Number.isFinite(value) || value <= 0) return "--";
   const dollars = value / 1_000_000;
-  if (dollars >= 0.01) return `$${dollars.toFixed(2)}`;
-  return `$${Number(dollars.toPrecision(3))}`;
+  if (dollars < 0.01) return "<\u00a0$0.01";
+  return `$${dollars.toFixed(2)}`;
 }
 
 /** Clock for a running session card: MM:SS, widening to H:MM:SS past an hour. */
@@ -201,6 +211,40 @@ export function tokenUsage(
   return timing.cumulative_token_usage ?? timing.last_token_usage ?? null;
 }
 
+/**
+ * Sum the billable fields of two usages. `contextTokens` is passed in rather
+ * than added, because `total_tokens` gauges how full the context window is —
+ * adding two readings of it would be meaningless.
+ */
+export function addTokenUsage(
+  base: TokenUsage | null | undefined,
+  delta: TokenUsage,
+  contextTokens: number,
+): TokenUsage {
+  return {
+    input_tokens: (base?.input_tokens ?? 0) + delta.input_tokens,
+    output_tokens: (base?.output_tokens ?? 0) + delta.output_tokens,
+    cache_read_tokens: (base?.cache_read_tokens ?? 0) + delta.cache_read_tokens,
+    cache_write_tokens:
+      (base?.cache_write_tokens ?? 0) + delta.cache_write_tokens,
+    reasoning_tokens:
+      (base?.reasoning_tokens ?? 0) + (delta.reasoning_tokens ?? 0),
+    total_tokens: contextTokens,
+    cost:
+      base?.cost || delta.cost
+        ? {
+            input: (base?.cost?.input ?? 0) + (delta.cost?.input ?? 0),
+            output: (base?.cost?.output ?? 0) + (delta.cost?.output ?? 0),
+            cache_read:
+              (base?.cost?.cache_read ?? 0) + (delta.cost?.cache_read ?? 0),
+            cache_write:
+              (base?.cost?.cache_write ?? 0) + (delta.cost?.cache_write ?? 0),
+            total: (base?.cost?.total ?? 0) + (delta.cost?.total ?? 0),
+          }
+        : undefined,
+  };
+}
+
 export interface SessionRunMetrics {
   model: string;
   /** Where the run executes, shown as the small uppercase label. */
@@ -211,15 +255,23 @@ export interface SessionRunMetrics {
   usage: TokenUsage | null;
 }
 
-/** The values the chat input bar reports underneath the message field. */
+/**
+ * The values the chat input bar reports underneath the message field.
+ *
+ * `runUsage` is what the live stream has reported for a run the snapshot does
+ * not account for yet; folding it in is what keeps the counters moving during
+ * a long run instead of freezing until it ends.
+ */
 export function runMetrics(
   snapshot: SessionSnapshotResponse | null | undefined,
   entry: ManagedSessionSummary | null | undefined,
+  runUsage?: TokenUsage | null,
 ): SessionRunMetrics {
   const meta = snapshot?.metadata;
   const summary = entry?.summary;
   const activeRun = snapshot?.active_run ?? entry?.active_run ?? null;
   const active = isActiveRun(activeRun);
+  const persisted = tokenUsage(snapshot);
 
   return {
     model: meta?.model ?? summary?.model ?? "--",
@@ -227,6 +279,12 @@ export function runMetrics(
     active,
     startedAt: active && activeRun ? activeRun.started_at_epoch_ms : null,
     lastResponseMs: snapshot?.response_timing.last_response_duration_ms ?? null,
-    usage: tokenUsage(snapshot),
+    usage: runUsage
+      ? addTokenUsage(
+          persisted,
+          runUsage,
+          runUsage.total_tokens || (persisted?.total_tokens ?? 0),
+        )
+      : persisted,
   };
 }

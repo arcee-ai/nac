@@ -62,6 +62,7 @@ import type {
   WorkspaceFileContent,
   WorkspaceFileDiff,
   WorkspaceFileList,
+  OpenWorkspacePathResult,
   WorkspaceRevision,
   WorkspaceRevisionChanges,
 } from "@/app/types/api";
@@ -479,6 +480,14 @@ export const api = {
       { signal },
     );
   },
+
+  /** Ask nac-web to open a local workspace path with the OS default handler. */
+  openWorkspacePath: (id: string, path: string) =>
+    request<OpenWorkspacePathResult>(
+      "POST",
+      `${sessionPath(id)}/workspace/open`,
+      { body: { path } },
+    ),
 
   getWorkspaceRevisions: (id: string, signal?: AbortSignal) =>
     request<WorkspaceRevision[]>(

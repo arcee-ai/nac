@@ -9,6 +9,15 @@ fn test_agent_creation() {
 }
 
 #[test]
+fn worker_prompt_prefers_native_workspace_discovery() {
+    let prompt = render_worker_system_prompt("/workspace");
+    assert!(prompt.contains("Use glob to find workspace paths"));
+    assert!(prompt.contains("Use grep to search file contents"));
+    assert!(prompt.contains("instead of find, fd"));
+    assert!(prompt.contains("instead of grep, rg"));
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(

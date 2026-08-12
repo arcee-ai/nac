@@ -22,6 +22,12 @@ const pop = (id: object) => {
 };
 
 /**
+ * How many dialogs are up, for code that reads it inside an event rather than
+ * rendering against it — a global shortcut, which a dialog outranks.
+ */
+export const modalStackDepth = (): number => stack.length;
+
+/**
  * Shared stack for nested dialogs. Mobile uses it to slide lower sheets aside;
  * Escape uses it so only the topmost dialog dismisses.
  */

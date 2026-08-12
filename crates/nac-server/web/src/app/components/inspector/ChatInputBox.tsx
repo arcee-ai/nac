@@ -14,6 +14,7 @@ import {
   ButtonVariant,
   Icon,
   IconName,
+  KeyboardShortcut,
   Loader,
   LoaderSize,
   StickyButton,
@@ -30,6 +31,7 @@ import {
 } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
+  displayPromptFromMessageText,
   ENV_SSH,
   formatClock,
   formatCostMicros,
@@ -39,6 +41,7 @@ import {
 } from "@/app/lib/format";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
+import { usePromptHistoryPreview } from "@/app/hooks/usePromptHistoryPreview";
 import { perfRender } from "@/app/lib/perfDebug";
 import { humanErrorText } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -51,7 +54,11 @@ import {
   useSlashCommands,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
-import { pushLocalEvent, useRunning } from "@/app/store/runtimeStore";
+import {
+  pushLocalEvent,
+  useRunUsage,
+  useRunning,
+} from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -65,6 +72,9 @@ import type {
 } from "@/app/types/api";
 
 const PLACEHOLDER = "Ask anything…";
+
+/** Says the key is there, on a session that has prompts to walk back through. */
+const HISTORY_PLACEHOLDER = "Ask anything, or press ↑ for an earlier prompt";
 
 /** One line of the field, which is also its collapsed height. */
 const ROW_PX = { mobile: 40, wide: 48 };
@@ -128,6 +138,7 @@ function StatBadge({
   className,
   title,
   showIcon = true,
+  labelClassName = "label-micro",
 }: {
   iconName?: IconName;
   prefix?: string;
@@ -136,6 +147,7 @@ function StatBadge({
   className?: string;
   title: string;
   showIcon?: boolean;
+  labelClassName?: string;
 }) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter}>
@@ -146,11 +158,11 @@ function StatBadge({
         )}
       >
         {prefix ? (
-          <span className="label-micro">{prefix}</span>
+          <span className={labelClassName}>{prefix}</span>
         ) : showIcon && iconName ? (
           <Icon iconName={iconName} size={iconSize} />
         ) : null}
-        <span className="label-micro">{value}</span>
+        <span className={labelClassName}>{value}</span>
       </div>
     </Tooltip>
   );
@@ -206,6 +218,11 @@ export function ChatInputBox({
     string | null
   >(null);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
+  // The pointer's row is held apart from the keyboard's so that leaving the list
+  // takes the highlight with it instead of stranding it on the last row crossed.
+  const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(
+    null,
+  );
   const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
@@ -224,7 +241,10 @@ export function ChatInputBox({
   const submitInFlight = useRef(false);
   const listboxId = useId();
 
-  const metrics = runMetrics(snapshot, entry);
+  // The snapshot only accounts for a run once it ends, so while one is going
+  // the stream's own tally is what keeps these counters moving.
+  const runUsage = useRunUsage();
+  const metrics = runMetrics(snapshot, entry, running ? runUsage : null);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
   const context = contextGauge(
@@ -255,6 +275,34 @@ export function ChatInputBox({
     el.style.height = `${Math.min(el.scrollHeight, maxHeightPx)}px`;
   }, [rowPx, maxHeightPx]);
 
+  // Prompts already sent, newest first, in the short form the bubbles show —
+  // a `/plan` or `/run` message goes back to the instruction it was written as
+  // rather than to the wrapper the orchestrator reads.
+  const sentPrompts = useMemo(() => {
+    const prompts: string[] = [];
+    for (const message of snapshot?.messages ?? []) {
+      if (message.role !== "user") continue;
+      prompts.push(displayPromptFromMessageText(message.content));
+    }
+    return prompts.reverse();
+  }, [snapshot?.messages]);
+
+  const history = usePromptHistoryPreview({
+    prompts: sentPrompts,
+    value,
+    // A phone has no key to walk with, and its placeholder is already standing
+    // in for the collapsed line.
+    enabled: !isMobile,
+    setValue,
+    textareaRef: ref,
+    afterCommit: resize,
+  });
+  const resetHistory = history.reset;
+  const previewHelpId = useId();
+
+  // The walk belongs to the session whose prompts it is walking.
+  useEffect(() => resetHistory(), [sessionId, resetHistory]);
+
   const commandQuery = useMemo(() => slashCommandQuery(value), [value]);
   const filteredCommands = useMemo(() => {
     if (!commandQuery || !commandDefinitions) return [];
@@ -265,20 +313,36 @@ export function ChatInputBox({
   }, [commandDefinitions, commandQuery]);
   const suggestionsOpen =
     focused && commandQuery !== null && dismissedSuggestionValue !== value;
+  // A narrower query can leave the keyboard's highlight past the last row.
+  const keyboardSuggestion = Math.min(
+    activeSuggestion,
+    Math.max(filteredCommands.length - 1, 0),
+  );
+  // What Tab and Enter would take, which is whatever is lit: the pointer
+  // outranks the keyboard while it is in the list.
+  const suggestionIndex =
+    hoveredSuggestion !== null && hoveredSuggestion < filteredCommands.length
+      ? hoveredSuggestion
+      : keyboardSuggestion;
   const activeOptionId =
-    suggestionsOpen && filteredCommands[activeSuggestion]
-      ? `${listboxId}-option-${activeSuggestion}`
+    suggestionsOpen && filteredCommands[suggestionIndex]
+      ? `${listboxId}-option-${suggestionIndex}`
       : undefined;
 
+  // Only the keyboard's row: scrolling a row the pointer is already on would
+  // move the list out from under it.
   useEffect(() => {
     if (!suggestionsOpen) return;
-    optionRefs.current[activeSuggestion]?.scrollIntoView({
+    optionRefs.current[keyboardSuggestion]?.scrollIntoView({
       block: "nearest",
     });
-  }, [activeSuggestion, suggestionsOpen, filteredCommands]);
+  }, [keyboardSuggestion, suggestionsOpen, filteredCommands]);
 
+  // A list that closes under a resting pointer sends no leave event, and a
+  // stale row would light on the way back in.
   const dismissSuggestions = useCallback(() => {
     setDismissedSuggestionValue(value);
+    setHoveredSuggestion(null);
   }, [value]);
 
   const completeCommand = useCallback(
@@ -289,6 +353,7 @@ export function ChatInputBox({
       }`;
       setValue(completed);
       setDismissedSuggestionValue(completed);
+      setHoveredSuggestion(null);
       requestAnimationFrame(() => {
         const textarea = ref.current;
         if (!textarea) return;
@@ -354,6 +419,7 @@ export function ChatInputBox({
       const clearField = () => {
         if (!fromField) return;
         setValue("");
+        resetHistory();
         if (ref.current) ref.current.style.height = `${rowPx}px`;
       };
       submitInFlight.current = true;
@@ -418,6 +484,7 @@ export function ChatInputBox({
       compactSession,
       toast,
       rowPx,
+      resetHistory,
     ],
   );
 
@@ -519,7 +586,7 @@ export function ChatInputBox({
         <textarea
           ref={ref}
           className={cn(
-            "block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder",
+            "block w-full bg-transparent resize-none border-none outline-none text-medium  text-input placeholder:text-input-placeholder",
             isMobile ? "px-4 py-2" : "p-3",
             // The line below stands in for it while it is a single row, because
             // a textarea cannot ellipsize its own overflow.
@@ -533,18 +600,37 @@ export function ChatInputBox({
           aria-expanded={suggestionsOpen}
           aria-controls={suggestionsOpen ? listboxId : undefined}
           aria-activedescendant={activeOptionId}
-          placeholder={PLACEHOLDER}
+          aria-describedby={history.active ? previewHelpId : undefined}
+          // A preview stands where the placeholder would, rather than in the
+          // field, so an earlier prompt can be read before it is taken. The row
+          // below draws it, hence the blank here.
+          placeholder={
+            history.active
+              ? ""
+              : history.hasHistory && value === ""
+                ? HISTORY_PLACEHOLDER
+                : PLACEHOLDER
+          }
           spellCheck={false}
           value={value}
           style={{ minHeight: `${rowPx}px`, maxHeight: `${maxHeightPx}px` }}
           onChange={(e) => {
             if (e.target.value !== value) setDismissedSuggestionValue(null);
             setActiveSuggestion(0);
+            // A pointer resting over the list sends nothing while the rows
+            // change underneath it, so its position no longer means the row it
+            // meant.
+            setHoveredSuggestion(null);
+            history.onValueChange(e.target.value);
             setValue(e.target.value);
             resize();
           }}
           onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onBlur={() => {
+            setFocused(false);
+            setHoveredSuggestion(null);
+            resetHistory();
+          }}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return;
             if (suggestionsOpen && !e.shiftKey) {
@@ -556,25 +642,33 @@ export function ChatInputBox({
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 if (!filteredCommands.length) return;
-                setActiveSuggestion((current) =>
+                // From the lit row, so the keyboard carries on from where the
+                // pointer left the highlight rather than jumping back to its
+                // own last position.
+                setActiveSuggestion(
                   e.key === "ArrowDown"
-                    ? Math.min(current + 1, filteredCommands.length - 1)
-                    : Math.max(current - 1, 0),
+                    ? Math.min(
+                        suggestionIndex + 1,
+                        filteredCommands.length - 1,
+                      )
+                    : Math.max(suggestionIndex - 1, 0),
                 );
+                setHoveredSuggestion(null);
                 return;
               }
-              if (e.key === "Tab" && filteredCommands[activeSuggestion]) {
+              if (e.key === "Tab" && filteredCommands[suggestionIndex]) {
                 e.preventDefault();
-                completeCommand(filteredCommands[activeSuggestion]);
+                completeCommand(filteredCommands[suggestionIndex]);
                 return;
               }
               if (e.key === "Enter") {
                 e.preventDefault();
-                const selected = filteredCommands[activeSuggestion];
+                const selected = filteredCommands[suggestionIndex];
                 if (selected) completeCommand(selected);
                 return;
               }
             }
+            if (history.onKeyDown(e)) return;
             if (e.key !== "Enter") return;
             // Shift+Enter inserts a newline; a bare Enter (or Cmd/Ctrl+Enter) sends.
             if (e.shiftKey) return;
@@ -582,6 +676,23 @@ export function ChatInputBox({
             void submit();
           }}
         />
+        {history.active ? (
+          <>
+            <span id={previewHelpId} className="sr-only">
+              Press Tab to take this prompt, Escape to leave it, or start typing
+              to dismiss it
+            </span>
+            {/* The preview is drawn here rather than left to the native
+                placeholder, which cannot be measured — this way the key that
+                takes it sits against the end of the text however long it is. */}
+            <div className="pointer-events-none absolute inset-0 flex items-center gap-2 px-3">
+              <span className="min-w-0 truncate text-medium text-input-placeholder">
+                {history.previewText}
+              </span>
+              <KeyboardShortcut keys={["tab"]} spelled className="shrink-0" />
+            </div>
+          </>
+        ) : null}
         {collapsed ? (
           <div
             className="absolute inset-0 flex items-center px-4 cursor-text"
@@ -624,16 +735,23 @@ export function ChatInputBox({
             }}
             type="button"
             role="option"
-            aria-selected={index === activeSuggestion}
+            aria-selected={index === suggestionIndex}
             tabIndex={-1}
             className={cn(
               "flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left",
-              index === activeSuggestion
+              index === suggestionIndex
                 ? "btn-ghost-highlighted"
                 : "btn-ghost",
             )}
             onPointerDown={(event) => event.preventDefault()}
-            onPointerMove={() => setActiveSuggestion(index)}
+            // Move rather than enter: a list that opens under a still pointer
+            // keeps the highlight the keyboard put on the first row.
+            onPointerMove={() => setHoveredSuggestion(index)}
+            onPointerLeave={() =>
+              setHoveredSuggestion((current) =>
+                current === index ? null : current,
+              )
+            }
             onClick={() => completeCommand(definition)}
           >
             <span className="code code-small shrink-0 text-basic-primary">
@@ -745,6 +863,7 @@ export function ChatInputBox({
                 value={context.value}
                 className="text-info-primary"
                 title={context.title}
+                labelClassName="tag-label"
               />
               {/* The per-direction columns go with the model name, leaving the
                   narrow row the reading that matters. */}
@@ -755,6 +874,7 @@ export function ChatInputBox({
                     value={formatTokensCompact(metrics.usage.input_tokens)}
                     className="text-info-secondary opacity-75"
                     title="Input tokens"
+                    labelClassName="tag-label"
                   />
                   {metrics.usage.cache_read_tokens > 0 ? (
                     <StatBadge
@@ -764,6 +884,7 @@ export function ChatInputBox({
                       )}
                       className="text-info-secondary opacity-75"
                       title="Cache read tokens"
+                      labelClassName="tag-label"
                     />
                   ) : null}
                   <StatBadge
@@ -771,6 +892,7 @@ export function ChatInputBox({
                     value={formatTokensCompact(metrics.usage.output_tokens)}
                     className="text-info-secondary opacity-75"
                     title="Output tokens"
+                    labelClassName="tag-label"
                   />
                 </>
               )}

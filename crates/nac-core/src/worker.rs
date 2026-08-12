@@ -135,6 +135,7 @@ mod tests {
                     session_id: "session".to_string(),
                     action: "previous".to_string(),
                     content: "retained context".to_string(),
+                    status: store::EpisodeStatus::Ok.as_str().to_string(),
                     created_at: "now".to_string(),
                 }],
                 source_episodes: Vec::new(),

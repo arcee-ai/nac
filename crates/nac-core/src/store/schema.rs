@@ -1,9 +1,9 @@
 use super::*;
 
-// 12 carries the same schema as 10 (which added the ssh_configurations table;
-// 9 added the per-session ssh port and key columns): versions 11 and 12 were
-// claimed by since-removed migrations of intermediate branch revisions, so
-// they stay burned rather than reused for something different.
+// 12 carries the same schema as 11 (which added episodes.status; 10 added the
+// ssh_configurations table; 9 the per-session ssh port and key columns): 12
+// was claimed by a since-removed migration of an intermediate branch revision,
+// so it stays burned rather than reused for something different.
 const STORE_SCHEMA_VERSION: i64 = 12;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
@@ -182,6 +182,14 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535))",
     )?;
     ensure_column(&transaction, "sessions", "ssh_identity_file", "TEXT")?;
+    // Episodes recorded before dispatches could fail are all handoffs, so the
+    // default is exactly right for them.
+    ensure_column(
+        &transaction,
+        "episodes",
+        "status",
+        "TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error', 'timed_out', 'cancelled'))",
+    )?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -223,6 +231,8 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              session_id TEXT NOT NULL,
              action TEXT NOT NULL,
              content TEXT NOT NULL,
+             status TEXT NOT NULL DEFAULT 'ok'
+                 CHECK (status IN ('ok', 'error', 'timed_out', 'cancelled')),
              created_at TEXT NOT NULL,
              FOREIGN KEY (thread_name, session_id) REFERENCES threads(name, session_id)
          );

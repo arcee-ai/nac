@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Badge, BadgeColor } from "@/app/atoms";
 import {
   PanelEmpty,
+  PanelLoading,
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
@@ -134,7 +135,7 @@ export function WorksetsView({
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
-  if (!snapshot) return <PanelEmpty>Loading…</PanelEmpty>;
+  if (!snapshot) return <PanelLoading listTitle="Worksets" />;
 
   const worksets = snapshot.worksets;
   if (worksets.error) {

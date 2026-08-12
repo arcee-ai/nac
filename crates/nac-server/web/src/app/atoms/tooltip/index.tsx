@@ -4,6 +4,7 @@ import { useIsMobile } from "../../hooks/useMediaQuery";
 import { AnchorPlacement, anchorClasses, anchorCoords } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 import Icon, { IconName } from "../icon";
+import KeyboardShortcut from "../keyboard-shortcut";
 import Popover from "../popover";
 
 export { AnchorPlacement as TooltipPosition };
@@ -46,21 +47,9 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
         {title}
       </div>
       {keyboardShortcuts.length > 0 ? (
-        <div className="flex gap-1">
-          {keyboardShortcuts.map((key, i) => (
-            <kbd
-              key={i}
-              className={cn(
-                "tag-label px-1 rounded-[3px]",
-                inverted
-                  ? "bg-sublevel-variant-A text-basic-secondary-inverse"
-                  : "bg-elevation-level-3 text-basic-secondary",
-              )}
-            >
-              {key}
-            </kbd>
-          ))}
-        </div>
+        // Key names, not glyphs: the shortcut is declared once and drawn for the
+        // platform it is read on.
+        <KeyboardShortcut keys={keyboardShortcuts} inversed={inverted} />
       ) : null}
     </div>
     {description ? (

@@ -135,11 +135,15 @@ export const queryKeys = {
     revision: number | null,
   ) =>
     ["session", id, "workspace-diff", { path, stage, context, revision }] as const,
+  workspaceDiffRoot: (id: string) => ["session", id, "workspace-diff"] as const,
   branches: (id: string) => ["session", id, "branches"] as const,
   workspaceFiles: (id: string, revision: number | null) =>
     ["session", id, "workspace-files", { revision }] as const,
+  workspaceFilesRoot: (id: string) =>
+    ["session", id, "workspace-files"] as const,
   workspaceFile: (id: string, path: string, revision: number | null) =>
     ["session", id, "workspace-file", { path, revision }] as const,
+  workspaceFileRoot: (id: string) => ["session", id, "workspace-file"] as const,
   workspaceRevisions: (id: string) => ["session", id, "revisions"] as const,
   workspaceRevisionChanges: (id: string, revision: number) =>
     ["session", id, "revisions", revision, "changes"] as const,
@@ -475,13 +479,13 @@ export function useStoredKeyProviderModels(
  * empty into populated without a reload.
  */
 export function useManagedProviderModels(
-  backend: BackendKind,
+  backend: BackendKind | null,
   enabled: boolean,
 ) {
   return useQuery<ProviderModelList>({
-    queryKey: queryKeys.managedProviderModels(backend),
-    queryFn: () => api.listProviderModels({ backend }),
-    enabled,
+    queryKey: queryKeys.managedProviderModels(backend ?? ""),
+    queryFn: () => api.listProviderModels({ backend: backend! }),
+    enabled: enabled && backend !== null,
     retry: false,
     staleTime: 5 * 60_000,
   });

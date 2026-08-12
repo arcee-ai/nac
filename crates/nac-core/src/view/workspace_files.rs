@@ -252,3 +252,62 @@ fn run_git_optional(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Opt
     }
     Ok(Some(output.stdout))
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpenLocalPathResult {
+    /// Absolute path handed to the OS opener.
+    pub opened: String,
+    /// True when the requested file was missing and its parent was opened.
+    pub fell_back_to_parent: bool,
+}
+
+fn path_inside_root(path: &Path, root: &Path) -> bool {
+    path == root || path.starts_with(root)
+}
+
+/// Resolve `relpath` under a local workspace root and open it with the OS.
+///
+/// Missing files open the nearest existing parent directory still inside the
+/// workspace, so chat links keep working after a model names a path it has not
+/// written yet.
+pub fn open_local_path(root: &Path, relpath: &str) -> Result<OpenLocalPathResult> {
+    let rel = validate_workspace_relpath(relpath)?;
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("failed to resolve workspace root '{}'", root.display()))?;
+    let requested = root.join(&rel);
+
+    if requested.exists() {
+        return open_resolved(&requested, &root, false);
+    }
+
+    let mut parent = requested.parent().map(Path::to_path_buf);
+    while let Some(candidate) = parent {
+        if !path_inside_root(&candidate, &root) {
+            break;
+        }
+        if candidate.exists() {
+            return open_resolved(&candidate, &root, true);
+        }
+        parent = candidate.parent().map(Path::to_path_buf);
+    }
+    bail!("file not found: '{rel}'");
+}
+
+fn open_resolved(
+    target: &Path,
+    root: &Path,
+    fell_back_to_parent: bool,
+) -> Result<OpenLocalPathResult> {
+    let canonical = target
+        .canonicalize()
+        .with_context(|| format!("failed to resolve '{}'", target.display()))?;
+    if !path_inside_root(&canonical, root) {
+        bail!("invalid path: path escapes repository root");
+    }
+    crate::browser::open_path(&canonical)?;
+    Ok(OpenLocalPathResult {
+        opened: canonical.display().to_string(),
+        fell_back_to_parent,
+    })
+}

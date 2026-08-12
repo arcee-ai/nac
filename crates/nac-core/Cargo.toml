@@ -31,3 +31,10 @@ diffy = { version = "0.5.0", default-features = false }
 fs2 = "0.4"
 sha2 = "0.10"
 rand = "0.9"
+base64 = "0.22"
+cap-std = "4"
+globset = { version = "0.4", default-features = false }
+grep-matcher = "0.1"
+grep-regex = "0.1"
+ignore = "0.4"
+openssh-sftp-client = { version = "0.15", default-features = false }

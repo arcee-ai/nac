@@ -158,12 +158,16 @@ export interface ThreadSnapshot {
   latest_action: string | null;
 }
 
+/** How a dispatch ended; only `ok` is retained context for later dispatches. */
+export type EpisodeStatus = "ok" | "error" | "timed_out" | "cancelled";
+
 export interface EpisodeSnapshot {
   id: number;
   thread_name: string;
   session_id: string;
   action: string;
   content: string;
+  status: EpisodeStatus;
   created_at: string;
 }
 
@@ -227,6 +231,13 @@ export interface WorkspaceFileContent {
   size: number;
   binary: boolean;
   too_large: boolean;
+}
+
+export interface OpenWorkspacePathResult {
+  /** Absolute path handed to the OS opener. */
+  opened: string;
+  /** True when the requested file was missing and its parent was opened. */
+  fell_back_to_parent: boolean;
 }
 
 export interface Branch {

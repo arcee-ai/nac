@@ -14,6 +14,7 @@ export function FieldLabel({
 }: {
   label: string;
   hint?: string;
+  /** Marks the field with the asterisk the form's footnote explains. */
   required?: boolean;
   invalid?: boolean;
 }) {
@@ -26,14 +27,10 @@ export function FieldLabel({
         )}
       >
         {label}
+        {required ? "*" : ""}
       </div>
       {hint ? (
         <HoverHint title={hint} position={TooltipPosition.TopCenter} />
-      ) : null}
-      {required ? (
-        <div className="flex-1 text-right text-micro text-basic-muted">
-          Required
-        </div>
       ) : null}
     </div>
   );

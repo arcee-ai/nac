@@ -54,6 +54,7 @@ vi.mock("@/app/services/queries", () => ({
 vi.mock("@/app/store/runtimeStore", () => ({
   pushLocalEvent: mocks.pushLocalEvent,
   useRunning: () => false,
+  useRunUsage: () => null,
 }));
 
 vi.mock("@/app/store/sshConnectionStore", () => ({
@@ -173,8 +174,10 @@ describe("slash-command suggestions", () => {
     );
     expect(mocks.compact).not.toHaveBeenCalled();
     await waitFor(() =>
+      // The composer reports through `humanErrorText`, which opens a backend
+      // message as a sentence — the server sends this one lower-case.
       expect(mocks.toastError).toHaveBeenCalledWith(
-        "Failed to send: unknown slash command: /xyz",
+        "Failed to send: Unknown slash command: /xyz",
       ),
     );
   });

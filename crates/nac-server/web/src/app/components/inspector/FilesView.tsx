@@ -15,9 +15,11 @@ import {
 import { CommitPopover } from "@/app/components/inspector/CommitPopover";
 import {
   PanelEmpty,
+  PanelLoading,
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
+import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { statusLabelClass } from "@/app/lib/fileStatus";
@@ -648,6 +650,7 @@ export function FilesView({
     if (revision != null) return;
     void client.invalidateQueries({ queryKey: queryKeys.sessionSnapshot(sessionId) });
   }, [client, sessionId, revision]);
+  useLiveWorkspace(sessionId, revision);
 
   const workspace = snapshot?.workspace ?? null;
   const changed = useMemo(
@@ -709,7 +712,7 @@ export function FilesView({
     );
   }
   if (isLoading || !listing) {
-    return <PanelEmpty>Loading…</PanelEmpty>;
+    return <PanelLoading listTitle="Files" />;
   }
 
   return (

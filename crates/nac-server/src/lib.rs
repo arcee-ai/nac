@@ -754,6 +754,11 @@ pub struct WorkspaceFileQuery {
     pub revision: Option<i64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenWorkspacePathRequest {
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct WorkspaceRevisionQuery {
     pub revision: Option<i64>,
@@ -1493,6 +1498,38 @@ impl SessionManager {
         .context("workspace file read task failed")?
     }
 
+    /// Open a workspace path in the OS file manager / default app. Local
+    /// sessions only — an ssh checkout is not a path this machine can open.
+    pub async fn open_workspace_path(
+        &self,
+        session_id: &str,
+        path: String,
+    ) -> Result<view::OpenLocalPathResult> {
+        let summary = self
+            .list_sessions(false)
+            .await?
+            .into_iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .map(|entry| entry.summary)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        if summary.ssh_host.is_some() {
+            anyhow::bail!("opening paths is only available for local sessions");
+        }
+        let target = self.git_target(&summary)?;
+        let root = target
+            .local_path()
+            .ok_or_else(|| {
+                anyhow!(
+                    "workspace '{}' lives only inside the sandbox; mount a working directory to open it",
+                    summary.cwd.display()
+                )
+            })?
+            .to_path_buf();
+        tokio::task::spawn_blocking(move || view::open_local_path(&root, &path))
+            .await
+            .context("workspace open task failed")?
+    }
+
     pub fn workspace_revisions(
         &self,
         session_id: &str,
@@ -2108,6 +2145,10 @@ fn api_router(manager: SessionManager) -> Router {
             get(workspace_files),
         )
         .route("/sessions/{session_id}/workspace/file", get(workspace_file))
+        .route(
+            "/sessions/{session_id}/workspace/open",
+            post(open_workspace_path),
+        )
         .route(
             "/sessions/{session_id}/workspace/branches",
             get(workspace_branches).post(switch_workspace_branch),
@@ -3056,6 +3097,19 @@ async fn workspace_file(
     Ok(Json(
         manager
             .workspace_file(&session_id, query.path, query.revision)
+            .await?,
+    ))
+}
+
+async fn open_workspace_path(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<OpenWorkspacePathRequest>, JsonRejection>,
+) -> std::result::Result<Json<view::OpenLocalPathResult>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .open_workspace_path(&session_id, request.path)
             .await?,
     ))
 }

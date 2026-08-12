@@ -45,7 +45,6 @@ import {
 import { humanErrorText } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
 import {
   useCreateModelConfig,
   useCreateSession,
@@ -62,10 +61,22 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 type Mode = "local" | "ssh" | "sandbox";
 
-const MODES: { id: Mode; label: string }[] = [
-  { id: "local", label: "Local" },
-  { id: "ssh", label: "SSH" },
-  { id: "sandbox", label: "Sandbox" },
+const MODES: { id: Mode; label: string; description: string }[] = [
+  {
+    id: "local",
+    label: "Local",
+    description: "Runs on this machine with access to local files.",
+  },
+  {
+    id: "ssh",
+    label: "SSH",
+    description: "Runs on a connected remote machine.",
+  },
+  {
+    id: "sandbox",
+    label: "Sandbox",
+    description: "Runs in an isolated environment with limited access.",
+  },
 ];
 
 /** The configuration decides these, so "inherit" means "leave it alone". */
@@ -142,9 +153,9 @@ function LaunchForm({
   const [reasoning, setReasoning] = useState("");
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
-  const [initialPrompt, setInitialPrompt] = useState("");
   const [sandbox, setSandbox] = useState<SandboxState>(EMPTY_SANDBOX);
-  const [advanced, setAdvanced] = useState(false);
+  const [headersOpen, setHeadersOpen] = useState(false);
+  const [sandboxOpen, setSandboxOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [error, setError] = useState<FormError | null>(null);
@@ -259,7 +270,7 @@ function LaunchForm({
       return;
     }
     if (!nullable(cwd)) {
-      setError({ field: "cwd", message: "A working directory is required." });
+      setError({ field: "cwd", message: "A working folder is required." });
       return;
     }
     if (!selection) {
@@ -366,17 +377,6 @@ function LaunchForm({
         }
       }
 
-      const prompt = initialPrompt.trim();
-      if (newId && prompt) {
-        try {
-          await api.submitRun(newId, prompt);
-        } catch (runError) {
-          toast.error(
-            `Session created, but the initial run failed: ${humanErrorText(runError, backend)}`,
-          );
-        }
-      }
-
       if (newId) navigate(routes.session(newId));
       onClose();
     } catch (createError) {
@@ -443,8 +443,8 @@ function LaunchForm({
       <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
         <div className="flex flex-col gap-1">
           <FieldLabel
-            label="Execution"
-            hint="Where the agent runs: on this machine, over SSH, or inside a container."
+            label="Environment"
+            hint="Where NAC runs commands and accesses files."
           />
           <div className="flex items-start gap-3">
             {MODES.map((item) => (
@@ -465,6 +465,11 @@ function LaunchForm({
               </Button>
             ))}
           </div>
+          {/* What the chosen environment means for the session, which the three
+              one-word buttons cannot say on their own. */}
+          <p className="pt-1 text-micro text-basic-muted">
+            {MODES.find((item) => item.id === mode)?.description}
+          </p>
         </div>
 
         {isSsh ? (
@@ -479,11 +484,11 @@ function LaunchForm({
           <div className="flex flex-col md:flex-row items-start gap-6 md:gap-4">
             <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
               <FieldLabel
-                label="Working Directory"
+                label="Working Folder"
                 hint={
                   isSsh
-                    ? "Directory on the SSH host the agent works in."
-                    : "Project directory the agent works in."
+                    ? "The project folder NAC works within on the SSH host."
+                    : "The project folder NAC works within."
                 }
                 required
                 invalid={invalid("cwd")}
@@ -513,7 +518,7 @@ function LaunchForm({
               ) : null}
             </div>
             <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
-              <FieldLabel label="Title (optional)" />
+              <FieldLabel label="Title" />
               <Input
                 inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 placeholder="Shown on the session card"
@@ -533,8 +538,8 @@ function LaunchForm({
           >
             <div className="flex flex-col gap-2">
               <ConfigRow
-                label="Reasoning effort"
-                hint="Reasoning effort passed to the model."
+                label="Reasoning Effort"
+                hint="Higher effort for deeper reasoning and lower effort for faster responses."
                 control={smallSelect(
                   reasoningItems,
                   reasoning,
@@ -543,36 +548,40 @@ function LaunchForm({
               />
               <Separator />
               <ConfigRow
-                label="Compaction threshold"
-                hint="Context size that triggers compaction; 0 disables it."
+                label="Context Limit"
+                hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
                 control={
-                  <Input
-                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                    className="w-full md:w-[120px]"
-                    inputClassName="md:text-right"
-                    placeholder={compactionPlaceholder}
-                    inputMode="numeric"
-                    value={compaction}
-                    onChange={(e) => onCompactionChange(e.target.value)}
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                      className="w-full md:w-[120px]"
+                      inputClassName="md:text-right"
+                      placeholder={compactionPlaceholder}
+                      inputMode="numeric"
+                      value={compaction}
+                      onChange={(e) => onCompactionChange(e.target.value)}
+                    />
+                    <span className="shrink-0 text-micro text-basic-muted">
+                      tokens
+                    </span>
+                  </div>
                 }
               />
-              <Separator />
-              <ConfigRow
-                label="Advanced Configurations"
-                hint="Extra headers and a first message."
-                control={
-                  <Switch
-                    checked={advanced}
-                    onChange={setAdvanced}
-                    aria-label="Advanced Configurations"
-                  />
-                }
-              />
-
-              {advanced ? (
+              {mode === "sandbox" ? (
                 <>
-                  {mode === "sandbox" ? (
+                  <Separator />
+                  <ConfigRow
+                    label="Sandbox options"
+                    hint="The container the session runs in: image, GPUs, workdir, shared memory and mounts."
+                    control={
+                      <Switch
+                        checked={sandboxOpen}
+                        onChange={setSandboxOpen}
+                        aria-label="Sandbox options"
+                      />
+                    }
+                  />
+                  {sandboxOpen ? (
                     <>
                       <Separator />
                       <ConfigRow
@@ -646,13 +655,13 @@ function LaunchForm({
                       />
                       <Separator />
                       <ConfigRow
-                        label="Don't mount the working directory"
+                        label="Don't mount the working folder"
                         secondary
                         control={
                           <Switch
                             checked={sandbox.noMount}
                             onChange={(value) => setSb({ noMount: value })}
-                            aria-label="Don't mount the working directory"
+                            aria-label="Don't mount the working folder"
                             size={
                               isMobile ? SwitchSize.Large : SwitchSize.Medium
                             }
@@ -661,23 +670,31 @@ function LaunchForm({
                       />
                     </>
                   ) : null}
+                </>
+              ) : null}
 
+              <Separator />
+              <ConfigRow
+                label="Custom HTTP headers"
+                hint="Turn this on only if you need to send additional request metadata."
+                control={
+                  <Switch
+                    checked={headersOpen}
+                    onChange={setHeadersOpen}
+                    aria-label="Custom HTTP headers"
+                  />
+                }
+              />
+              {headersOpen ? (
+                <>
                   <Separator />
                   <TextArea
                     label="Extra headers (JSON object)"
                     hintText="Blank keeps the configuration's headers. Enter {} to send none; header values must be strings."
-                    placeholder='{"X-Title": "nac"}'
+                    placeholder='{"X-Title": "NAC"}'
                     value={extraHeaders}
                     onChange={(e) => edit(setExtraHeaders)(e.target.value)}
                     textAreaClassName="h-[108px] resize-none"
-                  />
-                  <Separator />
-                  <TextArea
-                    label="Initial prompt"
-                    placeholder="Send a first message right after the session is created…"
-                    value={initialPrompt}
-                    onChange={(e) => edit(setInitialPrompt)(e.target.value)}
-                    textAreaClassName="h-[116px] resize-none"
                   />
                 </>
               ) : null}

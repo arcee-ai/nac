@@ -14,6 +14,7 @@ import {
   Icon,
   IconName,
   Modal,
+  ShimmerLoader,
   TabButton,
   TabButtonSize,
 } from "@/app/atoms";
@@ -45,6 +46,7 @@ export function PanelSplit({
   listToolbar,
   listTitle,
   title,
+  titleAction,
   actions,
   children,
 }: {
@@ -58,6 +60,8 @@ export function PanelSplit({
   listTitle?: string;
   /** Row that is open, named for the narrow header. */
   title?: string;
+  /** Control belonging to the title itself, beside it rather than trailing. */
+  titleAction?: ReactNode;
   /** Panel's own controls, trailing the narrow header. */
   actions?: ReactNode;
   children: ReactNode;
@@ -163,9 +167,11 @@ export function PanelSplit({
             what leads back to it. */}
         {!showList ? (
           <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-level-1">
-            <span className="flex-1 min-w-0 truncate label-small text-basic-primary">
+            <span className="min-w-0 truncate label-small text-basic-primary">
               {title}
             </span>
+            {titleAction}
+            <span className="flex-1" />
             {actions}
             <Button
               size={ButtonSize.Medium}
@@ -283,6 +289,35 @@ export function PanelRow({
       </span>
       {trailing}
     </TabButton>
+  );
+}
+
+/**
+ * Placeholder for a panel waiting on its first payload: rows the size of the
+ * ones on their way, rather than the word "Loading".
+ *
+ * Laid out as the split it is loading into — a short list beside a taller body
+ * — so the columns and the divider are already where the rows will land, and
+ * arriving data fills the panel instead of rebuilding it.
+ */
+export function PanelLoading({ listTitle }: { listTitle?: string }) {
+  return (
+    <PanelSplit
+      listTitle={listTitle}
+      list={
+        <div className="px-1">
+          <ShimmerLoader rows={2} rowClassName="h-6" />
+        </div>
+      }
+    >
+      <div
+        role="status"
+        aria-label={`Loading ${listTitle ?? "panel"}`}
+        className="flex flex-1 flex-col min-h-0 overflow-hidden p-4"
+      >
+        <ShimmerLoader rows={3} rowClassName="h-6" />
+      </div>
+    </PanelSplit>
   );
 }
 
