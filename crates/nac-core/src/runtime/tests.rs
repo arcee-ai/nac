@@ -1451,7 +1451,7 @@ X-Config = "yes"
         )
         .await
         .unwrap();
-        let session_id = created.session.session_id().unwrap().to_string();
+        let session_id = created.session.session_id().to_string();
         assert_eq!(
             created.client.reasoning_effort(),
             Some(ReasoningEffort::Xhigh)
@@ -1633,7 +1633,7 @@ X-Config = "yes"
                 .and_then(|target| target.local_path()),
             Some(canonical_session_cwd.as_path())
         );
-        assert_eq!(run_config.session.session_id(), Some("resume-session"));
+        assert_eq!(run_config.session.session_id(), "resume-session");
         assert_eq!(run_config.agent.messages.len(), 4);
         match &run_config.agent.messages[2] {
             Message::User { content } => assert_eq!(content, "hello"),
@@ -1886,7 +1886,7 @@ X-Config = "yes"
         .await
         .expect("remote resume must not perform local path checks");
 
-        assert_eq!(run_config.session.session_id(), Some("remote-session"));
+        assert_eq!(run_config.session.session_id(), "remote-session");
         assert_eq!(
             run_config.workspace_display,
             remote_cwd.display().to_string()
@@ -1980,7 +1980,6 @@ X-Config = "yes"
         let session_id = run_config
             .session
             .session_id()
-            .expect("remote creation must produce an active session")
             .to_string();
         let stored = sessions::load_session(&store_path, &session_id).unwrap();
         assert_eq!(
@@ -2059,7 +2058,7 @@ X-Config = "yes"
             fresh_control_path.display()
         );
 
-        let session_id = run_config.session.session_id().unwrap().to_string();
+        let session_id = run_config.session.session_id().to_string();
         let store_path = run_config.session.store_path();
         let resume_base_cwd = run_config.resume_base_cwd().to_path_buf();
         let resumed = build_resume_config_for_session(
@@ -2223,7 +2222,7 @@ X-Config = "yes"
         .await
         .expect("blank remote cwd should default to home");
         assert_eq!(run_config.workspace_display, "~");
-        let session_id = run_config.session.session_id().unwrap().to_string();
+        let session_id = run_config.session.session_id().to_string();
         let stored = sessions::load_session(&store_path, &session_id).unwrap();
         assert_eq!(stored.cwd, PathBuf::from("~"));
         assert_eq!(

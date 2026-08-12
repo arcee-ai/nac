@@ -531,16 +531,16 @@ pub(crate) struct OrchestratorSession {
 }
 
 impl OrchestratorSession {
-    pub fn session_id(&self) -> Option<&str> {
-        Some(&self.session_id)
+    pub fn session_id(&self) -> &str {
+        &self.session_id
     }
 
     pub fn store_path(&self) -> PathBuf {
         self.store_path.clone()
     }
 
-    pub fn into_snapshot(self) -> Option<SessionSnapshot> {
-        Some(self.snapshot)
+    pub fn into_snapshot(self) -> SessionSnapshot {
+        self.snapshot
     }
 }
 

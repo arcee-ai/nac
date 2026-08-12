@@ -622,7 +622,7 @@ impl SessionService {
         mut run_config: OrchestratorRunConfig,
     ) -> SessionServiceParts {
         let store_path = run_config.session.store_path();
-        let session_id = run_config.session.session_id().map(str::to_string);
+        let session_id = Some(run_config.session.session_id().to_string());
         let restored_messages = run_config.agent.messages.clone();
         let transcript_recovery_warning = run_config
             .agent
@@ -660,7 +660,7 @@ impl SessionService {
             api_key_env: run_config.client.api_key_env().map(str::to_string),
             extra_headers: run_config.client.extra_headers().clone(),
         };
-        let session_snapshot = run_config.session.into_snapshot();
+        let session_snapshot = Some(run_config.session.into_snapshot());
         let active_threads = run_config.agent.active_threads_handle();
         let transcript_log = run_config.agent.transcript_log_writer();
         // The restored transcript is exactly the store transcript (blob ++
