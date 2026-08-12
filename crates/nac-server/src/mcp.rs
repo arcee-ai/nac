@@ -20,7 +20,7 @@ use rmcp::transport::StreamableHttpServerConfig;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::tower::StreamableHttpService;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 // ---------------------------------------------------------------------------
@@ -169,13 +169,9 @@ impl NacMcpService {
                     "session_id": session_id,
                     "model": model,
                 });
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("Error serializing: {e}")),
-                )]))
+                render_success(&result)
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Err(e) => render_error(e),
         }
     }
 
@@ -202,13 +198,9 @@ impl NacMcpService {
                     })
                     .collect();
                 let result = json!(entries);
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("Error serializing: {e}")),
-                )]))
+                render_success(&result)
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Err(e) => render_error(e),
         }
     }
 
@@ -243,13 +235,9 @@ impl NacMcpService {
                     "active_threads": snapshot.active_threads,
                     "threads": threads,
                 });
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("Error serializing: {e}")),
-                )]))
+                render_success(&result)
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Err(e) => render_error(e),
         }
     }
 
@@ -268,13 +256,9 @@ impl NacMcpService {
                     "run_id": response.run_id,
                     "display_prompt": response.display_prompt,
                 });
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("Error serializing: {e}")),
-                )]))
+                render_success(&result)
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Err(e) => render_error(e),
         }
     }
 
@@ -316,12 +300,8 @@ impl NacMcpService {
                 })
         };
         match result {
-            Ok(value) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&value).unwrap_or_else(|e| format!("Error serializing: {e}")),
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Ok(value) => render_success(&value),
+            Err(e) => render_error(e),
         }
     }
 
@@ -368,13 +348,9 @@ impl NacMcpService {
                         "has_older": page.page.has_older,
                     },
                 });
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("Error serializing: {e}")),
-                )]))
+                render_success(&result)
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Err(e) => render_error(e),
         }
     }
 
@@ -435,15 +411,9 @@ impl NacMcpService {
         })
         .await;
         match result {
-            Ok(Ok(value)) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&value).unwrap_or_else(|e| format!("Error serializing: {e}")),
-            )])),
-            Ok(Err(e)) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Ok(Ok(value)) => render_success(&value),
+            Ok(Err(e)) => render_error(e),
+            Err(e) => render_error(e),
         }
     }
 
@@ -490,12 +460,8 @@ impl NacMcpService {
                 })
         };
         match result {
-            Ok(value) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&value).unwrap_or_else(|e| format!("Error serializing: {e}")),
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Ok(value) => render_success(&value),
+            Err(e) => render_error(e),
         }
     }
 
@@ -542,12 +508,8 @@ impl NacMcpService {
             )),
         };
         match result {
-            Ok(value) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&value).unwrap_or_else(|e| format!("Error serializing: {e}")),
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Ok(value) => render_success(&value),
+            Err(e) => render_error(e),
         }
     }
 
@@ -570,13 +532,8 @@ impl NacMcpService {
             .update_session_config(&params.session_id, request)
             .await
         {
-            Ok(()) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({"status": "ok"}))
-                    .unwrap_or_else(|e| format!("Error serializing: {e}")),
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
+            Ok(()) => render_success(&json!({"status": "ok"})),
+            Err(e) => render_error(e),
         }
     }
 
@@ -612,9 +569,7 @@ impl NacMcpService {
             })
             .collect();
         let result = json!(providers);
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("Error serializing: {e}")),
-        )]))
+        render_success(&result)
     }
 }
 
@@ -638,6 +593,16 @@ pub fn streamable_http_service(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn render_success(value: &impl Serialize) -> Result<CallToolResult, ErrorData> {
+    let text = serde_json::to_string_pretty(value)
+        .unwrap_or_else(|error| format!("Error serializing: {error}"));
+    Ok(CallToolResult::success(vec![Content::text(text)]))
+}
+
+fn render_error(error: impl std::fmt::Display) -> Result<CallToolResult, ErrorData> {
+    Ok(CallToolResult::error(vec![Content::text(format!("Error: {error}"))]))
+}
 
 /// Converts an `Option<String>` into a `RequestField<String>`:
 /// `Some(v)` → `Value(v)`, `None` → `Omitted`.
@@ -667,5 +632,46 @@ fn message_content(msg: &nac_core::types::Message) -> String {
             content.clone().unwrap_or_default()
         }
         nac_core::types::Message::Tool { content, .. } => content.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct SerializationFailure;
+
+    impl Serialize for SerializationFailure {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Err(serde::ser::Error::custom("intentional failure"))
+        }
+    }
+
+    fn text(result: &CallToolResult) -> &str {
+        result.content[0].as_text().expect("text content").text.as_str()
+    }
+
+    #[test]
+    fn result_rendering_preserves_success_and_fallback_text() {
+        let success = render_success(&json!({"status": "ok"})).expect("success result");
+        assert_eq!(text(&success), "{\n  \"status\": \"ok\"\n}");
+        assert_eq!(success.is_error, Some(false));
+
+        let fallback = render_success(&SerializationFailure).expect("fallback result");
+        assert_eq!(
+            text(&fallback),
+            "Error serializing: intentional failure"
+        );
+        assert_eq!(fallback.is_error, Some(false));
+    }
+
+    #[test]
+    fn result_rendering_preserves_error_text() {
+        let error = render_error("bad request").expect("error result");
+        assert_eq!(text(&error), "Error: bad request");
+        assert_eq!(error.is_error, Some(true));
     }
 }
