@@ -683,16 +683,16 @@ fn thinking_level_map_lookup_semantics() {
     // present + Some = supported, with the wire value.
     assert_eq!(map.wire_value(ReasoningEffort::High), Some("max"));
     assert!(map.is_supported(ReasoningEffort::High));
-    assert!(!map.is_explicitly_unsupported(ReasoningEffort::High));
+    assert!(matches!(map.0.get(&ReasoningEffort::High), Some(Some(_))));
     // present + None = explicitly unsupported (documents always-thinking
     // models); distinct from absent.
     assert_eq!(map.wire_value(ReasoningEffort::Low), None);
     assert!(!map.is_supported(ReasoningEffort::Low));
-    assert!(map.is_explicitly_unsupported(ReasoningEffort::Low));
+    assert!(matches!(map.0.get(&ReasoningEffort::Low), Some(None)));
     // absent = unsupported, but not explicitly.
     assert_eq!(map.wire_value(ReasoningEffort::Xhigh), None);
     assert!(!map.is_supported(ReasoningEffort::Xhigh));
-    assert!(!map.is_explicitly_unsupported(ReasoningEffort::Xhigh));
+    assert!(!map.0.contains_key(&ReasoningEffort::Xhigh));
 }
 
 #[test]

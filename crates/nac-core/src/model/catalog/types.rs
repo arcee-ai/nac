@@ -74,15 +74,6 @@ impl ThinkingLevelMap {
         self.wire_value(effort).is_some()
     }
 
-    /// Whether the map explicitly marks the effort unsupported (present +
-    /// `None`), as opposed to merely absent. Currently consumed by tests;
-    /// it documents the user-override `null` wire-value case, which neither
-    /// the seed catalog nor the generator ever produces.
-    #[allow(dead_code)] // test-consumed; the /models listing reads supported_efforts
-    pub fn is_explicitly_unsupported(&self, effort: ReasoningEffort) -> bool {
-        matches!(self.0.get(&effort), Some(None))
-    }
-
     /// The supported effort levels (keys with a wire value), in canonical
     /// effort order. The `/models` listing derives its per-model effort
     /// options from this; the wire values stay internal.
