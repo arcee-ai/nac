@@ -2,6 +2,7 @@ mod compaction;
 mod filesystem;
 mod managed_auth;
 mod mcp;
+mod model_configuration_http;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -9,6 +10,10 @@ pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,
+};
+pub use model_configuration_http::{
+    ModelConfigFromFileRequest, ProviderModelList, ProviderModelsRequest,
+    ResolvedModelConfiguration,
 };
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
@@ -48,12 +53,10 @@ use nac_core::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
     model::{
-        list_managed_provider_models, list_provider_models, list_stored_api_keys,
-        managed_backend_base_url, provider_default_base_url, provider_for_model,
-        provider_uses_api_key, remove_api_key, resolve_backend_api_key, resolve_model_base_url,
-        store_api_key, validate_caller_supplied_base_url, validate_model_configuration,
-        BackendKind, EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError,
-        ModelListing, ProviderModel, ReasoningEffort,
+        list_stored_api_keys, managed_backend_base_url, provider_for_model, provider_uses_api_key,
+        remove_api_key, resolve_model_base_url, store_api_key, validate_caller_supplied_base_url,
+        validate_model_configuration, BackendKind, EffectiveModelSettings, ModelConfigurationError,
+        ModelListing, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
     runtime::{
@@ -477,46 +480,6 @@ pub struct UpdateSshConfigurationRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct SshConfigurationList {
     pub configurations: Vec<SshConfigurationRecord>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ModelConfigFromFileRequest {
-    pub path: String,
-}
-
-/// A configuration that has been checked end to end: the destination is
-/// approved, the credential resolves, and the provider answered with the
-/// models it allows.
-#[derive(Debug, Clone, Serialize)]
-pub struct ResolvedModelConfiguration {
-    pub backend: BackendKind,
-    pub model: Option<String>,
-    pub base_url: String,
-    pub api_key_env: Option<String>,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub models: Vec<ProviderModel>,
-    /// Why the list is empty, when a stored login could not be asked. An empty
-    /// list without this is a provider that simply offers no index.
-    pub models_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ProviderModelsRequest {
-    pub backend: BackendKind,
-    pub api_key: Option<String>,
-    /// Names a key already held in the environment or in NAC home, for a caller
-    /// that has one on file and no copy of the secret to send.
-    pub api_key_env: Option<String>,
-    /// Overrides the provider's canonical URL, for a proxy or a custom gateway.
-    pub base_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProviderModelList {
-    /// The URL the models were actually read from, so the caller can persist
-    /// the same destination it validated against.
-    pub base_url: String,
-    pub models: Vec<ProviderModel>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2176,22 +2139,14 @@ fn api_router(manager: SessionManager) -> Router {
         .route("/store", get(store_info))
         .route("/fs/browse", get(browse_filesystem_handler))
         .route("/ssh/browse", post(browse_ssh_handler))
-        .route("/providers/models", post(provider_models_handler))
+        .merge(model_configuration_http::routes())
         .route(
             "/model-configs",
             get(list_model_configs_handler).post(create_model_config_handler),
         )
         .route(
-            "/model-configs/from-file",
-            post(model_config_from_file_handler),
-        )
-        .route(
             "/model-configs/{config_id}",
             patch(update_model_config_handler).delete(delete_model_config_handler),
-        )
-        .route(
-            "/model-configs/{config_id}/models",
-            post(saved_model_config_models_handler),
         )
         .route(
             "/ssh-configs",
@@ -2411,92 +2366,6 @@ async fn browse_ssh_handler(
     Ok(Json(listing))
 }
 
-/// Validate a credential by asking its provider which models it may use.
-///
-/// A key arrives in the request body and is forwarded once; it is never stored
-/// by this route, and the destination goes through the same credential trust
-/// check as a session launch. A provider signed in through the browser has no
-/// key to send, so the stored login answers instead — and its answer is the
-/// same evidence the launch UI needs that the login still works.
-async fn provider_models_handler(
-    State(manager): State<SessionManager>,
-    payload: std::result::Result<Json<ProviderModelsRequest>, JsonRejection>,
-) -> std::result::Result<Json<ProviderModelList>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let backend = request.backend;
-
-    let api_key = request.api_key.unwrap_or_default();
-    let api_key_env = request
-        .api_key_env
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    if let Some(provider) = ManagedAuthProvider::for_backend(backend) {
-        if !api_key.trim().is_empty() || api_key_env.is_some() {
-            return Err(ApiError {
-                status: StatusCode::BAD_REQUEST,
-                message: format!(
-                    "backend '{backend}' authenticates with a stored login and accepts no API key"
-                ),
-            });
-        }
-        let models = list_managed_provider_models(provider)
-            .await
-            .map_err(|error| ApiError {
-                status: StatusCode::BAD_GATEWAY,
-                message: error.to_string(),
-            })?;
-        // The endpoint belongs to the login rather than to the caller, so it is
-        // reported back the same way a validated key's is.
-        let base_url = provider_default_base_url(backend)
-            .map(str::to_string)
-            .unwrap_or_default();
-        return Ok(Json(ProviderModelList { base_url, models }));
-    }
-    // A key already filed away is named rather than sent, so a setup that is
-    // only being reviewed never has to hand its secret back to the page first.
-    let api_key = match api_key_env {
-        Some(name) if api_key.trim().is_empty() => resolve_backend_api_key(backend, Some(name))
-            .map_err(|error| ApiError {
-                status: StatusCode::BAD_REQUEST,
-                message: error.to_string(),
-            })?,
-        _ => api_key,
-    };
-    if api_key.trim().is_empty() {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' requires a nonblank API key"),
-        });
-    }
-
-    let base_url = request
-        .base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| provider_default_base_url(backend).map(str::to_string))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' has no default base URL; supply one"),
-        })?;
-    enforce_trusted_base_url(
-        Some(backend),
-        Some(base_url.as_str()),
-        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-    )?;
-
-    let models = list_provider_models(backend, &base_url, &api_key)
-        .await
-        .map_err(|error| ApiError {
-            // A rejected key is the caller's problem, not a server fault.
-            status: StatusCode::BAD_GATEWAY,
-            message: error.to_string(),
-        })?;
-    Ok(Json(ProviderModelList { base_url, models }))
-}
-
 async fn list_model_configs_handler(
     State(manager): State<SessionManager>,
 ) -> std::result::Result<Json<ModelConfigurationList>, ApiError> {
@@ -2517,7 +2386,8 @@ async fn create_model_config_handler(
     let Json(request) = payload.map_err(ApiError::from)?;
     let backend = request.backend;
 
-    let base_url = settle_configuration_base_url(&manager, backend, request.base_url.as_deref())?;
+    let base_url =
+        model_configuration_http::settle_base_url(&manager, backend, request.base_url.as_deref())?;
 
     let api_key = request
         .api_key
@@ -2579,32 +2449,6 @@ async fn create_model_config_handler(
     }
 }
 
-/// Settles where a configuration sends its requests: the caller's URL when
-/// there is one, the provider's canonical URL otherwise, checked against the
-/// credential destination policy either way.
-fn settle_configuration_base_url(
-    manager: &SessionManager,
-    backend: BackendKind,
-    requested: Option<&str>,
-) -> std::result::Result<String, ApiError> {
-    let base_url = requested
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| provider_default_base_url(backend).map(str::to_string))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' has no default base URL; supply one"),
-        })?;
-    let base_url = resolve_model_base_url(backend, Some(base_url))?;
-    enforce_trusted_base_url(
-        Some(backend),
-        Some(base_url.as_str()),
-        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-    )?;
-    Ok(base_url)
-}
-
 /// Edit a saved provider setup, keeping whatever the request leaves out.
 ///
 /// A new key is filed under a fresh generated name and the row is pointed at
@@ -2639,7 +2483,11 @@ async fn update_model_config_handler(
         RequestField::Null => None,
         RequestField::Omitted => (backend == stored_backend).then(|| existing.base_url.clone()),
     };
-    let base_url = settle_configuration_base_url(&manager, backend, requested_base_url.as_deref())?;
+    let base_url = model_configuration_http::settle_base_url(
+        &manager,
+        backend,
+        requested_base_url.as_deref(),
+    )?;
 
     let expects_key = provider_uses_api_key(backend);
     let supplied_key = match &request.api_key {
@@ -2736,153 +2584,6 @@ fn replaceable_text(field: RequestField<String>, current: &str) -> String {
         RequestField::Null => String::new(),
         RequestField::Omitted => current.to_string(),
     }
-}
-
-/// Read a configuration the user picked from disk and check it can actually run.
-///
-/// The key is never sent by the client here: the file names an environment
-/// variable or stored credential, and the server resolves it the same way a
-/// session would.
-async fn model_config_from_file_handler(
-    State(manager): State<SessionManager>,
-    payload: std::result::Result<Json<ModelConfigFromFileRequest>, JsonRejection>,
-) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let path = PathBuf::from(request.path.trim());
-    if path.as_os_str().is_empty() {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: "a configuration file path is required".to_string(),
-        });
-    }
-
-    let config = NacConfig::load_from_file(&path).map_err(|error| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message: error.to_string(),
-    })?;
-    // A file written against the current schema names only a model, whose
-    // provider the catalog resolves; an older one states the provider
-    // outright and is taken at its word.
-    let identity = NacConfig::load_model_identity_from_file(&path).map_err(|error| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message: error.to_string(),
-    })?;
-    let backend = identity
-        .backend
-        .or_else(|| config.model.model.as_deref().and_then(provider_for_model))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!(
-                "{} names no model the catalog recognizes, so it cannot describe a provider",
-                path.display()
-            ),
-        })?;
-
-    resolve_configuration(
-        &manager,
-        backend,
-        config.model.model,
-        identity.base_url,
-        identity.api_key_env,
-        config.model.reasoning_effort,
-    )
-    .await
-}
-
-async fn saved_model_config_models_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
-) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
-    let record =
-        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
-    let backend: BackendKind = record.backend.parse().map_err(|message: String| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message,
-    })?;
-    let reasoning_effort = record
-        .reasoning_effort
-        .as_deref()
-        .map(|raw| parse_request_enum::<ReasoningEffort>(raw, "reasoning_effort"))
-        .transpose()?;
-
-    resolve_configuration(
-        &manager,
-        backend,
-        Some(record.model),
-        Some(record.base_url),
-        record.api_key_env,
-        reasoning_effort,
-    )
-    .await
-}
-
-/// Shared tail of the saved-configuration and config-file paths: settle the
-/// destination, resolve the credential, and confirm both by listing models.
-async fn resolve_configuration(
-    manager: &SessionManager,
-    backend: BackendKind,
-    model: Option<String>,
-    base_url: Option<String>,
-    api_key_env: Option<String>,
-    reasoning_effort: Option<ReasoningEffort>,
-) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
-    let base_url = base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| provider_default_base_url(backend).map(str::to_string))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' has no default base URL; supply one"),
-        })?;
-    let base_url = resolve_model_base_url(backend, Some(base_url))?;
-    enforce_trusted_base_url(
-        Some(backend),
-        Some(base_url.as_str()),
-        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-    )?;
-
-    let mut models_error = None;
-    let models = match ManagedAuthProvider::for_backend(backend) {
-        // A stored login has no key to check, but it does reach a model index,
-        // so a saved setup offers the same choice a fresh one does. Being
-        // signed out is not fatal here: the configuration still names a model.
-        // The reason for an empty list travels with it, so the caller can tell a
-        // provider with nothing to offer from a login that stopped working.
-        Some(provider) => match list_managed_provider_models(provider).await {
-            Ok(models) => models,
-            Err(error) => {
-                models_error = Some(error.to_string());
-                Vec::new()
-            }
-        },
-        None => {
-            let api_key =
-                resolve_backend_api_key(backend, api_key_env.as_deref()).map_err(|error| {
-                    ApiError {
-                        status: StatusCode::BAD_REQUEST,
-                        message: error.to_string(),
-                    }
-                })?;
-            list_provider_models(backend, &base_url, &api_key)
-                .await
-                .map_err(|error| ApiError {
-                    status: StatusCode::BAD_GATEWAY,
-                    message: error.to_string(),
-                })?
-        }
-    };
-
-    Ok(Json(ResolvedModelConfiguration {
-        backend,
-        model,
-        base_url,
-        api_key_env,
-        reasoning_effort,
-        models,
-        models_error,
-    }))
 }
 
 async fn delete_model_config_handler(
