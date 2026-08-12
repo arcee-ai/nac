@@ -9,30 +9,24 @@
 
 /* Figma "Header/Header-md": semibold 16/24, unlike .header-small which is bold. */
 .header-md { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 600; }
-/* Figma "Header/Header-sm": semibold 14/20, unlike .header-micro which is bold. */
+/* Figma "Header/Header-sm": semibold 14/20. */
 .header-sm { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; }
 /* Figma "Header/Header-2xl": semibold 24/32, unlike .subtitle which is medium. */
 .header-2xl { font-family: Inter; font-size: 1.5rem; line-height: 2rem; font-weight: 600; }
 
-.header-big { font-family: Inter; font-size: 1.25rem; line-height: 1.75rem; font-weight: 700; }
 .header-medium { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; font-weight: 700; }
 .header-small { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
-.header-micro { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; font-weight: 700; }
 
-.label-big { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; font-weight: 500; }
 .label-medium { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 500; }
 .label-small { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; }
 .label-micro { font-family: Inter; font-size: 0.75rem; line-height: 1rem; font-weight: 500; }
 
-.text-big { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; }
 .text-medium { font-family: Inter; font-size: 1rem; line-height: 1.5rem; }
 .text-small { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; }
 .text-micro { font-family: Inter; font-size: 0.75rem; line-height: 1rem; }
 
-.paragraph-big { font-family: Inter; font-size: 1.125rem; line-height: 1.75rem; }
 .paragraph-medium { font-family: Inter; font-size: 1rem; line-height: 1.75rem; }
 .paragraph-small { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; }
-.paragraph-micro { font-family: Inter; font-size: 0.75rem; line-height: 1rem; }
 
 .tag-label {
   font-family: Inter; font-size: 10px; line-height: 0.75rem;
@@ -47,4 +41,3 @@
 .code-micro { font-size: 10px; line-height: 12px; font-weight: 500; letter-spacing: 0; }
 .code-small { font-size: 12px; }
 .code-medium { font-size: 13px; }
-.code-large { font-size: 14px; }
