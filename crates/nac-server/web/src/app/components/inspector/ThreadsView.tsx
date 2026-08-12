@@ -42,6 +42,7 @@ import {
   persistedThreadLog,
   threadIsThinking,
   type LogEntry,
+  type StandaloneLine,
   type ThreadLogLine,
   type ToolCallEntry,
 } from "@/app/lib/threadLog";
@@ -137,12 +138,11 @@ const ToolCallView = memo(function ToolCallView({
         )}
       </p>
       {entry.resultPreview !== null ? (
-        <p
-          className={
-            "pl-4 pt-0.5 code code-small whitespace-pre-wrap break-words " +
-            (entry.isError ? "text-error-primary" : "text-basic-tertiary")
-          }
-        >
+        // Only the glyph carries the outcome. What a failing command printed is
+        // the part worth reading, and a whole line of red reads as unreadable
+        // rather than as urgent — a "File not found" is a plain fact about the
+        // path in it.
+        <p className="pl-4 pt-0.5 code code-small whitespace-pre-wrap break-words text-basic-tertiary">
           <span
             className={
               entry.isError ? "text-error-primary" : "text-success-primary"
@@ -163,16 +163,23 @@ const ToolCallView = memo(function ToolCallView({
 const StandaloneView = memo(function StandaloneView({
   entry,
 }: {
-  entry: { kind: "log"; key: string; text: string; isError: boolean };
+  entry: StandaloneLine;
 }) {
   return (
-    <p
-      className={
-        "pt-1 code code-small whitespace-pre-wrap break-words " +
-        (entry.isError ? "text-error-primary" : "text-basic-tertiary")
-      }
-    >
-      {entry.text}
+    <p className="pt-1 code code-small whitespace-pre-wrap break-words text-basic-tertiary">
+      {entry.mark ? (
+        <span
+          className={
+            entry.isError ? "text-error-primary" : "text-success-primary"
+          }
+        >
+          {`${entry.mark} `}
+        </span>
+      ) : null}
+      {entry.name ? (
+        <span className="text-basic-primary">{`${entry.name}: `}</span>
+      ) : null}
+      {entry.body}
     </p>
   );
 });

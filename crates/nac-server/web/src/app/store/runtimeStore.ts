@@ -5,7 +5,11 @@
 
 import { createStore } from "@/app/lib/store";
 import { isActiveRun } from "@/app/lib/format";
-import { threadLogLine, type ThreadLogLine } from "@/app/lib/threadLog";
+import {
+  threadLogLine,
+  toolCallFailed,
+  type ThreadLogLine,
+} from "@/app/lib/threadLog";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
   ActiveRunSnapshot,
@@ -370,15 +374,17 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
       // and at that rate they would push everything else out of the events tab.
       pushThreadLog(event.name, event);
       return "none";
-    case "tool_call_finished":
+    case "tool_call_finished": {
+      const failed = toolCallFailed(event);
       pushThreadLog(event.thread_name, event);
       pushEvent({
         seq,
         kind: "tool",
-        text: `${event.is_error ? "✕" : "✓"} ${event.name}: ${event.content_preview}`,
-        isError: event.is_error,
+        text: `${failed ? "✕" : "✓"} ${event.name}: ${event.content_preview}`,
+        isError: failed,
       });
       return "none";
+    }
     case "thread_started":
       setState({ activity: `Thread ${event.name}: ${event.action}` });
       pushEvent({

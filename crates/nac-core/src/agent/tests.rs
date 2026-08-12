@@ -75,7 +75,7 @@ fn exec_command_result_preview_uses_output_field() {
         is_error: false,
     };
 
-    assert_eq!(preview_tool_result("exec_command", &result), "line two");
+    assert_eq!(preview_tool_result("exec_command", &result), "line two...");
 }
 
 #[test]

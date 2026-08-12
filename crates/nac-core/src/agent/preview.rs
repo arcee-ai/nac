@@ -9,7 +9,11 @@ pub(super) fn preview(value: &str, max_len: usize) -> String {
         while !sanitized.is_char_boundary(end) {
             end -= 1;
         }
-        format!("{}...", &sanitized[..end])
+        // The cut can land on trailing dots — its own, or the marker a caller
+        // already appended to stand for the lines it left out — and stacking
+        // three more onto those reads as four or five.
+        let head = sanitized[..end].trim_end_matches(|c: char| c == '.' || c.is_whitespace());
+        format!("{head}...")
     }
 }
 
@@ -178,11 +182,25 @@ pub(super) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
         return preview(trimmed, 160);
     }
 
+    let more = ellipsis(lines.len());
     if let Some(summary) = select_summary_line(name, &lines) {
-        return preview(summary, 160);
+        return preview(&format!("{summary}{more}"), 160);
     }
 
-    preview(lines[0], 160)
+    preview(&format!("{}{more}", lines[0]), 160)
+}
+
+/// Marks a preview that stands in for more than the one line it shows.
+///
+/// A log line has room for a single line of what a tool printed, and without
+/// this the line it picked reads as everything there was — a grep that found
+/// eight matches looks like it found the one under the command.
+fn ellipsis(line_count: usize) -> &'static str {
+    if line_count > 1 {
+        "..."
+    } else {
+        ""
+    }
 }
 
 pub(super) fn select_summary_line<'a>(_name: &str, lines: &'a [&'a str]) -> Option<&'a str> {
@@ -239,12 +257,13 @@ pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
     let summary = select_summary_line("exec_command_output", &output_lines)
         .or_else(|| output_lines.last().copied());
     let exit_code = parsed.get("exit_code").and_then(|value| value.as_i64());
+    let more = ellipsis(output_lines.len());
 
     match (exit_code, summary) {
-        (Some(0), Some(summary)) => Some(summary.to_string()),
-        (Some(code), Some(summary)) => Some(format!("exit {code}: {summary}")),
+        (Some(0), Some(summary)) => Some(format!("{summary}{more}")),
+        (Some(code), Some(summary)) => Some(format!("exit {code}: {summary}{more}")),
         (Some(code), None) => Some(format!("exit {code}")),
-        (None, Some(summary)) => Some(summary.to_string()),
+        (None, Some(summary)) => Some(format!("{summary}{more}")),
         (None, None) => parsed
             .get("session_name")
             .and_then(|value| value.as_str())
