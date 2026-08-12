@@ -1,11 +1,12 @@
 use super::*;
 
-// 11 adds the mcp_server_configurations table. A store already at 10 would
-// otherwise skip creating it — `open_runtime_connection` returns early
-// whenever the stored version already equals this one. (10 added the
-// ssh_configurations table; 9 added the per-session ssh port and key
-// columns.)
-const STORE_SCHEMA_VERSION: i64 = 11;
+// 12 adds the mcp_server_configurations table. 12 rather than 11 because an
+// intermediate revision of this branch used 11 (and later 12) for a since-
+// removed migration, and `open_runtime_connection` returns early whenever the
+// stored version already equals this one — a store left at 11 must still pass
+// through `open_connection` to pick up the table. (10 added the
+// ssh_configurations table; 9 added the per-session ssh port and key columns.)
+const STORE_SCHEMA_VERSION: i64 = 12;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -142,10 +143,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
