@@ -437,14 +437,12 @@ impl TokenUsage {
     /// context-window gauge and therefore takes the last recorded value instead.
     /// Returns `None` when nothing was ever recorded.
     pub fn aggregate(entries: &[Option<Self>]) -> Option<Self> {
-        let recorded: Vec<&Self> = entries.iter().flatten().collect();
-        let last = recorded.last()?;
-        let mut cumulative = Self::default();
-        for usage in &recorded {
+        entries.iter().flatten().fold(None, |cumulative, usage| {
+            let mut cumulative = cumulative.unwrap_or_default();
             cumulative.add_cost_saturating(usage);
-        }
-        cumulative.orchestrator_context_tokens = last.orchestrator_context_tokens;
-        Some(cumulative)
+            cumulative.orchestrator_context_tokens = usage.orchestrator_context_tokens;
+            Some(cumulative)
+        })
     }
 
     /// Tokens actually billed for the session: everything that was sent to and
@@ -493,4 +491,38 @@ pub struct ModelTurnResponse {
     pub assistant: AssistantTurn,
     pub finish_reason: Option<String>,
     pub usage: Option<TokenUsage>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TokenUsage;
+
+    #[test]
+    fn aggregate_returns_none_without_recorded_usage() {
+        assert_eq!(TokenUsage::aggregate(&[None, None]), None);
+    }
+
+    #[test]
+    fn aggregate_sums_cost_fields_and_keeps_last_context_gauge() {
+        let entries = [
+            Some(TokenUsage {
+                input_tokens: 2,
+                output_tokens: 3,
+                orchestrator_context_tokens: 11,
+                ..TokenUsage::default()
+            }),
+            None,
+            Some(TokenUsage {
+                input_tokens: 5,
+                output_tokens: 7,
+                orchestrator_context_tokens: 17,
+                ..TokenUsage::default()
+            }),
+        ];
+
+        let usage = TokenUsage::aggregate(&entries).expect("usage was recorded");
+        assert_eq!(usage.input_tokens, 7);
+        assert_eq!(usage.output_tokens, 10);
+        assert_eq!(usage.orchestrator_context_tokens, 17);
+    }
 }
