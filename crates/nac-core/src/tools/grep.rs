@@ -14,7 +14,7 @@ pub fn definition() -> ToolDefinition {
                 "type": "object",
                 "properties": {
                     "pattern": { "type": "string", "minLength": 1, "maxLength": 65536, "description": "Literal text or regular expression to find" },
-                    "roots": { "type": "array", "items": { "type": "string", "maxLength": 1024 }, "minItems": 1, "maxItems": 32, "description": "Workspace-relative directories to search", "default": ["."] },
+                    "roots": { "type": "array", "items": { "type": "string", "maxLength": 1024 }, "minItems": 1, "maxItems": 32, "description": "Workspace-relative files or directories to search", "default": ["."] },
                     "regex": { "type": "boolean", "description": "Interpret pattern as a regular expression", "default": true },
                     "case": { "type": "string", "enum": ["smart", "sensitive", "insensitive"], "description": "Case matching mode; smart is insensitive only when pattern has no uppercase characters", "default": "smart" },
                     "globs": { "type": "array", "items": { "type": "string", "maxLength": 1024 }, "maxItems": 128, "description": "Optional workspace-relative path glob filters" },

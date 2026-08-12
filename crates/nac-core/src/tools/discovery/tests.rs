@@ -153,6 +153,82 @@ async fn grep_paginates_every_match_once() {
 }
 
 #[tokio::test]
+async fn grep_accepts_file_roots() {
+    let (runtime, root) = fixture_runtime();
+    let output = parsed(
+        execute(
+            "grep",
+            json!({
+                "pattern": "ExecutionBackend",
+                "regex": false,
+                "roots": ["src/a.rs"]
+            }),
+            &runtime,
+        )
+        .await,
+    );
+    assert_eq!(output["matches"].as_array().expect("matches").len(), 1);
+    assert_eq!(output["matches"][0]["path"], "src/a.rs");
+    assert_eq!(output["matches"][0]["line"], 1);
+
+    fs::create_dir(root.join("blocked")).expect("create ignored file-root fixture");
+    fs::write(root.join("blocked/item.rs"), "ExecutionBackend\n")
+        .expect("write ignored file-root fixture");
+    fs::write(root.join(".gitignore"), "ignored.rs\nblocked/\n").expect("ignore file-root parent");
+    fs::write(root.join("blocked/.gitignore"), "[unterminated\n")
+        .expect("write invalid nested ignore fixture");
+    let ignored = parsed(
+        execute(
+            "grep",
+            json!({
+                "pattern": "ExecutionBackend",
+                "regex": false,
+                "roots": ["blocked/item.rs"]
+            }),
+            &runtime,
+        )
+        .await,
+    );
+    assert!(ignored["matches"].as_array().expect("matches").is_empty());
+    assert!(ignored["errors"].as_array().expect("errors").is_empty());
+
+    fs::write(root.join(".hidden/.gitignore"), "[unterminated\n")
+        .expect("write hidden invalid ignore fixture");
+    let hidden = parsed(
+        execute(
+            "grep",
+            json!({
+                "pattern": "ExecutionBackend",
+                "regex": false,
+                "roots": [".hidden/secret.rs"]
+            }),
+            &runtime,
+        )
+        .await,
+    );
+    assert!(hidden["matches"].as_array().expect("matches").is_empty());
+    assert!(hidden["errors"].as_array().expect("errors").is_empty());
+
+    let invalid_descendant = execute(
+        "grep",
+        json!({
+            "pattern": "ExecutionBackend",
+            "regex": false,
+            "roots": ["src/a.rs", "src/a.rs/child"]
+        }),
+        &runtime,
+    )
+    .await;
+    assert!(invalid_descendant.is_error);
+    assert_eq!(
+        serde_json::from_str::<Value>(&invalid_descendant.content).expect("error JSON")["error"]
+            ["code"],
+        "not_directory"
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[tokio::test]
 async fn invalid_patterns_and_outside_roots_are_explicit_errors() {
     let (runtime, root) = fixture_runtime();
     let invalid = execute("glob", json!({"pattern": "["}), &runtime).await;
