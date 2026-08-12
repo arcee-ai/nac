@@ -5532,7 +5532,10 @@ pub(super) mod tests {
             .expect("active run should expose server-submitted user message");
         assert_eq!(submitted.run_id, active.run_id);
         assert_eq!(submitted.content, "blocked prompt");
-        assert!(snapshot.messages.iter().any(
+        // Submission metadata is available without the agent lock, but the
+        // prompt is not part of the persisted transcript until the agent can
+        // acquire that lock and append it.
+        assert!(!snapshot.messages.iter().any(
             |message| matches!(message, Message::User { content } if content == "blocked prompt")
         ));
 
