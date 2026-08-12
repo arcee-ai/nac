@@ -20,60 +20,9 @@ pub struct NewSshConfiguration {
     pub ssh_identity_file: Option<String>,
 }
 
-#[derive(Debug)]
-pub enum SshConfigurationStoreError {
-    InvalidInput(String),
-    DuplicateName(String),
-    NotFound(String),
-    Store(anyhow::Error),
-}
-
-impl std::fmt::Display for SshConfigurationStoreError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidInput(message) => formatter.write_str(message),
-            Self::DuplicateName(name) => {
-                write!(formatter, "a configuration named '{name}' already exists")
-            }
-            Self::NotFound(id) => write!(formatter, "configuration '{id}' was not found"),
-            Self::Store(error) => write!(formatter, "{error}"),
-        }
-    }
-}
-
-impl std::error::Error for SshConfigurationStoreError {}
-
-impl From<anyhow::Error> for SshConfigurationStoreError {
-    fn from(error: anyhow::Error) -> Self {
-        Self::Store(error)
-    }
-}
+configuration_store_error!(SshConfigurationStoreError);
 
 type ConfigurationResult<T> = std::result::Result<T, SshConfigurationStoreError>;
-
-/// Longest accepted display name. Names are shown in a dropdown, so a runaway
-/// paste is rejected rather than truncated.
-const MAX_NAME_LEN: usize = 120;
-
-fn nonblank(value: &str, field: &str) -> ConfigurationResult<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(SshConfigurationStoreError::InvalidInput(format!(
-            "{field} must not be blank"
-        )));
-    }
-    Ok(trimmed.to_string())
-}
-
-fn validate_name(name: &str) -> ConfigurationResult<String> {
-    let name = nonblank(name, "configuration name")?;
-    if name.chars().count() > MAX_NAME_LEN {
-        return Err(SshConfigurationStoreError::InvalidInput(format!(
-            "configuration name must be at most {MAX_NAME_LEN} characters"
-        )));
-    }
-    Ok(name)
-}
 
 fn validate_port(port: Option<u16>) -> ConfigurationResult<Option<u16>> {
     match port {
@@ -89,13 +38,6 @@ fn optional_path(value: Option<String>) -> Option<String> {
     value
         .map(|path| path.trim().to_string())
         .filter(|path| !path.is_empty())
-}
-
-fn is_unique_violation(error: &rusqlite::Error) -> bool {
-    matches!(
-        error.sqlite_error_code(),
-        Some(rusqlite::ErrorCode::ConstraintViolation)
-    )
 }
 
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SshConfigurationRecord> {
@@ -150,9 +92,20 @@ fn validated_record(
     created_at: String,
 ) -> ConfigurationResult<SshConfigurationRecord> {
     Ok(SshConfigurationRecord {
-        config_id: nonblank(config_id, "configuration id")?,
-        name: validate_name(&configuration.name)?,
-        ssh_host: nonblank(&configuration.ssh_host, "ssh_host")?,
+        config_id: configuration_common::nonblank(
+            config_id,
+            "configuration id",
+            SshConfigurationStoreError::InvalidInput,
+        )?,
+        name: configuration_common::validate_name(
+            &configuration.name,
+            SshConfigurationStoreError::InvalidInput,
+        )?,
+        ssh_host: configuration_common::nonblank(
+            &configuration.ssh_host,
+            "ssh_host",
+            SshConfigurationStoreError::InvalidInput,
+        )?,
         ssh_port: validate_port(configuration.ssh_port)?,
         ssh_identity_file: optional_path(configuration.ssh_identity_file),
         created_at,
@@ -183,7 +136,7 @@ pub fn insert_ssh_configuration(
         ],
     )
     .map_err(|error| {
-        if is_unique_violation(&error) {
+        if configuration_common::is_constraint_violation(&error) {
             SshConfigurationStoreError::DuplicateName(record.name.clone())
         } else {
             SshConfigurationStoreError::Store(error.into())
@@ -223,7 +176,7 @@ pub fn update_ssh_configuration(
             ],
         )
         .map_err(|error| {
-            if is_unique_violation(&error) {
+            if configuration_common::is_constraint_violation(&error) {
                 SshConfigurationStoreError::DuplicateName(record.name.clone())
             } else {
                 SshConfigurationStoreError::Store(error.into())
@@ -246,4 +199,91 @@ pub fn delete_ssh_configuration(path: &Path, config_id: &str) -> ConfigurationRe
         )
         .map_err(|error| SshConfigurationStoreError::Store(error.into()))?;
     Ok(removed > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn initialized_store(label: &str) -> PathBuf {
+        let path = crate::test_utils::temp_store_path(label);
+        initialize(&path).unwrap();
+        path
+    }
+
+    fn configuration(name: &str) -> NewSshConfiguration {
+        NewSshConfiguration {
+            name: name.to_string(),
+            ssh_host: "user@example.com".to_string(),
+            ssh_port: Some(2222),
+            ssh_identity_file: Some(" ~/.ssh/id_ed25519 ".to_string()),
+        }
+    }
+
+    #[test]
+    fn a_saved_configuration_reads_back_normalized_fields() {
+        let path = initialized_store("ssh_round_trip");
+        let inserted = insert_ssh_configuration(&path, "ssh-1", configuration(" Work ")).unwrap();
+        assert_eq!(load_ssh_configuration(&path, "ssh-1").unwrap(), inserted);
+        assert_eq!(inserted.name, "Work");
+        assert_eq!(
+            inserted.ssh_identity_file.as_deref(),
+            Some("~/.ssh/id_ed25519")
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn duplicate_names_have_the_ssh_error_identity() {
+        let path = initialized_store("ssh_duplicate");
+        insert_ssh_configuration(&path, "ssh-1", configuration("Work")).unwrap();
+        let error = insert_ssh_configuration(&path, "ssh-2", configuration(" Work ")).unwrap_err();
+        assert!(
+            matches!(error, SshConfigurationStoreError::DuplicateName(ref name) if name == "Work")
+        );
+        let _: &dyn std::error::Error = &error;
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn invalid_shared_and_ssh_specific_fields_are_rejected() {
+        let path = initialized_store("ssh_invalid");
+        for (id, configuration, field) in [
+            (" ", configuration("Work"), "configuration id"),
+            ("ssh-1", configuration(" "), "configuration name"),
+            (
+                "ssh-1",
+                NewSshConfiguration {
+                    ssh_host: " ".into(),
+                    ..configuration("Work")
+                },
+                "ssh_host",
+            ),
+            (
+                "ssh-1",
+                NewSshConfiguration {
+                    ssh_port: Some(0),
+                    ..configuration("Work")
+                },
+                "ssh_port",
+            ),
+        ] {
+            let error = insert_ssh_configuration(&path, id, configuration).unwrap_err();
+            assert!(
+                matches!(error, SshConfigurationStoreError::InvalidInput(ref message) if message.contains(field))
+            );
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn unknown_load_and_idempotent_delete_match_model_store_behavior() {
+        let path = initialized_store("ssh_missing");
+        let error = load_ssh_configuration(&path, "missing").unwrap_err();
+        assert!(matches!(error, SshConfigurationStoreError::NotFound(ref id) if id == "missing"));
+        insert_ssh_configuration(&path, "ssh-1", configuration("Work")).unwrap();
+        assert!(delete_ssh_configuration(&path, "ssh-1").unwrap());
+        assert!(!delete_ssh_configuration(&path, "ssh-1").unwrap());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 }

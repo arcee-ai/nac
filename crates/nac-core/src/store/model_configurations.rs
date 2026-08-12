@@ -39,60 +39,9 @@ pub struct NewModelConfiguration {
     pub initial_prompt: Option<String>,
 }
 
-#[derive(Debug)]
-pub enum ModelConfigurationStoreError {
-    InvalidInput(String),
-    DuplicateName(String),
-    NotFound(String),
-    Store(anyhow::Error),
-}
-
-impl std::fmt::Display for ModelConfigurationStoreError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidInput(message) => formatter.write_str(message),
-            Self::DuplicateName(name) => {
-                write!(formatter, "a configuration named '{name}' already exists")
-            }
-            Self::NotFound(id) => write!(formatter, "configuration '{id}' was not found"),
-            Self::Store(error) => write!(formatter, "{error}"),
-        }
-    }
-}
-
-impl std::error::Error for ModelConfigurationStoreError {}
-
-impl From<anyhow::Error> for ModelConfigurationStoreError {
-    fn from(error: anyhow::Error) -> Self {
-        Self::Store(error)
-    }
-}
+configuration_store_error!(ModelConfigurationStoreError);
 
 type ConfigurationResult<T> = std::result::Result<T, ModelConfigurationStoreError>;
-
-/// Longest accepted display name. Names are shown in a dropdown, so a runaway
-/// paste is rejected rather than truncated.
-const MAX_NAME_LEN: usize = 120;
-
-fn nonblank(value: &str, field: &str) -> ConfigurationResult<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(ModelConfigurationStoreError::InvalidInput(format!(
-            "{field} must not be blank"
-        )));
-    }
-    Ok(trimmed.to_string())
-}
-
-fn validate_name(name: &str) -> ConfigurationResult<String> {
-    let name = nonblank(name, "configuration name")?;
-    if name.chars().count() > MAX_NAME_LEN {
-        return Err(ModelConfigurationStoreError::InvalidInput(format!(
-            "configuration name must be at most {MAX_NAME_LEN} characters"
-        )));
-    }
-    Ok(name)
-}
 
 fn encode_headers(headers: &BTreeMap<String, String>) -> ConfigurationResult<String> {
     serde_json::to_string(headers).map_err(|error| {
@@ -104,13 +53,6 @@ fn encode_headers(headers: &BTreeMap<String, String>) -> ConfigurationResult<Str
 
 fn decode_headers(raw: &str) -> BTreeMap<String, String> {
     serde_json::from_str(raw).unwrap_or_default()
-}
-
-fn is_unique_violation(error: &rusqlite::Error) -> bool {
-    matches!(
-        error.sqlite_error_code(),
-        Some(rusqlite::ErrorCode::ConstraintViolation)
-    )
 }
 
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfigurationRecord> {
@@ -174,11 +116,30 @@ fn validated_record(
     created_at: String,
 ) -> ConfigurationResult<ModelConfigurationRecord> {
     Ok(ModelConfigurationRecord {
-        config_id: nonblank(config_id, "configuration id")?,
-        name: validate_name(&configuration.name)?,
-        backend: nonblank(&configuration.backend, "backend")?,
-        model: nonblank(&configuration.model, "model")?,
-        base_url: nonblank(&configuration.base_url, "base_url")?,
+        config_id: configuration_common::nonblank(
+            config_id,
+            "configuration id",
+            ModelConfigurationStoreError::InvalidInput,
+        )?,
+        name: configuration_common::validate_name(
+            &configuration.name,
+            ModelConfigurationStoreError::InvalidInput,
+        )?,
+        backend: configuration_common::nonblank(
+            &configuration.backend,
+            "backend",
+            ModelConfigurationStoreError::InvalidInput,
+        )?,
+        model: configuration_common::nonblank(
+            &configuration.model,
+            "model",
+            ModelConfigurationStoreError::InvalidInput,
+        )?,
+        base_url: configuration_common::nonblank(
+            &configuration.base_url,
+            "base_url",
+            ModelConfigurationStoreError::InvalidInput,
+        )?,
         api_key_env: configuration.api_key_env,
         reasoning_effort: configuration.reasoning_effort,
         extra_headers: configuration.extra_headers,
@@ -237,7 +198,7 @@ pub fn insert_model_configuration(
         ],
     )
     .map_err(|error| {
-        if is_unique_violation(&error) {
+        if configuration_common::is_constraint_violation(&error) {
             ModelConfigurationStoreError::DuplicateName(record.name.clone())
         } else {
             ModelConfigurationStoreError::Store(error.into())
@@ -285,7 +246,7 @@ pub fn update_model_configuration(
             ],
         )
         .map_err(|error| {
-            if is_unique_violation(&error) {
+            if configuration_common::is_constraint_violation(&error) {
                 ModelConfigurationStoreError::DuplicateName(record.name.clone())
             } else {
                 ModelConfigurationStoreError::Store(error.into())
@@ -317,7 +278,6 @@ mod tests {
     use super::*;
 
     use crate::store::initialize;
-
 
     fn initialized_store(label: &str) -> PathBuf {
         let path = crate::test_utils::temp_store_path(label);
@@ -463,13 +423,13 @@ mod tests {
     fn a_runaway_name_is_rejected_rather_than_truncated() {
         let store_path = initialized_store("long_name");
 
-        let at_limit = "ą".repeat(MAX_NAME_LEN);
+        let at_limit = "ą".repeat(configuration_common::MAX_NAME_LEN);
         insert_model_configuration(&store_path, "config-1", configuration(&at_limit)).unwrap();
 
         let error = insert_model_configuration(
             &store_path,
             "config-2",
-            configuration(&"ą".repeat(MAX_NAME_LEN + 1)),
+            configuration(&"ą".repeat(configuration_common::MAX_NAME_LEN + 1)),
         )
         .unwrap_err();
 

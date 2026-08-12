@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+#[macro_use]
+mod configuration_common;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod render;
