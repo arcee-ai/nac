@@ -782,6 +782,70 @@ async fn special_files_are_rejected_without_blocking_native_reads() {
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn workspace_metadata_preserves_existing_missing_and_symlink_kinds() {
+    use std::os::unix::fs::symlink;
+
+    let (runtime, root) = fixture_runtime();
+    symlink("src/a.rs", root.join("linked.rs")).expect("create symlink fixture");
+    let file_size = fs::metadata(root.join("src/a.rs"))
+        .expect("file fixture metadata")
+        .len();
+    let symlink_size = fs::symlink_metadata(root.join("linked.rs"))
+        .expect("symlink fixture metadata")
+        .len();
+    let mut workspace = super::WorkspaceFs::open(&runtime)
+        .await
+        .expect("open workspace");
+
+    assert_eq!(
+        workspace
+            .optional_path_metadata("src/a.rs")
+            .await
+            .expect("existing metadata"),
+        Some((super::EntryKind::File, file_size))
+    );
+    assert_eq!(
+        workspace
+            .path_kind("src/a.rs")
+            .await
+            .expect("existing kind"),
+        super::EntryKind::File
+    );
+    assert_eq!(
+        workspace
+            .optional_path_metadata("missing")
+            .await
+            .expect("optional missing metadata"),
+        None
+    );
+    let missing = workspace
+        .path_kind("missing")
+        .await
+        .expect_err("required missing metadata");
+    assert_eq!(missing.code, "unreadable_path");
+    assert_eq!(missing.path.as_deref(), Some("missing"));
+    assert!(!missing.message.is_empty());
+    assert_eq!(
+        workspace
+            .optional_path_metadata("linked.rs")
+            .await
+            .expect("symlink metadata"),
+        Some((super::EntryKind::Symlink, symlink_size))
+    );
+    assert_eq!(
+        workspace
+            .path_kind("linked.rs")
+            .await
+            .expect("symlink kind"),
+        super::EntryKind::Symlink
+    );
+
+    workspace.close().await;
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
 #[tokio::test]
 async fn sandbox_discovery_composes_nested_workspace_mounts() {
     let base = std::env::temp_dir().join(format!("nac-discovery-base-{}", uuid::Uuid::new_v4()));
@@ -832,6 +896,25 @@ async fn sandbox_discovery_composes_nested_workspace_mounts() {
     });
     let mut runtime = crate::tools::test_runtime();
     runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Sandbox(session));
+
+    let mut workspace = super::WorkspaceFs::open(&runtime)
+        .await
+        .expect("open sandbox workspace");
+    assert_eq!(
+        workspace
+            .optional_path_metadata("deps")
+            .await
+            .expect("virtual directory metadata"),
+        Some((super::EntryKind::Directory, 0))
+    );
+    assert_eq!(
+        workspace
+            .path_kind("deps")
+            .await
+            .expect("virtual directory kind"),
+        super::EntryKind::Directory
+    );
+    workspace.close().await;
 
     let output = parsed(execute("glob", json!({"pattern": "**/*.rs"}), &runtime).await);
     let paths: Vec<&str> = output["entries"]

@@ -111,6 +111,12 @@ enum EntryKind {
     Other,
 }
 
+#[derive(Clone, Copy)]
+enum MissingPathPolicy {
+    Optional,
+    Error,
+}
+
 #[derive(Clone)]
 enum Record {
     Entry(Value),
@@ -788,16 +794,16 @@ impl WorkspaceFs {
             ),
         }
     }
-    async fn optional_path_metadata(
+    async fn path_metadata(
         &mut self,
         relative: &str,
+        missing: MissingPathPolicy,
     ) -> SearchResult<Option<(EntryKind, u64)>> {
         let absolute = self.absolute(relative);
         match self {
             Self::Local(local) => {
                 let virtual_directory = local.is_virtual_directory(relative);
                 let (root, mapped) = local.resolve(relative);
-                let display = relative.to_string();
                 let metadata = tokio::task::spawn_blocking(move || root.symlink_metadata(&mapped))
                     .await
                     .map_err(|error| {
@@ -816,11 +822,16 @@ impl WorkspaceFs {
                     {
                         Ok(Some((EntryKind::Directory, 0)))
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound
+                            && matches!(missing, MissingPathPolicy::Optional) =>
+                    {
+                        Ok(None)
+                    }
                     Err(error) => Err(SearchError::at(
                         "unreadable_path",
                         error.to_string(),
-                        display,
+                        display_path(relative),
                     )),
                 }
             }
@@ -842,7 +853,7 @@ impl WorkspaceFs {
                     Err(openssh_sftp_client::Error::SftpError(
                         openssh_sftp_client::error::SftpErrorKind::NoSuchFile,
                         _,
-                    )) => Ok(None),
+                    )) if matches!(missing, MissingPathPolicy::Optional) => Ok(None),
                     Err(error) => Err(SearchError::at(
                         "unreadable_path",
                         error.to_string(),
@@ -853,51 +864,20 @@ impl WorkspaceFs {
         }
     }
 
+    async fn optional_path_metadata(
+        &mut self,
+        relative: &str,
+    ) -> SearchResult<Option<(EntryKind, u64)>> {
+        self.path_metadata(relative, MissingPathPolicy::Optional)
+            .await
+    }
+
     async fn path_kind(&mut self, relative: &str) -> SearchResult<EntryKind> {
-        let absolute = self.absolute(relative);
-        match self {
-            Self::Local(local) => {
-                let virtual_directory = local.is_virtual_directory(relative);
-                let (root, mapped) = local.resolve(relative);
-                let display = relative.to_string();
-                let metadata = tokio::task::spawn_blocking(move || root.symlink_metadata(&mapped))
-                    .await
-                    .map_err(|error| {
-                        SearchError::new(
-                            "internal_error",
-                            format!("local metadata task failed: {error}"),
-                        )
-                    })?;
-                match metadata {
-                    Ok(metadata) => Ok(entry_kind_from_file_type(metadata.file_type())),
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::NotFound && virtual_directory =>
-                    {
-                        Ok(EntryKind::Directory)
-                    }
-                    Err(error) => Err(SearchError::at(
-                        "unreadable_path",
-                        error.to_string(),
-                        display_path(&display),
-                    )),
-                }
-            }
-            Self::Remote(remote) => {
-                let sftp = remote.sftp.as_ref().ok_or_else(|| {
-                    SearchError::new("backend_protocol", "SSH SFTP session is closed")
-                })?;
-                let mut fs = sftp.fs();
-                let metadata = fs.symlink_metadata(&absolute).await.map_err(|error| {
-                    SearchError::at("unreadable_path", error.to_string(), display_path(relative))
-                })?;
-                Ok(match metadata.file_type() {
-                    Some(file_type) if file_type.is_symlink() => EntryKind::Symlink,
-                    Some(file_type) if file_type.is_dir() => EntryKind::Directory,
-                    Some(file_type) if file_type.is_file() => EntryKind::File,
-                    _ => EntryKind::Other,
-                })
-            }
-        }
+        Ok(self
+            .path_metadata(relative, MissingPathPolicy::Error)
+            .await?
+            .expect("required metadata policy always returns a result")
+            .0)
     }
 
     async fn close(mut self) {
