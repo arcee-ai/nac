@@ -526,38 +526,23 @@ impl EffectiveSandboxOptions {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) enum OrchestratorSession {
-    Active {
-        session_id: String,
-        store_path: PathBuf,
-        snapshot: SessionSnapshot,
-    },
-    Picker {
-        store_path: PathBuf,
-    },
+pub(crate) struct OrchestratorSession {
+    pub(crate) session_id: String,
+    pub(crate) store_path: PathBuf,
+    pub(crate) snapshot: SessionSnapshot,
 }
 
 impl OrchestratorSession {
     pub fn session_id(&self) -> Option<&str> {
-        match self {
-            Self::Active { session_id, .. } => Some(session_id),
-            Self::Picker { .. } => None,
-        }
+        Some(&self.session_id)
     }
 
     pub fn store_path(&self) -> PathBuf {
-        match self {
-            Self::Active { store_path, .. } => store_path.clone(),
-            Self::Picker { store_path } => store_path.clone(),
-        }
+        self.store_path.clone()
     }
 
     pub fn into_snapshot(self) -> Option<SessionSnapshot> {
-        match self {
-            Self::Active { snapshot, .. } => Some(snapshot),
-            Self::Picker { .. } => None,
-        }
+        Some(self.snapshot)
     }
 }
 
@@ -876,7 +861,7 @@ pub async fn build_run_config(
         return Ok(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id,
                 store_path,
                 snapshot: session_snapshot,
@@ -961,7 +946,7 @@ pub async fn build_run_config(
     Ok(OrchestratorRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: OrchestratorSession {
             session_id,
             store_path,
             snapshot: session_snapshot,
@@ -1415,7 +1400,7 @@ async fn build_resume_config_from_snapshot(
     Ok(OrchestratorRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: OrchestratorSession {
             session_id,
             store_path,
             snapshot,
@@ -1598,6 +1583,15 @@ mod tests {
         }
     }
 
+    fn temp_store_path(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("nac_main_test_{}_{}", label, unique))
+            .join("store.db")
+    }
 
     fn restore_env(name: &str, value: Option<OsString>) {
         match value {
@@ -2059,7 +2053,7 @@ mod tests {
         let original = std::env::var_os(key_name);
         unsafe { std::env::remove_var(key_name) };
 
-        let root = crate::test_utils::temp_store_path("credential_free_picker")
+        let root = temp_store_path("credential_free_picker")
             .parent()
             .unwrap()
             .to_path_buf();
@@ -2135,7 +2129,7 @@ mod tests {
         let original_key = std::env::var_os(key_name);
         unsafe { std::env::remove_var(key_name) };
 
-        let root = crate::test_utils::temp_store_path("network_free_picker")
+        let root = temp_store_path("network_free_picker")
             .parent()
             .unwrap()
             .to_path_buf();
@@ -2219,7 +2213,7 @@ mod tests {
 
     #[tokio::test]
     async fn required_model_failures_occur_before_session_persistence() {
-        let root = crate::test_utils::temp_store_path("required_model_before_persist")
+        let root = temp_store_path("required_model_before_persist")
             .parent()
             .unwrap()
             .to_path_buf();
@@ -2699,7 +2693,7 @@ X-Config = "yes"
 
     #[tokio::test]
     async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
-        let root = crate::test_utils::temp_store_path("arcee_api_key_env_paths")
+        let root = temp_store_path("arcee_api_key_env_paths")
             .parent()
             .unwrap()
             .to_path_buf();
@@ -2798,7 +2792,7 @@ X-Config = "yes"
             std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
         }
 
-        let store_path = crate::test_utils::temp_store_path("managed_worker_messages");
+        let store_path = temp_store_path("managed_worker_messages");
         store::initialize(&store_path).unwrap();
 
         let session_id = "session-msg-order";
@@ -3027,7 +3021,7 @@ X-Config = "yes"
         let original_key = std::env::var_os(key_name);
         unsafe { std::env::set_var(key_name, "test-key") };
 
-        let root = crate::test_utils::temp_store_path("reasoning_lifecycle")
+        let root = temp_store_path("reasoning_lifecycle")
             .parent()
             .unwrap()
             .to_path_buf();
@@ -3094,14 +3088,11 @@ X-Config = "yes"
             Some(ReasoningEffort::Xhigh)
         );
         assert_eq!(resumed.client.extra_headers(), &headers);
-        match &resumed.session {
-            OrchestratorSession::Active { snapshot, .. } => assert_eq!(
-                snapshot.orchestrator_compaction_threshold,
-                Some(48_000),
-                "resume must ignore the current compaction config"
-            ),
-            OrchestratorSession::Picker { .. } => panic!("expected active resumed session"),
-        }
+        assert_eq!(
+            resumed.session.snapshot.orchestrator_compaction_threshold,
+            Some(48_000),
+            "resume must ignore the current compaction config"
+        );
         assert_eq!(
             crate::tools::thread::worker_model_arguments_for_test(&resumed.client),
             vec![
@@ -3351,7 +3342,7 @@ X-Config = "yes"
 
         let error = match build_resume_config_from_snapshot(
             snapshot,
-            crate::test_utils::temp_store_path("malformed_remote_resume"),
+            temp_store_path("malformed_remote_resume"),
             &NacConfig::default(),
             PathBuf::from("/local/resume/base"),
             None,
@@ -3373,7 +3364,7 @@ X-Config = "yes"
 
     #[tokio::test]
     async fn invalid_legacy_snapshot_requires_settings_repair_without_persistence() {
-        let store_path = crate::test_utils::temp_store_path("invalid_legacy_model_snapshot");
+        let store_path = temp_store_path("invalid_legacy_model_snapshot");
         let snapshot = sessions::new_snapshot(
             "legacy-invalid-model".to_string(),
             PathBuf::from("~/repo"),
@@ -3712,7 +3703,7 @@ X-Config = "yes"
             std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
         }
 
-        let run_store_path = crate::test_utils::temp_store_path("invalid_ssh_sandbox_run");
+        let run_store_path = temp_store_path("invalid_ssh_sandbox_run");
         let run_store_root = run_store_path.parent().unwrap().to_path_buf();
         assert!(!run_store_root.exists());
         let run_error = match build_run_config(
@@ -3751,7 +3742,7 @@ X-Config = "yes"
             run_store_root.display()
         );
 
-        let worker_store_path = crate::test_utils::temp_store_path("invalid_ssh_sandbox_worker");
+        let worker_store_path = temp_store_path("invalid_ssh_sandbox_worker");
         let worker_store_root = worker_store_path.parent().unwrap().to_path_buf();
         assert!(!worker_store_root.exists());
         let worker_error = match build_managed_worker_config(
@@ -3808,7 +3799,7 @@ X-Config = "yes"
         unsafe {
             std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
         }
-        let store_path = crate::test_utils::temp_store_path("remote_create_defaults");
+        let store_path = temp_store_path("remote_create_defaults");
         store::initialize(&store_path).unwrap();
 
         let options = |workspace_cwd: PathBuf, sandbox: SandboxOptions| RunOptions {
@@ -3961,7 +3952,7 @@ args = ["-c", {}]
             std::env::set_var("NAC_HOME", &nac_home);
         }
 
-        let store_path = crate::test_utils::temp_store_path("remote_worker_stdio_mcp");
+        let store_path = temp_store_path("remote_worker_stdio_mcp");
         store::initialize(&store_path).unwrap();
         let run_config = build_managed_worker_config(
             ManagedWorkerOptions {
@@ -4053,7 +4044,7 @@ args = ["-c", {}]
             std::env::set_var("NAC_HOME", &nac_home_rel);
         }
 
-        let store_path = crate::test_utils::temp_store_path("remote_worker_relative_config_mcp");
+        let store_path = temp_store_path("remote_worker_relative_config_mcp");
         store::initialize(&store_path).unwrap();
         let run_config = build_managed_worker_config(
             ManagedWorkerOptions {

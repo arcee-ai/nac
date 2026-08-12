@@ -627,14 +627,8 @@ impl SessionService {
             .transcript_recovery_warning()
             .map(str::to_owned);
         let response_timing =
-            ResponseTimingSnapshot::from_session_snapshot(match &run_config.session {
-                OrchestratorSession::Active { snapshot, .. } => Some(snapshot),
-                OrchestratorSession::Picker { .. } => None,
-            });
-        let config_version = match &run_config.session {
-            OrchestratorSession::Active { snapshot, .. } => Some(snapshot.config_version),
-            OrchestratorSession::Picker { .. } => None,
-        };
+            ResponseTimingSnapshot::from_session_snapshot(Some(&run_config.session.snapshot));
+        let config_version = Some(run_config.session.snapshot.config_version);
 
         let event_bus =
             SessionEventBus::with_thread_event_store(session_id.clone(), store_path.clone());
@@ -1735,8 +1729,13 @@ impl SessionService {
         Option<sessions::SessionOperationLease>,
         OperationAdmissionPreparationError,
     > {
-        let operation_lease = match (supplied_lease, self.metadata.session_id.as_deref()) {
-            (Some(lease), Some(session_id)) => {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .expect("orchestrator services always have a persisted session");
+        let operation_lease = match supplied_lease {
+            Some(lease) => {
                 lease
                     .validate(&self.metadata.store_path, session_id)
                     .map_err(|error| match error {
@@ -1755,12 +1754,7 @@ impl SessionService {
                     })?;
                 Some(lease)
             }
-            (Some(_), None) => {
-                return Err(OperationAdmissionPreparationError::Coordination {
-                    message: SessionCoordinationError::invalid_lease(),
-                });
-            }
-            (None, Some(session_id)) => Some(
+            None => Some(
                 sessions::SessionOperationLease::try_acquire(&self.metadata.store_path, session_id)
                     .map_err(|error| match error {
                         sessions::SessionOperationLeaseError::Busy(session_id) => {
@@ -1775,9 +1769,6 @@ impl SessionService {
                         }
                     })?,
             ),
-            // Picker services have no runnable persisted session. Keeping this
-            // path lease-free supports read-only picker construction.
-            (None, None) => None,
         };
 
         if let (Some(session_id), Some(service_version)) =
@@ -3033,6 +3024,15 @@ pub(super) mod tests {
         .is_empty());
     }
 
+    pub(super) fn test_store_path(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("nac_session_service_{label}_{unique}"))
+            .join("store.db")
+    }
 
     pub(super) fn test_agent(
         client: ModelClient,
@@ -3076,27 +3076,11 @@ pub(super) mod tests {
         .expect("agent config must be valid")
     }
 
-    pub(super) fn test_picker_service(label: &str) -> SessionServiceParts {
-        let store_path = crate::test_utils::temp_store_path(label);
-        let client = ModelClient::new_for_test();
-        let agent = test_agent(client.clone(), store_path.clone(), None);
-        SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
-            agent,
-            client,
-            session: OrchestratorSession::Picker { store_path },
-            sandbox_status: "off".to_string(),
-            agents_md_status: "off".to_string(),
-            workspace_display: "/repo".to_string(),
-            workspace_git: Some(GitTarget::local("/repo")),
-            resume_base_cwd: PathBuf::from("/repo"),
-        })
-    }
-
     pub(super) fn test_active_service(
         label: &str,
         session_id: &str,
     ) -> (SessionServiceParts, PathBuf) {
-        let store_path = crate::test_utils::temp_store_path(label);
+        let store_path = test_store_path(label);
         let client = ModelClient::new_for_test();
         let agent = test_agent(
             client.clone(),
@@ -3120,7 +3104,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.to_string(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -3237,7 +3221,7 @@ pub(super) mod tests {
         session_id: &str,
         client: ModelClient,
     ) -> (SessionServiceParts, PathBuf) {
-        let store_path = crate::test_utils::temp_store_path(label);
+        let store_path = test_store_path(label);
         let mut agent = test_agent(
             client.clone(),
             store_path.clone(),
@@ -3276,7 +3260,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.to_string(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -3669,7 +3653,7 @@ pub(super) mod tests {
     async fn store_backed_snapshot_is_live_during_a_real_run() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-        let store_path = crate::test_utils::temp_store_path("real_run_live");
+        let store_path = test_store_path("real_run_live");
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let (hit_tx, hit_rx) = std::sync::mpsc::channel::<()>();
         let server = ScriptedServer::start_observed(
@@ -3727,7 +3711,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -4344,7 +4328,7 @@ pub(super) mod tests {
 
     #[test]
     fn from_orchestrator_run_config_exposes_metadata_and_init_snapshot() {
-        let store_path = crate::test_utils::temp_store_path("active_init");
+        let store_path = test_store_path("active_init");
         let client = ModelClient::new_for_test();
         let session_id = "session-1".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4368,7 +4352,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -4397,7 +4381,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn finish_run_persists_snapshot_before_completion_event() {
-        let store_path = crate::test_utils::temp_store_path("active_finish_persist");
+        let store_path = test_store_path("active_finish_persist");
         let client = ModelClient::new_for_test();
         let session_id = "session-finish-persist".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4418,7 +4402,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -4637,7 +4621,7 @@ pub(super) mod tests {
     async fn real_run_diffs_token_timing_from_the_run_start_store_count() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-        let store_path = crate::test_utils::temp_store_path("baseline_real_run");
+        let store_path = test_store_path("baseline_real_run");
         let server = ScriptedServer::start(vec![ScriptedResponse::json(
             "200 OK",
             serde_json::json!({
@@ -4693,7 +4677,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -4758,7 +4742,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn finish_run_persists_token_usage() {
-        let store_path = crate::test_utils::temp_store_path("active_finish_token_usage");
+        let store_path = test_store_path("active_finish_token_usage");
         let client = ModelClient::new_for_test();
         let session_id = "session-finish-token-usage".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4779,7 +4763,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -4875,7 +4859,7 @@ pub(super) mod tests {
         // round that dispatched workers), the accumulated token usage —
         // including worker thread tokens — must still be persisted so it is
         // not permanently lost.
-        let store_path = crate::test_utils::temp_store_path("active_failed_token_usage");
+        let store_path = test_store_path("active_failed_token_usage");
         let client = ModelClient::new_for_test();
         let session_id = "session-failed-token-usage".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -4896,7 +4880,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -4971,7 +4955,7 @@ pub(super) mod tests {
 
     #[test]
     fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
-        let store_path = crate::test_utils::temp_store_path("failed_then_successful_token_usage");
+        let store_path = test_store_path("failed_then_successful_token_usage");
         let client = ModelClient::new_for_test();
         let session_id = "session-failed-then-successful";
         let mut snapshot = sessions::new_snapshot(
@@ -5114,7 +5098,7 @@ pub(super) mod tests {
         // neither. The next run reuses that agent, and providers reject a
         // transcript whose assistant tool calls have no tool results — the
         // run-failure path must trim the dangling turn from both stores.
-        let store_path = crate::test_utils::temp_store_path("failed_run_normalizes");
+        let store_path = test_store_path("failed_run_normalizes");
         let server = ScriptedServer::start(vec![
             ScriptedResponse::json(
                 "200 OK",
@@ -5160,7 +5144,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -5298,7 +5282,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
-        let store_path = crate::test_utils::temp_store_path("active_persist_failure");
+        let store_path = test_store_path("active_persist_failure");
         let store_parent = store_path.parent().unwrap().to_path_buf();
         // The store must be usable at agent construction time (the transcript
         // log writer opens it eagerly); break the path afterwards so only the
@@ -5323,7 +5307,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: snapshot.session_id.clone(),
                 store_path,
                 snapshot,
@@ -5391,7 +5375,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn cancelled_run_stays_cancelled_when_snapshot_persistence_fails() {
-        let store_path = crate::test_utils::temp_store_path("cancel_persist_failure");
+        let store_path = test_store_path("cancel_persist_failure");
         let store_parent = store_path.parent().unwrap().to_path_buf();
         crate::store::initialize(&store_path).unwrap();
         let client = ModelClient::new_for_test();
@@ -5413,7 +5397,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: snapshot.session_id.clone(),
                 store_path,
                 snapshot,
@@ -5451,7 +5435,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_agent_events_filters_agent_envelopes() {
-        let store_path = crate::test_utils::temp_store_path("agent_event_adapter");
+        let store_path = test_store_path("agent_event_adapter");
         let client = ModelClient::new_for_test();
         let session_id = "session-agent-events".to_string();
         crate::store::insert_test_session(&store_path, &session_id);
@@ -5472,7 +5456,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -5499,7 +5483,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn client_subscribers_receive_same_events_with_unique_identity() {
-        let parts = test_picker_service("client_subscribers");
+        let (mut parts, _store_path) =
+            test_active_service("client_subscribers", "client_subscribers-session");
+        parts.service.workspace_git = None;
         let first_client = parts.service.connect_client();
         let second_client = parts.service.connect_client();
         let mut first_events = first_client.subscribe_events();
@@ -5524,7 +5510,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn frontend_snapshot_does_not_wait_for_agent_lock_while_active_run() {
-        let parts = test_picker_service("snapshot_nonblocking");
+        let (mut parts, _store_path) =
+            test_active_service("snapshot_nonblocking", "snapshot_nonblocking-session");
+        parts.service.workspace_git = None;
         let agent_guard = parts.service.agent.lock().await;
         let active = parts.service.try_begin_run(None, "blocked prompt").unwrap();
 
@@ -5544,7 +5532,9 @@ pub(super) mod tests {
             .expect("active run should expose server-submitted user message");
         assert_eq!(submitted.run_id, active.run_id);
         assert_eq!(submitted.content, "blocked prompt");
-        assert!(snapshot.messages.is_empty());
+        assert!(snapshot.messages.iter().any(
+            |message| matches!(message, Message::User { content } if content == "blocked prompt")
+        ));
 
         drop(agent_guard);
         assert!(
@@ -5561,7 +5551,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn mark_run_finishing_clears_submitted_user_message_before_persistence() {
-        let store_path = crate::test_utils::temp_store_path("active_pending_cleared_on_finish");
+        let store_path = test_store_path("active_pending_cleared_on_finish");
         let client = ModelClient::new_for_test();
         let session_id = "session-pending-clear".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -5582,7 +5572,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -5677,7 +5667,11 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn mark_run_cancelling_clears_submitted_user_message() {
-        let parts = test_picker_service("active_pending_cleared_on_cancel");
+        let (mut parts, _store_path) = test_active_service(
+            "active_pending_cleared_on_cancel",
+            "active_pending_cleared_on_cancel-session",
+        );
+        parts.service.workspace_git = None;
         let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
         assert!(active.submitted_user_message.is_some());
 
@@ -5696,7 +5690,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn cancel_and_completion_race_has_exactly_one_terminal_owner() {
-        let parts = test_picker_service("cancel_completion_race");
+        let (mut parts, _store_path) =
+            test_active_service("cancel_completion_race", "cancel_completion_race-session");
+        parts.service.workspace_git = None;
         let active = parts.service.try_begin_run(None, "race prompt").unwrap();
         let barrier = Arc::new(tokio::sync::Barrier::new(3));
 
@@ -5747,7 +5743,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn busy_run_rejects_concurrent_submission_and_clears_once() {
-        let parts = test_picker_service("busy_rejection");
+        let (mut parts, _store_path) =
+            test_active_service("busy_rejection", "busy_rejection-session");
+        parts.service.workspace_git = None;
         let client = parts.service.connect_client();
         let mut events = parts.service.subscribe_events();
         let first = parts
@@ -5773,8 +5771,12 @@ pub(super) mod tests {
                 )
                 .await
         );
-        let completion = events.recv().await.unwrap();
-        assert_eq!(completion.sequence_id, 2);
+        let completion = loop {
+            let event = events.recv().await.unwrap();
+            if matches!(event.event, SessionEvent::RunCompleted { .. }) {
+                break event;
+            }
+        };
         assert_eq!(completion.run_id.as_ref(), Some(&first.run_id));
         assert_eq!(completion.client_id.as_ref(), first.client_id.as_ref());
         assert!(matches!(
@@ -5809,7 +5811,12 @@ pub(super) mod tests {
                 .finish_run_once(&second.run_id, RunOutcome::Failed("boom".to_string(), None))
                 .await
         );
-        let failed = events.recv().await.unwrap();
+        let failed = loop {
+            let event = events.recv().await.unwrap();
+            if matches!(event.event, SessionEvent::RunFailed { .. }) {
+                break event;
+            }
+        };
         assert_eq!(failed.run_id.as_ref(), Some(&second.run_id));
         assert!(failed.client_id.is_none());
         assert_eq!(
@@ -5823,7 +5830,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn failed_run_persists_messages_without_recording_new_duration() {
-        let store_path = crate::test_utils::temp_store_path("active_failed_persist");
+        let store_path = test_store_path("active_failed_persist");
         let client = ModelClient::new_for_test();
         let session_id = "session-failed-persist".to_string();
         let mut agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -5858,7 +5865,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -5929,7 +5936,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn request_cancel_persists_marker_and_emits_terminal_event() {
-        let store_path = crate::test_utils::temp_store_path("active_cancel_persist");
+        let store_path = test_store_path("active_cancel_persist");
         let client = ModelClient::new_for_test();
         let session_id = "session-cancel-persist".to_string();
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
@@ -5950,7 +5957,7 @@ pub(super) mod tests {
         let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: OrchestratorSession {
                 session_id: session_id.clone(),
                 store_path: store_path.clone(),
                 snapshot,
@@ -6076,49 +6083,5 @@ pub(super) mod tests {
         ));
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-    }
-
-    #[tokio::test]
-    async fn finish_run_without_active_session_snapshot_emits_completion_without_saving() {
-        let store_path = crate::test_utils::temp_store_path("picker_noop");
-        let client = ModelClient::new_for_test();
-        let agent = test_agent(client.clone(), store_path.clone(), None);
-        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
-            agent,
-            client,
-            session: OrchestratorSession::Picker {
-                store_path: store_path.clone(),
-            },
-            sandbox_status: "off".to_string(),
-            agents_md_status: "off".to_string(),
-            workspace_display: "/repo".to_string(),
-            workspace_git: Some(GitTarget::local("/repo")),
-            resume_base_cwd: PathBuf::from("/repo"),
-        });
-        let mut events = parts.service.subscribe_events();
-        let active = parts.service.try_begin_run(None, "prompt").unwrap();
-
-        assert!(
-            parts
-                .service
-                .finish_run_once(
-                    &active.run_id,
-                    RunOutcome::Completed("done".to_string(), None)
-                )
-                .await
-        );
-        let started = events.recv().await.unwrap();
-        assert_run_started_event(started, &active, "prompt");
-        let completion = events.recv().await.unwrap();
-        assert_eq!(completion.run_id.as_ref(), Some(&active.run_id));
-        assert!(matches!(
-            completion.event,
-            SessionEvent::RunCompleted {
-                response,
-                duration_ms: Some(_),
-            } if response == "done"
-        ));
-        assert!(events.try_recv().is_err());
-        assert!(!store_path.exists());
     }
 }

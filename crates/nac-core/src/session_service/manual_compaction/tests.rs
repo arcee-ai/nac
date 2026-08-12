@@ -1,6 +1,6 @@
 use super::super::tests::{
     compaction_response, test_active_service, test_agent, test_agent_with_compaction_threshold,
-    test_compaction_service, test_picker_service,
+    test_compaction_service, test_store_path,
 };
 use super::*;
 use crate::events::CompactionSkipReason;
@@ -107,18 +107,6 @@ async fn manual_compaction_and_run_admission_are_mutually_exclusive() {
         }
     ));
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-}
-
-#[tokio::test]
-async fn picker_compaction_is_unavailable_without_lifecycle_or_operation_state() {
-    let parts = test_picker_service("picker_compaction_unavailable");
-    let mut events = parts.service.subscribe_events();
-    assert!(matches!(
-        parts.service.try_compact(),
-        Err(SessionCompactionAdmissionError::Unavailable)
-    ));
-    assert!(!parts.service.has_active_operation());
-    assert!(events.try_recv().is_err());
 }
 
 #[tokio::test]
@@ -230,7 +218,7 @@ fn supplied_leases_are_rejected_for_the_wrong_session_or_store() {
     ));
     assert!(!parts.service.has_active_operation());
 
-    let other_store = crate::test_utils::temp_store_path("lease_identity_other_store");
+    let other_store = test_store_path("lease_identity_other_store");
     crate::store::initialize(&other_store).unwrap();
     let wrong_store_lease =
         sessions::SessionOperationLease::try_acquire(&other_store, "target-session").unwrap();
@@ -287,7 +275,7 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
     let parts_b = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
         agent: agent_b,
         client,
-        session: OrchestratorSession::Active {
+        session: OrchestratorSession {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot: snapshot_b,
@@ -414,7 +402,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
     ]);
     let client = ModelClient::new_for_test_server(server.base_url.clone());
     let session_id = "sequential-context-sample";
-    let store_path = crate::test_utils::temp_store_path("sequential_context_sample");
+    let store_path = test_store_path("sequential_context_sample");
     let mut agent = test_agent_with_compaction_threshold(
         client.clone(),
         store_path.clone(),
@@ -441,7 +429,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
     let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: OrchestratorSession {
             session_id: session_id.to_string(),
             store_path: store_path.clone(),
             snapshot,
@@ -604,8 +592,8 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     assert_eq!(persisted_after.1, persisted_before_state.1); // last_response_duration_ms
     assert_eq!(persisted_after.2, persisted_before_state.2); // previous_response_duration_ms
     assert_eq!(persisted_after.3, persisted_before_state.3); // response_durations_ms_json
-    // token_usages_json now includes the compaction's projected context
-    // as unattributed_usage (the context gauge override).
+                                                             // token_usages_json now includes the compaction's projected context
+                                                             // as unattributed_usage (the context gauge override).
     assert_ne!(persisted_after.4, persisted_before_state.4);
     assert!(persisted_after
         .4
