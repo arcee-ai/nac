@@ -56,14 +56,94 @@ const anchors: Record<
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
+/** Region a floating box is kept inside, in viewport coordinates. */
+export interface AnchorBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+interface Span {
+  start: number;
+  end: number;
+}
+
+/**
+ * The ancestors that clip an element, nearest first. Collected once per opening
+ * because reading the cascade is the expensive half of `visibleBounds`, while
+ * the rects it needs go stale on every scroll.
+ */
+export function clippingAncestors(element: Element | null): HTMLElement[] {
+  const clippers: HTMLElement[] = [];
+  for (
+    let node = element?.parentElement ?? null;
+    node;
+    node = node.parentElement
+  ) {
+    const style = window.getComputedStyle(node);
+    if (style.overflowX !== "visible" || style.overflowY !== "visible") {
+      clippers.push(node);
+    }
+  }
+  return clippers;
+}
+
+/**
+ * The region those ancestors leave visible, or null when nothing clips. A
+ * portalled box escapes their clipping, but it still belongs inside the box its
+ * trigger lives in rather than over that box's chrome — or, worse, over nothing
+ * at all.
+ */
+export function visibleBounds(clippers: HTMLElement[]): AnchorBounds | null {
+  let bounds: AnchorBounds | null = null;
+  for (const node of clippers) {
+    const rect = node.getBoundingClientRect();
+    bounds = bounds
+      ? {
+          left: Math.max(bounds.left, rect.left),
+          top: Math.max(bounds.top, rect.top),
+          right: Math.min(bounds.right, rect.right),
+          bottom: Math.min(bounds.bottom, rect.bottom),
+        }
+      : {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+        };
+  }
+  return bounds;
+}
+
+/**
+ * One coordinate, held inside `limit` and inside `preferred` as well whenever
+ * the box has the room to fit there — a box too big for the region it was
+ * anchored in is better off overhanging it than squeezed into it.
+ */
+function fit(
+  start: number,
+  size: number,
+  limit: Span,
+  preferred?: Span,
+): number {
+  const span =
+    preferred && size + 2 * ANCHOR_GAP <= preferred.end - preferred.start
+      ? preferred
+      : limit;
+  const min = span.start + ANCHOR_GAP;
+  return clamp(start, min, Math.max(min, span.end - size - ANCHOR_GAP));
+}
+
 /**
  * Viewport coordinates for a portalled box, kept inside the window — which the
- * CSS-only variant cannot do.
+ * CSS-only variant cannot do — and inside `within` when one is given.
  */
 export function anchorCoords(
   placement: AnchorPlacement,
   trigger: DOMRect,
   box: DOMRect,
+  within?: AnchorBounds | null,
 ): { left: number; top: number } {
   const anchor = anchors[placement] ?? anchors[AnchorPlacement.TopCenter];
   const left = {
@@ -79,15 +159,17 @@ export function anchorCoords(
     middle: trigger.top + (trigger.height - box.height) / 2,
   }[anchor.y];
   return {
-    left: clamp(
+    left: fit(
       left,
-      ANCHOR_GAP,
-      Math.max(ANCHOR_GAP, window.innerWidth - box.width - ANCHOR_GAP),
+      box.width,
+      { start: 0, end: window.innerWidth },
+      within ? { start: within.left, end: within.right } : undefined,
     ),
-    top: clamp(
+    top: fit(
       top,
-      ANCHOR_GAP,
-      Math.max(ANCHOR_GAP, window.innerHeight - box.height - ANCHOR_GAP),
+      box.height,
+      { start: 0, end: window.innerHeight },
+      within ? { start: within.top, end: within.bottom } : undefined,
     ),
   };
 }

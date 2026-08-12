@@ -3,7 +3,7 @@ import { AnchorPlacement } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
-import Popover from "../popover";
+import Popover, { PopoverSize } from "../popover";
 import TabButton, { TabButtonSize, TabButtonVariant } from "../tab-button";
 
 export interface SelectItem {
@@ -23,6 +23,13 @@ interface SelectProps {
   placement?: AnchorPlacement;
   placeholder?: string;
   disabled?: boolean;
+  /**
+   * Portal the panel to the body, for a select that sits in a box which clips
+   * its overflow — a dialog scrolling its own body cuts the list off otherwise.
+   * The panel then sizes to its content instead of to the trigger, so a width
+   * of its own belongs in `panelClassName`.
+   */
+  sticky?: boolean;
   className?: string;
   /**
    * Applied to the trigger button. The wrapper stretching is not enough on its
@@ -50,6 +57,7 @@ const Select: React.FC<SelectProps> = ({
   placement = AnchorPlacement.BottomRight,
   placeholder = "Select...",
   disabled = false,
+  sticky = false,
   className = "",
   triggerClassName = "",
   panelClassName = "",
@@ -68,7 +76,10 @@ const Select: React.FC<SelectProps> = ({
       open={open}
       onClose={() => setOpen(false)}
       placement={placement}
-      size="min-w-full"
+      // A fixed panel measures `min-w-full` against the viewport rather than
+      // against the trigger, so a portalled list hugs its content instead.
+      size={sticky ? PopoverSize.Fit : "min-w-full"}
+      sticky={sticky}
       className={className}
       panelClassName={panelClassName}
       content={
