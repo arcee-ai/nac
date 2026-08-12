@@ -1,20 +1,13 @@
 import { memo } from "react";
 
 import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
   ChatSessionMessage,
   ChatSessionMessageVariant,
-  CopyButton,
-  Icon,
-  IconName,
   ModelPill,
-  Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
+import { MessageActions } from "@/app/components/inspector/MessageActions";
 import {
   SnapshotBadge,
   type FilesPanelLink,
@@ -26,7 +19,6 @@ import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import { RUN_CANCELLED_MARKER, type ModelTurn } from "@/app/lib/transcript";
 import type { WorkspaceRevision } from "@/app/types/api";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /**
  * "Thinking" for reasoning that is still arriving, so the badge names what the
@@ -118,8 +110,6 @@ export const ModelMessage = memo(function ModelMessage({
   filesPanel = null,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
-  const canRefresh = onRefresh != null && userMessageIndex != null;
-  const canRevert = onRevert != null && userMessageIndex != null;
   const copyText = modelCopyText(turn);
   // The stop applies to the whole turn, including the files its runs had
   // already written, so it closes the turn below the snapshot rather than
@@ -128,7 +118,6 @@ export const ModelMessage = memo(function ModelMessage({
     (block) =>
       block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
-  const isMobile = useIsMobile();
   return (
     <div
       className={cn(
@@ -244,72 +233,14 @@ export const ModelMessage = memo(function ModelMessage({
               "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
             )}
           >
-            {canRefresh ? (
-              <Tooltip title="Resend" position={TooltipPosition.BottomRight}>
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
-                  content={ButtonContent.Icon}
-                  aria-label="Resend"
-                  disabled={actionsDisabled}
-                  onClick={() => onRefresh(userMessageIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.Refresh} size={16} />
-                </Button>
-              </Tooltip>
-            ) : null}
-
-            {canRevert ? (
-              <Tooltip
-                title="Revert to this snapshot"
-                position={TooltipPosition.BottomRight}
-              >
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
-                  content={ButtonContent.Icon}
-                  aria-label="Revert to this snapshot"
-                  disabled={actionsDisabled}
-                  onClick={() => onRevert(userMessageIndex, userText)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.TurnLeft} size={16} />
-                </Button>
-              </Tooltip>
-            ) : (
-              <Tooltip
-                title="This message is not in the transcript yet"
-                position={TooltipPosition.BottomRight}
-              >
-                <span className="inline-flex">
-                  <Button
-                    size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                    variant={
-                      isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                    }
-                    content={ButtonContent.Icon}
-                    aria-label="Revert to this snapshot"
-                    disabled
-                    className="md:!h-4 md:!min-h-4 md:!p-0"
-                  >
-                    <Icon iconName={IconName.TurnLeft} size={16} />
-                  </Button>
-                </span>
-              </Tooltip>
-            )}
-
-            <CopyButton
-              value={copyText}
-              size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-              variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-              title="Copy message"
-              position={TooltipPosition.BottomRight}
-              className="md:!h-4 md:!min-h-4 md:!p-0"
+            <MessageActions
+              tooltipPosition={TooltipPosition.BottomRight}
+              messageIndex={userMessageIndex}
+              promptText={userText}
+              copyText={copyText}
+              onRefresh={onRefresh}
+              onRevert={onRevert}
+              disabled={actionsDisabled}
             />
           </div>
         ) : null}

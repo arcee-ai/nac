@@ -1,19 +1,9 @@
 import { memo } from "react";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  CopyButton,
-  Icon,
-  IconName,
-  Tooltip,
-  TooltipPosition,
-} from "@/app/atoms";
+import { TooltipPosition } from "@/app/atoms";
+import { MessageActions } from "@/app/components/inspector/MessageActions";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 interface UserMessageProps {
   text: string;
@@ -53,9 +43,6 @@ export const UserMessage = memo(function UserMessage({
   actionsDisabled = false,
 }: UserMessageProps) {
   perfRender("UserMessage");
-  const canRefresh = onRefresh != null && messageIndex != null;
-  const canRevert = onRevert != null && messageIndex != null;
-  const isMobile = useIsMobile();
   return (
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
       <div
@@ -86,72 +73,14 @@ export const UserMessage = memo(function UserMessage({
             </span>
           ) : null}
 
-          {canRefresh ? (
-            <Tooltip title="Resend" position={TooltipPosition.BottomLeft}>
-              <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={
-                  isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                }
-                content={ButtonContent.Icon}
-                aria-label="Resend"
-                disabled={actionsDisabled}
-                onClick={() => onRefresh(messageIndex)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
-              >
-                <Icon iconName={IconName.Refresh} size={16} />
-              </Button>
-            </Tooltip>
-          ) : null}
-
-          {canRevert ? (
-            <Tooltip
-              title="Revert to this snapshot"
-              position={TooltipPosition.BottomLeft}
-            >
-              <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={
-                  isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                }
-                content={ButtonContent.Icon}
-                aria-label="Revert to this snapshot"
-                disabled={actionsDisabled}
-                onClick={() => onRevert(messageIndex, text)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
-              >
-                <Icon iconName={IconName.TurnLeft} size={16} />
-              </Button>
-            </Tooltip>
-          ) : (
-            <Tooltip
-              title="This message is not in the transcript yet"
-              position={TooltipPosition.BottomLeft}
-            >
-              <span className="inline-flex">
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
-                  content={ButtonContent.Icon}
-                  aria-label="Revert to this snapshot"
-                  disabled
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.TurnLeft} size={16} />
-                </Button>
-              </span>
-            </Tooltip>
-          )}
-
-          <CopyButton
-            value={text}
-            size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-            variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-            title="Copy message"
-            position={TooltipPosition.BottomLeft}
-            className="md:!h-4 md:!min-h-4 md:!p-0"
+          <MessageActions
+            tooltipPosition={TooltipPosition.BottomLeft}
+            messageIndex={messageIndex}
+            promptText={text}
+            copyText={text}
+            onRefresh={onRefresh}
+            onRevert={onRevert}
+            disabled={actionsDisabled}
           />
         </div>
       ) : null}
