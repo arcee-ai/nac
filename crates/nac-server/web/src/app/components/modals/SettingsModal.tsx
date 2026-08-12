@@ -10,8 +10,6 @@ import {
   Input,
   InputSize,
   InputWrapper,
-  Loader,
-  LoaderSize,
   Modal,
   ModalSize,
   Select,
@@ -35,9 +33,7 @@ import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useCompactionThreshold } from "@/app/hooks/useCompactionThreshold";
-import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
-import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import {
   isGeneratedCredentialName,
   MASKED_KEY,
@@ -48,13 +44,10 @@ import {
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
-import { managedAuthLabel } from "@/app/lib/providers";
 import { humanErrorText } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
 import {
-  useManagedLogout,
-  useManagedProviderModels,
   useCreateModelConfig,
   useModelCatalog,
   useSessionConfig,
@@ -679,125 +672,6 @@ function ApiKeyField({
 }
 
 /**
- * What a managed provider shows in place of a key: the credential is a browser
- * login shared by every session on that provider, so this row signs in and out
- * rather than editing anything the session owns. It is named after the account
- * being signed into rather than after authentication in the abstract, so the
- * button never leaves the destination to guesswork.
- */
-function AuthenticationField({ backend }: { backend: BackendKind }) {
-  const isMobile = useIsMobile();
-  const buttonSize = isMobile ? ButtonSize.Large : ButtonSize.Medium;
-  const { provider, signedIn } = useManagedSignIn(backend);
-  const { state, start, cancel } = useDeviceLogin();
-  const logout = useManagedLogout();
-  // A credential on file is not the same as a working one, so the row leans on
-  // the request that actually spends it rather than on the file being there.
-  const reach = useManagedProviderModels(
-    backend,
-    Boolean(provider) && signedIn,
-  );
-
-  if (!provider) return null;
-
-  const label = managedAuthLabel(provider);
-  const failed = state.status === "failed";
-  const expired = signedIn && reach.isError;
-  const control =
-    state.status === "waiting" ? (
-      <div className="flex items-center gap-2">
-        <Loader size={LoaderSize.Micro} />
-        {state.prompt.user_code ? (
-          <>
-            <span className="text-micro text-basic-muted">Code</span>
-            <span className="label-small text-basic-primary tabular-nums">
-              {state.prompt.user_code}
-            </span>
-          </>
-        ) : (
-          <span className="text-micro text-basic-muted">
-            Waiting for the browser
-          </span>
-        )}
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={buttonSize}
-          content={ButtonContent.Text}
-          onClick={() => void cancel()}
-        >
-          Cancel
-        </Button>
-      </div>
-    ) : signedIn ? (
-      <div className="flex items-center gap-2">
-        {expired ? (
-          <Button
-            variant={ButtonVariant.Primary}
-            size={buttonSize}
-            content={ButtonContent.IconRight}
-            loading={state.status === "starting"}
-            onClick={() => void start(provider)}
-          >
-            <span>Sign in again</span>
-            <Icon iconName={IconName.External} />
-          </Button>
-        ) : (
-          <div
-            // Height rather than padding, so the chip lines up with whichever
-            // size the buttons beside it take.
-            className={`flex items-center gap-1.5 rounded-[4px] bg-success-secondary pl-2 pr-4 ${isMobile ? "h-12" : "py-2"}`}
-          >
-            <Icon
-              iconName={IconName.CheckCircle}
-              className="text-success-primary"
-            />
-            <span className="label-small text-success-primary">Success</span>
-          </div>
-        )}
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={buttonSize}
-          content={ButtonContent.Text}
-          loading={logout.isPending}
-          onClick={() => void logout.mutateAsync(provider).catch(() => {})}
-        >
-          Sign out
-        </Button>
-      </div>
-    ) : (
-      <Button
-        variant={ButtonVariant.Primary}
-        size={buttonSize}
-        content={ButtonContent.IconRight}
-        loading={state.status === "starting"}
-        onClick={() => void start(provider)}
-      >
-        <span>Sign in with {label}</span>
-        <Icon iconName={IconName.External} />
-      </Button>
-    );
-
-  return (
-    <InputWrapper
-      label={`${label} sign-in`}
-      validation={failed || expired}
-      validationText={
-        failed || expired
-          ? humanErrorText(failed ? state.message : reach.error, backend)
-          : undefined
-      }
-      hintText={
-        signedIn
-          ? `This provider authenticates with ${label} in your browser; the login is shared by every session on it.`
-          : `This provider authenticates with ${label} in your browser instead of with an API key. The session cannot run until you sign in.`
-      }
-    >
-      <div className="flex items-center">{control}</div>
-    </InputWrapper>
-  );
-}
-
-/**
  * The model the session runs. A provider that answers with a model index picks
  * from that list; a hand-written gateway that has none is typed in, and a
  * credential that is not working yet has nothing to offer either way.
@@ -854,5 +728,4 @@ function ModelField({
 // Kept temporarily as implementation references while the shared configuration
 // panel owns the active settings UI.
 void ApiKeyField;
-void AuthenticationField;
 void ModelField;
