@@ -64,16 +64,6 @@ export function displaySessionTitle(
   return shortId(summary.session_id) || "session";
 }
 
-export function formatTokens(n: number | null | undefined): string {
-  if (n == null) return "--";
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "--";
-  if (Math.abs(v) >= 1000) {
-    return `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k`;
-  }
-  return String(v);
-}
-
 /** Token counts for the chat input bar, e.g. 185000 -> "185K", 14.3e6 -> "14.3M". */
 export function formatTokensCompact(n: number | null | undefined): string {
   if (n == null) return "--";
@@ -139,15 +129,6 @@ export function formatStoreTime(value: string): string {
   });
 }
 
-export function formatRuntime(ms: number | null | undefined): string {
-  if (ms == null || !Number.isFinite(ms)) return "--:--:--";
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = String(Math.floor(total / 3600)).padStart(2, "0");
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
-  const s = String(total % 60).padStart(2, "0");
-  return `${h}:${m}:${s}`;
-}
-
 export const ENV_LOCAL = "Local";
 export const ENV_SSH = "SSH";
 export const ENV_SANDBOX = "Sandbox";
@@ -183,24 +164,6 @@ export function isActiveRun(
   if (!activeRun) return false;
   const state = (activeRun.state ?? activeRun.status ?? "").toLowerCase();
   return !TERMINAL_RUN_STATES.includes(state);
-}
-
-export interface DiffTotals {
-  additions: number;
-  deletions: number;
-  error: string;
-}
-
-export function diffTotals(
-  entry: ManagedSessionSummary | null | undefined,
-  snapshot: SessionSnapshotResponse | null | undefined,
-): DiffTotals {
-  const wd = snapshot?.workspace ?? entry?.workspace_diff;
-  return {
-    additions: wd?.total_additions ?? 0,
-    deletions: wd?.total_deletions ?? 0,
-    error: wd?.error ?? "",
-  };
 }
 
 export function tokenUsage(

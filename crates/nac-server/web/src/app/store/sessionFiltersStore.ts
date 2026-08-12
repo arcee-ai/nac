@@ -68,7 +68,7 @@ export const sessionFiltersStore = createStore<FiltersState>({
   providers: [],
 });
 
-const { getState, setState, useStore } = sessionFiltersStore;
+const { setState, useStore } = sessionFiltersStore;
 
 const toggle = <T,>(list: T[], value: T): T[] =>
   list.includes(value) ? list.filter((v) => v !== value) : list.concat(value);
@@ -83,27 +83,6 @@ export const toggleEnv = (env: SessionEnv) =>
   setState((s) => ({ envs: toggle(s.envs, env) }));
 export const toggleProvider = (provider: string) =>
   setState((s) => ({ providers: toggle(s.providers, provider) }));
-
-export function resetFilters(): void {
-  setState({
-    query: "",
-    createdRange: RANGE_ANY,
-    modifiedRange: RANGE_ANY,
-    envs: [],
-    providers: [],
-  });
-}
-
-export function hasActiveFilters(): boolean {
-  const s = getState();
-  return (
-    s.query.trim() !== "" ||
-    s.createdRange !== RANGE_ANY ||
-    s.modifiedRange !== RANGE_ANY ||
-    s.envs.length > 0 ||
-    s.providers.length > 0
-  );
-}
 
 /** Unparseable timestamps must not hide a session, so they pass every range. */
 function withinRange(value: string, range: RangeId, now: number): boolean {

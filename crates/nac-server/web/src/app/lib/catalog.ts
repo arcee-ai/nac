@@ -138,22 +138,3 @@ export function resolveCatalogModel(
     estimated: true,
   };
 }
-
-/**
- * The provider carrying an entry for this model id, mirroring
- * `ModelCatalog::provider_for_model`: an exact match wins, and a collision
- * prefers the first provider that is not a managed login.
- */
-export function catalogProviderForModel(
-  catalog: ModelCatalog | undefined,
-  model: string,
-): BackendKind | null {
-  const id = model.trim();
-  if (!id) return null;
-  const matches = (catalog?.providers ?? []).filter((provider) =>
-    provider.models.some((entry) => entry.id === id),
-  );
-  if (matches.length === 0) return null;
-  const unmanaged = matches.find((provider) => provider.managed_base_url === null);
-  return (unmanaged ?? matches[0]).id;
-}
