@@ -124,10 +124,10 @@ pub const TRANSCRIPT_PAYLOAD_KEY: &str = "nac_transcript_message";
 pub fn is_transcript_log_payload(event_json: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(event_json)
         .ok()
-        .map_or(false, |value| {
+        .is_some_and(|value| {
             value
                 .get(TRANSCRIPT_PAYLOAD_KEY)
-                .map_or(false, |entry| entry.is_object())
+                .is_some_and(serde_json::Value::is_object)
         })
 }
 
@@ -486,14 +486,12 @@ impl TranscriptLogWriter {
             entries.push((entry.idx, message));
         }
         entries.reverse();
-        let mut expected_idx = blob_len + tail_start;
-        for (idx, _) in &entries {
+        for (expected_idx, (idx, _)) in (blob_len + tail_start..).zip(&entries) {
             if *idx != expected_idx {
                 return Err(anyhow!(
                     "transcript log tail window is not contiguous: expected idx {expected_idx}, found {idx}"
                 ));
             }
-            expected_idx += 1;
         }
         Ok((tail_len, entries))
     }

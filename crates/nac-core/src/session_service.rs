@@ -1662,16 +1662,15 @@ impl SessionService {
             cache.scanned_len = merged_len;
             return Ok(());
         }
-        let mut position = scanned_len;
-        for message in blob_delta
-            .iter()
-            .chain(rows.iter().map(|(_, message)| message))
-        {
+        for (position, message) in (scanned_len..).zip(
+            blob_delta
+                .iter()
+                .chain(rows.iter().map(|(_, message)| message)),
+        ) {
             if position >= cache.scanned_len {
                 cache.scan_message(position, message);
                 cache.scanned_len = position + 1;
             }
-            position += 1;
         }
         Ok(())
     }

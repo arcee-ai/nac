@@ -857,6 +857,7 @@ mod file_lock_tests {
         let locked = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false)
             .open(Path::new(&target))
             .unwrap();
         FileExt::lock_exclusive(&locked).unwrap();
@@ -878,6 +879,7 @@ mod file_lock_tests {
         let target = dir.join("target.txt");
         let unrelated = dir.join("unrelated.txt");
         let ready = dir.join("ready");
+        std::fs::write(&target, b"preserve while locking").unwrap();
 
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
@@ -904,6 +906,11 @@ mod file_lock_tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(ready.exists(), "file-lock helper never became ready");
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"preserve while locking",
+            "opening the lock file must not truncate its contents"
+        );
 
         let same_file = OpenOptions::new()
             .read(true)

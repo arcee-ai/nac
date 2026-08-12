@@ -273,17 +273,12 @@ pub struct ListSessionsQuery {
     pub workspace_stats: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum RequestField<T> {
+    #[default]
     Omitted,
     Null,
     Value(T),
-}
-
-impl<T> Default for RequestField<T> {
-    fn default() -> Self {
-        Self::Omitted
-    }
 }
 
 impl<'de, T> Deserialize<'de> for RequestField<T>
@@ -7285,7 +7280,6 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Null,
                     orchestrator_compaction_threshold: RequestField::Null,
-                    ..UpdateConfigRequest::default()
                 },
             )
             .await

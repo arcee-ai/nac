@@ -417,7 +417,6 @@ export function ConfigurationsPanel({
     source.kind,
     initial,
     preservesInitial,
-    picked,
     catalogPick,
     catalogCredential,
     catalogProvider,

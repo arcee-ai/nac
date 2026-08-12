@@ -297,7 +297,7 @@ async fn unreadable_directories_are_reported_without_hiding_readable_results() {
     let locked = root.join("locked");
     fs::create_dir(&locked).expect("create unreadable fixture");
     fs::write(locked.join("secret.rs"), "ExecutionBackend\n").expect("write unreadable fixture");
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0)).expect("make fixture unreadable");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o0)).expect("make fixture unreadable");
     let output = parsed(execute("glob", json!({"pattern": "**/*.rs"}), &runtime).await);
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))
         .expect("restore fixture permissions");

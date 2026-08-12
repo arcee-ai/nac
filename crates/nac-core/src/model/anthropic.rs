@@ -333,10 +333,8 @@ pub(super) fn parse_anthropic_messages_response(
                     },
                 });
             }
-            Some("thinking") | Some("redacted_thinking") => {
-                if is_anthropic_reasoning_block(block) {
-                    reasoning_blocks.push(block.clone());
-                }
+            Some("thinking" | "redacted_thinking") if is_anthropic_reasoning_block(block) => {
+                reasoning_blocks.push(block.clone());
             }
             _ => {}
         }

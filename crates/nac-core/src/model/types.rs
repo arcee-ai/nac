@@ -57,9 +57,10 @@ impl std::str::FromStr for BackendKind {
             "anthropic-messages" => Ok(Self::AnthropicMessages),
             "arcee-auth" => Ok(Self::ArceeAuth),
             "arcee-api" => Ok(Self::ArceeApi),
-            "arcee" => Err(format!(
+            "arcee" => Err(
                 "unsupported backend 'arcee'; settings repair required: select 'arcee-auth' for managed arcee_auth.json credentials or 'arcee-api' for API-key credentials"
-            )),
+                    .to_string(),
+            ),
             "auto" => Err(format!(
                 "unsupported backend 'auto'; settings repair required: select an explicit backend ({})",
                 Self::SUPPORTED

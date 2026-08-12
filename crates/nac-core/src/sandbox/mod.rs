@@ -26,16 +26,11 @@ pub const DEFAULT_SANDBOX_WORKDIR: &str = "/workspace";
 ///
 /// Kept as an enum (currently Podman-only) so a future sandbox rework has a
 /// natural home for additional backends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SandboxBackendType {
+    #[default]
     Podman,
-}
-
-impl Default for SandboxBackendType {
-    fn default() -> Self {
-        SandboxBackendType::Podman
-    }
 }
 
 impl SandboxBackendType {
