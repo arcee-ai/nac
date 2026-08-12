@@ -18,7 +18,7 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
     let valid = append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
@@ -35,7 +35,7 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
     )
     .unwrap();
     append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: Some(valid.id),
@@ -76,7 +76,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
     let first = append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
@@ -123,7 +123,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     state.record_ordinary_context(&messages, 50, messages.len(), Some(first.id));
     let (source, policy) = checkpoint_digests(&messages, 3);
     let second = append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: Some(first.id),
@@ -160,7 +160,7 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
     let valid = append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
@@ -178,7 +178,7 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
     .unwrap();
     let (source, policy) = checkpoint_digests(&messages, 3);
     append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: Some(valid.id),
@@ -215,7 +215,7 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
     let checkpoint = append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
@@ -282,7 +282,7 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
         let path = &store.path;
         let (source, policy) = checkpoint_digests(&messages, boundary);
         let checkpoint = append_orchestrator_compaction_checkpoint(
-            &path,
+            path,
             &NewOrchestratorCompactionCheckpoint {
                 session_id: "session".to_string(),
                 previous_checkpoint_id: None,

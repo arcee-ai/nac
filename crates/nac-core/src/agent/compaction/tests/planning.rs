@@ -292,7 +292,7 @@ fn active_end_checkpoint_without_new_messages_is_already_compacted() {
     let boundary = messages.len();
     let (source, policy) = checkpoint_digests(&messages, boundary);
     append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,

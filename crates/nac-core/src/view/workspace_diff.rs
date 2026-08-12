@@ -751,7 +751,7 @@ mod tests {
             "selected",
         );
         assert_blob(
-            b"100644 one 1\ta\0100644 two 2\tb\0100644 three 3\tc\0100644 zero 0\td\0",
+            b"100644 one 1\ta\x00100644 two 2\tb\x00100644 three 3\tc\x00100644 zero 0\td\0",
             GitBlobSource::Index,
             "100644",
             "zero",

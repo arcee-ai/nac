@@ -59,7 +59,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     ];
     let (source, policy) = checkpoint_digests(&messages, 3);
     let first = append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
@@ -103,7 +103,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     let end_path = &end_store.path;
     let (end_source, end_policy) = checkpoint_digests(&end_messages, 1);
     let end_parent = append_orchestrator_compaction_checkpoint(
-        &end_path,
+        end_path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
@@ -173,7 +173,7 @@ fn version_one_checkpoint_is_invalidated() {
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let (source, policy) = checkpoint_digests(&messages, 2);
     append_orchestrator_compaction_checkpoint(
-        &path,
+        path,
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
