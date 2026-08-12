@@ -1,7 +1,6 @@
 use super::super::*;
-use super::{assistant, candidate, state, user};
+use super::{assistant, candidate, state, user, StoreFixture};
 
-use crate::store;
 use crate::store::orchestrator_compaction::{
     append_orchestrator_compaction_checkpoint, NewOrchestratorCompactionCheckpoint,
 };
@@ -9,9 +8,8 @@ use crate::types::{FunctionCall, Message, ToolCall};
 
 #[test]
 fn restore_falls_back_from_newest_invalid_checkpoint() {
-    let path = crate::test_utils::temp_store_path("fallback");
-    store::initialize(&path).unwrap();
-    store::insert_test_session(&path, "session");
+    let store = StoreFixture::new("fallback");
+    let path = &store.path;
     let messages = vec![
         user("old"),
         assistant("answer"),
@@ -54,7 +52,7 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
     )
     .unwrap();
 
-    let mut state = state(path.clone(), None);
+    let mut state = state(path.to_path_buf(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
     let view = state
@@ -65,14 +63,11 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
     assert!(!serde_json::to_string(&view)
         .unwrap()
         .contains("invalid newest"));
-
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 #[test]
 fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_changed_checkpoint() {
-    let path = crate::test_utils::temp_store_path("sample_refresh");
-    store::initialize(&path).unwrap();
-    store::insert_test_session(&path, "session");
+    let store = StoreFixture::new("sample_refresh");
+    let path = &store.path;
     let messages = vec![
         user("old"),
         assistant("answer"),
@@ -97,7 +92,7 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
         },
     )
     .unwrap();
-    let mut state = state(path.clone(), Some(1_000));
+    let mut state = state(path.to_path_buf(), Some(1_000));
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     state.record_ordinary_context(&messages, 50, messages.len(), Some(first.id));
 
@@ -152,14 +147,11 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
         estimate_message_tokens(&prepared.messages).saturating_add(estimate_tool_tokens(&[]))
     );
     assert_ne!(prepared.context_estimate, 50);
-
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 #[test]
 fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
-    let path = crate::test_utils::temp_store_path("wrapper_only");
-    store::initialize(&path).unwrap();
-    store::insert_test_session(&path, "session");
+    let store = StoreFixture::new("wrapper_only");
+    let path = &store.path;
     let messages = vec![
         user("old"),
         assistant("answer"),
@@ -203,21 +195,18 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
     )
     .unwrap();
 
-    let mut state = state(path.clone(), None);
+    let mut state = state(path.to_path_buf(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
     let view = state.plan(&messages, &[], CompactionReason::Auto).prepared;
     assert!(serde_json::to_string(&view.messages)
         .unwrap()
         .contains("valid"));
-
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 #[test]
 fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use() {
-    let path = crate::test_utils::temp_store_path("repaired");
-    store::initialize(&path).unwrap();
-    store::insert_test_session(&path, "session");
+    let store = StoreFixture::new("repaired");
+    let path = &store.path;
     let mut messages = vec![
         user("old"),
         assistant("answer"),
@@ -242,7 +231,7 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
         },
     )
     .unwrap();
-    let mut state = state(path.clone(), Some(1));
+    let mut state = state(path.to_path_buf(), Some(1));
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     state.record_ordinary_context(&messages, 50, messages.len(), Some(checkpoint.id));
 
@@ -260,8 +249,6 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
             .context_estimate
             != 50
     );
-
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 #[test]
 fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_positions() {
@@ -291,9 +278,8 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
         },
     ];
     for (label, boundary) in [("user", 2), ("assistant", 3), ("end", messages.len())] {
-        let path = crate::test_utils::temp_store_path(label);
-        store::initialize(&path).unwrap();
-        store::insert_test_session(&path, "session");
+        let store = StoreFixture::new(label);
+        let path = &store.path;
         let (source, policy) = checkpoint_digests(&messages, boundary);
         let checkpoint = append_orchestrator_compaction_checkpoint(
             &path,
@@ -312,7 +298,7 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
             },
         )
         .unwrap();
-        let mut state = state(path.clone(), None);
+        let mut state = state(path.to_path_buf(), None);
         state.restore_newest_valid_checkpoint(&messages).unwrap();
         assert_eq!(
             state.active_checkpoint_for_test().unwrap().id,
@@ -331,7 +317,6 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
             state.record_ordinary_context(&appended, 20, appended.len(), Some(checkpoint.id));
             assert_eq!(state.prepare(&appended, &[]).context_estimate, 20);
         }
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     assert!(!checkpoint_boundary_is_valid(&messages, 4));

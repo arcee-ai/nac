@@ -1,9 +1,8 @@
 use super::super::*;
-use super::{assistant, candidate, state, user};
+use super::{assistant, candidate, state, user, StoreFixture};
 
 use sha2::{Digest, Sha256};
 
-use crate::store;
 use crate::store::orchestrator_compaction::{
     append_orchestrator_compaction_checkpoint, NewOrchestratorCompactionCheckpoint,
 };
@@ -45,9 +44,8 @@ fn installed_historical_wrapper_is_unchanged() {
 }
 #[test]
 fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
-    let path = crate::test_utils::temp_store_path("incremental");
-    store::initialize(&path).unwrap();
-    store::insert_test_session(&path, "session");
+    let store = StoreFixture::new("incremental");
+    let path = &store.path;
     let messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -77,7 +75,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
         },
     )
     .unwrap();
-    let mut cs = state(path.clone(), Some(1));
+    let mut cs = state(path.to_path_buf(), Some(1));
     cs.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(cs.active_checkpoint_for_test().unwrap().id, first.id);
 
@@ -101,9 +99,8 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
         assistant("second answer"),
         assistant("third answer"),
     ];
-    let end_path = crate::test_utils::temp_store_path("incremental_end");
-    store::initialize(&end_path).unwrap();
-    store::insert_test_session(&end_path, "session");
+    let end_store = StoreFixture::new("incremental_end");
+    let end_path = &end_store.path;
     let (end_source, end_policy) = checkpoint_digests(&end_messages, 1);
     let end_parent = append_orchestrator_compaction_checkpoint(
         &end_path,
@@ -122,7 +119,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
         },
     )
     .unwrap();
-    let mut end_state = state(end_path.clone(), Some(1));
+    let mut end_state = state(end_path.to_path_buf(), Some(1));
     end_state
         .restore_newest_valid_checkpoint(&end_messages)
         .unwrap();
@@ -133,9 +130,6 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     assert!(end_encoded.contains("parent summary"));
     assert!(end_encoded.contains("new answer"));
     assert!(!end_encoded.contains("old"));
-    let _ = std::fs::remove_dir_all(end_path.parent().unwrap());
-
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 #[test]
 fn policy_digest_covers_every_ordered_system_even_after_boundary() {
@@ -174,9 +168,8 @@ fn policy_digest_covers_every_ordered_system_even_after_boundary() {
 }
 #[test]
 fn version_one_checkpoint_is_invalidated() {
-    let path = crate::test_utils::temp_store_path("version_one");
-    store::initialize(&path).unwrap();
-    store::insert_test_session(&path, "session");
+    let store = StoreFixture::new("version_one");
+    let path = &store.path;
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let (source, policy) = checkpoint_digests(&messages, 2);
     append_orchestrator_compaction_checkpoint(
@@ -197,12 +190,10 @@ fn version_one_checkpoint_is_invalidated() {
     )
     .unwrap();
 
-    let mut state = state(path.clone(), None);
+    let mut state = state(path.to_path_buf(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert!(state.active_checkpoint_for_test().is_none());
     assert_eq!(state.prepare(&messages, &[]).messages.len(), messages.len());
-
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 #[test]
 fn summary_acceptance_requires_nonblank_text_without_tools_or_length_finish() {
