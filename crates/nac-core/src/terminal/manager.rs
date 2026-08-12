@@ -299,6 +299,7 @@ impl TerminalManager {
         let mut exit_code = None;
         let mut runtime_error = None;
         let mut process_exited = false;
+        let mut readers_open = true;
 
         while !process_exited {
             match child.try_wait() {
@@ -325,13 +326,16 @@ impl TerminalManager {
             }
 
             tokio::select! {
-                chunk = receiver.recv() => {
-                    if let Some(chunk) = chunk {
-                        if let Err(error) = self.output_registry.append(&output_id, chunk.stream, chunk.bytes) {
-                            status = CommandStatus::SpawnError;
-                            runtime_error = Some(error.to_string());
-                            break;
+                chunk = receiver.recv(), if readers_open => {
+                    match chunk {
+                        Some(chunk) => {
+                            if let Err(error) = self.output_registry.append(&output_id, chunk.stream, chunk.bytes) {
+                                status = CommandStatus::SpawnError;
+                                runtime_error = Some(error.to_string());
+                                break;
+                            }
                         }
+                        None => readers_open = false,
                     }
                 }
                 _ = sleep(PROCESS_POLL_INTERVAL) => {}
@@ -592,6 +596,17 @@ mod tests {
         assert_eq!(preview_budgets(8_000, 10_000, 0), (8_000, 0));
     }
 
+    #[cfg(unix)]
+    fn current_thread_cpu_time() -> Duration {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+        assert_eq!(result, 0, "failed to read thread CPU clock");
+        Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+    }
+
     #[tokio::test]
     async fn one_shot_preserves_separate_streams_and_nonzero_exit() {
         let manager = TerminalManager::new();
@@ -631,6 +646,96 @@ mod tests {
         assert_eq!(output.status, CommandStatus::TimedOut);
         assert_eq!(output.exit_code, None);
     }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn one_shot_closed_pipes_do_not_busy_spin() {
+        let manager = TerminalManager::new();
+        let wall_start = Instant::now();
+        let cpu_start = current_thread_cpu_time();
+        let output = manager
+            .exec_one_shot(
+                "printf retained; exec 1>&- 2>&-; sleep 0.3",
+                None,
+                120,
+                40,
+                1_000,
+                8_000,
+                &backend(),
+                None,
+            )
+            .await;
+        let wall_elapsed = wall_start.elapsed();
+        let cpu_elapsed = current_thread_cpu_time().saturating_sub(cpu_start);
+
+        assert_eq!(output.status, CommandStatus::Completed);
+        assert_eq!(
+            manager
+                .read_output(
+                    output.output_id.as_deref().unwrap(),
+                    OutputStream::Stdout,
+                    0,
+                    32,
+                )
+                .unwrap()
+                .content,
+            "retained"
+        );
+        assert!(
+            cpu_elapsed < wall_elapsed / 2,
+            "closed output pipes consumed {cpu_elapsed:?} CPU over {wall_elapsed:?} wall time"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_shot_closed_pipes_still_time_out() {
+        let manager = TerminalManager::new();
+        let output = manager
+            .exec_one_shot(
+                "exec 1>&- 2>&-; sleep 5",
+                None,
+                120,
+                40,
+                20,
+                8_000,
+                &backend(),
+                None,
+            )
+            .await;
+
+        assert_eq!(output.status, CommandStatus::TimedOut);
+        assert_eq!(output.exit_code, None);
+    }
+
+    #[tokio::test]
+    async fn one_shot_closed_pipes_still_cancel() {
+        let manager = TerminalManager::new();
+        let cancellation = ThreadCancellation::default();
+        let task_manager = manager.clone();
+        let task_backend = backend();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            task_manager
+                .exec_one_shot(
+                    "exec 1>&- 2>&-; sleep 5",
+                    None,
+                    120,
+                    40,
+                    5_000,
+                    8_000,
+                    task_backend.as_ref(),
+                    Some(&task_cancellation),
+                )
+                .await
+        });
+
+        sleep(Duration::from_millis(50)).await;
+        cancellation.cancel();
+        let output = task.await.unwrap();
+        assert_eq!(output.status, CommandStatus::Cancelled);
+        assert_eq!(output.exit_code, None);
+    }
+
     #[tokio::test]
     async fn one_shot_spawn_failure_is_structured() {
         let manager = TerminalManager::new();

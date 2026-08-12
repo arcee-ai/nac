@@ -5,6 +5,7 @@ import {
   mergeThreadLog,
   persistedThreadLog,
   threadLogLine,
+  toolCallFailed,
 } from "@/app/lib/threadLog";
 import type {
   AgentEvent,
@@ -37,6 +38,47 @@ function page(ids: number[], hasOlder: boolean): ThreadEventPage {
     next_before_id: hasOlder ? Math.min(...ids) : null,
   };
 }
+
+describe("tool-call status", () => {
+  it.each(["timed_out", "cancelled", "spawn_error"] as const)(
+    "renders %s commands as failures",
+    (command_status) => {
+      expect(
+        toolCallFailed({
+          is_error: false,
+          content_preview: command_status.replace("_", " "),
+          command_status,
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it("keeps completed commands with nonzero exits successful", () => {
+    const line = threadLogLine(
+      {
+        type: "tool_call_finished",
+        call_id: "command-1",
+        name: "exec_command",
+        content_preview: "exit 7: failed assertion",
+        is_error: false,
+        command_status: "completed",
+        exit_code: 7,
+      },
+      0,
+    );
+
+    expect(line).toMatchObject({ mark: "✓", isError: false });
+  });
+
+  it("keeps legacy timeout previews marked as failures", () => {
+    expect(
+      toolCallFailed({
+        is_error: false,
+        content_preview: "Command timed out after 1000ms",
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("thread history paging", () => {
   it("normalizes newest and overlapping older pages chronologically", () => {
