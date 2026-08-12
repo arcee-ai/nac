@@ -105,6 +105,9 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           "flex flex-col items-start w-full h-full text-left",
           selected ? "btn-ghost-highlighted" : "btn-ghost",
         )}
+        // The tile is too small for the task, and once the thread answers the
+        // task is not even what it shows any more.
+        title={thread.action || undefined}
         aria-pressed={selected}
         onClick={() => onSelect(thread.name, thread.key)}
       >

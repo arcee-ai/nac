@@ -10,6 +10,8 @@ import {
 } from "react";
 
 import {
+  Badge,
+  BadgeColor,
   Button,
   ButtonSize,
   ButtonVariant,
@@ -201,10 +203,18 @@ const LogEntryView = memo(function LogEntryView({
   return <StandaloneView entry={entry} />;
 });
 
+/** How a dispatch that produced no handoff ended, as the badge reads it. */
+const FAILED_EPISODE_BADGE: Record<string, { label: string; color: BadgeColor }> =
+  {
+    error: { label: "Failed", color: BadgeColor.Red },
+    timed_out: { label: "Timed out", color: BadgeColor.Yellow },
+    cancelled: { label: "Cancelled", color: BadgeColor.Gray },
+  };
+
 /**
- * One retained episode as a collapsible tab. Collapsed it shows the index,
- * timestamp, and a truncated action preview; expanded it reveals the full
- * action and the episode content beneath. Each tab owns its own open state so
+ * One dispatch as a collapsible tab. Collapsed it shows the index, how the
+ * dispatch ended and a truncated action preview; expanded it reveals the full
+ * action and what came back beneath. Each tab owns its own open state so
  * several can be read at once.
  */
 function EpisodeTab({
@@ -216,6 +226,7 @@ function EpisodeTab({
 }) {
   const [expanded, setExpanded] = useState(false);
   const isMobile = useIsMobile();
+  const failure = FAILED_EPISODE_BADGE[episode.status];
   return (
     <div className="flex flex-col items-start w-full">
       <button
@@ -234,6 +245,13 @@ function EpisodeTab({
         >
           {`Episode ${index + 1}`}
         </span>
+        {failure ? (
+          <Badge
+            text={failure.label}
+            color={failure.color}
+            className="shrink-0"
+          />
+        ) : null}
         <span
           className={`flex-1 min-w-0 ${isMobile ? "label-small" : "label-micro"} text-basic-secondary truncate`}
         >
@@ -247,6 +265,56 @@ function EpisodeTab({
           <Markdown className="text-basic-secondary">
             {episode.content}
           </Markdown>
+        </div>
+      </DropdownContent>
+    </div>
+  );
+}
+
+/**
+ * What the thread was asked to do, above whichever half of it is being read.
+ *
+ * The dispatch carries this from the moment the thread starts, so it is the
+ * one thing about a running thread that can be known before it has produced
+ * anything — which is why it sits outside both views rather than waiting for
+ * an episode to be written.
+ */
+function ThreadTask({
+  action,
+  className,
+}: {
+  action: string;
+  className?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={cn(
+        "flex flex-col shrink-0 border-b border-muted bg-elevation-level-1",
+        className,
+      )}
+    >
+      <button
+        type="button"
+        className="flex items-center gap-2 px-4 py-2 w-full text-left btn-ghost"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <Icon
+          iconName={expanded ? IconName.Down : IconName.Right}
+          size={16}
+          className="shrink-0 text-basic-muted"
+        />
+        <span className="shrink-0 label-micro text-basic-muted">Task</span>
+        {expanded ? null : (
+          <span className="flex-1 min-w-0 label-micro text-basic-secondary truncate">
+            {action}
+          </span>
+        )}
+      </button>
+      <DropdownContent isOpen={expanded} className="w-full">
+        <div className="px-4 pb-4 max-h-[40vh] overflow-auto">
+          <Markdown className="text-basic-secondary">{action}</Markdown>
         </div>
       </DropdownContent>
     </div>
@@ -447,19 +515,23 @@ function LogPane({
   );
 }
 
-/** Retained episodes of one thread as collapsible tabs. */
+/** The dispatches of one thread as collapsible tabs. */
 function Episodes({
   episodes,
+  running,
   className,
 }: {
   episodes: EpisodeSnapshot[];
+  running: boolean;
   className?: string;
 }) {
   if (!episodes.length) {
     return (
       <div className={cn("flex flex-1 min-h-0", className)}>
-        <p className="p-4 code code-small text-basic-muted">
-          No episodes retained yet.
+        <p className="p-4 max-w-prose label-small text-basic-muted">
+          {running
+            ? "An episode records one dispatch — what the thread was asked to do and what came back. This one is written when the dispatch ends; until then the Command Log is the live view."
+            : "This thread has not been dispatched yet, so it has no episodes."}
         </p>
       </div>
     );
@@ -488,7 +560,7 @@ type ThreadDetailView = "log" | "overview";
 
 const VIEW_LABEL: Record<ThreadDetailView, string> = {
   log: "Command Log",
-  overview: "Overview",
+  overview: "Episodes",
 };
 
 const THREAD_DETAIL_VIEWS: ThreadDetailView[] = ["log", "overview"];
@@ -584,6 +656,7 @@ function ThreadViewSelect({
 
 function Detail({
   thread,
+  action,
   episodes,
   events,
   liveLog,
@@ -598,6 +671,8 @@ function Detail({
   onViewChange,
 }: {
   thread: ThreadSnapshot;
+  /** What this thread was asked to do, live for the dispatch in flight. */
+  action: string;
   episodes: EpisodeSnapshot[];
   /** Commands the store has persisted for this thread. */
   events: AgentEvent[] | undefined;
@@ -620,6 +695,12 @@ function Detail({
     [events, liveLog],
   );
 
+  // The floating phone pills sit over the top of this column, so whichever
+  // element comes first has to clear them.
+  const task = action ? (
+    <ThreadTask action={action} className={isMobile ? "pt-14" : undefined} />
+  ) : null;
+  const bodyOffset = isMobile && !task ? "pt-14" : undefined;
   const body =
     view === "log" ? (
       <LogPane
@@ -631,12 +712,13 @@ function Detail({
         historyError={historyError}
         onLoadOlder={onLoadOlder}
         onRetry={onRetry}
-        className={isMobile ? "pt-14" : undefined}
+        className={bodyOffset}
       />
     ) : (
       <Episodes
         episodes={episodes}
-        className={isMobile ? "pt-14" : undefined}
+        running={running}
+        className={bodyOffset}
       />
     );
 
@@ -644,6 +726,7 @@ function Detail({
   if (isMobile || isTablet) {
     return (
       <div className="relative flex flex-col flex-1 min-h-0 min-w-0">
+        {task}
         {body}
         {isMobile ? <ViewPills view={view} onChange={onViewChange} /> : null}
       </div>
@@ -668,9 +751,10 @@ function Detail({
         </div>
         <ViewSwitcher view={view} onChange={onViewChange} />
         <span className="shrink-0 text-micro text-basic-muted">
-          {thread.episode_count} ep
+          {episodes.length} ep
         </span>
       </div>
+      {task}
       {body}
     </div>
   );
@@ -822,13 +906,19 @@ export function ThreadsView({
             const pending = pendingNames.has(thread.name);
             const running = runningNames.has(thread.name);
             const errored = liveThreads[thread.name]?.isError;
+            // The task is the only description a thread has, so the row hands
+            // it over on hover rather than making the name stand for it.
+            const task =
+              liveThreads[thread.name]?.action || thread.latest_action || "";
             return (
               <PanelRow
                 key={thread.name}
                 label={thread.name}
                 active={thread.name === current?.name}
                 disabled={pending}
-                title={pending ? "Waiting on source threads" : undefined}
+                title={
+                  pending ? "Waiting on source threads" : task || undefined
+                }
                 icon={
                   pending ? (
                     <Icon
@@ -856,7 +946,8 @@ export function ThreadsView({
                 }
                 trailing={
                   <span className="code code-micro text-basic-muted shrink-0">
-                    {thread.episode_count}
+                    {snapshot.thread_episodes?.[thread.name]?.length ??
+                      thread.episode_count}
                   </span>
                 }
                 onClick={() => onSelect(thread.name)}
@@ -870,6 +961,7 @@ export function ThreadsView({
         <Detail
           key={`${sessionId}:${current.name}`}
           thread={current}
+          action={live?.action || current.latest_action || ""}
           episodes={snapshot.thread_episodes?.[current.name] ?? []}
           events={
             pagedEvents ?? snapshot.thread_events?.[current.name]

@@ -54,6 +54,7 @@ vi.mock("@/app/services/queries", () => ({
 vi.mock("@/app/store/runtimeStore", () => ({
   pushLocalEvent: mocks.pushLocalEvent,
   useRunning: () => false,
+  useRunUsage: () => null,
 }));
 
 vi.mock("@/app/store/sshConnectionStore", () => ({

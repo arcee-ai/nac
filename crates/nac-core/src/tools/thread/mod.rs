@@ -202,40 +202,87 @@ pub async fn execute_parsed_dispatch(
 
     match result {
         Err(e) => {
+            let message = format!("Failed to spawn thread '{}': {}", thread_name, e);
+            record_dispatch_failure(
+                runtime,
+                &session_id,
+                &thread_name,
+                &action,
+                store::EpisodeStatus::Error,
+                &message,
+            )
+            .await;
             runtime.event_sink.emit(AgentEvent::Error {
                 thread_name: Some(thread_name.clone()),
-                message: format!("Failed to spawn thread '{}': {}", thread_name, e),
+                message: message.clone(),
             });
             ToolResult {
-                content: format!("Failed to spawn thread '{}': {}", thread_name, e),
+                content: message,
                 is_error: true,
             }
         }
-        Ok(run) if run.cancelled => ToolResult {
-            content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled."),
-            is_error: true,
-        },
+        Ok(run) if run.cancelled => {
+            let message = format!("Thread '{thread_name}' was cancelled.");
+            record_dispatch_failure(
+                runtime,
+                &session_id,
+                &thread_name,
+                &action,
+                store::EpisodeStatus::Cancelled,
+                &message,
+            )
+            .await;
+            ToolResult {
+                content: format!("{TOOL_CALL_CANCELLED_MARKER} {message}"),
+                is_error: true,
+            }
+        }
         Ok(run) if run.timed_out => {
             let timeout_reason = run.timeout_reason.clone();
+            let message = match &timeout_reason {
+                Some(reason) => format!(
+                    "Thread '{}' timed out after {}s.\n{}",
+                    thread_name, timeout_secs, reason
+                ),
+                None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
+            };
+            record_dispatch_failure(
+                runtime,
+                &session_id,
+                &thread_name,
+                &action,
+                store::EpisodeStatus::TimedOut,
+                &message,
+            )
+            .await;
             runtime.event_sink.emit(AgentEvent::ThreadFinished {
                 name: thread_name.clone(),
                 exit_code: run.exit_code,
                 timed_out: true,
-                timeout_reason: timeout_reason.clone(),
+                timeout_reason,
                 usage: run.usage.clone(),
             });
             ToolResult {
-                content: match timeout_reason {
-                    Some(reason) => format!(
-                        "Thread '{}' timed out after {}s.\n{}",
-                        thread_name, timeout_secs, reason
-                    ),
-                    None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
-                },
+                content: message,
                 is_error: true,
             }
         }
         Ok(run) if run.exit_code != 0 => {
+            let details =
+                worker_failure_details(run.model_error.as_deref(), &run.stderr, &run.stdout);
+            let message = format!(
+                "Thread '{}' failed (exit {}):\n{}",
+                thread_name, run.exit_code, details
+            );
+            record_dispatch_failure(
+                runtime,
+                &session_id,
+                &thread_name,
+                &action,
+                store::EpisodeStatus::Error,
+                &message,
+            )
+            .await;
             runtime.event_sink.emit(AgentEvent::ThreadFinished {
                 name: thread_name.clone(),
                 exit_code: run.exit_code,
@@ -243,13 +290,8 @@ pub async fn execute_parsed_dispatch(
                 timeout_reason: None,
                 usage: run.usage.clone(),
             });
-            let details =
-                worker_failure_details(run.model_error.as_deref(), &run.stderr, &run.stdout);
             ToolResult {
-                content: format!(
-                    "Thread '{}' failed (exit {}):\n{}",
-                    thread_name, run.exit_code, details
-                ),
+                content: message,
                 is_error: true,
             }
         }
@@ -267,6 +309,47 @@ pub async fn execute_parsed_dispatch(
             }
         }
     }
+}
+
+/// Record a dispatch that produced no handoff. A worker only writes its own
+/// episode after the model answers, so every other ending — spawn failure,
+/// cancellation, timeout, non-zero exit — would otherwise leave nothing behind
+/// saying what the thread had been asked to do. Written before `ThreadFinished`
+/// is emitted, since that event is what makes the panel reload episodes.
+async fn record_dispatch_failure(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    thread_name: &str,
+    action: &str,
+    status: store::EpisodeStatus,
+    content: &str,
+) {
+    let store_path = runtime.store_path.clone();
+    let session_id = session_id.to_string();
+    let thread = thread_name.to_string();
+    let action = action.to_string();
+    let content = content.to_string();
+    let write = tokio::task::spawn_blocking(move || {
+        store::append_episode_with_status(
+            &store_path,
+            &session_id,
+            &thread,
+            &action,
+            &content,
+            status,
+        )
+    })
+    .await;
+
+    let failure = match write {
+        Ok(Ok(())) => return,
+        Ok(Err(error)) => error.to_string(),
+        Err(join_error) => join_error.to_string(),
+    };
+    runtime.event_sink.emit(AgentEvent::Error {
+        thread_name: Some(thread_name.to_string()),
+        message: format!("failed to record the outcome of thread '{thread_name}': {failure}"),
+    });
 }
 
 fn worker_failure_details(model_error: Option<&str>, stderr: &str, stdout: &str) -> String {

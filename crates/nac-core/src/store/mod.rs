@@ -64,6 +64,31 @@ pub fn is_sqlite_busy(error: &anyhow::Error) -> bool {
     })
 }
 
+/// How a dispatch ended.
+///
+/// Only [`EpisodeStatus::Ok`] episodes are retained context: they are the ones
+/// a later dispatch reads back and the ones `thread_read` renders. The failure
+/// kinds exist so the panel can still show what a thread was asked to do and
+/// how it died, which is otherwise lost the moment the worker is killed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EpisodeStatus {
+    Ok,
+    Error,
+    TimedOut,
+    Cancelled,
+}
+
+impl EpisodeStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Error => "error",
+            Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EpisodeRecord {
     pub id: i64,
@@ -71,6 +96,7 @@ pub struct EpisodeRecord {
     pub session_id: String,
     pub action: String,
     pub content: String,
+    pub status: String,
     pub created_at: String,
 }
 

@@ -398,6 +398,7 @@ impl NacMcpService {
                                     "thread_name": e.thread_name,
                                     "action": e.action,
                                     "content": e.content,
+                                    "status": e.status,
                                     "created_at": e.created_at,
                                 })
                             })
@@ -414,6 +415,7 @@ impl NacMcpService {
                                 "thread_name": e.thread_name,
                                 "action": e.action,
                                 "content": e.content,
+                                "status": e.status,
                                 "created_at": e.created_at,
                             }));
                         }
