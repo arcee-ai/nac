@@ -31,6 +31,7 @@ import {
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
+import { TaskButton } from "@/app/components/inspector/TaskPreview";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
 import {
@@ -269,56 +270,6 @@ function EpisodeTab({
           <Markdown className="text-basic-secondary">
             {episode.content}
           </Markdown>
-        </div>
-      </DropdownContent>
-    </div>
-  );
-}
-
-/**
- * What the thread was asked to do, above whichever half of it is being read.
- *
- * The dispatch carries this from the moment the thread starts, so it is the
- * one thing about a running thread that can be known before it has produced
- * anything — which is why it sits outside both views rather than waiting for
- * an episode to be written.
- */
-function ThreadTask({
-  action,
-  className,
-}: {
-  action: string;
-  className?: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div
-      className={cn(
-        "flex flex-col shrink-0 border-b border-muted bg-elevation-level-1",
-        className,
-      )}
-    >
-      <button
-        type="button"
-        className="flex items-center gap-2 px-4 py-2 w-full text-left btn-ghost"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <Icon
-          iconName={expanded ? IconName.Down : IconName.Right}
-          size={16}
-          className="shrink-0 text-basic-muted"
-        />
-        <span className="shrink-0 label-micro text-basic-muted">Task</span>
-        {expanded ? null : (
-          <span className="flex-1 min-w-0 label-micro text-basic-secondary truncate">
-            {action}
-          </span>
-        )}
-      </button>
-      <DropdownContent isOpen={expanded} className="w-full">
-        <div className="px-4 pb-4 max-h-[40vh] overflow-auto">
-          <Markdown className="text-basic-secondary">{action}</Markdown>
         </div>
       </DropdownContent>
     </div>
@@ -699,12 +650,9 @@ function Detail({
     [events, liveLog],
   );
 
-  // The floating phone pills sit over the top of this column, so whichever
-  // element comes first has to clear them.
-  const task = action ? (
-    <ThreadTask action={action} className={isMobile ? "pt-14" : undefined} />
-  ) : null;
-  const bodyOffset = isMobile && !task ? "pt-14" : undefined;
+  // The floating phone pills sit over the top of this column, so the body has
+  // to clear them.
+  const bodyOffset = isMobile ? "pt-14" : undefined;
   const body =
     view === "log" ? (
       <LogPane
@@ -730,7 +678,6 @@ function Detail({
   if (isMobile || isTablet) {
     return (
       <div className="relative flex flex-col flex-1 min-h-0 min-w-0">
-        {task}
         {body}
         {isMobile ? <ViewPills view={view} onChange={onViewChange} /> : null}
       </div>
@@ -741,14 +688,17 @@ function Detail({
     <div className="flex flex-col flex-1 min-h-0 min-w-0">
       <div className="flex items-center gap-2 h-14 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
         <div className="flex flex-col flex-1 min-w-0 justify-center">
-          <span
-            className={cn(
-              "label-small truncate",
-              running ? "text-shimmer-basic" : "text-basic-primary",
-            )}
-          >
-            {thread.name}
-          </span>
+          <div className="flex items-center gap-3 min-w-0">
+            <span
+              className={cn(
+                "label-small truncate",
+                running ? "text-shimmer-basic" : "text-basic-primary",
+              )}
+            >
+              {thread.name}
+            </span>
+            {action ? <TaskButton action={action} /> : null}
+          </div>
           <span className="code code-micro text-basic-muted truncate">
             {thread.updated_at}
           </span>
@@ -758,7 +708,6 @@ function Detail({
           {episodes.length} ep
         </span>
       </div>
-      {task}
       {body}
     </div>
   );
@@ -865,6 +814,9 @@ export function ThreadsView({
     selectable[0] ??
     null;
   const live = current ? liveThreads[current.name] : undefined;
+  const currentAction = current
+    ? actions[current.name] || current.latest_action || ""
+    : "";
 
   // Keep the layout store on the thread the detail pane is showing, so the
   // phone dialog header names that thread instead of the panel label.
@@ -898,6 +850,9 @@ export function ThreadsView({
     <PanelSplit
       listTitle="Threads"
       title={current?.name}
+      titleAction={
+        currentAction ? <TaskButton action={currentAction} /> : null
+      }
       actions={
         current ? <ThreadViewSelect view={view} onChange={setView} /> : null
       }
@@ -968,7 +923,7 @@ export function ThreadsView({
         <Detail
           key={`${sessionId}:${current.name}`}
           thread={current}
-          action={actions[current.name] || current.latest_action || ""}
+          action={currentAction}
           episodes={snapshot.thread_episodes?.[current.name] ?? []}
           events={
             pagedEvents ?? snapshot.thread_events?.[current.name]

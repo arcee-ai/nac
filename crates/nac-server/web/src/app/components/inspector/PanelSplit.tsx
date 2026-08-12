@@ -46,6 +46,7 @@ export function PanelSplit({
   listToolbar,
   listTitle,
   title,
+  titleAction,
   actions,
   children,
 }: {
@@ -59,6 +60,8 @@ export function PanelSplit({
   listTitle?: string;
   /** Row that is open, named for the narrow header. */
   title?: string;
+  /** Control belonging to the title itself, beside it rather than trailing. */
+  titleAction?: ReactNode;
   /** Panel's own controls, trailing the narrow header. */
   actions?: ReactNode;
   children: ReactNode;
@@ -164,9 +167,11 @@ export function PanelSplit({
             what leads back to it. */}
         {!showList ? (
           <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-level-1">
-            <span className="flex-1 min-w-0 truncate label-small text-basic-primary">
+            <span className="min-w-0 truncate label-small text-basic-primary">
               {title}
             </span>
+            {titleAction}
+            <span className="flex-1" />
             {actions}
             <Button
               size={ButtonSize.Medium}

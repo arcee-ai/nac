@@ -10,7 +10,7 @@ use crate::types::{ToolDefinition, TOOL_CALL_CANCELLED_MARKER};
 mod worker;
 #[cfg(test)]
 pub(crate) use worker::worker_model_arguments_for_test;
-use worker::{run_worker, WorkerInvocation};
+use worker::{run_worker, WorkerInvocation, WorkerRun};
 
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
@@ -173,6 +173,12 @@ pub async fn execute_parsed_dispatch(
         source_threads: source_threads.clone(),
     });
 
+    // A worker commits its handoff and only then exits, so a kill or a timeout
+    // can land in the gap between the two. This marks off what the thread
+    // already held, so a dispatch that did answer is not recorded as a failure
+    // on top of the episode it just wrote.
+    let handoff_watermark = read_handoff_watermark(runtime, &session_id, &thread_name).await;
+
     let result = run_worker(
         runtime,
         client,
@@ -189,20 +195,10 @@ pub async fn execute_parsed_dispatch(
     )
     .await;
 
-    close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
-
-    // Fold worker token usage into the shared runtime accumulator so the
-    // orchestrator's agent loop can include it in session totals.
-    if let Ok(run) = &result {
-        if let Some(usage) = &run.usage {
-            let mut wu = runtime.worker_usage.lock().await;
-            wu.add_cost_saturating(usage);
-        }
-    }
-
-    match result {
-        Err(e) => {
-            let message = format!("Failed to spawn thread '{}': {}", thread_name, e);
+    let run = match result {
+        Ok(run) => run,
+        Err(error) => {
+            let message = format!("Failed to spawn thread '{}': {}", thread_name, error);
             record_dispatch_failure(
                 runtime,
                 &session_id,
@@ -212,110 +208,182 @@ pub async fn execute_parsed_dispatch(
                 &message,
             )
             .await;
+            close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
             runtime.event_sink.emit(AgentEvent::Error {
                 thread_name: Some(thread_name.clone()),
                 message: message.clone(),
             });
-            ToolResult {
+            runtime.event_sink.emit(AgentEvent::ThreadFinished {
+                name: thread_name,
+                exit_code: SPAWN_FAILURE_EXIT_CODE,
+                timed_out: false,
+                timeout_reason: None,
+                usage: None,
+            });
+            return ToolResult {
                 content: message,
                 is_error: true,
-            }
-        }
-        Ok(run) if run.cancelled => {
-            let message = format!("Thread '{thread_name}' was cancelled.");
-            record_dispatch_failure(
-                runtime,
-                &session_id,
-                &thread_name,
-                &action,
-                store::EpisodeStatus::Cancelled,
-                &message,
-            )
-            .await;
-            ToolResult {
-                content: format!("{TOOL_CALL_CANCELLED_MARKER} {message}"),
-                is_error: true,
-            }
-        }
-        Ok(run) if run.timed_out => {
-            let timeout_reason = run.timeout_reason.clone();
-            let message = match &timeout_reason {
-                Some(reason) => format!(
-                    "Thread '{}' timed out after {}s.\n{}",
-                    thread_name, timeout_secs, reason
-                ),
-                None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
             };
+        }
+    };
+
+    let failure = classify_dispatch_failure(&run, &thread_name, timeout_secs);
+    if let Some(failure) = &failure {
+        if !handed_off(runtime, &session_id, &thread_name, handoff_watermark).await {
             record_dispatch_failure(
                 runtime,
                 &session_id,
                 &thread_name,
                 &action,
-                store::EpisodeStatus::TimedOut,
-                &message,
+                failure.status,
+                &failure.message,
             )
             .await;
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name.clone(),
-                exit_code: run.exit_code,
-                timed_out: true,
-                timeout_reason,
-                usage: run.usage.clone(),
-            });
-            ToolResult {
-                content: message,
-                is_error: true,
-            }
-        }
-        Ok(run) if run.exit_code != 0 => {
-            let details =
-                worker_failure_details(run.model_error.as_deref(), &run.stderr, &run.stdout);
-            let message = format!(
-                "Thread '{}' failed (exit {}):\n{}",
-                thread_name, run.exit_code, details
-            );
-            record_dispatch_failure(
-                runtime,
-                &session_id,
-                &thread_name,
-                &action,
-                store::EpisodeStatus::Error,
-                &message,
-            )
-            .await;
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name.clone(),
-                exit_code: run.exit_code,
-                timed_out: false,
-                timeout_reason: None,
-                usage: run.usage.clone(),
-            });
-            ToolResult {
-                content: message,
-                is_error: true,
-            }
-        }
-        Ok(run) => {
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name.clone(),
-                exit_code: run.exit_code,
-                timed_out: false,
-                timeout_reason: None,
-                usage: run.usage.clone(),
-            });
-            ToolResult {
-                content: run.stdout.trim().to_string(),
-                is_error: false,
-            }
         }
     }
+    close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
+
+    // Fold worker token usage into the shared runtime accumulator so the
+    // orchestrator's agent loop can include it in session totals.
+    if let Some(usage) = &run.usage {
+        let mut wu = runtime.worker_usage.lock().await;
+        wu.add_cost_saturating(usage);
+    }
+
+    let Some(failure) = failure else {
+        runtime.event_sink.emit(AgentEvent::ThreadFinished {
+            name: thread_name,
+            exit_code: run.exit_code,
+            timed_out: false,
+            timeout_reason: None,
+            usage: run.usage,
+        });
+        return ToolResult {
+            content: run.stdout.trim().to_string(),
+            is_error: false,
+        };
+    };
+
+    if failure.status == store::EpisodeStatus::Cancelled {
+        // Deliberately no `ThreadFinished`: the stop that killed this worker
+        // ends the whole run, and `RunCancelled` is what the panel reloads on.
+        // A finish event here would repaint the card as an ordinary failure.
+        return ToolResult {
+            content: format!("{TOOL_CALL_CANCELLED_MARKER} {}", failure.message),
+            is_error: true,
+        };
+    }
+
+    let timed_out = failure.status == store::EpisodeStatus::TimedOut;
+    runtime.event_sink.emit(AgentEvent::ThreadFinished {
+        name: thread_name,
+        exit_code: run.exit_code,
+        timed_out,
+        timeout_reason: if timed_out { run.timeout_reason } else { None },
+        usage: run.usage,
+    });
+    ToolResult {
+        content: failure.message,
+        is_error: true,
+    }
+}
+
+/// Exit code standing for a dispatch whose worker never ran, so the card can
+/// still settle as failed instead of spinning until the run ends.
+const SPAWN_FAILURE_EXIT_CODE: i32 = -1;
+
+struct DispatchFailure {
+    status: store::EpisodeStatus,
+    message: String,
+}
+
+/// How a dispatch died, or `None` when the worker handed back an answer.
+fn classify_dispatch_failure(
+    run: &WorkerRun,
+    thread_name: &str,
+    timeout_secs: u64,
+) -> Option<DispatchFailure> {
+    if run.cancelled {
+        return Some(DispatchFailure {
+            status: store::EpisodeStatus::Cancelled,
+            message: format!("Thread '{thread_name}' was cancelled."),
+        });
+    }
+
+    if run.timed_out {
+        let message = match run.timeout_reason.as_deref() {
+            Some(reason) => format!(
+                "Thread '{}' timed out after {}s.\n{}",
+                thread_name, timeout_secs, reason
+            ),
+            None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
+        };
+        return Some(DispatchFailure {
+            status: store::EpisodeStatus::TimedOut,
+            message,
+        });
+    }
+
+    if run.exit_code != 0 {
+        let details = worker_failure_details(run.model_error.as_deref(), &run.stderr, &run.stdout);
+        return Some(DispatchFailure {
+            status: store::EpisodeStatus::Error,
+            message: format!(
+                "Thread '{}' failed (exit {}):\n{}",
+                thread_name, run.exit_code, details
+            ),
+        });
+    }
+
+    None
+}
+
+/// Episodes this thread held before the dispatch started, or `None` when the
+/// read failed. Without it a killed dispatch is recorded as a failure whether
+/// or not it handed off, which is what happened before the watermark existed.
+async fn read_handoff_watermark(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    thread_name: &str,
+) -> Option<i64> {
+    let store_path = runtime.store_path.clone();
+    let session_id = session_id.to_string();
+    let thread = thread_name.to_string();
+    tokio::task::spawn_blocking(move || store::latest_episode_id(&store_path, &session_id, &thread))
+        .await
+        .ok()?
+        .ok()
+}
+
+/// Whether the dispatch that just ended left a retained episode behind.
+async fn handed_off(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    thread_name: &str,
+    watermark: Option<i64>,
+) -> bool {
+    let Some(watermark) = watermark else {
+        return false;
+    };
+    let store_path = runtime.store_path.clone();
+    let session_id = session_id.to_string();
+    let thread = thread_name.to_string();
+    tokio::task::spawn_blocking(move || {
+        store::has_retained_episode_after(&store_path, &session_id, &thread, watermark)
+    })
+    .await
+    .is_ok_and(|retained| retained.unwrap_or(false))
 }
 
 /// Record a dispatch that produced no handoff. A worker only writes its own
 /// episode after the model answers, so every other ending — spawn failure,
 /// cancellation, timeout, non-zero exit — would otherwise leave nothing behind
-/// saying what the thread had been asked to do. Written before `ThreadFinished`
-/// is emitted, since that event is what makes the panel reload episodes.
+/// saying what the thread had been asked to do.
+///
+/// Written before the dispatch is closed, and therefore before `ThreadFinished`
+/// or `RunCancelled`: those are what make the panel reload episodes, and a stop
+/// waits for the dispatch to close before aborting the run task that this write
+/// runs in.
 async fn record_dispatch_failure(
     runtime: &ToolRuntime,
     session_id: &str,

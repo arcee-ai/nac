@@ -360,7 +360,7 @@ pub fn load_all_thread_episodes(
     let Some(session_id) = session_id else {
         return Ok(HashMap::new());
     };
-    let episodes = store::load_all_episodes(store_path, session_id)?;
+    let episodes = store::load_all_dispatches(store_path, session_id)?;
     Ok(episodes
         .into_iter()
         .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))
@@ -374,7 +374,7 @@ pub(crate) fn load_all_thread_episodes_with_connection(
     let Some(session_id) = session_id else {
         return Ok(HashMap::new());
     };
-    let episodes = store::load_all_episodes_with_connection(conn, session_id)?;
+    let episodes = store::load_all_dispatches_with_connection(conn, session_id)?;
     Ok(episodes
         .into_iter()
         .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))

@@ -206,6 +206,31 @@
   margin-top: 0.5rem;
 }
 
+/* The thread card's hover preview is a glance at the task rather than a read of
+   it, so the same prose runs at the smallest scale the design has. */
+.chat-response.task-preview p,
+.chat-response.task-preview li,
+.chat-response.task-preview code {
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.chat-response.task-preview p {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.chat-response.task-preview ol,
+.chat-response.task-preview ul {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.chat-response.task-preview li {
+  margin-left: 1rem;
+  margin-bottom: 0.125rem;
+}
+
 .chat-response ul {
   list-style: disc;
   margin-bottom: 1rem;

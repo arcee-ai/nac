@@ -406,29 +406,29 @@ impl NacMcpService {
                         json!({ "episodes": entries })
                     })
             } else {
-                nac_core::store::load_all_episodes(&store_path, &session_id).map(|grouped| {
-                    let mut all: Vec<_> = Vec::new();
-                    for (_thread, episodes) in &grouped {
-                        for e in episodes {
-                            all.push(json!({
-                                "id": e.id,
-                                "thread_name": e.thread_name,
-                                "action": e.action,
-                                "content": e.content,
-                                "status": e.status,
-                                "created_at": e.created_at,
-                            }));
-                        }
+                let grouped =
+                    nac_core::store::load_all_retained_episodes(&store_path, &session_id)?;
+                let mut all: Vec<_> = Vec::new();
+                for (_thread, episodes) in &grouped {
+                    for e in episodes {
+                        all.push(json!({
+                            "id": e.id,
+                            "thread_name": e.thread_name,
+                            "action": e.action,
+                            "content": e.content,
+                            "status": e.status,
+                            "created_at": e.created_at,
+                        }));
                     }
-                    all.sort_by(|a, b| {
-                        let thread_a = a["thread_name"].as_str().unwrap_or("");
-                        let thread_b = b["thread_name"].as_str().unwrap_or("");
-                        let id_a = a["id"].as_i64().unwrap_or(0);
-                        let id_b = b["id"].as_i64().unwrap_or(0);
-                        thread_a.cmp(thread_b).then(id_a.cmp(&id_b))
-                    });
-                    json!({ "episodes": all })
-                })
+                }
+                all.sort_by(|a, b| {
+                    let thread_a = a["thread_name"].as_str().unwrap_or("");
+                    let thread_b = b["thread_name"].as_str().unwrap_or("");
+                    let id_a = a["id"].as_i64().unwrap_or(0);
+                    let id_b = b["id"].as_i64().unwrap_or(0);
+                    thread_a.cmp(thread_b).then(id_a.cmp(&id_b))
+                });
+                Ok(json!({ "episodes": all }))
             }
         })
         .await;
