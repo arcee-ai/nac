@@ -13,7 +13,7 @@ pub(super) async fn connect_server(
             let args = expand_strings(&args)?;
             let env = expand_map(&env)?;
             let transport =
-                TokioChildProcess::new(build_stdio_command(&command, &args, &env, cwd, sandbox)?)?;
+                TokioChildProcess::new(build_stdio_command(&command, &args, &env, cwd, sandbox))?;
             handler
                 .clone()
                 .serve(transport)
@@ -40,7 +40,7 @@ fn build_stdio_command(
     envs: &BTreeMap<String, String>,
     cwd: &Path,
     sandbox: Option<&SandboxSession>,
-) -> Result<Command> {
+) -> Command {
     let env_pairs: Vec<(String, String)> = envs
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
@@ -49,7 +49,7 @@ fn build_stdio_command(
     if let Some(sandbox) = sandbox {
         let mut command = sandbox.child_process_command(program, args, &env_pairs);
         command.current_dir(cwd);
-        return Ok(command);
+        return command;
     }
 
     let mut command = Command::new(program);
@@ -59,7 +59,7 @@ fn build_stdio_command(
     command.stdin(std::process::Stdio::piped());
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::inherit());
-    Ok(command)
+    command
 }
 
 fn build_http_transport_config(

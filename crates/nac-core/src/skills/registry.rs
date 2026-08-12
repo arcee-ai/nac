@@ -11,7 +11,7 @@ impl SkillRegistry {
         visibility: SkillPathVisibility,
         paths: &PathContext,
     ) -> Result<Option<Arc<Self>>> {
-        let sources = discover_skill_sources(workspace_dir, paths)?;
+        let sources = discover_skill_sources(workspace_dir, paths);
         if sources.is_empty() {
             return Ok(None);
         }
@@ -24,7 +24,7 @@ impl SkillRegistry {
                 Some(path) => path,
                 None => continue,
             };
-            for skill_dir in discover_skill_dirs(&source.host_root)? {
+            for skill_dir in discover_skill_dirs(&source.host_root) {
                 let skill_md_path = skill_dir.join(SKILL_FILENAME);
                 let Some(parsed) = parse_skill_file(&skill_md_path)? else {
                     continue;

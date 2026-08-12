@@ -10,7 +10,7 @@ pub(super) struct SkillSource {
 pub(super) fn discover_skill_sources(
     workspace_dir: Option<&Path>,
     paths: &PathContext,
-) -> Result<Vec<SkillSource>> {
+) -> Vec<SkillSource> {
     let mut sources = Vec::new();
 
     if let Some(workspace_dir) = workspace_dir {
@@ -46,7 +46,7 @@ pub(super) fn discover_skill_sources(
     sources.sort_by_key(|source| source.precedence);
     let mut seen = std::collections::HashSet::new();
     sources.retain(|source| seen.insert(source.host_root.clone()));
-    Ok(sources)
+    sources
 }
 
 pub(super) fn visible_root_for_source(
@@ -63,9 +63,9 @@ pub(super) fn visible_root_for_source(
     }
 }
 
-pub(super) fn discover_skill_dirs(root: &Path) -> Result<Vec<PathBuf>> {
+pub(super) fn discover_skill_dirs(root: &Path) -> Vec<PathBuf> {
     if !root.is_dir() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
     let mut found = Vec::new();
@@ -112,7 +112,7 @@ pub(super) fn discover_skill_dirs(root: &Path) -> Result<Vec<PathBuf>> {
     }
 
     found.sort();
-    Ok(found)
+    found
 }
 
 pub(super) fn find_project_root(workspace_dir: &Path) -> Option<PathBuf> {

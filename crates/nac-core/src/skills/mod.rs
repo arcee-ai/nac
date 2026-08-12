@@ -298,7 +298,7 @@ mod tests {
         fs::create_dir_all(home.join(".agents/skills")).unwrap();
         write_skill(&home.join(".agents/skills"), "demo", "demo skill", "body");
 
-        let sources = discover_skill_sources(Some(&home), &PathContext::new(&home)).unwrap();
+        let sources = discover_skill_sources(Some(&home), &PathContext::new(&home));
         let mut seen = std::collections::HashSet::new();
         for source in &sources {
             assert!(

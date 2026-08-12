@@ -5,7 +5,7 @@ pub fn auto_mounts(
     existing_mounts: &[MountSpec],
     paths: &PathContext,
 ) -> Result<Vec<MountSpec>> {
-    let sources = discover_skill_sources(Some(workspace_dir), paths)?;
+    let sources = discover_skill_sources(Some(workspace_dir), paths);
     let mut mounts = Vec::new();
 
     for source in sources {

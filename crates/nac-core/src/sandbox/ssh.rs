@@ -158,17 +158,15 @@ impl SshBackend {
     }
 
     pub(crate) fn resolve_terminal_cwd(&self, requested: Option<&str>) -> Result<Option<PathBuf>> {
-        requested
-            .map(|workdir| self.resolve_workdir(workdir))
-            .transpose()
+        Ok(requested.map(|workdir| self.resolve_workdir(workdir)))
     }
 
-    fn resolve_workdir(&self, workdir: &str) -> Result<PathBuf> {
+    fn resolve_workdir(&self, workdir: &str) -> PathBuf {
         let requested = PathBuf::from(workdir);
         if requested.is_absolute() || workdir == "~" || workdir.starts_with("~/") {
-            return Ok(requested);
+            return requested;
         }
-        Ok(self.remote_cwd.join(requested))
+        self.remote_cwd.join(requested)
     }
 
     pub(crate) async fn exec(
