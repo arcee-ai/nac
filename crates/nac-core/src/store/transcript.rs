@@ -307,6 +307,35 @@ fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Resu
     }
 }
 
+fn transcript_row_ids_from(
+    transaction: &rusqlite::Transaction<'_>,
+    session_id: &str,
+    from_idx: u64,
+) -> Result<Vec<i64>> {
+    let mut statement = transaction.prepare(
+        "SELECT id, event_json
+         FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2
+         ORDER BY id ASC",
+    )?;
+    let rows = statement.query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut row_ids = Vec::new();
+    for row in rows {
+        let (id, event_json) = row?;
+        let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+            anyhow!(
+                "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+            )
+        })?;
+        if entry.idx >= from_idx {
+            row_ids.push(id);
+        }
+    }
+    Ok(row_ids)
+}
+
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
@@ -689,31 +718,7 @@ impl TranscriptLogWriter {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let row_ids = {
-            let mut statement = transaction.prepare(
-                "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
-                 ORDER BY id ASC",
-            )?;
-            let rows = statement
-                .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })?;
-            let mut row_ids = Vec::new();
-            for row in rows {
-                let (id, event_json) = row?;
-                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
-                    anyhow!(
-                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
-                    )
-                })?;
-                if entry.idx >= from_idx {
-                    row_ids.push(id);
-                }
-            }
-            row_ids
-        };
+        let row_ids = transcript_row_ids_from(&transaction, session_id, from_idx)?;
         for id in &row_ids {
             transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
         }
@@ -743,31 +748,7 @@ impl TranscriptLogWriter {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let row_ids = {
-            let mut statement = transaction.prepare(
-                "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
-                 ORDER BY id ASC",
-            )?;
-            let rows = statement
-                .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })?;
-            let mut row_ids = Vec::new();
-            for row in rows {
-                let (id, event_json) = row?;
-                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
-                    anyhow!(
-                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
-                    )
-                })?;
-                if entry.idx >= from_idx {
-                    row_ids.push(id);
-                }
-            }
-            row_ids
-        };
+        let row_ids = transcript_row_ids_from(&transaction, session_id, from_idx)?;
         let updated = transaction.execute(
             "UPDATE sessions SET messages_json = ?1 WHERE session_id = ?2",
             params![messages_json, session_id],
