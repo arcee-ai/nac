@@ -44,7 +44,6 @@ import {
 } from "@/app/lib/apiKey";
 import {
   buildSettingsPatch,
-  managedLaunchBaseUrl,
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
@@ -249,7 +248,6 @@ function SettingsForm({
   const [model, setModel] = useState(initial.model);
   const [backend, setBackend] = useState(initial.backend);
   const [reasoning, setReasoning] = useState(initial.reasoning_effort ?? "");
-  const [, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
   const [compaction, setCompaction] = useState(
     initial.orchestrator_compaction_threshold != null
@@ -278,7 +276,6 @@ function SettingsForm({
       const values = next.kind === "resolved" ? next : next.request;
       setBackend(values.backend);
       setModel(values.model);
-      setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
       if (next.kind === "resolved") {
         setReasoning(next.reasoning_effort ?? "");
         setHeaders(headersToText(next.extra_headers ?? {}));
