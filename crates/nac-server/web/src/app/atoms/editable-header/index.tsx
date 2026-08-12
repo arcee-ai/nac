@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 
 export enum EditableHeaderSize {
-  Micro = "header-micro",
   Small = "header-small",
   Medium = "header-medium",
 }

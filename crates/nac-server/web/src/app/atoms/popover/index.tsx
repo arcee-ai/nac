@@ -14,9 +14,7 @@ import BottomSheet from "./BottomSheet";
 export { AnchorPlacement as PopoverPlacement };
 
 export enum PopoverSize {
-  Small = "w-[240px]",
   Medium = "w-[320px]",
-  Large = "w-[400px]",
   /** As wide as the content, useful together with `min-w-full` on the panel. */
   Fit = "w-max",
 }

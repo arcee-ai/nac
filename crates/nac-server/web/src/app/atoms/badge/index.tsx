@@ -7,7 +7,6 @@ export enum BadgeColor {
   Blue = "bg-info-tertiary text-info-primary border-info-muted",
   Red = "bg-error-tertiary text-error-primary border-error-muted",
   Yellow = "bg-danger-tertiary  text-danger-primary border-danger-muted",
-  Violet = "bg-indigo-400 text-indigo-800 border-indigo-300",
   Gray = "bg-sublevel-variant-A text-basic-secondary border-muted",
 }
 

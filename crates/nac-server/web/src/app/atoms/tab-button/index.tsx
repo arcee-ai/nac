@@ -9,7 +9,6 @@ export enum TabButtonSize {
 export enum TabButtonVariant {
   Regular = "btn-ghost",
   Accent = "btn-ghost-accent",
-  Destructive = "btn-ghost-destructive",
 }
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {

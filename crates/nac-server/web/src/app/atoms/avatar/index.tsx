@@ -2,7 +2,6 @@ import type React from "react";
 import { cn } from "../../lib/cn";
 
 export enum AvatarSize {
-  Micro = "w-4 h-4 text-[10px]",
   Small = "w-5 h-5 text-xs",
   Medium = "w-6 h-6 text-xs",
   Large = "w-8 h-8 text-sm",

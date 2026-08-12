@@ -8,8 +8,6 @@ import Modal from "../modal";
 
 export enum CodeBlockSize {
   Small = "code-small",
-  Medium = "code-medium",
-  Large = "code-large",
 }
 
 interface CodeBlockProps {
