@@ -29,7 +29,6 @@ export {
   EditableHeaderSize,
 } from "./editable-header";
 export { default as FileIcon, fileIconName } from "./file-icon";
-export { default as Hint } from "./hint";
 export {
   default as HorizontalTabsItem,
   HorizontalTabsItemVariant,

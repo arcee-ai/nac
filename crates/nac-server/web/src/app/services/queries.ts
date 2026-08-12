@@ -60,7 +60,6 @@ import type {
   CreateSshConfigurationRequest,
   UpdateSshConfigurationRequest,
   SshTarget,
-  StoredCredentialList,
   StoreInfo,
   SwitchBranchRequest,
   UpdateConfigRequest,
@@ -80,7 +79,6 @@ export const WORKSPACE_STATS_POLL_MS = 30_000;
 
 export const queryKeys = {
   storeInfo: ["store"] as const,
-  credentials: ["credentials"] as const,
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
   sshConfigs: ["ssh-configs"] as const,
@@ -147,53 +145,6 @@ export function useStoreInfo() {
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
     staleTime: Infinity,
-  });
-}
-
-/**
- * Which API key names have a value stored in NAC home. Used to tell the user
- * whether a session can authenticate without the environment variable being
- * set; failures are non-fatal because the environment may well supply the key.
- */
-export function useStoredCredentials(enabled = true) {
-  return useQuery<StoredCredentialList>({
-    queryKey: queryKeys.credentials,
-    queryFn: ({ signal }) => api.listCredentials(signal),
-    enabled,
-    staleTime: 30_000,
-    retry: false,
-  });
-}
-
-export function useStoreCredential() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ name, value }: { name: string; value: string }) =>
-      api.storeCredential(name, value),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: queryKeys.credentials }),
-  });
-}
-
-/**
- * Files a key away and reports the name it was given. Used where the key is the
- * thing the user supplies and the selector is an implementation detail.
- */
-export function useStoreGeneratedCredential() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (value: string) => api.storeGeneratedCredential(value),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: queryKeys.credentials }),
-  });
-}
-
-export function useDeleteCredential() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) => api.deleteCredential(name),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: queryKeys.credentials }),
   });
 }
 
@@ -500,8 +451,6 @@ export function useCreateModelConfig() {
       api.createModelConfig(payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
-      // The server files the key under a generated credential name.
-      void client.invalidateQueries({ queryKey: queryKeys.credentials });
     },
   });
 }
@@ -518,8 +467,6 @@ export function useUpdateModelConfig() {
     }) => api.updateModelConfig(configId, payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
-      // A replaced key is filed under a new generated name and the old one goes.
-      void client.invalidateQueries({ queryKey: queryKeys.credentials });
     },
   });
 }
@@ -530,7 +477,6 @@ export function useDeleteModelConfig() {
     mutationFn: (configId: string) => api.deleteModelConfig(configId),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
-      void client.invalidateQueries({ queryKey: queryKeys.credentials });
     },
   });
 }

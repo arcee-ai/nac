@@ -673,25 +673,6 @@ export interface LaunchModelDefaultsRequest {
   ssh_identity_file?: string | null;
 }
 
-/**
- * An API key kept in NAC home. The value itself never leaves the server, so
- * only the selector name and a short suffix are available to the UI.
- */
-export interface StoredCredentialSummary {
-  name: string;
-  /** Empty when the secret is too short for a suffix to be safe to show. */
-  last_four: string;
-}
-
-export interface StoredCredentialList {
-  credentials: StoredCredentialSummary[];
-}
-
-/** The name the server filed a key under when the caller supplied none. */
-export interface GeneratedCredential {
-  name: string;
-}
-
 /** Providers that sign in through a browser instead of taking an API key. */
 export type ManagedAuthProvider = "arcee" | "codex";
 

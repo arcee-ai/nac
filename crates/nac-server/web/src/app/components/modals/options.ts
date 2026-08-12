@@ -3,13 +3,7 @@ import { CLEAR_EFFORT } from "@/app/lib/modelConfig";
 import { PROVIDER_KINDS, providerLabel } from "@/app/lib/providers";
 import type { ReasoningEffort } from "@/app/types/api";
 
-// Backend and reasoning-effort choices mirror nac-core's serde enums
-// (BackendKind = kebab-case, ReasoningEffort = lowercase).
-export const BACKEND_OPTIONS: SelectItem[] = [
-  { id: "", label: "Inherit config" },
-  ...PROVIDER_KINDS.map((kind) => ({ id: kind, label: providerLabel(kind) })),
-];
-
+// Reasoning-effort choices mirror nac-core's lowercase serde enum.
 /** The providers themselves, for a row that has to name one. */
 export const PROTOCOL_ITEMS: SelectItem[] = PROVIDER_KINDS.map((kind) => ({
   id: kind,

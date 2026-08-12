@@ -18,7 +18,6 @@ import type {
   ManagedAuthList,
   ManagedAuthProvider,
   ManagedAuthStatus,
-  GeneratedCredential,
   ManagedSessionSummary,
   MessagesPageResponse,
   ModelCatalog,
@@ -42,7 +41,6 @@ import type {
   CreateSshConfigurationRequest,
   UpdateSshConfigurationRequest,
   SshTarget,
-  StoredCredentialList,
   StoreInfo,
   SubmitPromptResponse,
   SwitchBranchRequest,
@@ -167,23 +165,6 @@ export const api = {
 
   getStore: (signal?: AbortSignal) =>
     request<StoreInfo>("GET", "/store", { signal }),
-
-  // Credentials are write-only: the value is sent to the server and never
-  // read back, so the UI only ever learns which names have a key stored.
-  listCredentials: (signal?: AbortSignal) =>
-    request<StoredCredentialList>("GET", "/credentials", { signal }),
-
-  storeCredential: (name: string, value: string) =>
-    request<void>("PUT", `/credentials/${encodeURIComponent(name)}`, {
-      body: { value },
-    }),
-
-  /** Files a key under a server-generated name and reports what it was. */
-  storeGeneratedCredential: (value: string) =>
-    request<GeneratedCredential>("POST", "/credentials", { body: { value } }),
-
-  deleteCredential: (name: string) =>
-    request<void>("DELETE", `/credentials/${encodeURIComponent(name)}`),
 
   // Managed providers sign in with a device login: the server hands back a
   // code to show, waits for the browser approval on its own, and the outcome
