@@ -252,6 +252,7 @@ mod tests {
         restore_env, shell_single_quote, start_fake_http_mcp_server, toml_string, unique_temp_dir,
     };
     use super::*;
+    use crate::test_utils::EnvVarGuard;
     use crate::TEST_ENV_LOCK;
     use std::fs;
 
@@ -264,23 +265,10 @@ mod tests {
     #[test]
     fn env_expansion_replaces_placeholders() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let original = env::var("NAC_MCP_TEST").ok();
-        unsafe {
-            env::set_var("NAC_MCP_TEST", "expanded");
-        }
+        let _env = EnvVarGuard::set("NAC_MCP_TEST", "expanded");
 
         let expanded = expand_env("Bearer ${NAC_MCP_TEST}").unwrap();
         assert_eq!(expanded, "Bearer expanded");
-
-        if let Some(value) = original {
-            unsafe {
-                env::set_var("NAC_MCP_TEST", value);
-            }
-        } else {
-            unsafe {
-                env::remove_var("NAC_MCP_TEST");
-            }
-        }
     }
 
     #[test]

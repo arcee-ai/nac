@@ -232,8 +232,8 @@ fn load_settings(paths: &PathContext) -> AgentsMdSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::EnvVarGuard;
     use crate::TEST_ENV_LOCK;
-    use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -266,10 +266,7 @@ mod tests {
         .unwrap();
         fs::write(nested.join("AGENTS.md"), "deep").unwrap();
 
-        let original_nac_home = env::var_os("NAC_HOME");
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        let _nac_home_env = EnvVarGuard::set("NAC_HOME", &nac_home);
 
         let bundle = AgentsMdBundle::load(Some(&nested), &PathContext::new(&nested)).unwrap();
         let contents: Vec<&str> = bundle
@@ -278,11 +275,6 @@ mod tests {
             .map(|file| file.content.as_str())
             .collect();
         assert_eq!(contents, vec!["global", "root", "src override", "deep"]);
-
-        match original_nac_home {
-            Some(value) => unsafe { env::set_var("NAC_HOME", value) },
-            None => unsafe { env::remove_var("NAC_HOME") },
-        }
     }
 
     #[test]
@@ -360,19 +352,11 @@ mod tests {
         .unwrap();
         fs::write(project.join("TEAM_GUIDE.md"), "team guide").unwrap();
 
-        let original_nac_home = env::var_os("NAC_HOME");
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        let _nac_home_env = EnvVarGuard::set("NAC_HOME", &nac_home);
 
         let bundle = AgentsMdBundle::load(Some(&project), &PathContext::new(&project)).unwrap();
         assert_eq!(bundle.files().len(), 1);
         assert_eq!(bundle.files()[0].content, "team guide");
-
-        match original_nac_home {
-            Some(value) => unsafe { env::set_var("NAC_HOME", value) },
-            None => unsafe { env::remove_var("NAC_HOME") },
-        }
     }
 
     #[test]
@@ -385,10 +369,7 @@ mod tests {
         fs::create_dir_all(&workspace).unwrap();
         fs::write(nac_home.join("AGENTS.md"), "global via context").unwrap();
 
-        let original_nac_home = env::var_os("NAC_HOME");
-        unsafe {
-            env::set_var("NAC_HOME", "nac-home");
-        }
+        let _nac_home_env = EnvVarGuard::set("NAC_HOME", "nac-home");
 
         let bundle = AgentsMdBundle::load(Some(&workspace), &PathContext::new(&root)).unwrap();
         let contents: Vec<&str> = bundle
@@ -397,10 +378,5 @@ mod tests {
             .map(|file| file.content.as_str())
             .collect();
         assert_eq!(contents, vec!["global via context"]);
-
-        match original_nac_home {
-            Some(value) => unsafe { env::set_var("NAC_HOME", value) },
-            None => unsafe { env::remove_var("NAC_HOME") },
-        }
     }
 }

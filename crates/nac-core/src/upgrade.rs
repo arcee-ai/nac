@@ -149,52 +149,32 @@ fn command_exists(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::EnvVarGuard;
     use crate::TEST_ENV_LOCK;
-    use std::ffi::OsString;
-
-    fn restore_env(name: &str, value: Option<OsString>) {
-        match value {
-            Some(value) => unsafe { std::env::set_var(name, value) },
-            None => unsafe { std::env::remove_var(name) },
-        }
-    }
 
     #[test]
     fn script_url_uses_defaults_and_env_overrides() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let original_repo = std::env::var_os("NAC_REPO");
-        let original_branch = std::env::var_os("NAC_SCRIPT_BRANCH");
-        let original_base = std::env::var_os("NAC_SCRIPT_BASE_URL");
-        unsafe {
-            std::env::remove_var("NAC_REPO");
-            std::env::remove_var("NAC_SCRIPT_BRANCH");
-            std::env::remove_var("NAC_SCRIPT_BASE_URL");
-        }
+        let _repo_env = EnvVarGuard::remove("NAC_REPO");
+        let _branch_env = EnvVarGuard::remove("NAC_SCRIPT_BRANCH");
+        let _base_env = EnvVarGuard::remove("NAC_SCRIPT_BASE_URL");
 
         assert_eq!(
             script_url("install.sh"),
             "https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install.sh"
         );
 
-        unsafe {
-            std::env::set_var("NAC_REPO", "owner/repo");
-            std::env::set_var("NAC_SCRIPT_BRANCH", "dev");
-        }
+        let _repo_env = EnvVarGuard::set("NAC_REPO", "owner/repo");
+        let _branch_env = EnvVarGuard::set("NAC_SCRIPT_BRANCH", "dev");
         assert_eq!(
             script_url("uninstall.sh"),
             "https://raw.githubusercontent.com/owner/repo/dev/scripts/uninstall.sh"
         );
 
-        unsafe {
-            std::env::set_var("NAC_SCRIPT_BASE_URL", "https://example.com/scripts/");
-        }
+        let _base_env = EnvVarGuard::set("NAC_SCRIPT_BASE_URL", "https://example.com/scripts/");
         assert_eq!(
             script_url("install.sh"),
             "https://example.com/scripts/install.sh"
         );
-
-        restore_env("NAC_REPO", original_repo);
-        restore_env("NAC_SCRIPT_BRANCH", original_branch);
-        restore_env("NAC_SCRIPT_BASE_URL", original_base);
     }
 }

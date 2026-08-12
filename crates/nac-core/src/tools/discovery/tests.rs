@@ -959,16 +959,7 @@ async fn podman_and_local_backends_return_identical_discovery_pages() {
 async fn ssh_and_local_backends_return_identical_discovery_pages() {
     use std::os::unix::fs::PermissionsExt;
 
-    struct PathGuard(Option<std::ffi::OsString>);
-    impl Drop for PathGuard {
-        fn drop(&mut self) {
-            match self.0.take() {
-                Some(path) => std::env::set_var("PATH", path),
-                None => std::env::remove_var("PATH"),
-            }
-        }
-    }
-
+    let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
     let (local, root) = fixture_runtime();
     let original_path = std::env::var_os("PATH");
     let fake_bin = std::env::temp_dir().join(format!("nac-fake-ssh-{}", uuid::Uuid::new_v4()));
@@ -992,8 +983,7 @@ async fn ssh_and_local_backends_return_identical_discovery_pages() {
         ),
     )
     .expect("compose fake ssh PATH");
-    let _path_guard = PathGuard(original_path);
-    std::env::set_var("PATH", combined_path);
+    let _path_guard = crate::test_utils::EnvVarGuard::set("PATH", combined_path);
 
     let mut ssh_runtime = crate::tools::test_runtime();
     ssh_runtime.workspace_cwd = std::path::PathBuf::from(".");
@@ -1048,17 +1038,7 @@ async fn ssh_and_local_backends_return_identical_discovery_pages() {
 async fn tools_work_without_external_search_binaries_on_path() {
     use std::os::unix::fs::PermissionsExt;
 
-    struct PathGuard(Option<std::ffi::OsString>);
-    impl Drop for PathGuard {
-        fn drop(&mut self) {
-            match self.0.take() {
-                Some(path) => std::env::set_var("PATH", path),
-                None => std::env::remove_var("PATH"),
-            }
-        }
-    }
-
-    let original_path = std::env::var_os("PATH");
+    let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
     let isolated_path =
         std::env::temp_dir().join(format!("nac-discovery-path-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&isolated_path).expect("create isolated PATH");
@@ -1068,8 +1048,7 @@ async fn tools_work_without_external_search_binaries_on_path() {
         fs::set_permissions(&shim, fs::Permissions::from_mode(0o755))
             .expect("make search shim executable");
     }
-    let _path_guard = PathGuard(original_path);
-    std::env::set_var("PATH", &isolated_path);
+    let _path_guard = crate::test_utils::EnvVarGuard::set("PATH", &isolated_path);
 
     let (runtime, root) = fixture_runtime();
     let glob = parsed(execute("glob", json!({"pattern": "**/*.rs"}), &runtime).await);

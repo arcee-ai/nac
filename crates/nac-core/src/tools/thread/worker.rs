@@ -445,6 +445,7 @@ async fn next_pipe_line<R: AsyncBufRead + Unpin>(lines: &mut Lines<R>) -> Option
 mod tests {
     use super::*;
     use crate::model::{BackendKind, EffectiveModelSettings};
+    use crate::test_utils::EnvVarGuard;
     use crate::tools::test_runtime;
     use crate::TEST_ENV_LOCK;
     #[cfg(unix)]
@@ -756,8 +757,7 @@ exit 0
     fn worker_model_transport_is_complete_with_absent_effort_and_empty_headers() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let key_name = "NAC_WORKER_TRANSPORT_TEST_KEY";
-        let original = std::env::var_os(key_name);
-        unsafe { std::env::set_var(key_name, "test-key") };
+        let _key_env = EnvVarGuard::set(key_name, "test-key");
 
         let client = ModelClient::from_effective_settings(
             EffectiveModelSettings::new(
@@ -795,11 +795,6 @@ exit 0
             ]
         );
         assert!(!args.iter().any(|arg| arg == "--effort"));
-
-        match original {
-            Some(value) => unsafe { std::env::set_var(key_name, value) },
-            None => unsafe { std::env::remove_var(key_name) },
-        }
     }
 
     #[test]

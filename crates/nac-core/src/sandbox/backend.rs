@@ -260,6 +260,7 @@ pub fn select_execution_backend(
 mod tests {
     use super::*;
     use crate::sandbox::{SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use crate::test_utils::EnvVarGuard;
     use crate::TEST_ENV_LOCK;
 
     fn local() -> ExecutionBackend {
@@ -285,28 +286,17 @@ mod tests {
         PathContext::new("/local/config")
     }
 
-    fn restore_env(name: &str, value: Option<OsString>) {
-        match value {
-            Some(value) => unsafe { std::env::set_var(name, value) },
-            None => unsafe { std::env::remove_var(name) },
-        }
-    }
-
     #[test]
     fn select_backend_uses_local_path_context_for_ssh_control_socket() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
-        let original_nac_home = std::env::var_os("NAC_HOME");
-        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
         let config_cwd = std::env::temp_dir().join(format!("nac-select-ssh-config-cwd-{unique}"));
         let nac_home = PathBuf::from(format!("relative-nac-home-{unique}"));
-        unsafe {
-            std::env::set_var("NAC_HOME", &nac_home);
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
+        let _nac_home_env = EnvVarGuard::set("NAC_HOME", &nac_home);
+        let _xdg_env = EnvVarGuard::remove("XDG_CONFIG_HOME");
 
         let backend = select_execution_backend(
             Some(SshConnection::new("build-box")),
@@ -324,9 +314,6 @@ mod tests {
             "control socket should use config cwd, got {}",
             ssh.control_path_for_test().display()
         );
-
-        restore_env("NAC_HOME", original_nac_home);
-        restore_env("XDG_CONFIG_HOME", original_xdg);
     }
 
     #[test]
