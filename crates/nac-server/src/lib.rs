@@ -17,7 +17,7 @@ pub use model_configuration_http::{
 };
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
-    RevertSessionResponse,
+    RevertSessionResponse, SessionRewriteError,
 };
 
 use std::{

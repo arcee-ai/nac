@@ -56,71 +56,37 @@ impl From<RevertOutcome> for RevertSessionResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RevertSessionError {
+pub enum SessionRewriteError<const REGENERATE: bool> {
     NotFound,
     Busy,
-    /// The request named something that cannot be reverted to — an index past
-    /// the transcript, a message that is not the user's, or one that predates
-    /// the transcript log. The message is the core's, which is the only place
-    /// that knows which of those it was.
+    /// The request named a message that cannot be rewritten from: an index
+    /// past the transcript, a message that is not the user's, one predating the
+    /// transcript log, or (when regenerating) input the composer cannot accept.
+    /// The message comes from the layer that knows why the target was rejected.
     Rejected(String),
     Failed,
 }
 
-impl std::fmt::Display for RevertSessionError {
+/// Error returned when reverting a session to an earlier user message.
+pub type RevertSessionError = SessionRewriteError<false>;
+/// Error returned when regenerating a response from an earlier user message.
+pub type RegenerateSessionError = SessionRewriteError<true>;
+
+impl<const REGENERATE: bool> std::fmt::Display for SessionRewriteError<REGENERATE> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotFound => formatter.write_str("session not found"),
             Self::Busy => formatter.write_str("session is busy"),
             Self::Rejected(message) => formatter.write_str(message),
+            Self::Failed if REGENERATE => formatter.write_str("regenerate failed"),
             Self::Failed => formatter.write_str("revert failed"),
         }
     }
 }
 
-impl std::error::Error for RevertSessionError {}
+impl<const REGENERATE: bool> std::error::Error for SessionRewriteError<REGENERATE> {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RegenerateSessionError {
-    NotFound,
-    Busy,
-    /// The request named a message that cannot be answered again — see
-    /// [`RevertSessionError::Rejected`], plus the case where the message is no
-    /// longer something the composer would accept.
-    Rejected(String),
-    Failed,
-}
-
-impl std::fmt::Display for RegenerateSessionError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotFound => formatter.write_str("session not found"),
-            Self::Busy => formatter.write_str("session is busy"),
-            Self::Rejected(message) => formatter.write_str(message),
-            Self::Failed => formatter.write_str("regenerate failed"),
-        }
-    }
-}
-
-impl std::error::Error for RegenerateSessionError {}
-
-impl IntoResponse for RegenerateSessionError {
-    fn into_response(self) -> Response {
-        let status = match self {
-            Self::NotFound => axum::http::StatusCode::NOT_FOUND,
-            Self::Busy => axum::http::StatusCode::CONFLICT,
-            Self::Rejected(_) => axum::http::StatusCode::BAD_REQUEST,
-            Self::Failed => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        (
-            status,
-            Json(serde_json::json!({ "error": self.to_string() })),
-        )
-            .into_response()
-    }
-}
-
-impl IntoResponse for RevertSessionError {
+impl<const REGENERATE: bool> IntoResponse for SessionRewriteError<REGENERATE> {
     fn into_response(self) -> Response {
         let status = match self {
             Self::NotFound => axum::http::StatusCode::NOT_FOUND,
@@ -186,13 +152,13 @@ impl SessionManager {
             session_id,
             || RegenerateSessionError::NotFound,
             || RegenerateSessionError::Busy,
-            |operation, error| report_regenerate_failure(session_id, operation, error),
+            |operation, error| report_failure(session_id, operation, error),
             |service, operation_lease| async move {
                 let input = service.user_input_at(message_idx).await.map_err(|error| {
                     if is_rejection(&error) {
                         RegenerateSessionError::Rejected(format!("{error}"))
                     } else {
-                        report_regenerate_failure(session_id, "read the prompt to repeat", &error)
+                        report_failure(session_id, "read the prompt to repeat", &error)
                     }
                 })?;
 
@@ -222,7 +188,7 @@ impl SessionManager {
                         if is_rejection(&error) {
                             RegenerateSessionError::Rejected(format!("{error}"))
                         } else {
-                            report_regenerate_failure(session_id, "revert the transcript", &error)
+                            report_failure(session_id, "revert the transcript", &error)
                         }
                     })?;
 
@@ -230,7 +196,7 @@ impl SessionManager {
                 let handle = client
                     .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
                     .map_err(|error| {
-                        report_regenerate_failure(session_id, "start the repeated run", &error)
+                        report_failure(session_id, "start the repeated run", &error)
                     })?;
                 Ok(submit_response(handle, display_prompt))
             },
@@ -246,22 +212,14 @@ fn is_rejection(error: &anyhow::Error) -> bool {
     error.chain().count() == 1
 }
 
-fn report_regenerate_failure(
+fn report_failure<const REGENERATE: bool>(
     session_id: &str,
     operation: &str,
     error: &(impl std::fmt::Display + ?Sized),
-) -> RegenerateSessionError {
-    eprintln!("nac: regenerate for session {session_id:?} failed to {operation}: {error}");
-    RegenerateSessionError::Failed
-}
-
-fn report_failure(
-    session_id: &str,
-    operation: &str,
-    error: &(impl std::fmt::Display + ?Sized),
-) -> RevertSessionError {
-    eprintln!("nac: revert for session {session_id:?} failed to {operation}: {error}");
-    RevertSessionError::Failed
+) -> SessionRewriteError<REGENERATE> {
+    let rewrite = if REGENERATE { "regenerate" } else { "revert" };
+    eprintln!("nac: {rewrite} for session {session_id:?} failed to {operation}: {error}");
+    SessionRewriteError::Failed
 }
 
 pub(crate) async fn handler(
@@ -286,4 +244,82 @@ pub(crate) async fn regenerate_handler(
             .regenerate_session_run(&session_id, request.message_idx)
             .await?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::to_bytes, http::StatusCode};
+
+    async fn assert_response<const REGENERATE: bool>(
+        error: SessionRewriteError<REGENERATE>,
+        status: StatusCode,
+        message: &str,
+    ) {
+        let response = error.into_response();
+        assert_eq!(response.status(), status);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read rewrite error response");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).expect("parse error response"),
+            serde_json::json!({ "error": message })
+        );
+    }
+
+    #[tokio::test]
+    async fn revert_errors_have_exact_responses() {
+        assert_response(
+            RevertSessionError::NotFound,
+            StatusCode::NOT_FOUND,
+            "session not found",
+        )
+        .await;
+        assert_response(
+            RevertSessionError::Busy,
+            StatusCode::CONFLICT,
+            "session is busy",
+        )
+        .await;
+        assert_response(
+            RevertSessionError::Rejected("bad revert target".into()),
+            StatusCode::BAD_REQUEST,
+            "bad revert target",
+        )
+        .await;
+        assert_response(
+            RevertSessionError::Failed,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "revert failed",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn regenerate_errors_have_exact_responses() {
+        assert_response(
+            RegenerateSessionError::NotFound,
+            StatusCode::NOT_FOUND,
+            "session not found",
+        )
+        .await;
+        assert_response(
+            RegenerateSessionError::Busy,
+            StatusCode::CONFLICT,
+            "session is busy",
+        )
+        .await;
+        assert_response(
+            RegenerateSessionError::Rejected("bad repeated prompt".into()),
+            StatusCode::BAD_REQUEST,
+            "bad repeated prompt",
+        )
+        .await;
+        assert_response(
+            RegenerateSessionError::Failed,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "regenerate failed",
+        )
+        .await;
+    }
 }
