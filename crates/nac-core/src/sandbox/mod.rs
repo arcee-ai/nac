@@ -69,6 +69,11 @@ pub(crate) struct HostMountPath {
     pub relative: PathBuf,
     pub read_only: bool,
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostWorkspaceMount {
+    pub relative: PathBuf,
+    pub source: HostMountPath,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxSpec {
@@ -106,6 +111,10 @@ impl SandboxSession {
 
     pub fn host_workdir(&self) -> Option<PathBuf> {
         host_workdir_from_spec(self.spec())
+    }
+
+    pub(crate) fn host_workspace_mounts(&self) -> Option<Vec<HostWorkspaceMount>> {
+        host_workspace_mounts_from_spec(self.spec())
     }
 
     pub fn image(&self) -> &str {
@@ -297,16 +306,60 @@ pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountS
 }
 
 pub(crate) fn host_workdir_from_spec(spec: &SandboxSpec) -> Option<PathBuf> {
+    host_workdir_mount_from_spec(spec).map(|mount| join_host_path(&mount.root, &mount.relative))
+}
+
+fn host_workdir_mount_from_spec(spec: &SandboxSpec) -> Option<HostMountPath> {
+    let workdir = normalize_guest_path(&spec.workdir)?;
+    let (_, mount, mount_guest) = spec
+        .mounts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, mount)| {
+            let guest = normalize_guest_path(&mount.guest)?;
+            workdir.starts_with(&guest).then_some((index, mount, guest))
+        })
+        .max_by_key(|(_, _, guest)| guest.components().count())?;
+    let relative = workdir.strip_prefix(&mount_guest).ok()?.to_path_buf();
+    if host_path_contains_symlink(&mount.host, &relative) {
+        return None;
+    }
+    Some(HostMountPath {
+        root: mount.host.clone(),
+        relative,
+        read_only: mount.read_only,
+    })
+}
+
+fn host_workspace_mounts_from_spec(spec: &SandboxSpec) -> Option<Vec<HostWorkspaceMount>> {
+    let workdir = normalize_guest_path(&spec.workdir)?;
+    let base = host_workdir_mount_from_spec(spec)?;
+    let mut mounts = vec![HostWorkspaceMount {
+        relative: PathBuf::new(),
+        source: base,
+    }];
     for mount in &spec.mounts {
-        if spec.workdir.starts_with(&mount.guest) {
-            let suffix = spec
-                .workdir
-                .strip_prefix(&mount.guest)
-                .unwrap_or_else(|_| Path::new(""));
-            return Some(join_host_path(&mount.host, suffix));
+        let guest = normalize_guest_path(&mount.guest)?;
+        if guest == workdir || !guest.starts_with(&workdir) {
+            continue;
+        }
+        let relative = guest.strip_prefix(&workdir).ok()?.to_path_buf();
+        let candidate = HostWorkspaceMount {
+            relative: relative.clone(),
+            source: HostMountPath {
+                root: mount.host.clone(),
+                relative: PathBuf::new(),
+                read_only: mount.read_only,
+            },
+        };
+        if let Some(existing) = mounts.iter_mut().find(|entry| entry.relative == relative) {
+            *existing = candidate;
+        } else {
+            mounts.push(candidate);
         }
     }
-    None
+    mounts.sort_by_key(|mount| mount.relative.components().count());
+    Some(mounts)
 }
 
 pub fn build_sandbox_spec(
@@ -506,6 +559,58 @@ mod tests {
                 read_only: true,
             })
         );
+        assert_eq!(
+            session.host_workdir(),
+            Some(PathBuf::from("/host/workspace"))
+        );
+        assert_eq!(
+            session.host_workspace_mounts(),
+            Some(vec![
+                HostWorkspaceMount {
+                    relative: PathBuf::new(),
+                    source: HostMountPath {
+                        root: PathBuf::from("/host/workspace"),
+                        relative: PathBuf::new(),
+                        read_only: false,
+                    },
+                },
+                HostWorkspaceMount {
+                    relative: PathBuf::from("vendor"),
+                    source: HostMountPath {
+                        root: PathBuf::from("/host/vendor"),
+                        relative: PathBuf::new(),
+                        read_only: true,
+                    },
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn host_workdir_uses_the_deepest_mount_that_contains_it() {
+        let session = SandboxSession::new_for_test(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![
+                MountSpec {
+                    host: PathBuf::from("/host/workspace"),
+                    guest: PathBuf::from("/workspace"),
+                    read_only: false,
+                },
+                MountSpec {
+                    host: PathBuf::from("/host/vendor"),
+                    guest: PathBuf::from("/workspace/vendor"),
+                    read_only: true,
+                },
+            ],
+            workdir: PathBuf::from("/workspace/vendor"),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+
+        assert_eq!(session.host_workdir(), Some(PathBuf::from("/host/vendor")));
     }
 
     #[cfg(unix)]
@@ -531,7 +636,7 @@ mod tests {
             backend: SandboxBackendType::Podman,
             image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![MountSpec {
-                host: mount_root,
+                host: mount_root.clone(),
                 guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 read_only: false,
             }],
@@ -543,7 +648,23 @@ mod tests {
         });
 
         let mapped = session.host_path_for_guest(Path::new("/workspace/escape/file.txt"));
-        let _ = std::fs::remove_dir_all(root);
         assert_eq!(mapped, None);
+
+        let workdir_session = SandboxSession::new_for_test(SandboxSpec {
+            backend: SandboxBackendType::Podman,
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![MountSpec {
+                host: mount_root,
+                guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                read_only: false,
+            }],
+            workdir: PathBuf::from("/workspace/escape"),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+        assert_eq!(workdir_session.host_workdir(), None);
+        let _ = std::fs::remove_dir_all(root);
     }
 }
