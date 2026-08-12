@@ -1,7 +1,7 @@
 [package]
 name = "nac-core"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [lib]
 name = "nac_core"
@@ -11,24 +11,24 @@ default = []
 test-support = []
 
 [dependencies]
-tokio = { version = "1", default-features = false, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls", "stream"] }
+tokio = { workspace = true, default-features = false, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+reqwest = { workspace = true, default-features = false, features = ["json", "form", "rustls", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 bytes = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-anyhow = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+anyhow.workspace = true
 rusqlite = { version = "0.32", features = ["bundled"] }
-uuid = { version = "1", features = ["serde", "v4"] }
+uuid = { workspace = true, features = ["serde", "v4"] }
 libc = "0.2"
 portable-pty = "0.8"
-rmcp = { version = "1.3.0", default-features = false, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
-toml = "0.8"
+rmcp = { workspace = true, default-features = false, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+toml.workspace = true
 url = "2"
 serde_yaml_ng = "0.10"
 diffy = { version = "0.5.0", default-features = false }
 fs2 = "0.4"
-sha2 = "0.10"
+sha2.workspace = true
 rand = "0.9"
 base64 = "0.22"
 cap-std = "4"
