@@ -36,7 +36,6 @@ export interface RuntimeThread {
   status: "running" | "finished";
   /** The active dispatch ended because the parent run was stopped. */
   cancelled: boolean;
-  action: string;
   exitCode: number | null;
   isError: boolean;
   /**
@@ -215,7 +214,6 @@ const emptyThread = (name: string): RuntimeThread => ({
   name,
   status: "running",
   cancelled: false,
-  action: "",
   exitCode: null,
   isError: false,
   log: [],
@@ -421,17 +419,18 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
       }));
       return "none";
     case "thread_started":
-      setState({ activity: `Thread ${event.name}: ${event.action}` });
+      // The action is not carried here: event sanitization replaces it with a
+      // placeholder. The task text comes from the orchestrator's tool call.
+      setState({ activity: `Thread ${event.name} dispatched` });
       pushEvent({
         seq,
         kind: "thread",
-        text: `⌥ thread "${event.name}" — ${event.action}`,
+        text: `⌥ thread "${event.name}" dispatched`,
         isError: false,
       });
       updateThread(event.name, {
         status: "running",
         cancelled: false,
-        action: event.action,
         exitCode: null,
         isError: false,
         // A name can be dispatched again, and the previous run's commands are

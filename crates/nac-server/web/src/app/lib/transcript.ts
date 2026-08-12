@@ -191,6 +191,26 @@ export function dispatchThreadName(call: ToolCall): string {
   return threadName(call);
 }
 
+/**
+ * Latest dispatch prompt per thread, read off the orchestrator's own tool
+ * calls. The live `thread_started` event cannot serve this: event sanitization
+ * replaces the action with a fixed placeholder before it reaches the stream.
+ */
+export function dispatchActions(
+  messages: SessionSnapshotResponse["messages"],
+): Record<string, string> {
+  const actions: Record<string, string> = {};
+  messages.forEach((message) => {
+    if (message.role !== "assistant") return;
+    (message.tool_calls ?? []).forEach((call) => {
+      if (call.function?.name !== "thread") return;
+      const action = text(parseArguments(call).action);
+      if (action) actions[threadName(call)] = action;
+    });
+  });
+  return actions;
+}
+
 /** Source thread names from a dispatch; only strings count. */
 function sourceThreads(call: ToolCall): string[] {
   const value = parseArguments(call).threads;

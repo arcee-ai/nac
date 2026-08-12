@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { perfMark } from "@/app/lib/perfDebug";
 import { queryKeys } from "@/app/services/queries";
 import { useWorkspaceEpoch } from "@/app/store/runtimeStore";
 
@@ -39,6 +40,7 @@ export function useLiveWorkspace(
     timer.current = window.setTimeout(() => {
       timer.current = null;
       lastReread.current = Date.now();
+      perfMark("query:invalidate.workspace", { throttleMs: 0 });
       // The changed-file list and its totals are computed while the snapshot is
       // built, so they only move when the snapshot does.
       void client.invalidateQueries({

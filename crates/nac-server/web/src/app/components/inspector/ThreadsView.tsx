@@ -49,7 +49,11 @@ import {
   type ThreadLogLine,
   type ToolCallEntry,
 } from "@/app/lib/threadLog";
-import { dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
+import {
+  dispatchActions,
+  dispatchThreadName,
+  partitionThreadCalls,
+} from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
 import { useLiveThreads } from "@/app/store/runtimeStore";
 import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
@@ -784,6 +788,10 @@ export function ThreadsView({
     () => waveRankByName(snapshot?.messages),
     [snapshot?.messages],
   );
+  const actions = useMemo(
+    () => dispatchActions(snapshot?.messages ?? []),
+    [snapshot?.messages],
+  );
 
   // Backend pre-marks every name in a DAG batch as active. Only
   // `thread_started` means the worker is actually running; the rest are
@@ -908,8 +916,7 @@ export function ThreadsView({
             const errored = liveThreads[thread.name]?.isError;
             // The task is the only description a thread has, so the row hands
             // it over on hover rather than making the name stand for it.
-            const task =
-              liveThreads[thread.name]?.action || thread.latest_action || "";
+            const task = actions[thread.name] || thread.latest_action || "";
             return (
               <PanelRow
                 key={thread.name}
@@ -961,7 +968,7 @@ export function ThreadsView({
         <Detail
           key={`${sessionId}:${current.name}`}
           thread={current}
-          action={live?.action || current.latest_action || ""}
+          action={actions[current.name] || current.latest_action || ""}
           episodes={snapshot.thread_episodes?.[current.name] ?? []}
           events={
             pagedEvents ?? snapshot.thread_events?.[current.name]
