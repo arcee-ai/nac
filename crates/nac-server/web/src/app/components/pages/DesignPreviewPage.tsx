@@ -1,6 +1,7 @@
 import { useState } from "react";
+
+import Avatar from "@/app/atoms/avatar";
 import {
-  Avatar,
   AvatarSize,
   Badge,
   BadgeColor,

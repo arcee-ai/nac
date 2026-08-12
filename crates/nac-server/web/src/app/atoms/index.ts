@@ -1,4 +1,4 @@
-export { default as Avatar, AvatarSize } from "./avatar";
+export { AvatarSize } from "./avatar";
 export { default as Badge, BadgeColor } from "./badge";
 export { default as BoxSurface } from "./box-surface";
 export {
@@ -9,31 +9,26 @@ export {
 } from "./button";
 export { default as CopyButton } from "./button/CopyButton";
 export { default as StickyButton } from "./button/StickyButton";
-export { default as ChatLoader, ChatLoaderSize } from "./chat-loader";
+export { default as ChatLoader } from "./chat-loader";
 export {
   default as ChatSessionMessage,
   ChatSessionMessageVariant,
 } from "./chat-session-message";
 export { default as Checkbox } from "./checkbox";
-export { default as CodeBlock, CodeBlockSize } from "./code-block";
-export { default as CoverBackground } from "./cover-background";
-export { default as DatePicker, type DateRange } from "./date-picker";
-export {
-  default as DateSelector,
-  type DateString,
-  type DateStringRange,
-} from "./date-selector";
+export { default as CodeBlock } from "./code-block";
+export { default as DatePicker } from "./date-picker";
+export { default as DateSelector, type DateStringRange } from "./date-selector";
 export { default as DropdownContent } from "./dropdown-content";
 export {
   default as EditableHeader,
   EditableHeaderSize,
 } from "./editable-header";
-export { default as FileIcon, fileIconName } from "./file-icon";
+export { default as FileIcon } from "./file-icon";
 export {
   default as HorizontalTabsItem,
   HorizontalTabsItemVariant,
 } from "./horizontal-tabs-item";
-export { default as HoverHint, HoverHintSize } from "./hover-hint";
+export { default as HoverHint } from "./hover-hint";
 export { default as Icon, IconName } from "./icon";
 export { default as InitialPromptBox } from "./initial-prompt-box";
 export {
@@ -49,12 +44,8 @@ export {
 } from "./input/StickyInput";
 export { default as TextArea, TextAreaSize } from "./input/TextArea";
 export { default as KeyboardShortcut } from "./keyboard-shortcut";
-export { default as Label, type HoverHintConfig, LabelSize } from "./label";
 export { default as Loader, LoaderSize, LoaderVariant } from "./loader";
-export {
-  default as CircularLoader,
-  CircularLoaderVariant,
-} from "./loader/CircularLoader";
+export { default as CircularLoader } from "./loader/CircularLoader";
 export { default as ProgressLoader } from "./loader/ProgressLoader";
 export { default as ShimmerLoader } from "./loader/ShimmerLoader";
 export { default as Logo } from "./logo";
@@ -64,15 +55,14 @@ export {
   MessageBoxVariant,
 } from "./message-box";
 export { default as Modal, ModalSize } from "./modal";
-export { default as ModelPill, ModelPillSize } from "./model-pill";
+export { default as ModelPill } from "./model-pill";
 export { default as NumberInput } from "./number-input";
 export { default as Pagination } from "./pagination";
 export { default as Popover, PopoverPlacement, PopoverSize } from "./popover";
-export { default as BottomSheet } from "./popover/BottomSheet";
 export { default as Radio } from "./radio";
 export { default as RangeInput } from "./range-input";
 export { default as Select, type SelectItem } from "./select";
-export { default as SessionAvatar, sessionAvatarColor } from "./session-avatar";
+export { default as SessionAvatar } from "./session-avatar";
 export { default as SessionIllustration } from "./session-illustration";
 export { default as Separator } from "./separator";
 export { default as Switch, SwitchSize } from "./switch";
@@ -82,5 +72,4 @@ export {
   TabButtonVariant,
 } from "./tab-button";
 export { default as TagsSelector } from "./tags-selector";
-export { default as Toast, ToastVariant } from "./toast/Toast";
 export { default as Tooltip, TooltipPosition } from "./tooltip";
