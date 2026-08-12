@@ -120,7 +120,22 @@ async fn provider_models_handler(
             message: format!("backend '{backend}' requires a nonblank API key"),
         });
     }
-    let base_url = settle_base_url(&manager, backend, request.base_url.as_deref())?;
+    let base_url = request
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_default_base_url(backend).map(str::to_string))
+        .ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("backend '{backend}' has no default base URL; supply one"),
+        })?;
+    enforce_trusted_base_url(
+        Some(backend),
+        Some(base_url.as_str()),
+        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+    )?;
     let models = list_provider_models(backend, &base_url, &api_key)
         .await
         .map_err(|error| ApiError {

@@ -8181,6 +8181,42 @@ model = "gpt-5.2"
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[tokio::test]
+    async fn provider_models_preserves_malformed_base_url_status_by_backend() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("provider_models_malformed_base_url");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).expect("create NAC home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+        let expected_error = serde_json::json!({
+            "error": "invalid model configuration: base_url 'not a url' is not a valid absolute URL: relative URL without a base"
+        });
+
+        // OpenAI's trust policy parses caller-supplied URLs before discovery,
+        // while Arcee owns its origin policy and therefore reaches discovery's
+        // historical BAD_GATEWAY mapping for the same malformed value.
+        for (backend, expected_status) in [
+            ("openai-responses", StatusCode::BAD_REQUEST),
+            ("arcee-api", StatusCode::BAD_GATEWAY),
+        ] {
+            let response = post_json(
+                app.clone(),
+                "/providers/models",
+                serde_json::json!({
+                    "backend": backend,
+                    "api_key": "server-route-test-key",
+                    "base_url": "not a url",
+                }),
+            )
+            .await;
+            assert_eq!(response.status(), expected_status, "{backend}");
+            assert_eq!(response_json(response).await, expected_error, "{backend}");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Naming a credential is not a way to probe for one: a name with nothing
     /// behind it is refused before any request goes out, and a provider that
     /// signs in through the browser takes no name at all.
