@@ -1220,14 +1220,15 @@ impl SessionManager {
                 .clone()
                 .or_else(|| config.model.model.clone());
             if let Some(ref model_id) = model_id {
-                let selected_managed_base_url = model
-                    .backend
-                    .and_then(managed_backend_base_url)
-                    .map(str::to_string);
-                let validation_base_url = model
-                    .api_base_url
-                    .clone()
-                    .or(selected_managed_base_url);
+                // Resolve base_url through the full chain (caller-supplied →
+                // catalog default → managed canonical URL) using the resolved
+                // `launch_backend`, matching `EffectiveModelSettings::from_optional`.
+                // The previous narrow resolution (`api_base_url.or(model.backend
+                // .and_then(managed_backend_base_url))`) missed catalog defaults
+                // (arcee-api) and inferred managed backends (codex with no
+                // explicit `backend` field), causing valid creates to be rejected.
+                let validation_base_url =
+                    resolve_model_base_url(backend, model.api_base_url.clone())?;
                 let validation_effort = match &model.reasoning_effort {
                     OptionalModelOption::Inherit => config.model.reasoning_effort,
                     OptionalModelOption::Value(v) => Some(v.clone()),
@@ -1244,7 +1245,7 @@ impl SessionManager {
                 validate_model_configuration(
                     backend,
                     model_id,
-                    validation_base_url.as_deref(),
+                    Some(validation_base_url.as_str()),
                     validation_effort,
                     validation_api_key_env.as_deref(),
                     &validation_extra_headers,
