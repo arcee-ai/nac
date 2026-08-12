@@ -70,7 +70,10 @@ function session(
 }
 
 function Harness() {
-  const result = useSessionsWithWorkspaceStats({ baseMs: 5, statsMs: 30 });
+  const result = useSessionsWithWorkspaceStats({
+    baseMs: 60_000,
+    statsMs: 60_000,
+  });
   return (
     <output data-testid="sessions">
       {JSON.stringify(
@@ -172,6 +175,12 @@ describe("session-list polling split", () => {
     });
     expect(statsRead).toBe(1);
 
+    await act(async () => {
+      await client.refetchQueries({
+        queryKey: queryKeys.sessions(false),
+        exact: true,
+      });
+    });
     await waitFor(() => {
       expect(renderedData(renderer)).toEqual([{ title: "new" }]);
     });
@@ -193,10 +202,22 @@ describe("session-list polling split", () => {
     });
 
     allowEmptyBase = true;
+    await act(async () => {
+      await Promise.all([
+        client.refetchQueries({
+          queryKey: queryKeys.sessions(false),
+          exact: true,
+        }),
+        client.refetchQueries({
+          queryKey: queryKeys.sessions(true),
+          exact: true,
+        }),
+      ]);
+    });
     await waitFor(() => {
       expect(renderedData(renderer)).toEqual([]);
-      expect(statsRead).toBeGreaterThanOrEqual(2);
     });
+    expect({ baseRead, statsRead }).toEqual({ baseRead: 3, statsRead: 2 });
 
     const readsAtUnmount = { baseRead, statsRead };
     renderer.unmount();
