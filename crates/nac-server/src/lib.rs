@@ -1210,6 +1210,47 @@ impl SessionManager {
             model.api_base_url.as_deref(),
             &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
         )?;
+        // Validate the original (pre-remap) reasoning effort before
+        // `build_run_config` → `from_optional` silently remaps unsupported
+        // efforts to the highest supported level. This mirrors the
+        // defense-in-depth check in `update_session_config`.
+        if let Some(backend) = launch_backend {
+            let model_id = model
+                .api_model
+                .clone()
+                .or_else(|| config.model.model.clone());
+            if let Some(ref model_id) = model_id {
+                let selected_managed_base_url = model
+                    .backend
+                    .and_then(managed_backend_base_url)
+                    .map(str::to_string);
+                let validation_base_url = model
+                    .api_base_url
+                    .clone()
+                    .or(selected_managed_base_url);
+                let validation_effort = match &model.reasoning_effort {
+                    OptionalModelOption::Inherit => config.model.reasoning_effort,
+                    OptionalModelOption::Value(v) => Some(v.clone()),
+                    OptionalModelOption::Clear => None,
+                };
+                let validation_api_key_env = match &model.api_key_env {
+                    OptionalModelOption::Value(v) => Some(v.clone()),
+                    OptionalModelOption::Inherit | OptionalModelOption::Clear => None,
+                };
+                let validation_extra_headers = model
+                    .extra_headers
+                    .clone()
+                    .unwrap_or_else(|| config.model.extra_headers.clone());
+                validate_model_configuration(
+                    backend,
+                    model_id,
+                    validation_base_url.as_deref(),
+                    validation_effort,
+                    validation_api_key_env.as_deref(),
+                    &validation_extra_headers,
+                )?;
+            }
+        }
         let run_config = runtime::build_run_config(
             RunOptions {
                 workspace_cwd: location.workspace_cwd,
