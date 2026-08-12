@@ -34,7 +34,7 @@ export {
   HorizontalTabsItemVariant,
 } from "./horizontal-tabs-item";
 export { default as HoverHint, HoverHintSize } from "./hover-hint";
-export { default as Icon, IconName, mapIconName } from "./icon";
+export { default as Icon, IconName } from "./icon";
 export { default as InitialPromptBox } from "./initial-prompt-box";
 export {
   default as Input,

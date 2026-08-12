@@ -162,50 +162,6 @@ const getGlyph = (iconName: IconName): { d: string; viewBox: string } => {
   return entry ?? { d: "", viewBox: DEFAULT_VIEW_BOX };
 };
 
-/**
- * Normalize icon name string by converting to lowercase, trimming, and removing underscores/dashes
- * Also handles camelCase by removing capital letters (converts to lowercase)
- * @param iconName - Icon name string from backend (e.g., "Search", "book_open", "book-open", "BookOpen", "bookOpen")
- * @returns Normalized string (e.g., "search", "bookopen")
- */
-const normalizeIconName = (iconName: string): string => {
-  return iconName
-    .trim()
-    .replace(/[_-]/g, "") // Remove underscores and dashes
-    .toLowerCase(); // Convert to lowercase (handles camelCase like "bookOpen" -> "bookopen")
-};
-
-/**
- * Map backend icon name string to IconName enum
- * Handles various formats: "Search", "search", "book_open", "book-open", "BookOpen", "bookOpen", etc.
- * This is reverse mapping from enum values - maps all string variations to enum keys
- * @param iconNameString - Icon name string from backend
- * @param defaultIcon - Default IconName to return if no match found
- * @returns IconName enum value
- */
-export const mapIconName = (
-  iconNameString: string | undefined | null,
-  defaultIcon: IconName = IconName.Search,
-): IconName => {
-  if (!iconNameString) {
-    return defaultIcon;
-  }
-
-  const normalized = normalizeIconName(iconNameString);
-
-  // Try to find matching enum value
-  // Check each enum value's normalized form
-  for (const [key, value] of Object.entries(IconName)) {
-    const normalizedEnumValue = normalizeIconName(value);
-    if (normalized === normalizedEnumValue) {
-      return IconName[key as keyof typeof IconName];
-    }
-  }
-
-  // If no exact match, return default
-  return defaultIcon;
-};
-
 // Component
 const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
   iconName = IconName.Checklist,
