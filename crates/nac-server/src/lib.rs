@@ -1323,6 +1323,52 @@ impl SessionManager {
         Ok(service)
     }
 
+    /// Admits an operation while holding the lifecycle gate through its callback.
+    /// The callback receives the current service and owns the operation lease.
+    async fn with_admitted_operation<T, E, F, Fut>(
+        &self,
+        session_id: &str,
+        not_found: impl Fn() -> E,
+        busy: impl Fn() -> E,
+        report_failure: impl Fn(&str, &dyn std::fmt::Display) -> E,
+        operation: F,
+    ) -> Result<T, E>
+    where
+        F: FnOnce(Arc<SessionService>, sessions::SessionOperationLease) -> Fut,
+        Fut: std::future::Future<Output = Result<T, E>>,
+    {
+        if !self
+            .persisted_operation_session_exists(session_id)
+            .map_err(|error| report_failure("verify persisted session", &error))?
+        {
+            return Err(not_found());
+        }
+
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)
+                .map_err(|error| match error {
+                    sessions::SessionOperationLeaseError::Busy(_) => busy(),
+                    sessions::SessionOperationLeaseError::Store(error) => {
+                        report_failure("acquire operation lease", &error)
+                    }
+                })?;
+
+        if !self
+            .persisted_operation_session_exists(session_id)
+            .map_err(|error| report_failure("recheck persisted session", &error))?
+        {
+            return Err(not_found());
+        }
+
+        let service = self
+            .attach_current_operation_service_locked(session_id, &operation_lease)
+            .await
+            .map_err(|error| report_failure("attach current session", &error))?;
+        operation(service, operation_lease).await
+    }
+
     /// Returns a service whose model configuration matches the store. The
     /// caller must hold both the local lifecycle gate and the supplied
     /// operation lease. Durable compaction checkpoints are refreshed by the

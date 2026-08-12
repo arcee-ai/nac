@@ -15,7 +15,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use nac_core::{commands::PreparedUserInput, session_service::RevertOutcome, sessions};
+use nac_core::{commands::PreparedUserInput, session_service::RevertOutcome};
 use serde::{Deserialize, Serialize};
 
 use crate::{frontend_command_name, submit_response, SessionManager, SubmitPromptResponse};
@@ -142,49 +142,29 @@ impl SessionManager {
         session_id: &str,
         message_idx: usize,
     ) -> Result<RevertSessionResponse, RevertSessionError> {
-        if !self
-            .persisted_operation_session_exists(session_id)
-            .map_err(|error| report_failure(session_id, "verify persisted session", &error))?
-        {
-            return Err(RevertSessionError::NotFound);
-        }
-
-        let gate = self.lifecycle_gate(session_id);
-        let _lifecycle = gate.lock().await;
-        let operation_lease =
-            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)
-                .map_err(|error| match error {
-                    sessions::SessionOperationLeaseError::Busy(_) => RevertSessionError::Busy,
-                    sessions::SessionOperationLeaseError::Store(error) => {
-                        report_failure(session_id, "acquire operation lease", &error)
-                    }
-                })?;
-
-        if !self
-            .persisted_operation_session_exists(session_id)
-            .map_err(|error| report_failure(session_id, "recheck persisted session", &error))?
-        {
-            return Err(RevertSessionError::NotFound);
-        }
-
-        let service = self
-            .attach_current_operation_service_locked(session_id, &operation_lease)
-            .await
-            .map_err(|error| report_failure(session_id, "attach current session", &error))?;
-
-        service
-            .revert_to_message(message_idx)
-            .await
-            .map(RevertSessionResponse::from)
-            .map_err(|error| {
-                // A rejected target is the caller's mistake and worth telling
-                // them about; anything else is ours and stays in the log.
-                if is_rejection(&error) {
-                    RevertSessionError::Rejected(format!("{error}"))
-                } else {
-                    report_failure(session_id, "revert the transcript", &error)
-                }
-            })
+        self.with_admitted_operation(
+            session_id,
+            || RevertSessionError::NotFound,
+            || RevertSessionError::Busy,
+            |operation, error| report_failure(session_id, operation, error),
+            |service, operation_lease| async move {
+                let _operation_lease = operation_lease;
+                service
+                    .revert_to_message(message_idx)
+                    .await
+                    .map(RevertSessionResponse::from)
+                    .map_err(|error| {
+                        // A rejected target is the caller's mistake and worth telling
+                        // them about; anything else is ours and stays in the log.
+                        if is_rejection(&error) {
+                            RevertSessionError::Rejected(format!("{error}"))
+                        } else {
+                            report_failure(session_id, "revert the transcript", &error)
+                        }
+                    })
+            },
+        )
+        .await
     }
 }
 
@@ -202,87 +182,60 @@ impl SessionManager {
         session_id: &str,
         message_idx: usize,
     ) -> Result<SubmitPromptResponse, RegenerateSessionError> {
-        if !self
-            .persisted_operation_session_exists(session_id)
-            .map_err(|error| {
-                report_regenerate_failure(session_id, "verify persisted session", &error)
-            })?
-        {
-            return Err(RegenerateSessionError::NotFound);
-        }
-
-        let gate = self.lifecycle_gate(session_id);
-        let _lifecycle = gate.lock().await;
-        let operation_lease =
-            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)
-                .map_err(|error| match error {
-                    sessions::SessionOperationLeaseError::Busy(_) => RegenerateSessionError::Busy,
-                    sessions::SessionOperationLeaseError::Store(error) => {
-                        report_regenerate_failure(session_id, "acquire operation lease", &error)
+        self.with_admitted_operation(
+            session_id,
+            || RegenerateSessionError::NotFound,
+            || RegenerateSessionError::Busy,
+            |operation, error| report_regenerate_failure(session_id, operation, error),
+            |service, operation_lease| async move {
+                let input = service.user_input_at(message_idx).await.map_err(|error| {
+                    if is_rejection(&error) {
+                        RegenerateSessionError::Rejected(format!("{error}"))
+                    } else {
+                        report_regenerate_failure(session_id, "read the prompt to repeat", &error)
                     }
                 })?;
 
-        if !self
-            .persisted_operation_session_exists(session_id)
-            .map_err(|error| {
-                report_regenerate_failure(session_id, "recheck persisted session", &error)
-            })?
-        {
-            return Err(RegenerateSessionError::NotFound);
-        }
+                let client = service.connect_client();
+                let prompt = match client.prepare_user_input(&input) {
+                    PreparedUserInput::SubmitPrompt(prompt) => prompt,
+                    PreparedUserInput::Empty => {
+                        return Err(RegenerateSessionError::Rejected(
+                            "prompt is empty".to_string(),
+                        ))
+                    }
+                    PreparedUserInput::InvalidSlashCommand { message } => {
+                        return Err(RegenerateSessionError::Rejected(message))
+                    }
+                    PreparedUserInput::FrontendCommand(command) => {
+                        return Err(RegenerateSessionError::Rejected(format!(
+                            "frontend command '{}' is not supported by the server API",
+                            frontend_command_name(command)
+                        )))
+                    }
+                };
 
-        let service = self
-            .attach_current_operation_service_locked(session_id, &operation_lease)
-            .await
-            .map_err(|error| {
-                report_regenerate_failure(session_id, "attach current session", &error)
-            })?;
+                service
+                    .revert_to_message(message_idx)
+                    .await
+                    .map_err(|error| {
+                        if is_rejection(&error) {
+                            RegenerateSessionError::Rejected(format!("{error}"))
+                        } else {
+                            report_regenerate_failure(session_id, "revert the transcript", &error)
+                        }
+                    })?;
 
-        let input = service.user_input_at(message_idx).await.map_err(|error| {
-            if is_rejection(&error) {
-                RegenerateSessionError::Rejected(format!("{error}"))
-            } else {
-                report_regenerate_failure(session_id, "read the prompt to repeat", &error)
-            }
-        })?;
-
-        let client = service.connect_client();
-        let prompt = match client.prepare_user_input(&input) {
-            PreparedUserInput::SubmitPrompt(prompt) => prompt,
-            PreparedUserInput::Empty => {
-                return Err(RegenerateSessionError::Rejected(
-                    "prompt is empty".to_string(),
-                ))
-            }
-            PreparedUserInput::InvalidSlashCommand { message } => {
-                return Err(RegenerateSessionError::Rejected(message))
-            }
-            PreparedUserInput::FrontendCommand(command) => {
-                return Err(RegenerateSessionError::Rejected(format!(
-                    "frontend command '{}' is not supported by the server API",
-                    frontend_command_name(command)
-                )))
-            }
-        };
-
-        service
-            .revert_to_message(message_idx)
-            .await
-            .map_err(|error| {
-                if is_rejection(&error) {
-                    RegenerateSessionError::Rejected(format!("{error}"))
-                } else {
-                    report_regenerate_failure(session_id, "revert the transcript", &error)
-                }
-            })?;
-
-        let display_prompt = prompt.display_prompt.clone();
-        let handle = client
-            .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
-            .map_err(|error| {
-                report_regenerate_failure(session_id, "start the repeated run", &error)
-            })?;
-        Ok(submit_response(handle, display_prompt))
+                let display_prompt = prompt.display_prompt.clone();
+                let handle = client
+                    .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
+                    .map_err(|error| {
+                        report_regenerate_failure(session_id, "start the repeated run", &error)
+                    })?;
+                Ok(submit_response(handle, display_prompt))
+            },
+        )
+        .await
     }
 }
 
