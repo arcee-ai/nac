@@ -19,7 +19,7 @@ fn arcee_auth_lock_path() -> Result<PathBuf> {
 }
 
 fn acquire_arcee_auth_lock() -> Result<FileLock> {
-    acquire_lock(&arcee_auth_lock_path()?)
+    acquire_credential_lock(&arcee_auth_lock_path()?)
 }
 
 pub(super) fn try_acquire_arcee_auth_lock() -> Result<Option<FileLock>> {
@@ -31,7 +31,7 @@ pub(super) fn try_acquire_arcee_auth_lock() -> Result<Option<FileLock>> {
     FileLock::try_acquire(&path)
 }
 
-fn acquire_lock(path: &Path) -> Result<FileLock> {
+pub(super) fn acquire_credential_lock(path: &Path) -> Result<FileLock> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -51,7 +51,7 @@ pub(super) fn with_credential_lock<T>(
     lock_path: &Path,
     operation: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    let lock = acquire_lock(lock_path)?;
+    let lock = acquire_credential_lock(lock_path)?;
     let result = operation();
     drop(lock);
     result

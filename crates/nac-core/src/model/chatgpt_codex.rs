@@ -1,23 +1,24 @@
-use super::auth_store::ensure_open_credential_file_is_safe;
+use super::auth_store::{
+    acquire_credential_lock, read_auth_bytes_from_path, with_credential_lock,
+    write_auth_string_to_path, FileLock,
+};
 use super::responses_stream::ResponsesStreamFold;
 use super::sse::{read_sse_response, with_source_chain, StreamFold, StreamFoldError};
 use super::*;
 use anyhow::Context;
-use fs2::FileExt;
 use reqwest::header;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::form_urlencoded;
-use uuid::Uuid;
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEVICE_USER_CODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
@@ -1164,19 +1165,11 @@ fn auth_lock_path() -> Result<PathBuf> {
 }
 
 fn acquire_auth_lock() -> Result<FileLock> {
-    let path = auth_lock_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    FileLock::acquire(&path)
+    acquire_credential_lock(&auth_lock_path()?)
 }
 
 fn with_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
-    let lock = acquire_auth_lock()?;
-    let result = operation();
-    drop(lock);
-    result
+    with_credential_lock(&auth_lock_path()?, operation)
 }
 
 fn read_auth_file_optional() -> Result<Option<StoredCodexAuth>> {
@@ -1248,51 +1241,6 @@ fn validate_stored_auth(auth: &StoredCodexAuth, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err(anyhow!(
-                "refusing to read symlink credential path {}",
-                path.display()
-            ))
-        }
-        Ok(metadata) if !metadata.file_type().is_file() => {
-            return Err(anyhow!(
-                "refusing to read non-regular credential path {}",
-                path.display()
-            ))
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
-        }
-    }
-
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
-    }
-    let mut file = match options.open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error).with_context(|| {
-                format!("failed to securely open credential file {}", path.display())
-            })
-        }
-    };
-    ensure_open_credential_file_is_safe(&file, path)?;
-
-    let mut raw = Vec::new();
-    file.read_to_end(&mut raw)
-        .with_context(|| format!("failed to read credential file {}", path.display()))?;
-    Ok(Some(raw))
-}
-
 fn read_auth_file() -> Result<StoredCodexAuth> {
     read_auth_file_optional()?.ok_or_else(|| {
         stored_auth_configuration_error(
@@ -1309,211 +1257,7 @@ fn write_auth_file(auth: &StoredCodexAuth) -> Result<()> {
 
 fn write_auth_file_to_path(path: &Path, auth: &StoredCodexAuth) -> Result<()> {
     let raw = serde_json::to_string_pretty(auth).context("failed to serialize Codex auth")?;
-    atomic_replace_auth_file(path, |file| file.write_all(raw.as_bytes()))
-}
-
-fn atomic_replace_auth_file(
-    path: &Path,
-    write_contents: impl FnOnce(&mut File) -> io::Result<()>,
-) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("auth path {} has no parent directory", path.display()))?;
-    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
-    validate_regular_destination(path)?;
-
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow!("auth path {} has no file name", path.display()))?
-        .to_string_lossy();
-    let temp_path = parent.join(format!(".{file_name}.tmp-{}", Uuid::new_v4().simple()));
-    let mut temp = open_private_temp_file(&temp_path)?;
-    let mut cleanup = TempFileCleanup::new(temp_path.clone());
-    let write_result = (|| -> Result<()> {
-        make_file_private(&temp, &temp_path)?;
-        ensure_open_file_is_regular(&temp, &temp_path, "temporary auth file")?;
-        write_contents(&mut temp).with_context(|| {
-            format!(
-                "failed to write temporary auth file {}",
-                temp_path.display()
-            )
-        })?;
-        temp.flush().with_context(|| {
-            format!(
-                "failed to flush temporary auth file {}",
-                temp_path.display()
-            )
-        })?;
-        temp.sync_all().with_context(|| {
-            format!("failed to sync temporary auth file {}", temp_path.display())
-        })?;
-        Ok(())
-    })();
-    drop(temp);
-    write_result?;
-
-    // Check again immediately before rename. On Unix, rename replaces a final
-    // component rather than following it, so a racing symlink cannot modify its target.
-    validate_regular_destination(path)?;
-    fs::rename(&temp_path, path).with_context(|| {
-        format!(
-            "failed to atomically replace {} with {}",
-            path.display(),
-            temp_path.display()
-        )
-    })?;
-    cleanup.disarm();
-    sync_parent_directory(parent)
-        .with_context(|| format!("failed to sync auth directory {}", parent.display()))?;
-    Ok(())
-}
-
-fn validate_regular_destination(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
-            "refusing to replace symlink credential destination {}",
-            path.display()
-        )),
-        Ok(_) => Err(anyhow!(
-            "refusing to replace non-regular credential destination {}",
-            path.display()
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
-    }
-}
-
-fn open_private_temp_file(path: &Path) -> Result<File> {
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    }
-    options
-        .open(path)
-        .with_context(|| format!("failed to create temporary auth file {}", path.display()))
-}
-
-#[cfg(unix)]
-fn make_file_private(file: &File, path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    file.set_permissions(fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("failed to chmod {}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn make_file_private(_file: &File, _path: &Path) -> Result<()> {
-    Ok(())
-}
-
-fn ensure_open_file_is_regular(file: &File, path: &Path, kind: &str) -> Result<()> {
-    let metadata = file
-        .metadata()
-        .with_context(|| format!("failed to inspect open {kind} {}", path.display()))?;
-    if metadata.file_type().is_file() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "refusing to use non-regular {kind} {}",
-            path.display()
-        ))
-    }
-}
-
-#[cfg(unix)]
-fn sync_parent_directory(parent: &Path) -> io::Result<()> {
-    File::open(parent)?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
-    Ok(())
-}
-
-struct TempFileCleanup {
-    path: PathBuf,
-    armed: bool,
-}
-
-impl TempFileCleanup {
-    fn new(path: PathBuf) -> Self {
-        Self { path, armed: true }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for TempFileCleanup {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
-}
-
-struct FileLock {
-    file: File,
-}
-
-impl FileLock {
-    fn acquire(path: &Path) -> Result<Self> {
-        validate_lock_destination(path)?;
-        let mut options = OpenOptions::new();
-        options.create(true).truncate(false).read(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options
-                .mode(0o600)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-        }
-        let file = options
-            .open(path)
-            .with_context(|| format!("failed to open auth lock {}", path.display()))?;
-        ensure_open_file_is_regular(&file, path, "auth lock")?;
-        make_file_private(&file, path)?;
-        lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
-        Ok(Self { file })
-    }
-}
-
-fn validate_lock_destination(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
-            "refusing to use symlink auth lock {}",
-            path.display()
-        )),
-        Ok(_) => Err(anyhow!(
-            "refusing to use non-regular auth lock {}",
-            path.display()
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to inspect auth lock {}", path.display()))
-        }
-    }
-}
-
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        let _ = unlock_file(&self.file);
-    }
-}
-
-fn lock_file(file: &File) -> io::Result<()> {
-    FileExt::lock_exclusive(file)
-}
-
-fn unlock_file(file: &File) -> io::Result<()> {
-    FileExt::unlock(file)
+    write_auth_string_to_path(path, &raw)
 }
 
 fn extract_account_id(token: &str) -> Option<String> {
@@ -1612,10 +1356,15 @@ fn truncate(value: &str) -> String {
 mod tests {
     use super::*;
 
+    use fs2::FileExt;
+    #[cfg(unix)]
+    use std::fs::File;
+    use std::fs::OpenOptions;
     #[cfg(unix)]
     use std::io::{Read, Seek, SeekFrom};
     #[cfg(unix)]
     use std::os::unix::fs::{symlink, PermissionsExt};
+    use uuid::Uuid;
 
     struct TestDir(PathBuf);
 
@@ -1667,11 +1416,19 @@ mod tests {
 
     #[test]
     fn codex_lock_contends_until_release() {
-        super::super::auth_store::assert_lock_contention_and_release(
-            "codex",
-            lock_file,
-            unlock_file,
-        );
+        let dir = TestDir::new("lock-contention");
+        let path = dir.path("auth.auth.json.lock");
+        let first = acquire_credential_lock(&path).unwrap();
+        let second = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+
+        assert!(FileExt::try_lock_exclusive(&second).is_err());
+        drop(first);
+        FileExt::try_lock_exclusive(&second).unwrap();
+        FileExt::unlock(&second).unwrap();
     }
 
     #[test]
@@ -1798,23 +1555,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn codex_pre_rename_failure_preserves_existing_file_and_cleans_temp() {
-        let dir = TestDir::new("failure");
-        let path = dir.path("auth.json");
-        fs::write(&path, "old-valid-content").unwrap();
-
-        let result = atomic_replace_auth_file(&path, |file| {
-            file.write_all(b"partial")?;
-            Err(io::Error::other("injected pre-rename failure"))
-        });
-
-        assert!(result.is_err());
-        assert_eq!(fs::read_to_string(&path).unwrap(), "old-valid-content");
-        dir.assert_no_temp_files();
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn codex_write_rejects_symlink_destination_without_touching_target() {
         let dir = TestDir::new("symlink");
         let target = dir.path("target.json");
@@ -1839,7 +1579,7 @@ mod tests {
     fn codex_lock_is_private_and_rejects_symlink() {
         let dir = TestDir::new("lock");
         let lock_path = dir.path("auth.auth.json.lock");
-        let lock = FileLock::acquire(&lock_path).unwrap();
+        let lock = acquire_credential_lock(&lock_path).unwrap();
         assert_eq!(
             fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777,
             0o600
@@ -1850,7 +1590,7 @@ mod tests {
         let target = dir.path("lock-target");
         fs::write(&target, "unchanged").unwrap();
         symlink(&target, &lock_path).unwrap();
-        let error = FileLock::acquire(&lock_path)
+        let error = acquire_credential_lock(&lock_path)
             .err()
             .expect("symlink lock accepted");
         assert!(error.to_string().contains("symlink auth lock"));
