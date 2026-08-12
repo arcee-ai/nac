@@ -41,7 +41,7 @@ import {
   KEY_DEBOUNCE_MS,
   MASKED_KEY,
   modelItems,
-  type Validation,
+  providerKeyValidation,
 } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { CLEAR_EFFORT, serializeExtraHeaders } from "@/app/lib/modelConfig";
@@ -254,19 +254,11 @@ function ConfigurationForm({
     "",
   );
 
-  const validation: Validation = !(needsKey && debouncedKey)
-    ? { status: "idle" }
-    : keyQuery.isFetching
-      ? { status: "validating" }
-      : keyQuery.error
-        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
-        : keyQuery.data
-          ? {
-              status: "ready",
-              models: keyQuery.data.models,
-              baseUrl: keyQuery.data.base_url,
-            }
-          : { status: "validating" };
+  const validation = providerKeyValidation(
+    !!(needsKey && debouncedKey),
+    keyQuery,
+    backend,
+  );
 
   const models =
     keyQuery.data?.models ??
@@ -279,7 +271,7 @@ function ConfigurationForm({
 
   // A saved key is present but unreadable, so the field stands in for it and
   // only reports a status once the user starts replacing it.
-  const keyStatus: Validation["status"] =
+  const keyStatus =
     validation.status !== "idle"
       ? validation.status
       : record?.api_key_env

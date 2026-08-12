@@ -25,7 +25,7 @@ import { type Source, SourceMenu } from "@/app/components/modals/SourceMenu";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
-import { KEY_DEBOUNCE_MS, modelItems, type Validation } from "@/app/lib/apiKey";
+import { KEY_DEBOUNCE_MS, modelItems, providerKeyValidation } from "@/app/lib/apiKey";
 import { type CatalogPick, defaultCatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
@@ -236,19 +236,11 @@ export function ConfigurationsPanel({
   );
   const configQuery = useResolvedModelConfig(configId, configFile);
 
-  const validation: Validation = !(validates && debouncedKey)
-    ? { status: "idle" }
-    : keyQuery.isFetching
-      ? { status: "validating" }
-      : keyQuery.error
-        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
-        : keyQuery.data
-          ? {
-              status: "ready",
-              models: keyQuery.data.models,
-              baseUrl: keyQuery.data.base_url,
-            }
-          : { status: "validating" };
+  const validation = providerKeyValidation(
+    !!(validates && debouncedKey),
+    keyQuery,
+    backend,
+  );
 
   const keyValidated = validation.status === "ready";
   const validatedBaseUrl = keyQuery.data?.base_url ?? "";

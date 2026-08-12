@@ -4,7 +4,8 @@
 // way, which is why these live together rather than in either modal.
 
 import type { SelectItem } from "@/app/atoms";
-import type { ProviderModel } from "@/app/types/api";
+import { humanErrorText } from "@/app/lib/providerError";
+import type { ProviderModel, ProviderModelList } from "@/app/types/api";
 
 /** Long enough to stop firing on every keystroke of a pasted key. */
 export const KEY_DEBOUNCE_MS = 600;
@@ -28,6 +29,20 @@ export type Validation =
   | { status: "validating" }
   | { status: "ready"; models: ProviderModel[]; baseUrl: string }
   | { status: "error"; message: string };
+
+export function providerKeyValidation(
+  active: boolean,
+  query: { isFetching: boolean; error: unknown; data?: ProviderModelList },
+  backend?: string | null,
+): Validation {
+  if (!active) return { status: "idle" };
+  if (query.isFetching) return { status: "validating" };
+  if (query.error)
+    return { status: "error", message: humanErrorText(query.error, backend) };
+  return query.data
+    ? { status: "ready", models: query.data.models, baseUrl: query.data.base_url }
+    : { status: "validating" };
+}
 
 export function modelItems(models: ProviderModel[]): SelectItem[] {
   return models.map((model) => ({
