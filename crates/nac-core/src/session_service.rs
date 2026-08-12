@@ -21,7 +21,9 @@ pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
-use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
+use crate::runtime::OrchestratorRunConfig;
+#[cfg(test)]
+use crate::runtime::OrchestratorSession;
 use crate::sessions::{self, SessionSnapshot};
 use crate::types::Message;
 use crate::view::{
