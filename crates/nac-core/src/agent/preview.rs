@@ -9,7 +9,11 @@ pub(super) fn preview(value: &str, max_len: usize) -> String {
         while !sanitized.is_char_boundary(end) {
             end -= 1;
         }
-        format!("{}...", &sanitized[..end])
+        // The cut can land on trailing dots — its own, or the marker a caller
+        // already appended to stand for the lines it left out — and stacking
+        // three more onto those reads as four or five.
+        let head = sanitized[..end].trim_end_matches(|c: char| c == '.' || c.is_whitespace());
+        format!("{head}...")
     }
 }
 
