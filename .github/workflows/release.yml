@@ -32,10 +32,10 @@ jobs:
         working-directory: crates/nac-server/web
         run: npm ci
 
-      # The build output is committed so that building nac-web never needs Node.
-      # The Make targets also enforce that changes under `web/` ship the matching
-      # bundle and keep local and CI frontend validation in sync.
-      - name: Validate the web app
+      # Generated file icons and the build output are committed so that building
+      # nac-web never needs Node. test-assets regenerates each exactly once and
+      # keeps local and CI frontend validation in sync.
+      - name: Validate the web app and generated assets
         run: make test-web test-assets
 
       - name: Run nac-server tests

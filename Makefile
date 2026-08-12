@@ -1,4 +1,4 @@
-.PHONY: all build dev release install test test-rust test-web test-assets check fmt clippy clean help
+.PHONY: all build dev release install test test-rust test-web test-assets check-file-icons check fmt clippy clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -78,15 +78,27 @@ test-rust:
 test-web:
 	npm --prefix $(WEB_DIR) test
 
-# Mirrors the release workflow: the bundle under assets/dist is committed, so a
-# stale one has to fail here rather than in CI.
-test-assets:
+# Mirrors the release workflow: generated frontend sources and the bundle under
+# assets/dist are committed, so stale output has to fail here rather than in CI.
+test-assets: check-file-icons
 	npm --prefix $(WEB_DIR) run lint
 	npm --prefix $(WEB_DIR) run typecheck
 	npm --prefix $(WEB_DIR) run build
-	@if [ -n "$$(git status --porcelain -- crates/$(PKG)/assets/dist)" ]; then \
+	@if [ -n "$$(git status --porcelain --untracked-files=all -- crates/$(PKG)/assets/dist)" ]; then \
 		printf '%s\n' "error: crates/$(PKG)/assets/dist is stale; commit the rebuilt bundle"; \
-		git status --porcelain -- crates/$(PKG)/assets/dist; \
+		git status --porcelain --untracked-files=all -- crates/$(PKG)/assets/dist; \
+		exit 1; \
+	fi
+
+FILE_ICON_OUTPUTS := crates/$(PKG)/web/src/app/atoms/file-icon/icons \
+	crates/$(PKG)/web/src/app/atoms/file-icon/manifest.generated.ts
+
+## Regenerate file icons and require their committed outputs to be fresh
+check-file-icons:
+	npm --prefix $(WEB_DIR) run sync-file-icons
+	@if [ -n "$$(git status --porcelain --untracked-files=all -- $(FILE_ICON_OUTPUTS))" ]; then \
+		printf '%s\n' "error: generated file icons are stale; run 'npm --prefix $(WEB_DIR) run sync-file-icons' and commit the outputs"; \
+		git status --porcelain --untracked-files=all -- $(FILE_ICON_OUTPUTS); \
 		exit 1; \
 	fi
 
@@ -119,7 +131,8 @@ help:
 		'  test         Run Rust tests and all web validation' \
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-web     Run frontend unit tests' \
-		'  test-assets  Lint, typecheck and rebuild the web app' \
+		'  test-assets  Check generated icons, lint, typecheck and rebuild the web app' \
+		'  check-file-icons  Regenerate file icons and verify committed outputs' \
 		'  check        Run cargo check --workspace --locked' \
 		'  fmt          Run rustfmt' \
 		'  clippy       Run clippy (CLIPPY_ARGS=-D warnings to fail on lints)' \
