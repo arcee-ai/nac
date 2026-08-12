@@ -28,6 +28,24 @@ export interface ThreadLogLine {
   isError: boolean;
 }
 
+/** Opening of the preview a command killed by its own timeout comes back with. */
+const TIMED_OUT_PREVIEW = "Command timed out after";
+
+/**
+ * Whether a finished tool call should read as a failure.
+ *
+ * A command killed by its own timeout leaves no exit code behind, so the call
+ * that ran it reports no error however little of the work got done — the
+ * preview line is the only thing that says the command never finished. Reading
+ * it here is what keeps a timeout out of the log with a ✓ in front of it.
+ */
+export function toolCallFailed(event: {
+  is_error: boolean;
+  content_preview: string;
+}): boolean {
+  return event.is_error || event.content_preview.startsWith(TIMED_OUT_PREVIEW);
+}
+
 /**
  * How one of a thread's events reads in a log, or null for an event that says
  * nothing about what the thread is doing.
@@ -57,7 +75,8 @@ export function threadLogLine(
       };
     }
     case "tool_call_finished": {
-      const mark = event.is_error ? "✕" : "✓";
+      const failed = toolCallFailed(event);
+      const mark = failed ? "✕" : "✓";
       return {
         key: `result-${event.call_id}`,
         text: `${mark} ${event.name}: ${event.content_preview}`,
@@ -65,7 +84,7 @@ export function threadLogLine(
         mark,
         name: event.name,
         body: event.content_preview,
-        isError: event.is_error,
+        isError: failed,
       };
     }
     case "thread_log":
@@ -164,7 +183,11 @@ export interface ToolCallEntry {
 export interface StandaloneLine {
   kind: "log";
   key: string;
-  text: string;
+  /** Leading glyph, kept apart so only it carries the outcome's colour. */
+  mark: string | null;
+  /** Tool the line names — an orphan result has no call line to name it. */
+  name: string | null;
+  body: string;
   isError: boolean;
 }
 
@@ -209,7 +232,9 @@ export function groupThreadLog(lines: ThreadLogLine[]): LogEntry[] {
         entries.push({
           kind: "log",
           key: line.key,
-          text: line.text,
+          mark: line.mark,
+          name: line.name,
+          body: line.body,
           isError: line.isError,
         });
       }
@@ -217,7 +242,9 @@ export function groupThreadLog(lines: ThreadLogLine[]): LogEntry[] {
       entries.push({
         kind: "log",
         key: line.key,
-        text: line.text,
+        mark: line.mark,
+        name: line.name,
+        body: line.body,
         isError: line.isError,
       });
     }
