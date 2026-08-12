@@ -2,7 +2,7 @@
 //! (four commit points), the orchestrator-only construction gate, the
 //! blob ++ log restore merge, and crash/cancel log normalization.
 use super::*;
-
+use crate::test_utils::TempStore;
 
 fn transcript_test_agent(
     client: ModelClient,
@@ -41,14 +41,18 @@ fn transcript_test_agent(
     .expect("agent config must be valid")
 }
 
-fn orchestrator_agent(store_path: PathBuf, session_id: &str, server_url: Option<String>) -> Agent {
+fn orchestrator_agent(
+    store_path: &std::path::Path,
+    session_id: &str,
+    server_url: Option<String>,
+) -> Agent {
     let client = match server_url {
         Some(url) => ModelClient::new_for_test_server(url),
         None => ModelClient::new_for_test(),
     };
     let mut agent = transcript_test_agent(
         client,
-        store_path,
+        store_path.to_path_buf(),
         Some(session_id),
         AgentMode::Orchestrator,
     );
@@ -173,11 +177,10 @@ fn transcript_log_gate_is_orchestrator_with_session_only() {
     );
     assert!(picker.transcript_log.is_none());
 
-    let store_path = crate::test_utils::temp_store_path("gate_orchestrator");
-    crate::store::initialize(&store_path).unwrap();
+    let store = TempStore::initialized("gate_orchestrator");
     let orchestrator = transcript_test_agent(
         ModelClient::new_for_test(),
-        store_path.clone(),
+        store.path().to_path_buf(),
         Some("session"),
         AgentMode::Orchestrator,
     );
@@ -186,24 +189,21 @@ fn transcript_log_gate_is_orchestrator_with_session_only() {
         .as_ref()
         .expect("orchestrator with a session id must have a transcript log");
     assert_eq!(sink.session_id, "session");
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn worker_send_never_writes_transcript_log_rows() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = crate::test_utils::temp_store_path("worker_send");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("worker_send");
+    crate::store::insert_test_session(store.path(), "session");
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
         scripted_text_response("worker answer"),
     )]);
     let mut worker = transcript_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
-        store_path.clone(),
+        store.path().to_path_buf(),
         Some("session"),
         AgentMode::Worker,
     );
@@ -213,20 +213,17 @@ async fn worker_send_never_writes_transcript_log_rows() {
     server.finish();
     assert!(worker.messages.len() > 1);
     assert!(
-        read_log(&store_path, "session").is_empty(),
+        read_log(store.path(), "session").is_empty(),
         "worker runs must not write `__orchestrator__` transcript rows"
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = crate::test_utils::temp_store_path("commit_points");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("commit_points");
+    crate::store::insert_test_session(store.path(), "session");
     let server = ScriptedServer::start(vec![
         ScriptedResponse::json(
             "200 OK",
@@ -237,9 +234,8 @@ async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
         ),
         ScriptedResponse::json("200 OK", scripted_text_response("done")),
     ]);
-    let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
-    store_snapshot_messages(&store_path, &agent.messages);
+    let mut agent = orchestrator_agent(store.path(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(store.path(), &agent.messages);
     // The agent starts with exactly one (system) message, so the prompt lands
     // at absolute idx 1.
     assert_eq!(agent.messages.len(), 1);
@@ -247,7 +243,7 @@ async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
     assert_eq!(agent.send("current").await.unwrap(), "done");
     server.finish();
 
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 5);
     assert_eq!(log[0].0, 1);
     assert!(matches!(log[0].1, Message::User { ref content } if content == "current"));
@@ -276,19 +272,16 @@ async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
             canonical(&agent.messages[idx as usize])
         );
     }
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn steering_delivery_is_logged_after_the_ack() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = crate::test_utils::temp_store_path("steering_commit");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("steering_commit");
+    crate::store::insert_test_session(store.path(), "session");
     let queued = crate::store::queue_thread_steering(
-        &store_path,
+        store.path(),
         "session",
         crate::store::ORCHESTRATOR_STEERING_TARGET,
         "run",
@@ -299,25 +292,26 @@ async fn steering_delivery_is_logged_after_the_ack() {
         "200 OK",
         scripted_text_response("steered answer"),
     )]);
-    let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
-    store_snapshot_messages(&store_path, &agent.messages);
+    let mut agent = orchestrator_agent(store.path(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(store.path(), &agent.messages);
 
     assert_eq!(agent.send("current").await.unwrap(), "steered answer");
     server.finish();
 
     // The ack is durable and the staged message is in the transcript...
-    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
+    let records = crate::store::list_thread_steering(store.path(), "session").unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].status, "delivered");
     assert_eq!(records[0].id, queued.id);
-    assert!(agent
-        .messages
-        .iter()
-        .any(|message| matches!(message, Message::User { content } if content == "steer now")));
+    assert!(
+        agent
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::User { content } if content == "steer now"))
+    );
 
     // ...and the log carries prompt@1, steering@2, assistant@3 in order.
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 3);
     assert_eq!(log[0].0, 1);
     assert!(matches!(log[0].1, Message::User { ref content } if content == "current"));
@@ -327,15 +321,12 @@ async fn steering_delivery_is_logged_after_the_ack() {
     assert!(
         matches!(log[2].1, Message::Assistant { content: Some(ref text), .. } if text == "steered answer")
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn restore_merges_log_tail_over_the_snapshot_blob() {
-    let store_path = crate::test_utils::temp_store_path("merge");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("merge");
+    crate::store::insert_test_session(store.path(), "session");
     let blob = vec![
         Message::System {
             content: "stored system".to_string(),
@@ -343,11 +334,11 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
         user_message("old prompt"),
         plain_assistant("old answer"),
     ];
-    store_snapshot_messages(&store_path, &blob);
+    store_snapshot_messages(store.path(), &blob);
 
     // Crash scenario: the blob is the pre-run snapshot; the log holds the
     // full crashed run appended after it.
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    let writer = crate::store::TranscriptLogWriter::new(store.path()).unwrap();
     writer
         .append_batch(
             "session",
@@ -363,7 +354,7 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
             ],
         )
         .unwrap();
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
 
     agent
         .restore_messages_merging_log_tail(blob, None)
@@ -385,19 +376,16 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
         matches!(agent.messages[6], Message::Assistant { content: Some(ref text), .. } if text == "crashed answer")
     );
     // A complete tail is not normalized away.
-    assert_eq!(read_log(&store_path, "session").len(), 4);
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    assert_eq!(read_log(store.path(), "session").len(), 4);
 }
 
 #[tokio::test]
 async fn restore_with_no_log_tail_matches_the_plain_blob_path() {
-    let store_path = crate::test_utils::temp_store_path("merge_empty");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("merge_empty");
+    crate::store::insert_test_session(store.path(), "session");
 
     // Historical rows below the blob length are not a tail.
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    let writer = crate::store::TranscriptLogWriter::new(store.path()).unwrap();
     writer
         .append("session", 0, &user_message("already snapshotted"))
         .unwrap();
@@ -409,14 +397,14 @@ async fn restore_with_no_log_tail_matches_the_plain_blob_path() {
         user_message("already snapshotted"),
         plain_assistant("answer"),
     ];
-    store_snapshot_messages(&store_path, &blob);
-    let mut merging = orchestrator_agent(store_path.clone(), "session", None);
+    store_snapshot_messages(store.path(), &blob);
+    let mut merging = orchestrator_agent(store.path(), "session", None);
     merging
         .restore_messages_merging_log_tail(blob.clone(), None)
         .await
         .unwrap();
 
-    let mut plain = orchestrator_agent(store_path.clone(), "session", None);
+    let mut plain = orchestrator_agent(store.path(), "session", None);
     plain.restore_messages(blob);
 
     assert_eq!(
@@ -424,26 +412,23 @@ async fn restore_with_no_log_tail_matches_the_plain_blob_path() {
         serde_json::to_value(&plain.messages).unwrap(),
         "an empty log tail must be exactly the pre-log restore path"
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
-    let store_path = crate::test_utils::temp_store_path("merge_trim");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("merge_trim");
+    crate::store::insert_test_session(store.path(), "session");
     let blob = vec![
         Message::System {
             content: "stored system".to_string(),
         },
         user_message("old prompt"),
     ];
-    store_snapshot_messages(&store_path, &blob);
+    store_snapshot_messages(store.path(), &blob);
 
     // The crashed run logged a dangling assistant tool call and a partial
     // tool result: call-2's result never arrived.
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    let writer = crate::store::TranscriptLogWriter::new(store.path()).unwrap();
     writer
         .append_batch(
             "session",
@@ -457,7 +442,7 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
             ],
         )
         .unwrap();
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
 
     agent
         .restore_messages_merging_log_tail(blob, None)
@@ -466,18 +451,15 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
 
     assert_eq!(agent.messages.len(), 2);
     assert!(
-        read_log(&store_path, "session").is_empty(),
+        read_log(store.path(), "session").is_empty(),
         "the dangling log tail must be deleted during crash normalization"
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn restore_recovers_a_non_contiguous_log_tail() {
-    let store_path = crate::test_utils::temp_store_path("merge_gap");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("merge_gap");
+    crate::store::insert_test_session(store.path(), "session");
     let blob = vec![
         Message::System {
             content: "stored system".to_string(),
@@ -489,10 +471,10 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
         user_message("third prompt"),
         plain_assistant("third answer"),
     ];
-    store_snapshot_messages(&store_path, &blob);
+    store_snapshot_messages(store.path(), &blob);
     for (idx, content) in [(8, "orphaned tail"), (9, "later orphan")] {
         crate::store::append_thread_event(
-            &store_path,
+            store.path(),
             "session",
             crate::store::ORCHESTRATOR_STEERING_TARGET,
             &crate::store::encode_transcript_log_entry(idx, &user_message(content)).unwrap(),
@@ -500,7 +482,7 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
         .unwrap();
     }
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
     let repaired = agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -520,8 +502,8 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
         "{warning}"
     );
     assert!(!warning.contains("orphaned tail"), "{warning}");
-    assert!(read_log(&store_path, "session").is_empty());
-    let summary = crate::sessions::list_sessions(&store_path)
+    assert!(read_log(store.path(), "session").is_empty());
+    let summary = crate::sessions::list_sessions(store.path())
         .unwrap()
         .remove(0);
     assert_eq!(summary.visible_message_count, 6);
@@ -531,18 +513,15 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
         .push_and_log_for_test(user_message("next prompt"))
         .await
         .unwrap();
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].0, 7);
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
-    let store_path = crate::test_utils::temp_store_path("merge_gap_snapshot_tool_turn");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("merge_gap_snapshot_tool_turn");
+    crate::store::insert_test_session(store.path(), "session");
     let blob = vec![
         Message::System {
             content: "stored system".to_string(),
@@ -554,16 +533,16 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
         user_message("third prompt"),
         tool_call_assistant(&["call-1"]),
     ];
-    store_snapshot_messages(&store_path, &blob);
+    store_snapshot_messages(store.path(), &blob);
     crate::store::append_thread_event(
-        &store_path,
+        store.path(),
         "session",
         crate::store::ORCHESTRATOR_STEERING_TARGET,
         &crate::store::encode_transcript_log_entry(8, &user_message("orphaned tail")).unwrap(),
     )
     .unwrap();
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
     let repaired = agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -572,8 +551,8 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
 
     assert_eq!(agent.messages.len(), 6);
     assert!(agent.transcript_recovery_warning().is_some());
-    assert!(read_log(&store_path, "session").is_empty());
-    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    assert!(read_log(store.path(), "session").is_empty());
+    let connection = rusqlite::Connection::open(store.path()).unwrap();
     let persisted_json: String = connection
         .query_row(
             "SELECT messages_json FROM sessions WHERE session_id = 'session'",
@@ -589,7 +568,7 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
         "the reported blob is exactly the blob the repair persisted"
     );
     assert_eq!(
-        crate::sessions::list_sessions(&store_path)
+        crate::sessions::list_sessions(store.path())
             .unwrap()
             .remove(0)
             .last_user_prompt
@@ -601,16 +580,13 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
         .push_and_log_for_test(user_message("next prompt"))
         .await
         .unwrap();
-    assert_eq!(read_log(&store_path, "session")[0].0, 6);
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    assert_eq!(read_log(store.path(), "session")[0].0, 6);
 }
 
 #[tokio::test]
 async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
-    let store_path = crate::test_utils::temp_store_path("merge_partial_recovery");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("merge_partial_recovery");
+    crate::store::insert_test_session(store.path(), "session");
     let blob = vec![
         Message::System {
             content: "stored system".to_string(),
@@ -622,16 +598,16 @@ async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
         user_message("third prompt"),
         tool_call_assistant(&["call-1"]),
     ];
-    store_snapshot_messages(&store_path, &blob);
+    store_snapshot_messages(store.path(), &blob);
     // Partial-recovery aftermath: an earlier restore already committed the
     // gap deletion (the untrusted log suffix is gone) but failed before
     // rewriting the snapshot, so the blob still ends in the dangling tool
     // turn and this restore sees neither a gap nor a log tail.
-    assert!(read_log(&store_path, "session").is_empty());
+    assert!(read_log(store.path(), "session").is_empty());
 
     let held_lease =
-        crate::sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+        crate::sessions::SessionOperationLease::try_acquire(store.path(), "session").unwrap();
+    let mut agent = orchestrator_agent(store.path(), "session", None);
     let error = agent
         .restore_messages_merging_log_tail(blob.clone(), None)
         .await
@@ -656,7 +632,7 @@ async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
         agent.transcript_recovery_warning().is_none(),
         "no fresh gap was repaired on this restore"
     );
-    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    let connection = rusqlite::Connection::open(store.path()).unwrap();
     let persisted_json: String = connection
         .query_row(
             "SELECT messages_json FROM sessions WHERE session_id = 'session'",
@@ -678,16 +654,13 @@ async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
         .push_and_log_for_test(user_message("next prompt"))
         .await
         .unwrap();
-    assert_eq!(read_log(&store_path, "session")[0].0, 6);
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    assert_eq!(read_log(store.path(), "session")[0].0, 6);
 }
 
 #[tokio::test]
 async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() {
-    let store_path = crate::test_utils::temp_store_path("merge_stale_snapshot_before_lease");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("merge_stale_snapshot_before_lease");
+    crate::store::insert_test_session(store.path(), "session");
     let stale_blob = vec![
         Message::System {
             content: "stored system".to_string(),
@@ -699,8 +672,8 @@ async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() 
         user_message("third prompt"),
         tool_call_assistant(&["stale-call"]),
     ];
-    store_snapshot_messages(&store_path, &stale_blob[..6]);
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    store_snapshot_messages(store.path(), &stale_blob[..6]);
+    let writer = crate::store::TranscriptLogWriter::new(store.path()).unwrap();
     writer
         .append_batch(
             "session",
@@ -709,7 +682,7 @@ async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() 
         )
         .unwrap();
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
     let refreshed_blob = agent
         .restore_messages_merging_log_tail(stale_blob, None)
         .await
@@ -723,21 +696,18 @@ async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() 
         matches!(&agent.messages[7], Message::Assistant { content: Some(content), .. } if content == "new answer")
     );
     assert_eq!(
-        read_log(&store_path, "session").len(),
+        read_log(store.path(), "session").len(),
         2,
         "rows committed before automatic lease acquisition must remain intact"
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
-    let store_path = crate::test_utils::temp_store_path("cancel");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("cancel");
+    crate::store::insert_test_session(store.path(), "session");
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
     // Seed a realistic mid-run state in both the vec and the log: a dangling
     // assistant tool call (call-2 has no result).
     let seeded = vec![
@@ -751,7 +721,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
             content: "partial output".to_string(),
         },
     ];
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    let writer = crate::store::TranscriptLogWriter::new(store.path()).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
     agent.messages = seeded;
 
@@ -761,7 +731,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     assert!(
         matches!(agent.messages[2], Message::Assistant { content: Some(ref text), .. } if text == "[run cancelled by user]")
     );
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 3);
     assert_eq!(log[2].0, 2);
     assert!(
@@ -770,7 +740,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     );
 
     // No dangling turn: the marker simply appends.
-    let mut clean = orchestrator_agent(store_path.clone(), "session", None);
+    let mut clean = orchestrator_agent(store.path(), "session", None);
     clean.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -780,35 +750,32 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     ];
     clean.append_cancellation_marker().await.unwrap();
     assert_eq!(clean.messages.len(), 4);
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 4);
     assert_eq!(log[3].0, 3);
     assert!(
         matches!(log[3].1, Message::Assistant { content: Some(ref text), .. } if text == "[run cancelled by user]")
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
-    let store_path = crate::test_utils::temp_store_path("cancel_straggler");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("cancel_straggler");
+    crate::store::insert_test_session(store.path(), "session");
 
     // A run-task abort cannot interrupt a spawn_blocking log append once it
     // starts, so the log can hold a row the vec never saw (abort between the
     // append and the vec push). The cancellation marker would reuse that
     // idx, leaving duplicate-idx rows for the restore merge — unless the
     // cancel path deletes the straggler first.
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
     agent.messages = vec![
         Message::System {
             content: "system".to_string(),
         },
         user_message("prompt"),
     ];
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    let writer = crate::store::TranscriptLogWriter::new(store.path()).unwrap();
     writer
         .append_batch(
             "session",
@@ -826,27 +793,24 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
     agent.append_cancellation_marker().await.unwrap();
 
     assert_eq!(agent.messages.len(), 3);
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 3);
     assert_eq!(log[2].0, 2);
     assert!(
         matches!(log[2].1, Message::Assistant { content: Some(ref text), .. } if text == "[run cancelled by user]"),
         "the straggler row must be replaced by the cancellation marker, not duplicated"
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
-    let store_path = crate::test_utils::temp_store_path("normalize_failed");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("normalize_failed");
+    crate::store::insert_test_session(store.path(), "session");
 
     // The post-failure state the run-failure path normalizes: the assistant
     // tool-call message is in the vec AND the log; its tool results are in
     // neither (the tool-batch log append failed atomically).
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = orchestrator_agent(store.path(), "session", None);
     let seeded = vec![
         Message::System {
             content: "system".to_string(),
@@ -854,14 +818,14 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
         user_message("prompt"),
         tool_call_assistant(&["call-1"]),
     ];
-    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    let writer = crate::store::TranscriptLogWriter::new(store.path()).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
     agent.messages = seeded;
 
     agent.normalize_dangling_tail().await.unwrap();
 
     assert_eq!(agent.messages.len(), 2);
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(
         log.len(),
         2,
@@ -871,7 +835,7 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
 
     // A clean transcript is untouched: no trim, and the unconditional tail
     // delete is a no-op when the vec and the log agree.
-    let mut clean = orchestrator_agent(store_path.clone(), "session", None);
+    let mut clean = orchestrator_agent(store.path(), "session", None);
     clean.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -881,20 +845,17 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
     ];
     clean.normalize_dangling_tail().await.unwrap();
     assert_eq!(clean.messages.len(), 3);
-    assert_eq!(read_log(&store_path, "session").len(), 2);
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    assert_eq!(read_log(store.path(), "session").len(), 2);
 }
 
 #[tokio::test]
 async fn steering_log_failure_truncates_the_staged_messages() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = crate::test_utils::temp_store_path("steering_log_failure");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("steering_log_failure");
+    crate::store::insert_test_session(store.path(), "session");
     let queued = crate::store::queue_thread_steering(
-        &store_path,
+        store.path(),
         "session",
         crate::store::ORCHESTRATOR_STEERING_TARGET,
         "run",
@@ -903,7 +864,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     .unwrap();
     // Inject the log failure precisely at the post-ack steering append: the
     // staged message carries the instruction text; the prompt does not.
-    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    let connection = rusqlite::Connection::open(store.path()).unwrap();
     connection
         .execute_batch(
             "CREATE TRIGGER fail_steering_log_append
@@ -920,9 +881,8 @@ async fn steering_log_failure_truncates_the_staged_messages() {
         "200 OK",
         scripted_text_response("after failure"),
     )]);
-    let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
-    store_snapshot_messages(&store_path, &agent.messages);
+    let mut agent = orchestrator_agent(store.path(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(store.path(), &agent.messages);
 
     let error = agent.send("current").await.unwrap_err();
     assert!(
@@ -934,14 +894,14 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     // agree at the pre-staging checkpoint (log-first invariant restored).
     assert_eq!(agent.messages.len(), 2);
     assert!(matches!(agent.messages[1], Message::User { ref content } if content == "current"));
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].0, 1);
     assert!(matches!(log[0].1, Message::User { ref content } if content == "current"));
 
     // The ack is durable: the record stays delivered and is never
     // redelivered, even though its message left the transcript.
-    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
+    let records = crate::store::list_thread_steering(store.path(), "session").unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].id, queued.id);
     assert_eq!(records[0].status, "delivered");
@@ -960,7 +920,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
         )),
         "the acked steering is not redelivered"
     );
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert_eq!(log.len(), 3);
     assert_eq!(log[1].0, 2);
     assert!(matches!(log[1].1, Message::User { ref content } if content == "next"));
@@ -968,7 +928,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
 
     // The restore merge reads the log cleanly (the pre-fix gap failed it
     // loudly and bricked re-attach).
-    let mut restored = orchestrator_agent(store_path.clone(), "session", None);
+    let mut restored = orchestrator_agent(store.path(), "session", None);
     restored
         .restore_messages_merging_log_tail(
             vec![Message::System {
@@ -979,21 +939,18 @@ async fn steering_log_failure_truncates_the_staged_messages() {
         .await
         .unwrap();
     assert_eq!(restored.messages.len(), 4);
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = crate::test_utils::temp_store_path("live_trigger");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("live_trigger");
+    crate::store::insert_test_session(store.path(), "session");
     // Queue steering so the run covers all four commit points: prompt,
     // steering (stage→ack→append), assistant, and the tool-result batch.
     crate::store::queue_thread_steering(
-        &store_path,
+        store.path(),
         "session",
         crate::store::ORCHESTRATOR_STEERING_TARGET,
         "run",
@@ -1007,12 +964,11 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
         ),
         ScriptedResponse::json("200 OK", scripted_text_response("done")),
     ]);
-    let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
-    store_snapshot_messages(&store_path, &agent.messages);
+    let mut agent = orchestrator_agent(store.path(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(store.path(), &agent.messages);
     let bus = crate::events::SessionEventBus::with_thread_event_store(
         Some("session".to_string()),
-        store_path.clone(),
+        store.path().to_path_buf(),
     );
     let mut events = bus.subscribe();
     agent.set_event_sink(EventSink::bus(bus));
@@ -1034,23 +990,20 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
 
     // Live-only: the bus persists nothing for these events — thread_events
     // holds exactly the five transcript log rows and no event rows.
-    assert_eq!(read_log(&store_path, "session").len(), 5);
+    assert_eq!(read_log(store.path(), "session").len(), 5);
     assert!(
-        crate::store::load_all_thread_events(&store_path, "session", 100)
+        crate::store::load_all_thread_events(store.path(), "session", 100)
             .unwrap()
             .is_empty()
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = crate::test_utils::temp_store_path("origin_stamp");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("origin_stamp");
+    crate::store::insert_test_session(store.path(), "session");
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
         serde_json::json!({
@@ -1064,9 +1017,8 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
         })
         .to_string(),
     )]);
-    let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
-    store_snapshot_messages(&store_path, &agent.messages);
+    let mut agent = orchestrator_agent(store.path(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(store.path(), &agent.messages);
 
     assert_eq!(agent.send("current").await.unwrap(), "stamped answer");
     server.finish();
@@ -1093,7 +1045,7 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
         "responses-api reasoning is details-based; no completions field stamp"
     );
 
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     let Message::Assistant {
         model_origin: logged_origin,
         ..
@@ -1105,17 +1057,14 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
         logged_origin, model_origin,
         "the durable row carries the stamp"
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
 async fn errored_turns_never_enter_the_transcript() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let store_path = crate::test_utils::temp_store_path("errored_turn");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
+    let store = TempStore::initialized("errored_turn");
+    crate::store::insert_test_session(store.path(), "session");
     // HTTP 400 is non-retryable: the turn fails immediately, before the
     // assistant push. This pins the S5 precondition that reasoning
     // normalization never has to skip errored assistant messages — they
@@ -1124,9 +1073,8 @@ async fn errored_turns_never_enter_the_transcript() {
         "400 Bad Request",
         serde_json::json!({"error": {"message": "bad request"}}).to_string(),
     )]);
-    let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
-    store_snapshot_messages(&store_path, &agent.messages);
+    let mut agent = orchestrator_agent(store.path(), "session", Some(server.base_url.clone()));
+    store_snapshot_messages(store.path(), &agent.messages);
 
     let error = agent
         .send("current")
@@ -1144,12 +1092,10 @@ async fn errored_turns_never_enter_the_transcript() {
         "no assistant message in the in-memory transcript: {:?}",
         agent.messages
     );
-    let log = read_log(&store_path, "session");
+    let log = read_log(store.path(), "session");
     assert!(
         !log.iter()
             .any(|(_, message)| matches!(message, Message::Assistant { .. })),
         "no assistant row in the durable log: {log:?}"
     );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

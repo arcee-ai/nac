@@ -1,5 +1,5 @@
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -53,10 +53,53 @@ pub(crate) fn temp_store_path(label: &str) -> PathBuf {
         .join("store.db")
 }
 
+pub(crate) struct TempStore(PathBuf);
+
+impl TempStore {
+    pub(crate) fn initialized(label: &str) -> Self {
+        let path = temp_store_path(label);
+        crate::store::initialize(&path).unwrap();
+        Self(path)
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempStore {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.0.parent().unwrap());
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::EnvVarGuard;
+    use super::{EnvVarGuard, TempStore};
     use crate::TEST_ENV_LOCK;
+
+    #[test]
+    fn temp_store_removes_root_on_drop() {
+        let store = TempStore::initialized("normal_cleanup");
+        let root = store.path().parent().unwrap().to_path_buf();
+        assert!(store.path().exists());
+        drop(store);
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn temp_store_removes_root_during_panic_unwind() {
+        let store = TempStore::initialized("panic_cleanup");
+        let root = store.path().parent().unwrap().to_path_buf();
+        assert!(
+            std::panic::catch_unwind(move || {
+                assert!(store.path().exists());
+                panic!("exercise unwind")
+            })
+            .is_err()
+        );
+        assert!(!root.exists());
+    }
 
     #[test]
     fn env_var_guard_restores_absence_after_panic() {
