@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use anyhow::{Context, Result};
@@ -93,8 +94,6 @@ pub struct SandboxConfig {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct WorkerConfig {
     pub thread_timeout_secs: Option<u64>,
-    pub command_output_max_bytes: Option<usize>,
-    pub command_output_session_max_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -561,6 +560,93 @@ pub struct OrchestratorRunConfig {
     pub(crate) resume_base_cwd: PathBuf,
 }
 
+struct PreparedFreshSession {
+    session_id: String,
+    workspace_cwd: PathBuf,
+    config_cwd: PathBuf,
+    working_directory: String,
+    sandbox: Option<SandboxSession>,
+    ssh: Option<SshConnection>,
+    skills: Option<Arc<SkillRegistry>>,
+    agents_md_message: Option<String>,
+    sandbox_status: String,
+    agents_md_status: String,
+    workspace_git: Option<GitTarget>,
+    resume_base_cwd: PathBuf,
+}
+
+fn finish_fresh_session(
+    prepared: PreparedFreshSession,
+    client: ModelClient,
+    settings: EffectiveModelSettings,
+    store_path: PathBuf,
+    worker_executable: Option<PathBuf>,
+    orchestrator_compaction_threshold: Option<u64>,
+    thread_timeout_secs: u64,
+    command_output_limits: crate::terminal::CommandOutputLimits,
+) -> Result<OrchestratorRunConfig> {
+    let sandbox_spec = prepared
+        .sandbox
+        .as_ref()
+        .map(|session| session.spec().clone());
+    let snapshot_ssh = prepared.ssh.clone();
+    let agent = Agent::with_config(
+        client.clone(),
+        AgentConfig {
+            command_output_limits,
+            mode: AgentMode::Orchestrator,
+            store_path: store_path.clone(),
+            session_id: Some(prepared.session_id.clone()),
+            orchestrator_compaction_threshold,
+            initial_messages: Vec::new(),
+            thread_name: None,
+            dispatch_id: None,
+            event_sink: EventSink::none(),
+            workspace_cwd: prepared.workspace_cwd.clone(),
+            config_cwd: prepared.config_cwd,
+            working_directory: prepared.working_directory.clone(),
+            worker_executable,
+            sandbox: prepared.sandbox,
+            ssh: prepared.ssh,
+            mcp: None,
+            skills: prepared.skills,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: prepared.agents_md_message,
+            thread_timeout_secs,
+        },
+    )?;
+    let mut session_snapshot = sessions::new_snapshot(
+        prepared.session_id.clone(),
+        prepared.workspace_cwd,
+        settings.model.clone(),
+        settings.base_url.clone(),
+        settings.backend,
+        settings.reasoning_effort,
+        sandbox_spec,
+        snapshot_ssh,
+        agent.messages.clone(),
+        settings.api_key_env.clone(),
+        settings.extra_headers.clone(),
+    );
+    session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+    sessions::create_session(&store_path, &session_snapshot)?;
+
+    Ok(OrchestratorRunConfig {
+        agent,
+        client,
+        session: OrchestratorSession {
+            session_id: prepared.session_id,
+            store_path,
+            snapshot: session_snapshot,
+        },
+        sandbox_status: prepared.sandbox_status,
+        agents_md_status: prepared.agents_md_status,
+        workspace_display: prepared.working_directory,
+        workspace_git: prepared.workspace_git,
+        resume_base_cwd: prepared.resume_base_cwd,
+    })
+}
+
 impl OrchestratorRunConfig {
     pub fn resume_base_cwd(&self) -> &Path {
         &self.resume_base_cwd
@@ -742,22 +828,6 @@ pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
         .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
 }
 
-pub(crate) fn worker_command_output_limits(
-    config: &NacConfig,
-) -> Result<crate::terminal::CommandOutputLimits> {
-    crate::terminal::CommandOutputLimits {
-        per_command_bytes: config
-            .worker
-            .command_output_max_bytes
-            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES),
-        per_session_bytes: config
-            .worker
-            .command_output_session_max_bytes
-            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES),
-    }
-    .validate()
-}
-
 fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
     let is_ssh = ssh_host
         .map(str::trim)
@@ -807,7 +877,7 @@ pub async fn build_run_config(
 
     let config_paths = PathContext::new(&config_cwd);
     options.ssh.validate(&config_paths)?;
-    if ssh_host.is_some() {
+    let prepared = if ssh_host.is_some() {
         let connection = options
             .ssh
             .connection(&config_paths)
@@ -817,146 +887,74 @@ pub async fn build_run_config(
         let workspace_git = GitTarget::ssh(connection.clone(), remote_cwd.clone(), &config_cwd);
         let session_id = Uuid::new_v4().to_string();
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
-        let agent = Agent::with_config(
-            client.clone(),
-            AgentConfig {
-                command_output_limits: worker_command_output_limits(config)?,
-                mode: AgentMode::Orchestrator,
-                store_path: store_path.clone(),
-                session_id: Some(session_id.clone()),
-                orchestrator_compaction_threshold,
-                initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
-                event_sink: EventSink::none(),
-                workspace_cwd: remote_cwd.clone(),
-                config_cwd: config_cwd.clone(),
-                working_directory: working_directory.clone(),
-                worker_executable: options.worker_executable,
-                sandbox: None,
-                ssh: Some(connection.clone()),
-                mcp: None,
-                skills,
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: worker_thread_timeout_secs(config),
-            },
-        )?;
-        let mut session_snapshot = sessions::new_snapshot(
-            session_id.clone(),
-            remote_cwd,
-            settings.model.clone(),
-            settings.base_url.clone(),
-            settings.backend,
-            settings.reasoning_effort,
-            None,
-            Some(connection),
-            agent.messages.clone(),
-            settings.api_key_env.clone(),
-            settings.extra_headers.clone(),
-        );
-        session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
-        sessions::create_session(&store_path, &session_snapshot)?;
-
-        return Ok(OrchestratorRunConfig {
-            agent,
-            client,
-            session: OrchestratorSession {
-                session_id,
-                store_path,
-                snapshot: session_snapshot,
-            },
+        PreparedFreshSession {
+            session_id,
+            workspace_cwd: remote_cwd,
+            config_cwd: config_cwd.clone(),
+            working_directory,
+            sandbox: None,
+            ssh: Some(connection),
+            skills,
+            agents_md_message: None,
             sandbox_status: "off".to_string(),
             agents_md_status: "off".to_string(),
-            workspace_display: working_directory,
             workspace_git: Some(workspace_git),
             resume_base_cwd: config_cwd,
-        });
-    }
-
-    let workspace_cwd = options.workspace_cwd;
-    let paths = PathContext::new(&workspace_cwd);
-    let sandbox = build_sandbox_session(&sandbox_options, &workspace_cwd).await?;
-    let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
-    let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
-    let (skill_workspace, visibility) = if sandbox.is_some() {
-        (None, SkillPathVisibility::Hidden)
+        }
     } else {
-        (workspace_dir.as_deref(), SkillPathVisibility::Visible)
-    };
-    let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
-    let working_directory = sandbox
-        .as_ref()
-        .map(|session| session.workdir_display())
-        .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let workspace_git = if let Some(session) = sandbox.as_ref() {
-        session.host_workdir().map(GitTarget::local)
-    } else {
-        Some(GitTarget::local(workspace_cwd.clone()))
-    };
-    let sandbox_status = sandbox
-        .as_ref()
-        .map(|session| session.status_text())
-        .unwrap_or_else(|| "off".to_string());
-    let agents_md_message = agents_md.system_message();
-    let agents_md_status = agents_md.status_text();
-
-    let session_id = Uuid::new_v4().to_string();
-    let agent = Agent::with_config(
-        client.clone(),
-        AgentConfig {
-            command_output_limits: worker_command_output_limits(config)?,
-            mode: AgentMode::Orchestrator,
-            store_path: store_path.clone(),
-            session_id: Some(session_id.clone()),
-            orchestrator_compaction_threshold,
-            initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
-            event_sink: EventSink::none(),
-            workspace_cwd: workspace_cwd.clone(),
-            config_cwd: config_cwd.clone(),
-            working_directory: working_directory.clone(),
-            worker_executable: options.worker_executable,
-            sandbox: sandbox.clone(),
-            ssh: None,
-            mcp: None,
-            skills,
-            extra_tool_defs: Vec::new(),
-            agents_md_message,
-            thread_timeout_secs: worker_thread_timeout_secs(config),
-        },
-    )?;
-    let mut session_snapshot = sessions::new_snapshot(
-        session_id.clone(),
-        workspace_cwd.clone(),
-        settings.model.clone(),
-        settings.base_url.clone(),
-        settings.backend,
-        settings.reasoning_effort,
-        sandbox.as_ref().map(|session| session.spec().clone()),
-        None, // fresh local/sandbox sessions carry no ssh_host
-        agent.messages.clone(),
-        settings.api_key_env.clone(),
-        settings.extra_headers.clone(),
-    );
-    session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
-    sessions::create_session(&store_path, &session_snapshot)?;
-
-    Ok(OrchestratorRunConfig {
-        agent,
-        client,
-        session: OrchestratorSession {
+        let workspace_cwd = options.workspace_cwd;
+        let paths = PathContext::new(&workspace_cwd);
+        let sandbox = build_sandbox_session(&sandbox_options, &workspace_cwd).await?;
+        let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
+        let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
+        let (skill_workspace, visibility) = if sandbox.is_some() {
+            (None, SkillPathVisibility::Hidden)
+        } else {
+            (workspace_dir.as_deref(), SkillPathVisibility::Visible)
+        };
+        let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
+        let working_directory = sandbox
+            .as_ref()
+            .map(|session| session.workdir_display())
+            .unwrap_or_else(|| directory_display(&workspace_cwd));
+        let workspace_git = if let Some(session) = sandbox.as_ref() {
+            session.host_workdir().map(GitTarget::local)
+        } else {
+            Some(GitTarget::local(workspace_cwd.clone()))
+        };
+        let sandbox_status = sandbox
+            .as_ref()
+            .map(|session| session.status_text())
+            .unwrap_or_else(|| "off".to_string());
+        let agents_md_message = agents_md.system_message();
+        let agents_md_status = agents_md.status_text();
+        let session_id = Uuid::new_v4().to_string();
+        PreparedFreshSession {
             session_id,
-            store_path,
-            snapshot: session_snapshot,
-        },
-        sandbox_status,
-        agents_md_status,
-        workspace_display: working_directory,
-        workspace_git,
-        resume_base_cwd: workspace_cwd,
-    })
+            workspace_cwd: workspace_cwd.clone(),
+            config_cwd,
+            working_directory,
+            sandbox,
+            ssh: None,
+            skills,
+            agents_md_message,
+            sandbox_status,
+            agents_md_status,
+            workspace_git,
+            resume_base_cwd: workspace_cwd,
+        }
+    };
+
+    finish_fresh_session(
+        prepared,
+        client,
+        settings,
+        store_path,
+        options.worker_executable,
+        orchestrator_compaction_threshold,
+        worker_thread_timeout_secs(config),
+        worker_command_output_limits(config)?,
+    )
 }
 
 pub async fn build_managed_worker_config(
@@ -2312,33 +2310,6 @@ mod tests {
     }
 
     #[test]
-    fn worker_command_output_limits_validate_config() {
-        let mut config = NacConfig::default();
-        let defaults = worker_command_output_limits(&config).unwrap();
-        assert_eq!(
-            defaults.per_command_bytes,
-            crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES
-        );
-        assert_eq!(
-            defaults.per_session_bytes,
-            crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES
-        );
-
-        config.worker.command_output_max_bytes = Some(1_024);
-        config.worker.command_output_session_max_bytes = Some(4_096);
-        assert_eq!(
-            worker_command_output_limits(&config).unwrap(),
-            crate::terminal::CommandOutputLimits {
-                per_command_bytes: 1_024,
-                per_session_bytes: 4_096,
-            }
-        );
-
-        config.worker.command_output_session_max_bytes = Some(512);
-        assert!(worker_command_output_limits(&config).is_err());
-    }
-
-    #[test]
     fn nac_config_loads_new_sections_alongside_existing_mcp() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original_nac_home = std::env::var_os("NAC_HOME");
@@ -2365,8 +2336,6 @@ image = "config-image"
 
 [worker]
 thread_timeout_secs = 7200
-command_output_max_bytes = 8388608
-command_output_session_max_bytes = 67108864
 
 [mcp_servers.context7]
 enabled = true
@@ -2388,11 +2357,6 @@ url = "https://mcp.context7.com/mcp"
         assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-        assert_eq!(config.worker.command_output_max_bytes, Some(8_388_608));
-        assert_eq!(
-            config.worker.command_output_session_max_bytes,
-            Some(67_108_864)
-        );
 
         restore_env("NAC_HOME", original_nac_home);
         let _ = std::fs::remove_dir_all(root);
