@@ -44,9 +44,6 @@ const OVERLAY_FILE_NAME: &str = "anthropic-overlay.json";
 const SIDECAR_FILE_NAME: &str = "anthropic-overlay.sidecar";
 const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 
-// ---------------------------------------------------------------------------
-// Path helpers
-// ---------------------------------------------------------------------------
 
 fn anthropic_overlay_json_path(home: &Path) -> PathBuf {
     overlay_dir(home).join(OVERLAY_FILE_NAME)
@@ -56,9 +53,6 @@ fn anthropic_sidecar_path(home: &Path) -> PathBuf {
     overlay_dir(home).join(SIDECAR_FILE_NAME)
 }
 
-// ---------------------------------------------------------------------------
-// Cache file format
-// ---------------------------------------------------------------------------
 
 /// One entry in the anthropic overlay cache: a model id plus the
 /// capability fields the Anthropic API exposes.
@@ -85,9 +79,6 @@ struct AnthropicOverlayEntry {
     clear_thinking: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Refresh outcome
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AnthropicRefreshOutcome {
@@ -105,9 +96,6 @@ enum AnthropicRefreshOutcome {
     Failed { error: String },
 }
 
-// ---------------------------------------------------------------------------
-// Refresh side: fetch from the Anthropic API and rewrite the overlay
-// ---------------------------------------------------------------------------
 
 /// One refresh attempt; the testable core of [`spawn_anthropic_model_refresh`].
 /// Reads and writes `$NAC_HOME/model-catalog/`.
@@ -198,9 +186,6 @@ async fn fetch_anthropic_models(
         .map_err(|error| format!("reading anthropic models response body: {error}"))
 }
 
-// ---------------------------------------------------------------------------
-// API response → overlay entry mapping
-// ---------------------------------------------------------------------------
 
 /// The subset of the Anthropic `/v1/models` response that the overlay maps.
 /// Tolerant: every field except `id` is optional so schema drift cannot
@@ -391,9 +376,6 @@ fn map_anthropic_model(model: &AnthropicApiModel) -> AnthropicOverlayEntry {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Load side: merge the cached overlay over the baseline
-// ---------------------------------------------------------------------------
 
 /// Merge the cached anthropic overlay over the baseline. Never fails: missing
 /// file → no-op; unreadable/corrupt → typed warning + baseline stays active.
@@ -524,9 +506,6 @@ pub(super) fn merge_anthropic_overlay(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Spawn
-// ---------------------------------------------------------------------------
 
 static REFRESH_SPAWNED: AtomicBool = AtomicBool::new(false);
 

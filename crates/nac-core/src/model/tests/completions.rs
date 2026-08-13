@@ -67,8 +67,8 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
 
 #[test]
 fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
-    // S6 consolidation guard: a single builder, driven only by catalog
-    // compat data, reproduces the four distinct completions request
+    // A single builder driven only by catalog compatibility data reproduces
+    // the four distinct completions request
     // shapes (DeepSeek, Fireworks, Together, Arcee) — including the
     // per-provider reasoning replay field for unstamped (legacy)
     // assistant messages.

@@ -43,7 +43,7 @@ fn both_arcee_backends_preserve_summary_system_order_and_omit_empty_tools() {
             std::collections::BTreeMap::new(),
         );
         // Arcee's request shape comes from the shared completions builder
-        // driven by the provider's catalog compat (S6).
+        // driven by the provider's catalog compatibility data.
         let request = completions_chat_request(
             &client.model,
             client.reasoning_effort,
@@ -567,7 +567,6 @@ async fn arcee_multibyte_error_body_does_not_panic() {
     );
 }
 
-// --- S6: api-axis dispatch + catalog-driven max_tokens -------------------
 
 #[tokio::test]
 async fn send_turn_dispatches_on_the_resolved_api_not_the_backend() {
@@ -634,9 +633,8 @@ async fn openai_send_turn_carries_session_cache_policy_to_the_wire() {
 
 #[tokio::test]
 async fn anthropic_max_tokens_come_from_the_resolved_catalog_metadata() {
-    // S6 intentional behavior change: the Anthropic adapter sends the
-    // per-model catalog max_tokens (models.dev limit.output) instead of
-    // the hardcoded 128_000. Values verified against Anthropic's model
+    // The Anthropic adapter sends each model's catalog max_tokens
+    // (models.dev limit.output). Values are verified against Anthropic's model
     // docs (platform.claude.com/docs/en/about-claude/models/overview).
     for (model, expected) in [
         ("claude-opus-4-6", 128_000_u64),

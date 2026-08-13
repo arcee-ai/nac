@@ -206,7 +206,7 @@ fn calculate_cost_bills_1h_cache_writes_at_the_1h_rate() {
 
 #[test]
 fn old_token_usage_rows_deserialize_with_zero_cost() {
-    // The pre-S3 persisted shape: no `cost` field anywhere.
+    // Legacy persisted rows have no `cost` field.
     let old_usage = json!({
         "input_tokens": 100,
         "output_tokens": 50,
@@ -220,8 +220,8 @@ fn old_token_usage_rows_deserialize_with_zero_cost() {
     assert_eq!(usage.orchestrator_context_tokens, 380);
     assert_eq!(usage.cost, TokenCostMicros::default());
 
-    // A stored token_usages_json row (Vec<Option<TokenUsage>>) from before
-    // S3 parses with zero cost.
+    // A legacy token_usages_json row (Vec<Option<TokenUsage>>) parses with
+    // zero cost.
     let old_row = json!([
         {
             "input_tokens": 10,

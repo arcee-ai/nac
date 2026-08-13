@@ -75,9 +75,6 @@ fn overlay_etag_path(home: &Path) -> PathBuf {
     overlay_dir(home).join(ETAG_FILE_NAME)
 }
 
-// ---------------------------------------------------------------------------
-// Load side: merge the cached overlay over the baseline
-// ---------------------------------------------------------------------------
 
 /// The overlay document. `providers` decodes tolerantly (per-provider) so
 /// one unknown provider or malformed entry cannot sink the whole overlay.
@@ -189,9 +186,6 @@ fn baseline_generated_at() -> Option<String> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Refresh side: revalidate models.dev and rewrite the overlay
-// ---------------------------------------------------------------------------
 
 /// Revalidation state persisted across processes: the last-seen ETag and
 /// the last SUCCESSFUL fetch/304 time (the cadence gate). Failures do not
@@ -423,9 +417,6 @@ pub(crate) fn reset_refresh_for_test() {
     REFRESH_SPAWNED.store(false, Ordering::SeqCst);
 }
 
-// ---------------------------------------------------------------------------
-// models.dev → overlay mapping (runtime counterpart of nac-catalog-gen)
-// ---------------------------------------------------------------------------
 
 /// Runtime models.dev model schema: only the fields the overlay maps.
 /// Unlike the generator (which hard-errors on `reasoning_options` drift at
@@ -815,9 +806,6 @@ fn seed_thinking_map(baseline: &ModelCatalog, provider: BackendKind, id: &str) -
         .unwrap_or_default()
 }
 
-// ---------------------------------------------------------------------------
-// Time, shape checks and atomic writes
-// ---------------------------------------------------------------------------
 
 pub(super) fn unix_now() -> u64 {
     SystemTime::now()

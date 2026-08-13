@@ -35,9 +35,6 @@ use std::time::Duration;
 const OVERLAY_FILE_NAME: &str = "arcee-overlay.json";
 const SIDECAR_FILE_NAME: &str = "arcee-overlay.sidecar";
 
-// ---------------------------------------------------------------------------
-// Path helpers
-// ---------------------------------------------------------------------------
 
 fn arcee_overlay_json_path(home: &Path) -> PathBuf {
     overlay_dir(home).join(OVERLAY_FILE_NAME)
@@ -47,9 +44,6 @@ fn arcee_sidecar_path(home: &Path) -> PathBuf {
     overlay_dir(home).join(SIDECAR_FILE_NAME)
 }
 
-// ---------------------------------------------------------------------------
-// Cache file format
-// ---------------------------------------------------------------------------
 
 /// One entry in the arcee overlay cache: a model id plus the
 /// [`GeneratedModel`] fields (flattened for a flat JSON array).
@@ -60,9 +54,6 @@ pub(super) struct ArceeOverlayEntry {
     model: GeneratedModel,
 }
 
-// ---------------------------------------------------------------------------
-// Refresh outcome
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ArceeRefreshOutcome {
@@ -80,9 +71,6 @@ pub(crate) enum ArceeRefreshOutcome {
     Failed { error: String },
 }
 
-// ---------------------------------------------------------------------------
-// Refresh side: fetch from the arcee API and rewrite the overlay
-// ---------------------------------------------------------------------------
 
 /// One refresh attempt; the testable core of [`spawn_arcee_model_refresh`].
 /// Reads and writes `$NAC_HOME/model-catalog/`.
@@ -217,9 +205,6 @@ async fn fetch_arcee_models_managed(client: &reqwest::Client) -> Result<String, 
         .map_err(|error| format!("reading arcee models response body: {error}"))
 }
 
-// ---------------------------------------------------------------------------
-// API response → GeneratedModel mapping
-// ---------------------------------------------------------------------------
 
 /// The subset of the arcee API `/v1/models` response that the overlay maps.
 /// Tolerant: every field except `id` is optional so schema drift cannot break
@@ -435,9 +420,6 @@ fn parse_effort(s: &str) -> Option<ReasoningEffort> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Load side: merge the cached overlay over the seed catalog
-// ---------------------------------------------------------------------------
 
 /// Merge the cached arcee overlay over the baseline. Never fails: missing
 /// file → no-op; unreadable/corrupt → typed warning + seed models stay
@@ -492,9 +474,6 @@ pub(super) fn merge_arcee_overlay(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Spawn
-// ---------------------------------------------------------------------------
 
 static REFRESH_SPAWNED: AtomicBool = AtomicBool::new(false);
 

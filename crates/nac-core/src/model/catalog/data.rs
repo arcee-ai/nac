@@ -1,4 +1,4 @@
-//! Checked-in generated baseline (S1).
+//! Checked-in generated baseline.
 //!
 //! `catalog.json` is emitted by `cargo run -p nac-catalog-gen` from a
 //! models.dev snapshot plus the curated `overrides.toml` matrix
@@ -16,11 +16,11 @@
 //! provider endpoint default). `provider`/`api`
 //! are hydrated from the provider key and `compat` is inherited from the
 //! provider's seed default, so known and unknown models of a provider stay
-//! identical at adapter-consolidation time (S6). `cache_write_1h` is not
-//! models.dev data; S3's cost computation applies the 2x-input default
+//! identical at adapter dispatch. `cache_write_1h` is not models.dev data;
+//! cost computation applies the 2x-input default
 //! when `None`.
 //!
-//! The same record shape backs the S2 runtime overlay (`overlay.rs`), which
+//! The same record shape backs the runtime overlay (`overlay.rs`), which
 //! reuses [`hydrate_entry`] with `ModelSource::Overlay`.
 
 use super::{api_kind_for, ModelCatalog, ModelMetadata, ModelSource};
@@ -102,8 +102,8 @@ pub(crate) fn parse_manifest() -> Result<GeneratedManifest, serde_json::Error> {
 
 /// Hydrate a generated/overlay record into full metadata: provider and api
 /// come from the provider key, `compat` is inherited from the provider's
-/// seed default (known and unknown models stay identical for S6), and
-/// `cache_write_1h` stays unset (S3 applies the 2x-input default).
+/// seed default (known and unknown models stay wire-compatible), and
+/// `cache_write_1h` stays unset so cost computation applies the 2x-input default.
 pub(super) fn hydrate_entry(
     provider: BackendKind,
     id: String,

@@ -26,9 +26,8 @@ fn anthropic_request_omits_none_and_maps_supported_efforts_exactly() {
             false,
         )
         .unwrap();
-        // S6: max_tokens is the resolved catalog value — the conservative
-        // 16_384 fallback for a model with no catalog entry (previously
-        // the hardcoded 128_000 for every Anthropic model).
+        // max_tokens is the resolved catalog value: models with no catalog
+        // entry use the conservative 16_384 fallback.
         assert_eq!(request["max_tokens"], 16_384);
         assert!(request.get("thinking").is_none());
         assert!(request.get("output_config").is_none());

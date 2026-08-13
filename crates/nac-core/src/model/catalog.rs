@@ -4,12 +4,11 @@
 //!
 //! 1. the hand-written seed catalog (every provider's `_default` entry,
 //!    transcribing the `backend.rs` effort-validation matrix into data);
-//! 2. the generated models.dev baseline (S1; per-model limits, cost rates
-//!    and matrix-conformant thinking maps for the five models.dev
-//!    providers), embedded via `include_str!`;
-//! 3. the runtime overlay (S2): `$NAC_HOME/model-catalog/overlay.json`,
-//!    refreshed in the background from models.dev — see `overlay.rs`;
-//! 4. user overrides (S2): `$NAC_HOME/models.json` — see
+//! 2. the generated models.dev baseline, with per-model limits, cost rates,
+//!    and provider-specific thinking maps, embedded via `include_str!`;
+//! 3. the runtime overlay at `$NAC_HOME/model-catalog/overlay.json`, refreshed
+//!    in the background from models.dev — see `overlay.rs`;
+//! 4. user overrides at `$NAC_HOME/models.json` — see
 //!    `user_overrides.rs`.
 //!
 //! Unknown models fall back to a clone of the provider's `_default` entry
@@ -17,8 +16,7 @@
 //! local-only — no network, no credentials — so the session picker and
 //! resume paths stay credential-free; the overlay refresh only ever runs
 //! as a fire-and-forget task spawned from server/CLI startup. Validation
-//! (S4) and adapter effort translation read these maps; adapter dispatch
-//! consolidation (S6) follows.
+//! and adapter effort translation both read these maps.
 
 use crate::model::{managed_backend_base_url, BackendKind};
 use std::collections::BTreeMap;
@@ -202,8 +200,7 @@ struct ProviderCatalog {
 
 impl ProviderCatalog {
     /// The single implementation of the resolution chain: exact entry, then
-    /// a dated-snapshot family match (`name-YYYYMMDD` → `name`, the pre-S4
-    /// `backend.rs` Anthropic family rule, now generic), then a clone of the
+    /// a dated-snapshot family match (`name-YYYYMMDD` → `name`), then a clone of the
     /// provider's `_default` entry with the id swapped in and `source`
     /// re-marked `ProviderDefault` (pi's buildFallbackModel pattern).
     /// `ModelCatalog::resolve`, user overrides and the overlay's seed-map
@@ -336,8 +333,7 @@ impl ModelCatalog {
     }
 }
 
-/// Strip a `-YYYYMMDD` dated-snapshot suffix — the family-matching rule
-/// `backend.rs` used for Anthropic families before S4, now generic over
+/// Strip a `-YYYYMMDD` dated-snapshot suffix for family matching across
 /// every provider's catalog entries.
 pub(super) fn dated_snapshot_family(model: &str) -> Option<&str> {
     let (base, snapshot) = model.rsplit_once('-')?;
@@ -475,8 +471,8 @@ pub fn api_listing() -> ModelListing {
     }
 }
 
-/// Reload the process-global catalog from local sources. S2's overlay
-/// refresh calls this after writing a new overlay; tests pair it with
+/// Reload the process-global catalog from local sources. The overlay refresh
+/// calls this after writing a new overlay; tests pair it with
 /// `TEST_ENV_LOCK` for isolation.
 pub(crate) fn reload() {
     let mut catalog = CATALOG

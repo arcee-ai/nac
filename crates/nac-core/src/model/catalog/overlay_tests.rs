@@ -96,9 +96,6 @@ fn refresh_cadence_has_strict_boundary_and_tolerates_future_timestamps() {
     assert!(is_within_refresh_cadence(now + 1, now));
 }
 
-// ---------------------------------------------------------------------------
-// Refresh: 200 / 304 / errors / timeout / cadence
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
@@ -563,9 +560,6 @@ async fn spawn_overlay_refresh_runs_once_and_updates_the_catalog() {
     assert_eq!(server.finish().len(), 1);
 }
 
-// ---------------------------------------------------------------------------
-// Zero-network contract of the resolution/validation paths
-// ---------------------------------------------------------------------------
 
 #[test]
 fn resolution_and_validation_paths_never_touch_the_network() {
@@ -622,9 +616,6 @@ fn resolution_and_validation_paths_never_touch_the_network() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Overlay load: stale / corrupt / merge precedence over the baseline
-// ---------------------------------------------------------------------------
 
 #[test]
 fn overlay_older_than_baseline_is_ignored() {
@@ -760,9 +751,6 @@ fn overlay_load_skips_unknown_and_malformed_providers() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Runtime mapper parity with the generator pipeline
-// ---------------------------------------------------------------------------
 
 /// The recorded models.dev snapshot the checked-in baseline was generated
 /// from (the generator's golden fixture pins byte-identical regen).
@@ -1044,9 +1032,6 @@ fn overlay_credential_env_var_upgrades_and_never_erases() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Small units: time formatting, timestamp shape, sidecar IO
-// ---------------------------------------------------------------------------
 
 #[test]
 fn is_utc_iso8601_checks_shape() {

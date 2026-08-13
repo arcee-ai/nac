@@ -57,12 +57,12 @@ fn supported_effort_values(map: &ThinkingLevelMap) -> String {
     }
 }
 
-/// Validate effort values against the model's catalog thinking map (S4).
+/// Validate effort values against the model's catalog thinking map.
 ///
 /// Known models resolve to their catalog entry (dated snapshots resolve
 /// through their family entry); unknown models resolve to the provider's
-/// `_default` entry, which encodes the conservative pre-S4 validation
-/// matrix, so unknown models keep the historical conservative rejection.
+/// `_default` entry, which encodes the conservative validation matrix, so
+/// unknown models retain conservative rejection.
 /// No backend receives an application-selected default, and an explicitly
 /// configured effort is rejected — never clamped — when the map does not
 /// support it.

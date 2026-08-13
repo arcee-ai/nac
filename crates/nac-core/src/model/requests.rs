@@ -1,7 +1,7 @@
 use super::pseudo_tool_calls::strip_native_tool_format_tags;
 use super::*;
 
-/// Wire value for an effort level that passed catalog validation (S4).
+/// Wire value for an effort level that passed catalog validation.
 /// `EffectiveModelSettings` construction rejects unsupported levels, so a
 /// missing map entry here means validation was bypassed — a bug.
 pub(super) fn validated_wire_effort(
@@ -41,11 +41,10 @@ pub(super) fn completions_message_to_value(
                 "content": content,
             });
             if let Some(reasoning_text) = reasoning_text {
-                // Replay under the field the provider originally used (S5
-                // field-name discipline: together sends "reasoning", the
-                // other completions providers "reasoning_content"). Unstamped
-                // (legacy) messages fall back to the provider's catalog
-                // compat field (S6).
+                // Replay under the field the provider originally used: Together sends
+                // "reasoning" and the other completions providers send
+                // "reasoning_content". Unstamped legacy messages fall back to the
+                // provider's catalog compatibility field.
                 let field = reasoning_field
                     .as_deref()
                     .unwrap_or(default_reasoning_field);
@@ -134,12 +133,12 @@ pub(super) fn openai_responses_tool_to_value(tool: &ToolDefinition) -> Value {
     })
 }
 
-/// The single OpenAI-completions-family request builder (S6). Every
+/// The single OpenAI-completions-family request builder. Every
 /// per-provider difference comes from the catalog `Compat` data:
 /// `completions_reasoning_field` drives reasoning replay, an explicit
 /// `completions_temperature` is sent when the provider accepts one, and
 /// `completions_thinking_format` selects the thinking-control dialect.
-/// Effort wire values come from the catalog thinking map (S4).
+/// Effort wire values come from the catalog thinking map.
 pub(super) fn completions_chat_request(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,

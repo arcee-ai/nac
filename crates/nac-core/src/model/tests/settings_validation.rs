@@ -353,11 +353,9 @@ fn effective_settings_validate_reasoning_before_client_or_persistence() {
 
 #[test]
 fn anthropic_reasoning_rejection_is_a_typed_configuration_error() {
-    // Residue of the pre-S4 capability-matrix test: the per-family
-    // accept/reject behavior it pinned is now guarded exhaustively against
-    // the independent matrix transcription by the catalog guards
-    // (catalog/tests.rs); what remains unique here is the typed-error
-    // contract of a rejected Anthropic model/effort pair.
+    // Catalog guards exhaustively check per-family acceptance against the
+    // independent matrix transcription; this test pins the typed-error contract
+    // for a rejected Anthropic model/effort pair.
     let error = validate_model_reasoning_effort(
         BackendKind::AnthropicMessages,
         "claude-sonnet-4-6",
@@ -371,9 +369,8 @@ fn anthropic_reasoning_rejection_is_a_typed_configuration_error() {
 
 #[test]
 fn validation_error_messages_are_preserved_verbatim() {
-    // S4 derives the "supported values" list from the model's catalog
-    // map; the user-facing error strings are byte-identical to the
-    // pre-S4 matrix errors.
+    // The model's catalog map determines the supported-values list; pin the
+    // user-facing error strings byte-for-byte.
     let cases: &[(BackendKind, &str, ReasoningEffort, &str)] = &[
         (
             BackendKind::DeepSeekChat,

@@ -119,11 +119,11 @@ pub struct ModelCostRates {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelSource {
-    /// Checked-in baseline catalog (S0 seed; generated models.dev data in S1).
+    /// Checked-in seed and generated models.dev baseline catalog.
     Baseline,
-    /// Refreshed remote overlay under `$NAC_HOME/model-catalog/` (S2).
+    /// Refreshed remote overlay under `$NAC_HOME/model-catalog/`.
     Overlay,
-    /// User overrides from `$NAC_HOME/models.json` (S2).
+    /// User overrides from `$NAC_HOME/models.json`.
     UserOverride,
     /// Provider `_default` entry cloned for an unknown model id (pi's
     /// buildFallbackModel pattern).
@@ -151,8 +151,8 @@ pub struct ModelMetadata {
     pub context_window: u64,
     pub max_tokens: u64,
     pub cost: ModelCostRates,
-    /// Anthropic 1-hour-TTL cache-write rate; defaults to 2x input at cost
-    /// computation time (S3).
+    /// Anthropic 1-hour-TTL cache-write rate; defaults to 2x input during
+    /// cost computation.
     pub cache_write_1h: Option<f64>,
     /// Whether the model reasons at all (models.dev `reasoning` flag).
     /// Served by the `/models` listing (`api_listing`); the frontend hides
