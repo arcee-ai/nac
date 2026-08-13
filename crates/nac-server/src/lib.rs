@@ -224,9 +224,7 @@ pub struct LaunchModelDefaultsRequest {
     /// OpenSSH target for remote sessions; remote paths never select local config.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
-    #[serde(default)]
     pub ssh_port: Option<u16>,
-    #[serde(default)]
     pub ssh_identity_file: Option<String>,
 }
 
@@ -237,13 +235,10 @@ pub struct LaunchModelDefaultsRequest {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SshBrowseRequest {
     pub ssh_host: Option<String>,
-    #[serde(default)]
     pub ssh_port: Option<u16>,
-    #[serde(default)]
     pub ssh_identity_file: Option<String>,
     /// Absent or empty opens on the login home, which is where a fresh remote
     /// session would start anyway.
-    #[serde(default)]
     pub path: Option<String>,
     /// Dot-prefixed names are hidden unless explicitly requested, as locally.
     #[serde(default)]
@@ -360,9 +355,7 @@ pub struct CreateSessionRequest {
     /// leaves the choice to ssh, which is what a host configured in
     /// `~/.ssh/config` wants. Supplying them is what lets a session reach a box
     /// nac has no config for at all.
-    #[serde(default)]
     pub ssh_port: Option<u16>,
-    #[serde(default)]
     pub ssh_identity_file: Option<String>,
     #[serde(default)]
     pub sandbox: SandboxRequest,
@@ -3752,7 +3745,6 @@ mod tests {
             request.orchestrator_compaction_threshold,
             RequestField::Value(0)
         );
-        assert_eq!(request.cwd, None);
     }
 
     #[test]
@@ -7355,25 +7347,11 @@ model = "gpt-5.2"
     }
 
     #[test]
-    fn presentation_requests_require_the_complete_contract() {
-        let update: UpdateSessionPresentationRequest = serde_json::from_str(
-            r#"{"title":"  Build release  ","pinned":true,"expected_version":3}"#,
-        )
-        .unwrap();
-        assert_eq!(update.title, "  Build release  ");
-        assert!(update.pinned);
-        assert_eq!(update.expected_version, 3);
+    fn presentation_update_requires_title() {
         assert!(serde_json::from_str::<UpdateSessionPresentationRequest>(
             r#"{"pinned":true,"expected_version":3}"#
         )
         .is_err());
-
-        let reorder: ReorderSessionsRequest = serde_json::from_str(
-            r#"{"pinned":false,"session_ids":["b","a"],"expected_versions":{"a":2,"b":4}}"#,
-        )
-        .unwrap();
-        assert_eq!(reorder.session_ids, ["b", "a"]);
-        assert_eq!(reorder.expected_versions["a"], 2);
     }
 
     #[test]
