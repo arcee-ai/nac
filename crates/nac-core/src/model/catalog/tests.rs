@@ -317,7 +317,7 @@ fn wire_level_special_cases_are_encoded_in_data() {
 
     // Arcee's _default entry has the Arcee thinking format (bare
     // reasoning_effort) but an empty thinking_level_map, so unknown models
-    // accept no explicit effort levels. The passthrough models get their
+    // accept no explicit effort levels. The third-party models get their
     // effort maps from the arcee overlay at runtime.
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         let arcee = resolve(backend, "arcee-model");
@@ -486,13 +486,71 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
             assert_eq!(metadata.cost.cache_write, 0.0, "{backend}/{id}");
             assert_eq!(metadata.reasoning, *reasoning, "{backend}/{id}");
             // Trinity models accept no explicit effort levels (empty map).
-            // The passthrough models get their maps from the arcee overlay.
+            // The seeded third-party models carry their own maps (see the
+            // arcee_third-party_models_are_seeded_with_real_limits test).
             assert!(metadata.thinking_level_map.0.is_empty(), "{backend}/{id}");
             // The completions compat matches the provider default.
             let default = resolve(backend, "model-with-no-catalog-entry");
             assert_eq!(metadata.compat, default.compat, "{backend}/{id}");
         }
     }
+}
+
+#[test]
+fn arcee_third_party_models_are_seeded_with_real_limits() {
+    // The frontend's default pick (deepseek/deepseek-v4-flash-latest) and the
+    // other third-party models must resolve to real seeded limits even before
+    // the live arcee overlay loads — otherwise they fall through to the
+    // provider `_default` clone and requests go out with the 16k fallback
+    // max_tokens (issue #124). Limits follow the underlying models' published
+    // values, max output capped at 256k.
+    for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
+        for seed in super::seed::ARCEE_THIRD_PARTY_SEED_MODELS {
+            let id = seed.id;
+            let metadata = resolve(backend, id);
+            assert_eq!(metadata.id, id, "{backend}/{id}");
+            assert_eq!(metadata.source, ModelSource::Baseline, "{backend}/{id}");
+            assert_eq!(
+                metadata.display_name.as_deref(),
+                Some(seed.display_name),
+                "{backend}/{id}"
+            );
+            assert_eq!(metadata.context_window, seed.context_window, "{backend}/{id}");
+            assert_eq!(metadata.max_tokens, seed.max_tokens, "{backend}/{id}");
+            assert!(metadata.reasoning, "{backend}/{id}");
+            // The seeded map carries exactly the table's effort tiers.
+            for (effort, wire) in seed.efforts {
+                assert_eq!(
+                    metadata.thinking_level_map.wire_value(*effort),
+                    Some(*wire),
+                    "{backend}/{id} {}",
+                    effort.as_str()
+                );
+            }
+            assert_eq!(
+                metadata.thinking_level_map.0.len(),
+                seed.efforts.len(),
+                "{backend}/{id}"
+            );
+            // The completions compat matches the provider default.
+            let default = resolve(backend, "model-with-no-catalog-entry");
+            assert_eq!(metadata.compat, default.compat, "{backend}/{id}");
+        }
+    }
+    // Spot-check the family differences: deepseek tops out at max, kimi has
+    // no `none` (thinking is always enabled), minimax is a none/max toggle.
+    let flash = resolve(BackendKind::ArceeAuth, "deepseek/deepseek-v4-flash-latest");
+    assert_eq!(
+        flash.thinking_level_map.wire_value(ReasoningEffort::Max),
+        Some("max")
+    );
+    let kimi = resolve(BackendKind::ArceeAuth, "moonshotai/kimi-k3");
+    assert_eq!(kimi.thinking_level_map.wire_value(ReasoningEffort::None), None);
+    let minimax = resolve(BackendKind::ArceeAuth, "minimaxai/minimax-m3");
+    assert_eq!(
+        minimax.thinking_level_map.wire_value(ReasoningEffort::High),
+        None
+    );
 }
 
 #[test]
@@ -548,13 +606,16 @@ fn generated_baseline_merges_real_models_dev_data_over_the_seeds() {
 }
 
 #[test]
-fn arcee_passthrough_without_output_limit_gets_a_large_safe_default() {
+fn arcee_third_party_without_output_limit_gets_a_large_safe_default() {
+    // A third-party id with a sparse API record falls back to its seeded
+    // limits (262_144 for deepseek-v4-pro), so pre- and post-overlay values
+    // agree; trinity-large-thinking keeps its documented 80k.
     let entries = arcee_overlay::map_arcee_api_response(
         r#"{"data":[{"id":"deepseek-ai/deepseek-v4-pro","context_length":512000},{"id":"trinity-large-thinking","context_length":128000}]}"#,
     )
     .unwrap();
     let entry = serde_json::to_value(&entries[0]).unwrap();
-    assert_eq!(entry["max_tokens"], 256_000);
+    assert_eq!(entry["max_tokens"], 262_144);
     assert_eq!(
         serde_json::to_value(&entries[1]).unwrap()["max_tokens"],
         80_000
@@ -616,10 +677,10 @@ fn generated_entries_satisfy_catalog_invariants() {
             }
         }
     }
-    // Snapshot pin: 78 agent-compatible generated models plus 11 hand-seeded
+    // Snapshot pin: 79 agent-compatible generated models plus 21 hand-seeded
     // entries (2 deprecated deepseek models removed). Drift fails loudly here
     // at regen/seed-edit time, forcing a deliberate review.
-    assert_eq!(entry_count, 90, "catalog model count drifted");
+    assert_eq!(entry_count, 100, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -640,6 +701,16 @@ fn every_generated_entry_preserves_the_validation_matrix() {
     // because every writer is serialized by TEST_ENV_LOCK, which this test
     // holds.)
     let catalog = current();
+    // Seeded arcee third-party models are the documented exception: the
+    // pre-S4 matrix rejects every explicit effort on arcee, but these models
+    // accept effort in production whenever the live arcee overlay is loaded
+    // (the overlay stamps the same maps). Seeding the maps makes the
+    // pre-overlay behavior match the post-overlay behavior instead of
+    // flipping validation when the overlay lands.
+    let matrix_exempt: Vec<&str> = super::seed::ARCEE_THIRD_PARTY_SEED_MODELS
+        .iter()
+        .map(|model| model.id)
+        .collect();
     for (provider, provider_catalog) in &catalog.providers {
         if matches!(
             provider,
@@ -650,6 +721,11 @@ fn every_generated_entry_preserves_the_validation_matrix() {
         for (id, metadata) in &provider_catalog.models {
             assert_eq!(metadata.id, *id, "{provider}/{id}");
             assert_eq!(metadata.source, ModelSource::Baseline, "{provider}/{id}");
+            if matches!(*provider, BackendKind::ArceeAuth | BackendKind::ArceeApi)
+                && matrix_exempt.contains(&id.as_str())
+            {
+                continue;
+            }
             for effort in ALL_EFFORTS {
                 let matrix = pre_s4_matrix_accepts(*provider, id, effort);
                 let supported = metadata.thinking_level_map.is_supported(effort);
@@ -1100,7 +1176,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 90, "catalog model count drifted");
+    assert_eq!(total, 100, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks
@@ -1127,7 +1203,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
             .iter()
             .find(|provider| provider.id == backend)
             .unwrap();
-        assert_eq!(provider.models.len(), 3, "{backend}");
+        assert_eq!(provider.models.len(), 8, "{backend}");
         assert!(
             provider
                 .models

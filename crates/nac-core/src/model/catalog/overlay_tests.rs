@@ -1085,3 +1085,42 @@ fn overlay_provider_snapshot_retires_missing_baseline_models() {
     assert_eq!(provider.models.len(), 1);
     assert!(!provider.models.contains_key("deepseek-chat"));
 }
+
+#[test]
+fn arcee_overlay_load_caps_healed_max_tokens_at_context_window() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let home = TempHome::new("arcee-heal-cap");
+    // A stale cache entry from before the fallback heal existed: sparse
+    // context window with the old 16k fallback max_tokens. The heal replaces
+    // 16k with the seeded 256k, which must then be capped at the entry's
+    // context window (mirroring `map_arcee_model`).
+    let dir = overlay_dir(home.path());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("arcee-overlay.json"),
+        serde_json::json!([{
+            "id": "deepseek/deepseek-v4-flash-latest",
+            "display_name": "DeepSeek-V4-Flash",
+            "context_window": 128_000,
+            "max_tokens": 16_384,
+            "cost": { "input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0 },
+            "reasoning": true,
+            "thinking_level_map": {},
+            "adaptive_thinking": false,
+            "enabled_thinking": false,
+            "context_management": false,
+            "clear_thinking": false
+        }])
+        .to_string(),
+    )
+    .unwrap();
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let metadata = catalog.resolve(
+        BackendKind::ArceeAuth,
+        "deepseek/deepseek-v4-flash-latest",
+    );
+    assert_eq!(metadata.max_tokens, 128_000);
+}

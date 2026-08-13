@@ -189,11 +189,11 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         "Arcee: effort-free shape (bare reasoning_effort dialect)"
     );
 
-    // Arcee passthrough models: the Arcee format sends bare
+    // Arcee third-party models: the Arcee format sends bare
     // `reasoning_effort` — no `thinking`, `reasoning_history`, or
     // `chat_template_kwargs` wrapper objects. The wire value comes from the
-    // catalog map (max → "max" for deepseek passthrough models).
-    let arcee_passthrough_levels = ThinkingLevelMap(std::collections::BTreeMap::from([
+    // catalog map (max → "max" for deepseek third-party models).
+    let arcee_third_party_levels = ThinkingLevelMap(std::collections::BTreeMap::from([
         (ReasoningEffort::None, Some("none".to_string())),
         (ReasoningEffort::High, Some("high".to_string())),
         (ReasoningEffort::Max, Some("max".to_string())),
@@ -208,7 +208,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         Some(ReasoningEffort::None),
         &messages,
         &[],
-        &arcee_passthrough_levels,
+        &arcee_third_party_levels,
         &arcee_compat,
         CompletionsMessageShape::Standard,
     );
@@ -223,7 +223,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         Some(ReasoningEffort::High),
         &messages,
         &[],
-        &arcee_passthrough_levels,
+        &arcee_third_party_levels,
         &arcee_compat,
         CompletionsMessageShape::Standard,
     );
@@ -238,7 +238,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         Some(ReasoningEffort::Max),
         &messages,
         &[],
-        &arcee_passthrough_levels,
+        &arcee_third_party_levels,
         &arcee_compat,
         CompletionsMessageShape::Standard,
     );
