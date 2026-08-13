@@ -471,7 +471,13 @@ async fn mutate_mounted(
 ) -> ToolResult {
     #[cfg(unix)]
     {
-        let create_parents = matches!(&request, MutationRequest::Write { .. });
+        let create_parents = matches!(
+            &request,
+            MutationRequest::Write {
+                expected_revision: None,
+                ..
+            }
+        );
         let identity = match root.canonicalize() {
             Ok(root) => lexical_normalize(&root.join(&relative)),
             Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
@@ -1298,6 +1304,16 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 }
 
 pub(crate) const REMOTE_MUTATION_SCRIPT: &str = r#"
+import posix
+import sys
+
+# Python 3.10 and earlier do not guarantee that isolated mode removes the
+# working directory from sys.path. Remove every common spelling before any
+# non-builtin import so workspace modules cannot shadow the standard library.
+_nac_cwd = posix.getcwd()
+sys.path = [entry for entry in sys.path if entry not in ("", ".", _nac_cwd)]
+del _nac_cwd
+
 import difflib
 import fcntl
 import hashlib
@@ -1305,7 +1321,6 @@ import json
 import os
 import stat
 from pathlib import Path
-import sys
 import tempfile
 import uuid
 
@@ -1900,6 +1915,25 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mounted_revisioned_write_does_not_create_parents_for_a_missing_target() {
+        let root = std::env::temp_dir().join(format!("nac-mounted-mutation-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let result = write_mounted(
+            root.clone(),
+            PathBuf::from("missing/nested/file.txt"),
+            "missing/nested/file.txt".into(),
+            "replacement".into(),
+            Some(revision(b"before")),
+        )
+        .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not_found"), "{}", result.content);
+        assert!(!root.join("missing").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn concurrent_same_revision_edits_serialize_and_one_goes_stale() {
         let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
@@ -2238,6 +2272,65 @@ mod tests {
         assert_eq!(remote["end_line"], local.end_line);
         assert_eq!(remote["next_offset"], json!(local.next_offset));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn remote_protocol_removes_workspace_from_import_path_without_safe_path_support() {
+        use std::process::{Command, Stdio};
+
+        let workspace =
+            std::env::temp_dir().join(format!("nac-remote-import-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&workspace).unwrap();
+        let path = workspace.join("file.txt");
+        fs::write(&path, b"safe\n").unwrap();
+        for module in [
+            "difflib.py",
+            "fcntl.py",
+            "hashlib.py",
+            "json.py",
+            "os.py",
+            "pathlib.py",
+            "stat.py",
+            "tempfile.py",
+            "uuid.py",
+        ] {
+            fs::write(
+                workspace.join(module),
+                "raise RuntimeError('workspace module imported')\n",
+            )
+            .unwrap();
+        }
+        let payload = json!({
+            "operation": "read",
+            "path": "file.txt",
+            "resolved_path": path,
+            "offset": 0,
+            "limit": 20
+        });
+        let mut child = Command::new("python3")
+            .args(["-c", REMOTE_MUTATION_SCRIPT])
+            .current_dir(&workspace)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&payload).unwrap())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["content"], "safe\n");
+        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]
