@@ -10,7 +10,7 @@ use tokio::sync::Notify;
 
 use super::{ArtifactKind, OutputRegistry, OutputStream};
 #[cfg(unix)]
-use crate::process::{descendant_processes, signal_processes, ProcessIdentity};
+use crate::process::signal_descendants;
 use crate::sandbox::ExecutionBackend;
 
 pub struct TerminalSession {
@@ -207,16 +207,10 @@ impl TerminalSession {
     }
 
     #[cfg(unix)]
-    fn child_descendant_processes(&self) -> Vec<ProcessIdentity> {
-        let Some(pid) = self.child.process_id() else {
-            return Vec::new();
-        };
-        descendant_processes(pid as libc::pid_t)
-    }
-
-    #[cfg(unix)]
     fn signal_descendants(&self, signal: libc::c_int) {
-        signal_processes(&self.child_descendant_processes(), signal);
+        if let Some(pid) = self.child.process_id() {
+            signal_descendants(pid as libc::pid_t, signal);
+        }
     }
 
     #[cfg(not(unix))]

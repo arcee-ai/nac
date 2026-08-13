@@ -120,14 +120,17 @@ impl ProcessTreeGuard {
                 .root_pid
                 .filter(|root_pid| child.id() == Some(*root_pid as u32));
             if let Some(root_pid) = leader_pid {
-                signal_processes(&descendants_outside_group(root_pid, pgid), libc::SIGTERM);
+                signal_discovered(descendants_outside_group(root_pid, pgid), libc::SIGTERM);
 
                 let deadline = sleep(TERMINATE_GRACE);
                 tokio::pin!(deadline);
                 loop {
-                    if child.id() != Some(root_pid as u32)
-                        || descendants_outside_group(root_pid, pgid).is_empty()
-                    {
+                    if child.id() != Some(root_pid as u32) {
+                        break;
+                    }
+                    let descendants = descendants_outside_group(root_pid, pgid);
+                    report_capture_failures(&descendants.failures);
+                    if descendants.processes.is_empty() {
                         break;
                     }
                     tokio::select! {
@@ -136,7 +139,7 @@ impl ProcessTreeGuard {
                     }
                 }
                 if child.id() == Some(root_pid as u32) {
-                    signal_processes(&descendants_outside_group(root_pid, pgid), libc::SIGKILL);
+                    signal_discovered(descendants_outside_group(root_pid, pgid), libc::SIGKILL);
                 }
             }
 
@@ -153,7 +156,7 @@ impl ProcessTreeGuard {
         // finish, then kill the child itself.
         #[cfg(unix)]
         if let Some(root_pid) = self.root_pid {
-            signal_processes(&descendant_processes(root_pid), libc::SIGKILL);
+            signal_descendants(root_pid, libc::SIGKILL);
         }
 
         let _ = child.kill().await;
@@ -205,15 +208,53 @@ impl Drop for ProcessTreeGuard {
     }
 }
 #[cfg(unix)]
-fn descendants_outside_group(root: libc::pid_t, pgid: libc::pid_t) -> Vec<ProcessIdentity> {
-    descendant_processes(root)
-        .into_iter()
-        .filter(|process| {
-            let child_pgid = unsafe { libc::getpgid(process.pid) };
-            child_pgid > 0 && child_pgid != pgid
-        })
-        .collect()
+fn descendants_outside_group(root: libc::pid_t, pgid: libc::pid_t) -> DescendantProcesses {
+    let mut descendants = descendant_processes(root);
+    descendants.processes.retain(|process| {
+        let child_pgid = unsafe { libc::getpgid(process.pid) };
+        child_pgid > 0 && child_pgid != pgid
+    });
+    descendants
 }
+
+#[cfg(unix)]
+pub(crate) fn signal_descendants(root: libc::pid_t, signal: libc::c_int) {
+    signal_discovered(descendant_processes(root), signal);
+}
+
+#[cfg(unix)]
+fn signal_discovered(descendants: DescendantProcesses, signal: libc::c_int) {
+    signal_processes(&descendants.processes, signal);
+    report_capture_failures(&descendants.failures);
+}
+
+#[cfg(target_os = "linux")]
+fn report_capture_failures(failures: &[ProcessCaptureFailure]) {
+    for failure in failures {
+        eprintln!(
+            "nac: cannot safely signal descendant pid {}: pidfd_open failed: {}",
+            failure.pid, failure.error
+        );
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn report_capture_failures(_failures: &[ProcessCaptureFailure]) {}
+
+#[cfg(unix)]
+struct DescendantProcesses {
+    processes: Vec<ProcessIdentity>,
+    failures: Vec<ProcessCaptureFailure>,
+}
+
+#[cfg(target_os = "linux")]
+struct ProcessCaptureFailure {
+    pid: libc::pid_t,
+    error: std::io::Error,
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+struct ProcessCaptureFailure;
 
 pub fn isolate_process_group(command: &mut Command) {
     #[cfg(unix)]
@@ -228,26 +269,44 @@ pub async fn terminate_child_tree(child: &mut Child) {
 }
 
 #[cfg(unix)]
-pub(crate) fn descendant_processes(root: libc::pid_t) -> Vec<ProcessIdentity> {
+fn descendant_processes(root: libc::pid_t) -> DescendantProcesses {
     #[cfg(target_os = "macos")]
     {
-        descendant_pids_macos(root)
-            .into_iter()
-            .map(|pid| ProcessIdentity { pid })
-            .collect()
+        DescendantProcesses {
+            processes: descendant_pids_macos(root)
+                .into_iter()
+                .map(|pid| ProcessIdentity { pid })
+                .collect(),
+            failures: Vec::new(),
+        }
     }
 
     #[cfg(target_os = "linux")]
     {
-        descendant_snapshots(root, process_snapshots())
-            .into_iter()
-            .filter_map(ProcessIdentity::capture)
-            .collect()
+        let mut descendants = Vec::new();
+        let mut failures = Vec::new();
+        for snapshot in descendant_snapshots(root, process_snapshots()) {
+            match ProcessIdentity::capture(snapshot) {
+                Ok(Some(process)) => descendants.push(process),
+                Ok(None) => {}
+                Err(error) => failures.push(ProcessCaptureFailure {
+                    pid: snapshot.pid,
+                    error,
+                }),
+            }
+        }
+        DescendantProcesses {
+            processes: descendants,
+            failures,
+        }
     }
 
     #[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
     {
-        Vec::new()
+        DescendantProcesses {
+            processes: Vec::new(),
+            failures: Vec::new(),
+        }
     }
 }
 
@@ -255,28 +314,14 @@ pub(crate) fn descendant_processes(root: libc::pid_t) -> Vec<ProcessIdentity> {
 pub(crate) fn signal_processes(processes: &[ProcessIdentity], signal: libc::c_int) {
     for process in processes {
         #[cfg(target_os = "linux")]
-        match &process.handle {
-            ProcessHandle::PidFd(pidfd) => unsafe {
-                libc::syscall(
-                    libc::SYS_pidfd_send_signal,
-                    pidfd.as_raw_fd(),
-                    signal,
-                    std::ptr::null::<libc::siginfo_t>(),
-                    0,
-                );
-            },
-            ProcessHandle::CheckedStartTime(start_time) => {
-                let stat = std::fs::read_to_string(format!("/proc/{}/stat", process.pid));
-                if stat
-                    .ok()
-                    .and_then(|stat| parse_process_stat(&stat))
-                    .is_some_and(|(_, current_start_time)| current_start_time == *start_time)
-                {
-                    unsafe {
-                        libc::kill(process.pid, signal);
-                    }
-                }
-            }
+        unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                process.pidfd.as_raw_fd(),
+                signal,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            );
         }
         #[cfg(not(target_os = "linux"))]
         unsafe {
@@ -288,28 +333,28 @@ pub(crate) fn signal_processes(processes: &[ProcessIdentity], signal: libc::c_in
 #[cfg(target_os = "linux")]
 pub(crate) struct ProcessIdentity {
     pid: libc::pid_t,
-    handle: ProcessHandle,
-}
-
-#[cfg(target_os = "linux")]
-enum ProcessHandle {
-    PidFd(OwnedFd),
-    CheckedStartTime(u64),
+    pidfd: OwnedFd,
 }
 
 #[cfg(target_os = "linux")]
 impl ProcessIdentity {
-    fn capture(snapshot: ProcessSnapshot) -> Option<Self> {
-        let handle = match open_pidfd(snapshot.pid) {
-            Ok(pidfd) => ProcessHandle::PidFd(pidfd),
-            Err(_) => ProcessHandle::CheckedStartTime(snapshot.start_time),
+    fn capture(snapshot: ProcessSnapshot) -> std::io::Result<Option<Self>> {
+        // A numeric-PID fallback would recreate the reuse race this type is
+        // meant to close. If the kernel cannot provide a stable handle, leave
+        // this descendant unsignaled and report the failure after signaling
+        // every sibling whose identity was captured successfully.
+        let pidfd = open_pidfd(snapshot.pid)?;
+        let stat = match std::fs::read_to_string(format!("/proc/{}/stat", snapshot.pid)) {
+            Ok(stat) => stat,
+            Err(_) => return Ok(None),
         };
-        let stat = std::fs::read_to_string(format!("/proc/{}/stat", snapshot.pid)).ok()?;
-        let (_, start_time) = parse_process_stat(&stat)?;
-        (start_time == snapshot.start_time).then_some(Self {
+        let Some((_, start_time)) = parse_process_stat(&stat) else {
+            return Ok(None);
+        };
+        Ok((start_time == snapshot.start_time).then_some(Self {
             pid: snapshot.pid,
-            handle,
-        })
+            pidfd,
+        }))
     }
 }
 
@@ -467,7 +512,7 @@ mod tests {
             .unwrap();
         let identity = ProcessIdentity {
             pid: sentinel.id() as libc::pid_t,
-            handle: ProcessHandle::PidFd(pidfd),
+            pidfd,
         };
 
         signal_processes(&[identity], libc::SIGKILL);
@@ -476,25 +521,6 @@ mod tests {
             sentinel.try_wait().unwrap().is_none(),
             "signaling followed the numeric PID instead of the captured process identity"
         );
-        sentinel.kill().unwrap();
-        sentinel.wait().unwrap();
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn fallback_signaling_skips_a_mismatched_process_identity() {
-        let mut sentinel = std::process::Command::new("/bin/sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
-        let identity = ProcessIdentity {
-            pid: sentinel.id() as libc::pid_t,
-            handle: ProcessHandle::CheckedStartTime(u64::MAX),
-        };
-
-        signal_processes(&[identity], libc::SIGKILL);
-
-        assert!(sentinel.try_wait().unwrap().is_none());
         sentinel.kill().unwrap();
         sentinel.wait().unwrap();
     }
