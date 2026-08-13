@@ -28,9 +28,9 @@ Keep credentials private: if the user ever needs to enter a key or complete a de
 
 4. Hand the user the dashboard URL (`http://127.0.0.1:3210` by default) and confirm it responds. Everything from here — signing in with Arcee or ChatGPT, picking a model, adding MCP servers from the MCP Library — is done in the UI. Point the user at the dashboard's auth and model picker and let them drive.
 
-## 2. Connect the user's MCP client to nac
+## 2. Connect this MCP client to nac
 
-Ask the user which editor or agent they want to manage nac from — Claude Code, Codex, OpenCode, Cursor, or another MCP client. Then add this streamable-HTTP server to that client's MCP configuration:
+The MCP client is the harness running this session — the agent the user prompted to install the skill. Do not ask which client to use; configure the one you are running in. Add this streamable-HTTP server to your own harness's MCP configuration:
 
 ```text
 URL: http://127.0.0.1:3210/mcp
@@ -47,4 +47,4 @@ Before calling setup complete, confirm that:
 
 - `nac-web` is installed and running, and the dashboard URL responds.
 - The user is in the dashboard and can reach sign-in and the model picker themselves.
-- nac's `/mcp` endpoint is configured in the user's chosen MCP client and the client lists nac's tools.
+- nac's `/mcp` endpoint is configured in this harness's MCP client configuration and nac's tools are visible.
