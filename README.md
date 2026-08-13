@@ -22,7 +22,7 @@ nac is an open-source agent harness for longer, ambitious tasks — experiments,
 
 ## Quickstart
 
-**By Hand.** Install the latest `edge` build:
+**By Hand.** Install the latest stable release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install.sh | sh
@@ -40,7 +40,7 @@ and navigate to the interface in your browser (default: [http://127.0.0.1:3210](
 
 > Install the nac onboarding skill with `curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
 
-**Upgrade.** Nac ships with a native upgrade function which can be used to install the latest edge version of nac.
+**Upgrade.** Nac ships with a native upgrade function which can be used to install the latest stable release of nac.
 
 ```sh
 nac-web upgrade

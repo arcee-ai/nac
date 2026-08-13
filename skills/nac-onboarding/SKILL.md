@@ -12,7 +12,7 @@ Keep credentials private: if the user ever needs to enter a key or complete a de
 ## 1. Install and launch
 
 1. Check whether `nac-web` is available with `nac-web --version`.
-2. If it is missing, install the current edge build:
+2. If it is missing, install the latest stable release:
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install.sh | sh

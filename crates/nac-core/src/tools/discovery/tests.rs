@@ -687,6 +687,7 @@ async fn aborting_native_search_stops_promptly() {
     assert!(joined
         .expect_err("aborted task must not complete")
         .is_cancelled());
+    super::PAUSE_SEARCH_TASKS.store(false, std::sync::atomic::Ordering::Release);
     tokio::time::timeout(std::time::Duration::from_secs(1), async {
         while super::ACTIVE_SEARCH_TASKS.load(std::sync::atomic::Ordering::Acquire) != 0 {
             tokio::task::yield_now().await;
