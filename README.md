@@ -17,25 +17,7 @@ The installer places one binary in `$HOME/.local/bin` by default:
 
 ### Set up nac from another coding agent
 
-This repository keeps one portable, canonical skill at [`skills/nac-onboarding`](skills/nac-onboarding), using the same `SKILL.md` convention as [Cross-Harness Skills](https://github.com/eric-tramel/cross-harness-skills). Install the complete skill bundle into the directory your agent uses for skills:
-
-```sh
-gh api -H 'Accept: application/vnd.github.raw+json' repos/arcee-ai/nac/contents/scripts/install-skill.sh | sh -s -- --target codex
-```
-
-Replace `codex` with `claude`, `opencode`, `nac`, `agents` (the cross-agent default), or `project`. For an agent with a different skill location, use `--path /path/to/skills`. This works for any agent that recognizes the portable `SKILL.md` layout. Run the command with `--help` to see every option. Then ask the agent to use `nac-onboarding`.
-
-If this repository is public, the equivalent curl command is:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target codex
-```
-
-Or paste this into your agent:
-
 > Install the nac onboarding skill with `gh api -H 'Accept: application/vnd.github.raw+json' repos/arcee-ai/nac/contents/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
-
-The skill covers the complete setup, including nac's built-in MCP endpoint.
 
 ### Choose auth
 
