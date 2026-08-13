@@ -359,6 +359,12 @@ impl ModelClient {
         self.reasoning_effort
     }
 
+    /// Catalog cost rates of the resolved model, USD per 1M tokens.
+    /// All-zero means the catalog has no pricing for it.
+    pub(crate) fn cost_rates(&self) -> catalog::ModelCostRates {
+        self.resolved_model.cost
+    }
+
     pub fn api_key_env(&self) -> Option<&str> {
         self.api_key_env.as_deref()
     }
@@ -411,7 +417,13 @@ impl ModelClient {
                 CompletionsMessageShape::Standard
             },
         );
-        request["max_tokens"] = json!(self.resolved_model.max_tokens.min(262_144));
+        // Clamp output only when the catalog carries a real limit for this
+        // model. A synthetic provider-default value (the 16k fallback) would
+        // silently truncate models whose true limit the provider knows
+        // better than we do (issue #124).
+        if self.resolved_model.source.is_authoritative() {
+            request["max_tokens"] = json!(self.resolved_model.max_tokens.min(262_144));
+        }
         if self.backend == BackendKind::TogetherChat {
             request["context_length_exceeded_behavior"] = json!("truncate");
         }
@@ -515,12 +527,9 @@ impl ModelClient {
         }
         request["stream"] = Value::Bool(true);
         request["stream_options"] = json!({"include_usage": true});
-        self.post_sse_with_retry_headers(
-            url,
-            &request,
-            apply_headers,
-            || ChatStreamFold::new(on_delta, reasoning_field),
-        )
+        self.post_sse_with_retry_headers(url, &request, apply_headers, || {
+            ChatStreamFold::new(on_delta, reasoning_field)
+        })
         .await
     }
 
@@ -926,6 +935,19 @@ impl ModelClient {
         let mut client = Self::new_for_test();
         client.base_url = base_url;
         client.reasoning_effort = None;
+        client
+    }
+
+    pub(crate) fn new_for_test_settings(
+        backend: BackendKind,
+        model: &str,
+        reasoning_effort: ReasoningEffort,
+    ) -> Self {
+        let mut client = Self::new_for_test();
+        client.backend = backend;
+        client.model = model.to_string();
+        client.reasoning_effort = Some(reasoning_effort);
+        client.resolved_model = catalog::resolve(backend, model);
         client
     }
 

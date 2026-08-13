@@ -226,8 +226,8 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "none": "none",
-            "xhigh": "max"
+            "max": "max",
+            "none": "none"
           }
         },
         "deepseek-v4-pro": {
@@ -244,8 +244,8 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "none": "none",
-            "xhigh": "max"
+            "max": "max",
+            "none": "none"
           }
         }
       }
@@ -268,9 +268,8 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none",
-            "xhigh": "max"
+            "max": "max",
+            "none": "none"
           }
         },
         "accounts/fireworks/models/deepseek-v4-flash-0731": {
@@ -287,9 +286,8 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none",
-            "xhigh": "max"
+            "max": "max",
+            "none": "none"
           }
         },
         "accounts/fireworks/models/deepseek-v4-pro": {
@@ -306,9 +304,8 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none",
-            "xhigh": "max"
+            "max": "max",
+            "none": "none"
           }
         },
         "accounts/fireworks/models/glm-5p2": {
@@ -324,10 +321,8 @@
           "reasoning": true,
           "thinking_level_map": {
             "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none",
-            "xhigh": "max"
+            "max": "max",
+            "none": "none"
           }
         },
         "accounts/fireworks/models/gpt-oss-120b": {
@@ -414,8 +409,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none"
+            "max": "max"
           }
         },
         "accounts/fireworks/models/minimax-m2p7": {
@@ -447,9 +441,8 @@
           },
           "reasoning": true,
           "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium"
+            "max": "max",
+            "none": "none"
           }
         },
         "accounts/fireworks/models/qwen3p7-plus": {
@@ -483,10 +476,8 @@
           "reasoning": true,
           "thinking_level_map": {
             "high": "high",
-            "low": "low",
-            "medium": "medium",
-            "none": "none",
-            "xhigh": "max"
+            "max": "max",
+            "none": "none"
           }
         },
         "accounts/fireworks/routers/kimi-k2p6-fast": {
@@ -557,8 +548,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none"
+            "max": "max"
           }
         }
       }
@@ -1187,9 +1177,7 @@
           },
           "reasoning": true,
           "thinking_level_map": {
-            "high": "high",
-            "low": "low",
-            "medium": "medium",
+            "max": "max",
             "none": "none"
           }
         },
@@ -1269,7 +1257,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
+            "max": "max",
             "none": "none"
           }
         },
@@ -1288,7 +1276,6 @@
             "high": "high",
             "low": "low",
             "max": "max",
-            "medium": "medium",
             "none": "none"
           }
         },
@@ -1373,8 +1360,7 @@
           "thinking_level_map": {
             "high": "high",
             "low": "low",
-            "medium": "medium",
-            "none": "none"
+            "max": "max"
           }
         },
         "nvidia/nemotron-3-ultra-550b-a55b": {
@@ -1462,9 +1448,7 @@
           "reasoning": true,
           "thinking_level_map": {
             "high": "high",
-            "low": "low",
             "max": "max",
-            "medium": "medium",
             "none": "none"
           }
         }

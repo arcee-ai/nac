@@ -26,12 +26,74 @@ use crate::tools::ToolResult;
 use crate::types::{FunctionDef, ToolDefinition};
 
 mod config;
+mod file_config;
+mod library;
 mod naming;
 mod registry;
 mod result;
 mod transport;
 
+pub use config::{McpServerConfig, McpTransportConfig};
+pub use file_config::{
+    delete_mcp_server_configuration, insert_mcp_server_configuration,
+    list_mcp_server_configurations, load_mcp_server_configuration, mcp_config_path,
+    update_mcp_server_configuration, McpServerConfigurationRecord,
+    McpServerConfigurationStoreError, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+};
+pub use library::{
+    embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
+    McpLibraryAuth, McpLibraryEntry,
+};
 pub use registry::{McpRegistry, McpRootPolicy, McpTransportPolicy};
+
+/// A tool a probe discovered on a server, before anything is saved.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct McpProbedTool {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// Connects to a single server, lists its tools and disconnects. This is the
+/// dashboard's "test connection": it runs against an unsaved draft, so no
+/// registry or store is involved and no workspace roots are advertised.
+pub async fn probe_mcp_server(
+    name: &str,
+    config: &McpServerConfig,
+    cwd: &Path,
+) -> Result<Vec<McpProbedTool>> {
+    let handler = NacMcpClientHandler {
+        roots: mcp_roots_for_policy(cwd, None, McpRootPolicy::None)?,
+    };
+    let service = timeout(
+        MCP_CONNECT_TIMEOUT,
+        connect_server(name, config, &handler, cwd, None),
+    )
+    .await
+    .map_err(|_| {
+        anyhow!(
+            "timed out connecting after {}s",
+            MCP_CONNECT_TIMEOUT.as_secs()
+        )
+    })??;
+    let tools = timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools())
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "timed out listing tools after {}s",
+                MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
+            )
+        })?
+        .context("failed to list tools")?;
+    let probed = tools
+        .into_iter()
+        .map(|tool| McpProbedTool {
+            name: tool.name.to_string(),
+            description: tool.description.as_ref().map(|value| value.to_string()),
+        })
+        .collect();
+    let _ = service.cancel().await;
+    Ok(probed)
+}
 
 use config::*;
 use naming::*;
@@ -503,6 +565,105 @@ url = {}
         let definitions = registry.tool_definitions();
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].function.name, "mcp__http__echo");
+
+        drop(registry);
+        http_server.join().unwrap();
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
+    #[tokio::test]
+    async fn dashboard_saved_server_loads_from_the_file() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-dashboard-save");
+        fs::create_dir_all(&nac_home).unwrap();
+        let (http_url, http_server) = start_fake_http_mcp_server();
+        insert_mcp_server_configuration(
+            &nac_home.join("config.toml"),
+            McpServerConfigurationRecord {
+                name: "saved".to_string(),
+                enabled: true,
+                transport: MCP_TRANSPORT_STREAMABLE_HTTP.to_string(),
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                url: Some(http_url),
+                headers: std::collections::BTreeMap::new(),
+                library_id: Some("saved".to_string()),
+            },
+        )
+        .unwrap();
+        unsafe {
+            env::set_var("NAC_HOME", &nac_home);
+        }
+
+        let cwd = std::env::current_dir().unwrap();
+        let registry = McpRegistry::load_with_policy(
+            &cwd,
+            None,
+            &PathContext::new(&cwd),
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .unwrap()
+        .expect("saved HTTP server should load");
+        let definitions = registry.tool_definitions();
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].function.name, "mcp__saved__echo");
+
+        drop(registry);
+        http_server.join().unwrap();
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
+    #[tokio::test]
+    async fn servers_sharing_an_endpoint_connect_once() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-endpoint-dedup");
+        fs::create_dir_all(&nac_home).unwrap();
+        let (http_url, http_server) = start_fake_http_mcp_server();
+        fs::write(
+            nac_home.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.exa]
+transport = "streamable_http"
+url = {url}
+
+[mcp_servers.exa_web_search]
+transport = "streamable_http"
+url = {url}
+"#,
+                url = toml_string(&http_url)
+            ),
+        )
+        .unwrap();
+        unsafe {
+            env::set_var("NAC_HOME", &nac_home);
+        }
+
+        let cwd = std::env::current_dir().unwrap();
+        let registry = McpRegistry::load_with_policy(
+            &cwd,
+            None,
+            &PathContext::new(&cwd),
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .unwrap()
+        .expect("the endpoint's tools should load once");
+        let definitions = registry.tool_definitions();
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].function.name, "mcp__exa__echo");
 
         drop(registry);
         http_server.join().unwrap();

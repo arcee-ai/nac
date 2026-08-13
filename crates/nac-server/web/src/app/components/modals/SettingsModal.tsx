@@ -30,6 +30,10 @@ import {
 } from "@/app/components/modals/ConfigurationsPanel";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
+import {
+  LightModelSection,
+  type LightSelection,
+} from "@/app/components/modals/LightModelSection";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
@@ -43,8 +47,10 @@ import {
   type Validation,
 } from "@/app/lib/apiKey";
 import {
+  inheritPrimaryCredential,
   buildSettingsPatch,
   managedLaunchBaseUrl,
+  sameLightModel,
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
@@ -69,6 +75,7 @@ import {
 } from "@/app/store/sshConnectionStore";
 import type {
   BackendKind,
+  LightModelSettings,
   RawSessionConfig,
   SessionMetadata,
   SessionSummarySnapshot,
@@ -196,7 +203,10 @@ export function SettingsModal({
       ? initialFromConfig(config)
       : null;
 
-  if (!initial || !entry) {
+  // The form seeds its light-model state from `config` once at mount, so it
+  // must not mount before /config settles — a light model arriving later
+  // would leave the form on Single and a save would clear dual mode.
+  if (!initial || !entry || isLoading) {
     return (
       <SettingsShell open={open} onClose={onClose}>
         <p className="text-basic-muted text-micro">
@@ -213,6 +223,7 @@ export function SettingsModal({
       open={open}
       id={id}
       initial={initial}
+      initialLight={config?.light_model ?? null}
       summary={entry.summary}
       diagnostics={config?.diagnostics ?? []}
       onClose={onClose}
@@ -225,6 +236,7 @@ function SettingsForm({
   open,
   id,
   initial,
+  initialLight,
   summary,
   diagnostics,
   onClose,
@@ -232,6 +244,8 @@ function SettingsForm({
   open: boolean;
   id: string;
   initial: SettingsInitialValues;
+  /** The light model the session currently runs with, if any. */
+  initialLight: LightModelSettings | null;
   /** Carries the presentation version the title save has to match. */
   summary: SessionSummarySnapshot;
   diagnostics: string[];
@@ -269,7 +283,18 @@ function SettingsForm({
   );
   const [error, setError] = useState("");
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
+  const [light, setLight] = useState<LightSelection>({
+    mode: initialLight ? "dual" : "single",
+    light: initialLight,
+  });
   const [advanced, setAdvanced] = useState(false);
+
+  // A malformed stored light model loads as null with only a diagnostic; the
+  // server then refuses patches that omit light_model, so saving must always
+  // send an explicit repair or clear.
+  const lightNeedsRepair = diagnostics.some((diagnostic) =>
+    diagnostic.startsWith("malformed stored light model"),
+  );
 
   const onConfigurationChange = useCallback(
     (next: LaunchModelSelection | null) => {
@@ -408,6 +433,24 @@ function SettingsForm({
       return;
     }
 
+    if (light.mode === "dual") {
+      if (!light.light) {
+        setError("Pick the light model before saving.");
+        return;
+      }
+      const finalLight = inheritPrimaryCredential(
+        light.light,
+        selected.backend,
+        selected.api_key_env,
+        initial.api_key_env,
+      );
+      if (lightNeedsRepair || !sameLightModel(finalLight, initialLight)) {
+        patch.light_model = finalLight;
+      }
+    } else if (initialLight || lightNeedsRepair) {
+      patch.light_model = null;
+    }
+
     setError("");
     // The title lives on a different endpoint, so it is saved either way — a
     // rename should not be lost because the configuration happened to be
@@ -538,6 +581,8 @@ function SettingsForm({
           onChange={onConfigurationChange}
         >
           <div className="flex flex-col gap-2">
+            <LightModelSection initial={initialLight} onChange={setLight} />
+            <Separator />
             <button
               type="button"
               className="btn-ghost flex w-full items-center gap-1.5 rounded-[4px] p-2 text-btn-secondary"

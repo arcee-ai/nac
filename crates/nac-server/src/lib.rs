@@ -1,7 +1,9 @@
 mod compaction;
 mod filesystem;
+mod light_model;
 mod managed_auth;
 mod mcp;
+mod mcp_api;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -9,6 +11,10 @@ pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,
+};
+pub use mcp_api::{
+    CreateMcpServerRequest, McpLibraryResponse, McpServerList, McpServerView, TestMcpServerRequest,
+    TestMcpServerResponse, UpdateMcpServerRequest,
 };
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
@@ -47,6 +53,7 @@ use nac_core::{
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
+    light_model::LightModelSettings,
     model::{
         list_managed_provider_models, list_provider_models, list_stored_api_keys,
         managed_backend_base_url, provider_default_base_url, provider_for_model,
@@ -355,6 +362,9 @@ pub struct CreateSessionRequest {
     /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
+    /// Light worker model; omitted or null launches single-model.
+    #[serde(default)]
+    pub light_model: RequestField<LightModelSettings>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -422,6 +432,9 @@ pub struct CreateModelConfigurationRequest {
     pub orchestrator_compaction_threshold: Option<u64>,
     /// Message the launch modal pre-fills when this setup is chosen.
     pub initial_prompt: Option<String>,
+    /// Light worker model saved with this setup.
+    #[serde(default)]
+    pub light_model: Option<LightModelSettings>,
 }
 
 /// Edits a saved setup in place. Every field is tri-state: omit it to keep what
@@ -450,6 +463,8 @@ pub struct UpdateModelConfigurationRequest {
     pub orchestrator_compaction_threshold: RequestField<u64>,
     #[serde(default)]
     pub initial_prompt: RequestField<String>,
+    #[serde(default)]
+    pub light_model: RequestField<LightModelSettings>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -552,6 +567,9 @@ pub struct UpdateConfigRequest {
     /// Omitted preserves; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
+    /// Omitted preserves; null returns the session to single-model mode.
+    #[serde(default)]
+    pub light_model: RequestField<LightModelSettings>,
 }
 
 impl UpdateConfigRequest {
@@ -566,6 +584,7 @@ impl UpdateConfigRequest {
                 self.orchestrator_compaction_threshold,
                 RequestField::Omitted
             )
+            && matches!(self.light_model, RequestField::Omitted)
     }
 }
 
@@ -771,6 +790,10 @@ pub struct ReplayGapEvent {
 }
 
 impl SessionManager {
+    pub(crate) fn root_cwd(&self) -> &std::path::Path {
+        &self.inner.root_cwd
+    }
+
     pub fn new(options: ServerOptions) -> Result<Self> {
         let root_cwd = canonicalize_dir(options.root_cwd)?;
         let config = NacConfig::load_without_model_from_cwd(&root_cwd)?;
@@ -1188,7 +1211,7 @@ impl SessionManager {
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         let orchestrator_compaction_threshold =
             create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
-        let model = model_options(
+        let mut model = model_options(
             request.model,
             request.base_url,
             request.backend,
@@ -1196,6 +1219,32 @@ impl SessionManager {
             request.api_key_env,
             request.extra_headers,
         )?;
+        model.light_model = match request.light_model {
+            RequestField::Omitted | RequestField::Null => None,
+            RequestField::Value(light) => {
+                // A same-backend light model with no explicit selector
+                // inherits the session's primary one.
+                let primary_key = match &model.api_key_env {
+                    OptionalModelOption::Value(name) => Some(name.clone()),
+                    OptionalModelOption::Inherit | OptionalModelOption::Clear => None,
+                };
+                let inherited = primary_key.as_deref().and_then(|name| {
+                    let backend = model
+                        .backend
+                        .or_else(|| model.api_model.as_deref().and_then(provider_for_model))?;
+                    Some(light_model::InheritedCredential {
+                        backend,
+                        name: Some(name),
+                        previous: None,
+                    })
+                });
+                Some(light_model::normalize(
+                    light,
+                    &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
+                    inherited,
+                )?)
+            }
+        };
         // Mirror the launch-time resolution so the destination is checked
         // against the backend the session will actually use.
         let launch_backend = model.backend.or_else(|| {
@@ -1258,9 +1307,53 @@ impl SessionManager {
     }
 
     async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
+        const MAX_ATTEMPTS: usize = 2;
+
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        self.attach_session_locked(session_id, None).await
+        for _ in 0..MAX_ATTEMPTS {
+            if let Some(service) = self
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .get(session_id)
+                .cloned()
+            {
+                let version = self.session_config(session_id)?.config_version;
+                if service.config_version() == Some(version) {
+                    return Ok(service);
+                }
+                let mut active = self.inner.active_sessions.write().await;
+                if active
+                    .get(session_id)
+                    .is_some_and(|cached| Arc::ptr_eq(cached, &service))
+                {
+                    active.remove(session_id);
+                }
+            }
+
+            let (service, cacheable, _operation_lease) =
+                self.resume_session_attachment(session_id).await?;
+            let service = Arc::new(service);
+            if !cacheable {
+                return Ok(service);
+            }
+            let version = self.session_config(session_id)?.config_version;
+            if service.config_version() != Some(version) {
+                continue;
+            }
+            self.inner
+                .active_sessions
+                .write()
+                .await
+                .insert(session_id.to_string(), Arc::clone(&service));
+            return Ok(service);
+        }
+        Err(anyhow!(
+            "session '{}' configuration kept changing during attachment",
+            session_id
+        ))
     }
 
     /// Attaches while the caller holds this session's lifecycle gate. Keeping
@@ -1794,7 +1887,7 @@ impl SessionManager {
     pub async fn update_session_config(
         &self,
         session_id: &str,
-        request: UpdateConfigRequest,
+        mut request: UpdateConfigRequest,
     ) -> Result<()> {
         let request_empty = request.is_empty();
         if request_empty {
@@ -1849,13 +1942,56 @@ impl SessionManager {
             return Ok(());
         }
         let mut prospective = current.clone();
+        // The light model needs the credential destination policy, which the
+        // plain field patch does not, so it is settled here instead.
+        let light_field = std::mem::take(&mut request.light_model);
         apply_raw_config_patch(&mut prospective, request)?;
+        if matches!(&light_field, RequestField::Omitted)
+            && current.diagnostics.iter().any(|diagnostic| {
+                diagnostic.starts_with(sessions::MALFORMED_LIGHT_MODEL_DIAGNOSTIC)
+            })
+        {
+            return Err(request_configuration_error(
+                "stored light-model settings are malformed; include light_model in the update to repair them, or null to return to single-model mode",
+            ));
+        }
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
             &mut prospective,
             backend_selected,
             base_url_omitted,
             api_key_env_omitted,
         )?;
+        match light_field {
+            RequestField::Omitted => {
+                // A key-only patch still moves an inherited light selector
+                // along to the normalized primary selector, including a clear
+                // when the primary switches to managed auth.
+                let inherited = light_model::InheritedCredential {
+                    backend,
+                    name: prospective.api_key_env.as_deref(),
+                    previous: current.api_key_env.as_deref(),
+                };
+                if let Some(light) = prospective.light_model.as_mut() {
+                    light_model::rotate_inherited_credential(light, inherited);
+                }
+            }
+            RequestField::Null => prospective.light_model = None,
+            RequestField::Value(light) => {
+                // A same-backend light model with no explicit selector
+                // inherits the session's primary one, following it when the
+                // primary selector changes.
+                let inherited = Some(light_model::InheritedCredential {
+                    backend,
+                    name: prospective.api_key_env.as_deref(),
+                    previous: current.api_key_env.as_deref(),
+                });
+                prospective.light_model = Some(light_model::normalize(
+                    light,
+                    &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
+                    inherited,
+                )?);
+            }
+        }
 
         // An untouched destination carries no new risk, so only a patch that
         // moves the endpoint or switches the credential type is authorized.
@@ -1875,6 +2011,11 @@ impl SessionManager {
             prospective.api_key_env.clone(),
             extra_headers.clone(),
         )?;
+        // Fail a broken light model here, not at the session's next launch.
+        if let Some(light) = prospective.light_model.as_ref() {
+            nac_core::light_model::validate(light, &extra_headers)
+                .map_err(|error| request_configuration_error(format!("{error:#}")))?;
+        }
         validate_model_configuration(
             backend,
             &prospective.model,
@@ -1931,6 +2072,43 @@ impl SessionManager {
             .await?
         };
         Ok(SessionService::from_orchestrator_run_config(run_config).service)
+    }
+
+    async fn resume_session_attachment(
+        &self,
+        session_id: &str,
+    ) -> Result<(
+        SessionService,
+        bool,
+        Option<sessions::SessionOperationLease>,
+    )> {
+        let summary = self
+            .list_sessions(false)
+            .await?
+            .into_iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .map(|entry| entry.summary)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let config_cwd = if summary.ssh_host.is_some() {
+            &self.inner.root_cwd
+        } else {
+            &summary.cwd
+        };
+        let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
+        let (run_config, cacheable, operation_lease) =
+            runtime::build_resume_config_for_session_attachment(
+                self.inner.store_path.clone(),
+                session_id,
+                &config,
+                self.inner.root_cwd.clone(),
+                Some(self.inner.worker_executable.clone()),
+            )
+            .await?;
+        Ok((
+            SessionService::from_orchestrator_run_config(run_config).service,
+            cacheable,
+            operation_lease,
+        ))
     }
 }
 
@@ -2032,6 +2210,9 @@ async fn reject_foreign_host(
 }
 
 pub fn router(manager: SessionManager) -> Router {
+    // The registry answer takes a few seconds, so it is warmed in the
+    // background rather than on the first picker open.
+    tokio::spawn(mcp_api::warm_library_cache());
     api_router(manager)
         .merge(embedded_frontend_router())
         .layer(response_compression_layer())
@@ -2078,6 +2259,19 @@ fn api_router(manager: SessionManager) -> Router {
         .route(
             "/ssh-configs/{config_id}",
             patch(update_ssh_config_handler).delete(delete_ssh_config_handler),
+        )
+        .route("/mcp_library/library", get(mcp_api::library_handler))
+        .route(
+            "/mcp_library/servers",
+            get(mcp_api::list_servers_handler).post(mcp_api::create_server_handler),
+        )
+        .route(
+            "/mcp_library/servers/test",
+            post(mcp_api::test_server_handler),
+        )
+        .route(
+            "/mcp_library/servers/{server_name}",
+            patch(mcp_api::update_server_handler).delete(mcp_api::delete_server_handler),
         )
         .route("/auth", get(managed_auth::list_handler))
         .route("/auth/{provider}", delete(managed_auth::logout_handler))
@@ -2421,9 +2615,23 @@ async fn create_model_config_handler(
     let id = uuid::Uuid::new_v4();
     let credential_name =
         expects_key.then(|| format!("{GENERATED_CREDENTIAL_PREFIX}{}", id.simple()));
-    if let Some(name) = credential_name.as_deref() {
-        store_api_key(name, api_key)?;
-    }
+    let policy = NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?;
+    let light = request
+        .light_model
+        .map(|light| {
+            light_model::normalize(
+                light,
+                &policy,
+                credential_name
+                    .as_deref()
+                    .map(|name| light_model::InheritedCredential {
+                        backend,
+                        name: Some(name),
+                        previous: None,
+                    }),
+            )
+        })
+        .transpose()?;
 
     let configuration = model_configurations::NewModelConfiguration {
         name: request.name,
@@ -2437,7 +2645,22 @@ async fn create_model_config_handler(
         extra_headers: request.extra_headers.unwrap_or_default(),
         orchestrator_compaction_threshold: request.orchestrator_compaction_threshold,
         initial_prompt: request.initial_prompt,
+        light_model: light,
     };
+    if let Some(name) = credential_name.as_deref() {
+        store_api_key(name, api_key)?;
+    }
+    // The light model must resolve to a working client now, not at the first
+    // launch that picks this setup. Validation needs the credential above
+    // already stored, so a failure retires it again.
+    if let Some(light) = configuration.light_model.as_ref() {
+        if let Err(error) = nac_core::light_model::validate(light, &configuration.extra_headers) {
+            if let Some(name) = credential_name.as_deref() {
+                let _ = remove_api_key(name);
+            }
+            return Err(request_configuration_error(format!("{error:#}")).into());
+        }
+    }
     let record = model_configurations::insert_model_configuration(
         &manager.inner.store_path,
         &id.to_string(),
@@ -2535,15 +2758,19 @@ async fn update_model_config_handler(
 
     // The credential the row ends up pointing at, and the one it is leaving
     // behind — exactly one of the two survives this request.
+    let replacement_credential = supplied_key.filter(|key| !key.is_empty()).map(|key| {
+        (
+            format!(
+                "{GENERATED_CREDENTIAL_PREFIX}{}",
+                uuid::Uuid::new_v4().simple()
+            ),
+            key,
+        )
+    });
     let (api_key_env, superseded) = if !expects_key {
         (None, existing.api_key_env.clone())
-    } else if let Some(key) = supplied_key.filter(|key| !key.is_empty()) {
-        let name = format!(
-            "{GENERATED_CREDENTIAL_PREFIX}{}",
-            uuid::Uuid::new_v4().simple()
-        );
-        store_api_key(&name, &key)?;
-        (Some(name), existing.api_key_env.clone())
+    } else if let Some((name, _)) = replacement_credential.as_ref() {
+        (Some(name.clone()), existing.api_key_env.clone())
     } else if matches!(request.api_key, RequestField::Null) || existing.api_key_env.is_none() {
         return Err(ApiError {
             status: StatusCode::BAD_REQUEST,
@@ -2553,6 +2780,11 @@ async fn update_model_config_handler(
         (existing.api_key_env.clone(), None)
     };
 
+    let inherited = light_model::InheritedCredential {
+        backend,
+        name: api_key_env.as_deref(),
+        previous: existing.api_key_env.as_deref(),
+    };
     let configuration = model_configurations::NewModelConfiguration {
         name: replaceable_text(request.name, &existing.name),
         backend: backend.to_string(),
@@ -2579,18 +2811,60 @@ async fn update_model_config_handler(
             RequestField::Null => None,
             RequestField::Omitted => existing.initial_prompt.clone(),
         },
+        light_model: match request.light_model {
+            RequestField::Value(light) => Some(light_model::normalize(
+                light,
+                &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
+                Some(inherited),
+            )?),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.light_model.clone().map(|mut light| {
+                light_model::rotate_inherited_credential(&mut light, inherited);
+                light
+            }),
+        },
     };
 
+    if let Some((name, key)) = replacement_credential.as_ref() {
+        store_api_key(name, key)?;
+    }
+    // As on create, the light model must resolve to a working client before
+    // the row is updated; a failure retires the just-stored key.
+    if let Some(light) = configuration.light_model.as_ref() {
+        if let Err(error) = nac_core::light_model::validate(light, &configuration.extra_headers) {
+            if let Some((name, _)) = replacement_credential.as_ref() {
+                let _ = remove_api_key(name);
+            }
+            return Err(request_configuration_error(format!("{error:#}")).into());
+        }
+    }
     match model_configurations::update_model_configuration(
         &manager.inner.store_path,
         &config_id,
         configuration,
     ) {
         Ok(record) => {
-            if let Some(name) = superseded
-                .as_deref()
+            // A generated key survives exactly as long as something in the
+            // updated record — top-level or the light model — still names it;
+            // every other generated key this update walked away from is
+            // retired.
+            let mut retired: std::collections::BTreeSet<&str> = existing
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref())
+                .into_iter()
+                .chain(superseded.as_deref())
                 .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-            {
+                .collect();
+            for kept in record.api_key_env.iter().map(String::as_str).chain(
+                record
+                    .light_model
+                    .as_ref()
+                    .and_then(|light| light.api_key_env.as_deref()),
+            ) {
+                retired.remove(kept);
+            }
+            for name in retired {
                 let _ = remove_api_key(name);
             }
             Ok(Json(record))
@@ -2772,12 +3046,22 @@ async fn delete_model_config_handler(
     model_configurations::delete_model_configuration(&manager.inner.store_path, &config_id)?;
 
     // Only a key this server filed away is ours to drop; a hand-configured
-    // environment variable name belongs to the operator.
-    if let Some(name) = record
+    // environment variable name belongs to the operator. The light model can
+    // hold a generated key the top level already rotated off, so both are
+    // swept.
+    let generated: std::collections::BTreeSet<&str> = record
         .api_key_env
         .as_deref()
+        .into_iter()
+        .chain(
+            record
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+        )
         .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-    {
+        .collect();
+    for name in generated {
         let _ = remove_api_key(name);
     }
     Ok(StatusCode::NO_CONTENT)
@@ -3371,6 +3655,7 @@ fn model_options(
         api_model: required_create_string(model, "model")?,
         api_key_env,
         extra_headers,
+        light_model: None,
     })
 }
 
@@ -3693,6 +3978,16 @@ fn canonicalize_file(path: PathBuf) -> Result<PathBuf> {
 pub struct ApiError {
     status: StatusCode,
     message: String,
+}
+
+impl ApiError {
+    pub(crate) fn new(status: StatusCode, message: String) -> Self {
+        Self { status, message }
+    }
+
+    pub(crate) fn bad_request(message: String) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, message)
+    }
 }
 
 impl From<JsonRejection> for ApiError {
@@ -4985,6 +5280,7 @@ mod tests {
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
+            light_model: RequestField::Omitted,
             ssh_host: Some("build-box".to_string()),
             ssh_port: None,
             ssh_identity_file: None,
@@ -5020,6 +5316,7 @@ mod tests {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    light_model: RequestField::Omitted,
                     ssh_host: None,
                     ssh_port: None,
                     ssh_identity_file: None,
@@ -5065,6 +5362,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        light_model: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5107,6 +5405,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        light_model: RequestField::Omitted,
                     },
                 )
                 .await
@@ -5142,6 +5441,7 @@ mod tests {
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        light_model: RequestField::Omitted,
                     },
                 )
                 .await
@@ -6150,6 +6450,7 @@ thread_timeout_secs = 7200
                     api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
                     extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -6190,6 +6491,94 @@ thread_timeout_secs = 7200
 
         stale_manager.cancel_active_run("session").await.unwrap();
         endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn ordinary_attachment_does_not_open_operation_lease_sidecar() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("attachment_without_effort_migration");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
+        let snapshot = sessions::new_snapshot(
+            "session".to_string(),
+            root.clone(),
+            "claude-sonnet-4-6-20251001".to_string(),
+            "https://api.anthropic.com/v1".to_string(),
+            BackendKind::AnthropicMessages,
+            Some(ReasoningEffort::High),
+            None,
+            None,
+            Vec::new(),
+            Some("ANTHROPIC_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+        std::fs::write(root.join("store.db.run-locks"), b"unavailable").unwrap();
+        let manager = test_manager(&root);
+
+        let first = manager.attach_session("session").await.unwrap();
+        let second = manager.attach_session("session").await.unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(first.config_version(), Some(0));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn busy_attachment_is_transient_and_next_attach_observes_durable_config() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("busy_transient_effort_recovery");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
+        let snapshot = sessions::new_snapshot(
+            "session".to_string(),
+            root.clone(),
+            "claude-sonnet-4-6-20251001".to_string(),
+            "https://api.anthropic.com/v1".to_string(),
+            BackendKind::AnthropicMessages,
+            Some(ReasoningEffort::Xhigh),
+            None,
+            None,
+            Vec::new(),
+            Some("ANTHROPIC_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+        let lease = sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "session")
+            .unwrap();
+        let reader = test_manager(&root);
+        let writer = test_manager(&root);
+
+        let transient = reader.attach_session("session").await.unwrap();
+        assert_eq!(
+            transient.metadata().reasoning_effort.as_deref(),
+            Some("high")
+        );
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Xhigh));
+        assert_eq!(stored.config_version, 0);
+
+        drop(lease);
+        writer
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("claude-opus-4-6".to_string()),
+                    reasoning_effort: RequestField::Value("high".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let current = reader.attach_session("session").await.unwrap();
+        assert_eq!(current.metadata().model, "claude-opus-4-6");
+        assert_eq!(current.metadata().reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(current.config_version(), Some(1));
+        let cached = reader.attach_session("session").await.unwrap();
+        assert!(Arc::ptr_eq(&current, &cached));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -6601,16 +6990,24 @@ model = "gpt-5.2"
         let store_path = root.join("store.db");
         let manager = test_manager(&root);
 
-        for (session_id, backend, expected_base) in [
+        for (session_id, backend, expected_base, light_api_key_env) in [
             (
                 "repair-codex",
                 BackendKind::ChatGptCodexResponses,
                 nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+                Some("STALE_API_KEY"),
             ),
             (
                 "repair-arcee",
                 BackendKind::ArceeAuth,
                 nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+                Some("STALE_API_KEY"),
+            ),
+            (
+                "repair-arcee-without-light-selector",
+                BackendKind::ArceeAuth,
+                nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+                None,
             ),
         ] {
             seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
@@ -6621,6 +7018,18 @@ model = "gpt-5.2"
             }
             incomplete.base_url.clear();
             incomplete.api_key_env = Some("STALE_API_KEY".to_string());
+            incomplete.light_model = Some(LightModelSettings {
+                model: match backend {
+                    BackendKind::ArceeAuth => "trinity-large-thinking",
+                    BackendKind::ChatGptCodexResponses => "gpt-5.2-codex",
+                    _ => unreachable!("test only covers managed backends"),
+                }
+                .to_string(),
+                backend: Some(backend),
+                base_url: Some(expected_base.to_string()),
+                api_key_env: light_api_key_env.map(str::to_string),
+                reasoning_effort: None,
+            });
             sessions::update_session_config(&store_path, &incomplete).unwrap();
 
             manager
@@ -6630,9 +7039,23 @@ model = "gpt-5.2"
             let repaired = sessions::load_session(&store_path, session_id).unwrap();
             assert_eq!(repaired.base_url, expected_base);
             assert_eq!(repaired.api_key_env, None);
+            assert_eq!(
+                repaired
+                    .light_model
+                    .as_ref()
+                    .and_then(|light| light.api_key_env.as_deref()),
+                None
+            );
             let rehydrated = manager.session_config(session_id).unwrap();
             assert_eq!(rehydrated.base_url, expected_base);
             assert_eq!(rehydrated.api_key_env, None);
+            assert_eq!(
+                rehydrated
+                    .light_model
+                    .as_ref()
+                    .and_then(|light| light.api_key_env.as_deref()),
+                None
+            );
             let resumed = manager.snapshot(session_id).await.unwrap();
             assert_eq!(resumed.metadata.base_url, expected_base);
         }
@@ -6652,6 +7075,10 @@ model = "gpt-5.2"
         let store_path = root.join("store.db");
         let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
         api_key_session.reasoning_effort = None;
+        let inherited_selector = api_key_session
+            .api_key_env
+            .clone()
+            .expect("seeded API-key session has a selector");
         sessions::update_session_config(&store_path, &api_key_session).unwrap();
         let manager = test_manager(&root);
 
@@ -6661,6 +7088,13 @@ model = "gpt-5.2"
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-auth".to_string()),
                     model: RequestField::Value("trinity-large-thinking".to_string()),
+                    light_model: RequestField::Value(LightModelSettings {
+                        model: "trinity-large-thinking".to_string(),
+                        backend: Some(BackendKind::ArceeAuth),
+                        base_url: None,
+                        api_key_env: Some(inherited_selector),
+                        reasoning_effort: None,
+                    }),
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -6674,6 +7108,13 @@ model = "gpt-5.2"
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
         );
         assert_eq!(stored.api_key_env, None);
+        assert_eq!(
+            stored
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
+        );
         let rehydrated = manager.session_config("session").unwrap();
         assert_eq!(rehydrated.backend.as_deref(), Some("arcee-auth"));
         assert_eq!(
@@ -6681,6 +7122,13 @@ model = "gpt-5.2"
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
         );
         assert_eq!(rehydrated.api_key_env, None);
+        assert_eq!(
+            rehydrated
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -7080,6 +7528,7 @@ model = "gpt-5.2"
                         "true".to_string(),
                     )]))),
                     orchestrator_compaction_threshold: RequestField::Value(64_000),
+                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -7364,6 +7813,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        light_model: RequestField::Omitted,
                     },
                 )
                 .await
@@ -7405,6 +7855,7 @@ model = "gpt-5.2"
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
+                light_model: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -7457,6 +7908,7 @@ model = "gpt-5.2"
                         api_key_env: RequestField::Omitted,
                         extra_headers: RequestField::Omitted,
                         orchestrator_compaction_threshold: RequestField::Omitted,
+                        light_model: RequestField::Omitted,
                     },
                 )
                 .await
@@ -7485,6 +7937,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -7505,6 +7958,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -7523,6 +7977,7 @@ model = "gpt-5.2"
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
+                light_model: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -7569,6 +8024,7 @@ model = "gpt-5.2"
                     api_key_env: RequestField::Null,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
+                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -8266,6 +8722,96 @@ model = "gpt-5.2"
                 .recv_timeout(std::time::Duration::from_secs(5))
                 .expect("the model index was asked"),
             "Bearer sk-server-test-key"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn saved_config_managed_updates_clear_inherited_light_selectors() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("saved_config_managed_light_clear");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let inherited_selector = "NAC_CONFIG_OLD_KEY";
+        let managed_light = || LightModelSettings {
+            model: "trinity-large-thinking".to_string(),
+            backend: Some(BackendKind::ArceeAuth),
+            base_url: None,
+            api_key_env: Some(inherited_selector.to_string()),
+            reasoning_effort: None,
+        };
+
+        model_configurations::insert_model_configuration(
+            &manager.inner.store_path,
+            "repair",
+            model_configurations::NewModelConfiguration {
+                name: "Managed repair".to_string(),
+                backend: BackendKind::ArceeAuth.to_string(),
+                model: "trinity-large-thinking".to_string(),
+                base_url: nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL.to_string(),
+                api_key_env: Some(inherited_selector.to_string()),
+                reasoning_effort: None,
+                extra_headers: BTreeMap::new(),
+                orchestrator_compaction_threshold: None,
+                initial_prompt: None,
+                light_model: Some(managed_light()),
+            },
+        )
+        .unwrap();
+        let Json(repaired) = update_model_config_handler(
+            State(manager.clone()),
+            AxumPath("repair".to_string()),
+            Ok(Json(UpdateModelConfigurationRequest::default())),
+        )
+        .await
+        .expect("managed repair clears inherited selectors");
+        assert_eq!(repaired.api_key_env, None);
+        assert_eq!(
+            repaired
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
+        );
+
+        model_configurations::insert_model_configuration(
+            &manager.inner.store_path,
+            "switch",
+            model_configurations::NewModelConfiguration {
+                name: "Managed switch".to_string(),
+                backend: BackendKind::ArceeApi.to_string(),
+                model: "trinity-large-thinking".to_string(),
+                base_url: "https://api.arcee.ai/api/v1".to_string(),
+                api_key_env: Some(inherited_selector.to_string()),
+                reasoning_effort: None,
+                extra_headers: BTreeMap::new(),
+                orchestrator_compaction_threshold: None,
+                initial_prompt: None,
+                light_model: None,
+            },
+        )
+        .unwrap();
+        let Json(switched) = update_model_config_handler(
+            State(manager.clone()),
+            AxumPath("switch".to_string()),
+            Ok(Json(UpdateModelConfigurationRequest {
+                backend: RequestField::Value(BackendKind::ArceeAuth),
+                light_model: RequestField::Value(managed_light()),
+                ..UpdateModelConfigurationRequest::default()
+            })),
+        )
+        .await
+        .expect("managed switch clears inherited selectors");
+        assert_eq!(switched.api_key_env, None);
+        assert_eq!(
+            switched
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
         );
 
         let _ = std::fs::remove_dir_all(root);

@@ -47,11 +47,11 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
     assert_eq!(disabled["thinking"], json!({"type": "disabled"}));
     assert!(disabled.get("reasoning_effort").is_none());
 
-    // The wire tier `max` for `xhigh` comes from the catalog map, not
+    // The wire tier `max` for `Max` comes from the catalog map, not
     // from adapter code (requests.rs carries no "max" literal).
     for (effort, wire_effort) in [
         (ReasoningEffort::High, "high"),
-        (ReasoningEffort::Xhigh, "max"),
+        (ReasoningEffort::Max, "max"),
     ] {
         let request = completions_chat_request(
             "deepseek-v4-pro",
@@ -189,16 +189,14 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         "Arcee: effort-free shape (bare reasoning_effort dialect)"
     );
 
-    // Arcee passthrough models: the Arcee format sends bare
+    // Arcee third-party models: the Arcee format sends bare
     // `reasoning_effort` — no `thinking`, `reasoning_history`, or
     // `chat_template_kwargs` wrapper objects. The wire value comes from the
-    // catalog map (xhigh → "max" for deepseek/glm passthrough models).
-    let arcee_passthrough_levels = ThinkingLevelMap(std::collections::BTreeMap::from([
+    // catalog map (max → "max" for deepseek third-party models).
+    let arcee_third_party_levels = ThinkingLevelMap(std::collections::BTreeMap::from([
         (ReasoningEffort::None, Some("none".to_string())),
-        (ReasoningEffort::Low, Some("low".to_string())),
-        (ReasoningEffort::Medium, Some("medium".to_string())),
         (ReasoningEffort::High, Some("high".to_string())),
-        (ReasoningEffort::Xhigh, Some("max".to_string())),
+        (ReasoningEffort::Max, Some("max".to_string())),
     ]));
     let arcee_compat = Compat {
         completions_thinking_format: Some(CompletionsThinkingFormat::Arcee),
@@ -210,7 +208,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         Some(ReasoningEffort::None),
         &messages,
         &[],
-        &arcee_passthrough_levels,
+        &arcee_third_party_levels,
         &arcee_compat,
         CompletionsMessageShape::Standard,
     );
@@ -225,7 +223,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
         Some(ReasoningEffort::High),
         &messages,
         &[],
-        &arcee_passthrough_levels,
+        &arcee_third_party_levels,
         &arcee_compat,
         CompletionsMessageShape::Standard,
     );
@@ -235,16 +233,16 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
     assert!(arcee_high.get("chat_template_kwargs").is_none());
     assert!(arcee_high.get("reasoning").is_none());
 
-    let arcee_xhigh = completions_chat_request(
+    let arcee_max = completions_chat_request(
         "deepseek-ai/deepseek-v4-pro",
-        Some(ReasoningEffort::Xhigh),
+        Some(ReasoningEffort::Max),
         &messages,
         &[],
-        &arcee_passthrough_levels,
+        &arcee_third_party_levels,
         &arcee_compat,
         CompletionsMessageShape::Standard,
     );
-    assert_eq!(arcee_xhigh["reasoning_effort"], "max");
+    assert_eq!(arcee_max["reasoning_effort"], "max");
 }
 
 #[test]

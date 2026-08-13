@@ -368,6 +368,8 @@ pub struct ToolRuntime {
     /// API costs are included in the session totals.  `orchestrator_context_tokens` is
     /// intentionally NOT accumulated here — it stays orchestrator-only.
     pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
+    /// Light worker model client; `None` keeps single-model dispatch.
+    pub light_client: Option<Arc<crate::model::ModelClient>>,
 }
 
 pub(crate) fn resolve_workspace_path(runtime: &ToolRuntime, path: impl AsRef<Path>) -> PathBuf {
@@ -456,9 +458,12 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
     tools
 }
 
-pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<ToolDefinition> {
+pub fn orchestrator_tool_definitions(
+    skills: Option<&SkillRegistry>,
+    light: Option<&crate::model::ModelClient>,
+) -> Vec<ToolDefinition> {
     vec![
-        thread::dispatch_definition(skills),
+        thread::dispatch_definition(skills, light),
         thread::threads_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
@@ -633,5 +638,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
+        light_client: None,
     }
 }

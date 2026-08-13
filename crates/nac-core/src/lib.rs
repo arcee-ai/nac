@@ -6,6 +6,7 @@ mod agents_md;
 pub mod browser;
 pub mod commands;
 pub mod events;
+pub mod light_model;
 mod mcp;
 pub mod model;
 
@@ -26,6 +27,20 @@ pub mod ssh_configurations {
         delete_ssh_configuration, insert_ssh_configuration, list_ssh_configurations,
         load_ssh_configuration, update_ssh_configuration, NewSshConfiguration,
         SshConfigurationRecord, SshConfigurationStoreError,
+    };
+}
+
+/// Named MCP servers the dashboard manages, plus the library catalog it offers
+/// when adding one. The dashboard edits `config.toml` directly; sessions parse
+/// the file when a worker launches.
+pub mod mcp_configurations {
+    pub use crate::mcp::{
+        delete_mcp_server_configuration, embedded_library_entries, fetch_smithery_library_entries,
+        insert_mcp_server_configuration, list_mcp_server_configurations,
+        load_mcp_server_configuration, mcp_config_path, merge_library_entries, probe_mcp_server,
+        update_mcp_server_configuration, McpLibraryAuth, McpLibraryEntry, McpProbedTool,
+        McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
+        McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }
 

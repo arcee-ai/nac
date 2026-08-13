@@ -9,10 +9,11 @@ use uuid::Uuid;
 use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
+use crate::light_model::{resolve_light_client, LightModelSettings};
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
-    managed_backend_base_url, BackendKind, EffectiveModelSettings, ModelClient,
-    ModelConfigurationError, ReasoningEffort,
+    managed_backend_base_url, resolve_model_metadata, BackendKind, EffectiveModelSettings,
+    ModelClient, ModelConfigurationError, ModelMetadata, ReasoningEffort,
 };
 use crate::paths::PathContext;
 /// Public because callers outside this crate build the connections that sessions
@@ -331,6 +332,9 @@ pub struct ModelOptions {
     pub api_model: Option<String>,
     pub api_key_env: OptionalModelOption<String>,
     pub extra_headers: Option<BTreeMap<String, String>>,
+    /// Optional light worker model; `Some` enables weight-classified
+    /// dispatch for the session, `None` keeps single-model behavior.
+    pub light_model: Option<LightModelSettings>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -810,6 +814,12 @@ pub async fn build_run_config(
         settings.resolved.context_window,
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
+    let light_model = options.model.light_model.clone();
+    let light_client = light_model
+        .as_ref()
+        .map(|light| resolve_light_client(light, &settings.extra_headers))
+        .transpose()?
+        .map(std::sync::Arc::new);
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -855,6 +865,7 @@ pub async fn build_run_config(
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
+                light_client: light_client.clone(),
             },
         )?;
         let mut session_snapshot = sessions::new_snapshot(
@@ -871,6 +882,7 @@ pub async fn build_run_config(
             settings.extra_headers.clone(),
         );
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+        session_snapshot.light_model = light_model;
         sessions::create_session(&store_path, &session_snapshot)?;
 
         return Ok(OrchestratorRunConfig {
@@ -940,6 +952,7 @@ pub async fn build_run_config(
             extra_tool_defs: Vec::new(),
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
+            light_client: light_client.clone(),
         },
     )?;
     let mut session_snapshot = sessions::new_snapshot(
@@ -956,6 +969,7 @@ pub async fn build_run_config(
         settings.extra_headers.clone(),
     );
     session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+    session_snapshot.light_model = light_model;
     sessions::create_session(&store_path, &session_snapshot)?;
 
     Ok(OrchestratorRunConfig {
@@ -1070,6 +1084,7 @@ pub async fn build_managed_worker_config(
             extra_tool_defs,
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
+            light_client: None,
         },
     )?;
 
@@ -1125,6 +1140,8 @@ pub async fn build_resume_config(
         lookup_cwd,
         options.worker_executable,
         None,
+        true,
+        None,
     )
     .await
 }
@@ -1144,8 +1161,75 @@ pub async fn build_resume_config_for_session(
         resume_base_cwd,
         worker_executable,
         None,
+        true,
+        None,
     )
     .await
+}
+
+pub async fn build_resume_config_for_session_attachment(
+    store_path: PathBuf,
+    session_id: &str,
+    config: &NacConfig,
+    resume_base_cwd: PathBuf,
+    worker_executable: Option<PathBuf>,
+) -> Result<(
+    OrchestratorRunConfig,
+    bool,
+    Option<sessions::SessionOperationLease>,
+)> {
+    let snapshot = sessions::load_session(&store_path, session_id)?;
+    let metadata = resolve_model_metadata(snapshot.backend, &snapshot.model);
+    let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
+        metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
+    });
+    if !requires_migration {
+        let run_config = build_resume_config_from_snapshot(
+            snapshot,
+            store_path,
+            config,
+            resume_base_cwd,
+            worker_executable,
+            None,
+            true,
+            Some(metadata),
+        )
+        .await?;
+        return Ok((run_config, true, None));
+    }
+
+    match sessions::SessionOperationLease::try_acquire(&store_path, session_id) {
+        Ok(lease) => {
+            let snapshot = sessions::load_session(&store_path, session_id)?;
+            let run_config = build_resume_config_from_snapshot(
+                snapshot,
+                store_path,
+                config,
+                resume_base_cwd,
+                worker_executable,
+                Some(&lease),
+                true,
+                None,
+            )
+            .await?;
+            Ok((run_config, true, Some(lease)))
+        }
+        Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+            let run_config = build_resume_config_from_snapshot(
+                snapshot,
+                store_path,
+                config,
+                resume_base_cwd,
+                worker_executable,
+                None,
+                false,
+                Some(metadata),
+            )
+            .await?;
+            Ok((run_config, false, None))
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub async fn build_resume_config_for_session_with_lease(
@@ -1156,6 +1240,7 @@ pub async fn build_resume_config_for_session_with_lease(
     worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
 ) -> Result<OrchestratorRunConfig> {
+    operation_lease.validate(&store_path, session_id)?;
     let snapshot = sessions::load_session(&store_path, session_id)?;
     build_resume_config_from_snapshot(
         snapshot,
@@ -1164,6 +1249,8 @@ pub async fn build_resume_config_for_session_with_lease(
         resume_base_cwd,
         worker_executable,
         Some(operation_lease),
+        true,
+        None,
     )
     .await
 }
@@ -1175,6 +1262,8 @@ async fn build_resume_config_from_snapshot(
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
     operation_lease: Option<&sessions::SessionOperationLease>,
+    persist_recovery: bool,
+    resolved_metadata: Option<ModelMetadata>,
 ) -> Result<OrchestratorRunConfig> {
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     // Resume reaches the host with the connection the session recorded, not with
@@ -1195,13 +1284,24 @@ async fn build_resume_config_from_snapshot(
     let paths = PathContext::new(&workspace_cwd);
     let stored_model = snapshot.model.clone();
     let stored_base_url = snapshot.base_url.clone();
-    let snapshot_settings = EffectiveModelSettings::new(
+    let stored_reasoning_effort = snapshot.reasoning_effort;
+    let metadata = resolved_metadata
+        .unwrap_or_else(|| resolve_model_metadata(snapshot.backend, &stored_model));
+    if let Some(effort) = stored_reasoning_effort {
+        if !metadata.thinking_level_map.is_supported(effort) {
+            snapshot.reasoning_effort =
+                metadata.thinking_level_map.closest_supported_effort(effort);
+        }
+    }
+    let authoritative = metadata.source.is_authoritative();
+    let snapshot_settings = EffectiveModelSettings::new_with_resolved(
         snapshot.backend,
         stored_model.clone(),
         stored_base_url.clone(),
         snapshot.reasoning_effort,
         snapshot.api_key_env.clone(),
         snapshot.extra_headers.clone(),
+        metadata,
     )
     .map_err(|error| {
         anyhow::anyhow!(
@@ -1213,6 +1313,17 @@ async fn build_resume_config_from_snapshot(
         anyhow::bail!(
             "stored session model settings are invalid; settings repair required: model and base_url must be stored in normalized nonblank form"
         );
+    }
+    if persist_recovery && snapshot.reasoning_effort != stored_reasoning_effort && authoritative {
+        let migration_lease;
+        if let Some(lease) = operation_lease {
+            lease.validate(&store_path, &snapshot.session_id)?;
+        } else {
+            migration_lease =
+                sessions::SessionOperationLease::try_acquire(&store_path, &snapshot.session_id)?;
+            migration_lease.validate(&store_path, &snapshot.session_id)?;
+        }
+        snapshot.config_version = sessions::update_session_config(&store_path, &snapshot)?;
     }
     let client = ModelClient::from_effective_settings(snapshot_settings)
         .map_err(|error| {
@@ -1227,6 +1338,18 @@ async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
+    let light_client = snapshot
+        .light_model
+        .as_ref()
+        .map(|light| resolve_light_client(light, &snapshot.extra_headers))
+        .transpose()
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "stored session light-model settings are invalid; settings repair required: {:#}",
+                error
+            )
+        })?
+        .map(std::sync::Arc::new);
     let sandbox = if ssh.is_some() {
         None
     } else {
@@ -1298,6 +1421,7 @@ async fn build_resume_config_from_snapshot(
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: worker_thread_timeout_secs(config),
+            light_client,
         },
     )?;
     // Restore is blob ++ transcript log: rows the crashed previous run
@@ -1519,6 +1643,49 @@ mod tests {
         }
     }
 
+    async fn create_and_resume_effort_snapshot(
+        store_path: &Path,
+        root: &Path,
+        key_name: &str,
+        session_id: &str,
+        backend: BackendKind,
+        model: &str,
+        stored_effort: ReasoningEffort,
+    ) -> SessionSnapshot {
+        let base_url = match backend {
+            BackendKind::TogetherChat => "https://api.together.xyz/v1",
+            BackendKind::AnthropicMessages => "https://api.anthropic.com/v1",
+            BackendKind::ArceeApi => "https://api.arcee.ai/api/v1",
+            _ => unreachable!(),
+        };
+        let snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            model.to_string(),
+            base_url.to_string(),
+            backend,
+            Some(stored_effort),
+            None,
+            None,
+            Vec::new(),
+            Some(key_name.to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(store_path, &snapshot).unwrap();
+        build_resume_config_for_session(
+            store_path.to_path_buf(),
+            session_id,
+            &NacConfig::default(),
+            root.to_path_buf(),
+            None,
+        )
+        .await
+        .unwrap()
+        .session
+        .into_snapshot()
+        .unwrap()
+    }
+
     /// A config whose `[model]` section resolves through the catalog:
     /// gpt-5.2 is unique to openai-responses, so the backend, the catalog
     /// endpoint default and the conventional credential variable all come
@@ -1530,7 +1697,8 @@ mod tests {
     }
 
     #[test]
-    fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_out_of_range_values() {
+    fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_out_of_range_values(
+    ) {
         // No request: defaults to 70% of the context window (rounded).
         assert_eq!(
             effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
@@ -1636,6 +1804,7 @@ mod tests {
                 api_model: Some(" explicit-model ".to_string()),
                 api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
                 extra_headers: Some(headers.clone()),
+                light_model: None,
             },
             &config,
         )
@@ -2596,6 +2765,8 @@ X-Config = "yes"
             root.clone(),
             None,
             None,
+            true,
+            None,
         )
         .await
         {
@@ -2757,6 +2928,137 @@ X-Config = "yes"
     }
 
     #[tokio::test]
+    async fn resume_recovers_effort_and_only_persists_authoritative_changes() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_RESUME_EFFORT_MIGRATION_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("resume_effort_migration")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
+
+        for (session_id, model, stored_effort, effective_effort, stored_after, version) in [
+            (
+                "dated-family",
+                "claude-sonnet-4-6-20251001",
+                ReasoningEffort::Xhigh,
+                Some(ReasoningEffort::High),
+                Some(ReasoningEffort::High),
+                1,
+            ),
+            (
+                "supported",
+                "claude-sonnet-4-6-20251001",
+                ReasoningEffort::High,
+                Some(ReasoningEffort::High),
+                Some(ReasoningEffort::High),
+                0,
+            ),
+            (
+                "provider-default",
+                "unknown-model",
+                ReasoningEffort::Medium,
+                Some(ReasoningEffort::None),
+                Some(ReasoningEffort::Medium),
+                0,
+            ),
+        ] {
+            let active = create_and_resume_effort_snapshot(
+                &store_path,
+                &root,
+                key_name,
+                session_id,
+                BackendKind::AnthropicMessages,
+                model,
+                stored_effort,
+            )
+            .await;
+            assert_eq!(active.reasoning_effort, effective_effort);
+            assert_eq!(active.config_version, version);
+            let stored = sessions::load_session(&store_path, session_id).unwrap();
+            assert_eq!(stored.reasoning_effort, stored_after);
+            assert_eq!(stored.config_version, version);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
+    }
+
+    #[tokio::test]
+    async fn resume_effort_migration_requires_operation_lease() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_RESUME_EFFORT_LEASE_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("resume_effort_lease")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
+        let snapshot = sessions::new_snapshot(
+            "session".to_string(),
+            root.clone(),
+            "deepseek-ai/DeepSeek-V4-Pro".to_string(),
+            "https://api.together.xyz/v1".to_string(),
+            BackendKind::TogetherChat,
+            Some(ReasoningEffort::Medium),
+            None,
+            None,
+            Vec::new(),
+            Some(key_name.to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+
+        let lease = sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+        assert!(build_resume_config_for_session(
+            store_path.clone(),
+            "session",
+            &NacConfig::default(),
+            root.clone(),
+            None,
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            sessions::load_session(&store_path, "session")
+                .unwrap()
+                .reasoning_effort,
+            Some(ReasoningEffort::Medium)
+        );
+
+        let resumed = build_resume_config_for_session_with_lease(
+            store_path.clone(),
+            "session",
+            &NacConfig::default(),
+            root.clone(),
+            None,
+            &lease,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resumed.client.reasoning_effort(),
+            Some(ReasoningEffort::High)
+        );
+        let stored = sessions::load_session(&store_path, "session").unwrap();
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(stored.config_version, 1);
+
+        drop(lease);
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
+    }
+
+    #[tokio::test]
     async fn persisted_settings_are_identical_across_create_snapshot_resume_and_worker_transport() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let key_name = "NAC_REASONING_LIFECYCLE_TEST_KEY";
@@ -2786,6 +3088,7 @@ X-Config = "yes"
                     api_model: Some("snapshot-model".to_string()),
                     api_key_env: OptionalModelOption::Value(key_name.to_string()),
                     extra_headers: Some(headers.clone()),
+                    light_model: None,
                 },
                 orchestrator_compaction_threshold: Some(48_000),
                 sandbox: SandboxOptions::default(),
@@ -3092,6 +3395,8 @@ X-Config = "yes"
             PathBuf::from("/local/resume/base"),
             None,
             None,
+            true,
+            None,
         )
         .await
         {
@@ -3128,6 +3433,8 @@ X-Config = "yes"
             &complete_model_config(),
             PathBuf::from("/local/resume/base"),
             None,
+            None,
+            true,
             None,
         )
         .await

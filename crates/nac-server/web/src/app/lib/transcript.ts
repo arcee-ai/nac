@@ -15,6 +15,7 @@ import {
 import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
+  DispatchWeight,
   SessionSnapshotResponse,
   ToolCall,
 } from "@/app/types/api";
@@ -58,6 +59,8 @@ export interface TranscriptThread {
   name: string;
   /** What the orchestrator asked the thread to do. */
   action: string;
+  /** Weight class the dispatch was classified into, if any. */
+  weight: DispatchWeight | null;
   /** What the thread reported once it was done, or its action before then. */
   summary: string;
   /** Commands the thread has issued, oldest first, for the tail on its card. */
@@ -329,7 +332,11 @@ function describeThread(
   finishedNames: Set<string>,
 ): TranscriptThread {
   const name = threadName(call);
-  const action = text(parseArguments(call).action);
+  const args = parseArguments(call);
+  const action = text(args.action);
+  const rawWeight = text(args.weight);
+  const weight =
+    rawWeight === "light" || rawWeight === "heavy" ? rawWeight : null;
   const result = results.get(call.id) ?? null;
   // The stream is keyed by name and only ever describes the dispatch running
   // now, which is the newest one. Handing it to the earlier cards of that name
@@ -365,6 +372,7 @@ function describeThread(
     key: identity,
     name,
     action,
+    weight,
     summary: result || action,
     // The persisted events are what a reload falls back on, and the stream is
     // what carries the commands issued since the last snapshot.

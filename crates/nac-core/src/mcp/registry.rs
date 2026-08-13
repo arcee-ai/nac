@@ -41,7 +41,44 @@ struct McpServer {
 
 #[derive(Clone)]
 pub(super) struct NacMcpClientHandler {
-    roots: Vec<Root>,
+    pub(super) roots: Vec<Root>,
+}
+
+/// Servers defined in `config.toml`, or an empty map when the file is absent,
+/// unreadable or invalid — a broken file disables MCP rather than failing
+/// the session.
+fn file_servers_for_policy(
+    paths: &PathContext,
+    transport_policy: McpTransportPolicy,
+) -> BTreeMap<String, McpServerConfig> {
+    let Some(path) = default_config_path(paths) else {
+        return BTreeMap::new();
+    };
+    if !path.exists() {
+        return BTreeMap::new();
+    }
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            eprintln!(
+                "MCP config at '{}' could not be read; its servers will be skipped: {:#}",
+                path.display(),
+                error
+            );
+            return BTreeMap::new();
+        }
+    };
+    match mcp_config_for_policy(&raw, transport_policy) {
+        Ok(config) => config.mcp_servers,
+        Err(error) => {
+            eprintln!(
+                "MCP config at '{}' is invalid; its servers will be skipped: {:#}",
+                path.display(),
+                error
+            );
+            BTreeMap::new()
+        }
+    }
 }
 
 impl McpRegistry {
@@ -67,35 +104,10 @@ impl McpRegistry {
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
     ) -> Result<Option<Arc<Self>>> {
-        let Some(path) = default_config_path(paths) else {
-            return Ok(None);
-        };
-        if !path.exists() {
+        let servers = file_servers_for_policy(paths, transport_policy);
+        if servers.is_empty() {
             return Ok(None);
         }
-
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(error) => {
-                eprintln!(
-                    "MCP config at '{}' could not be read; MCP will be disabled: {:#}",
-                    path.display(),
-                    error
-                );
-                return Ok(None);
-            }
-        };
-        let config = match mcp_config_for_policy(&raw, transport_policy) {
-            Ok(config) => config,
-            Err(error) => {
-                eprintln!(
-                    "MCP config at '{}' is invalid; MCP will be disabled: {:#}",
-                    path.display(),
-                    error
-                );
-                return Ok(None);
-            }
-        };
 
         let handler = NacMcpClientHandler {
             roots: mcp_roots_for_policy(cwd, sandbox, root_policy)?,
@@ -103,8 +115,9 @@ impl McpRegistry {
 
         let mut tools = HashMap::new();
         let mut seen_names = HashMap::<String, usize>::new();
+        let mut seen_endpoints = HashMap::<String, String>::new();
 
-        for (server_name, server_config) in config.mcp_servers {
+        for (server_name, server_config) in servers {
             if !server_config.enabled {
                 continue;
             }
@@ -112,6 +125,17 @@ impl McpRegistry {
                 eprintln!(
                     "Skipping MCP server '{}': transport is disabled by policy",
                     server_name
+                );
+                continue;
+            }
+            // Two names for the same endpoint would mount every tool twice
+            // under different prefixes, so only the first name that mounts
+            // tools claims the endpoint; a failed attempt leaves it free for
+            // a later twin.
+            let endpoint = endpoint_key(&server_config.transport);
+            if let Some(existing) = seen_endpoints.get(&endpoint) {
+                eprintln!(
+                    "Skipping MCP server '{server_name}': same endpoint as server '{existing}'"
                 );
                 continue;
             }
@@ -161,6 +185,7 @@ impl McpRegistry {
                 }
             };
 
+            seen_endpoints.insert(endpoint, server_name.clone());
             let server = Arc::new(McpServer {
                 _service: service.clone(),
             });
@@ -292,6 +317,26 @@ pub(super) fn mcp_roots_for_policy(
                     .to_string()
             };
             Ok(vec![Root::new(root_uri).with_name(root_name)])
+        }
+    }
+}
+
+/// The identity a server connects to: the process for stdio, the URL for
+/// HTTP. Env vars and headers are credentials for the endpoint, not part of
+/// its identity.
+fn endpoint_key(transport: &McpTransportConfig) -> String {
+    match transport {
+        McpTransportConfig::Stdio { command, args, .. } => {
+            let mut key = String::from("stdio\0");
+            key.push_str(command);
+            for arg in args {
+                key.push('\0');
+                key.push_str(arg);
+            }
+            key
+        }
+        McpTransportConfig::StreamableHttp { url, .. } => {
+            format!("http\0{}", url.trim_end_matches('/'))
         }
     }
 }

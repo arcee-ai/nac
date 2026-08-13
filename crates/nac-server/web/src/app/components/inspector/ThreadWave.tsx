@@ -1,9 +1,6 @@
-import { useState } from "react";
-
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
-import { TaskPreviewHoverHint } from "@/app/components/inspector/TaskPreview";
 import { ThreadLogTail } from "@/app/components/inspector/ThreadLogTail";
-import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import type { ThreadState, TranscriptThread } from "@/app/lib/transcript";
 
@@ -73,13 +70,6 @@ function worstState(threads: TranscriptThread[]): ThreadState {
 /** One dispatched thread: name, live state and the newest line it produced. */
 function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
   const isMobile = useIsMobile();
-  const isDesktop = useIsDesktop();
-  const [hovered, setHovered] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  // The preview outlives the pointer leaving the card, so reading it does not
-  // require staying on the 220px tile it hangs off.
-  const showHint =
-    isDesktop && Boolean(thread.action) && (hovered || previewOpen);
   const running = thread.state === "running";
   const pending = thread.state === "pending";
   const cancelled = thread.state === "cancelled";
@@ -108,8 +98,6 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
         isMobile ? "w-[172px]" : "w-[220px]",
         running || pending ? "bg-elevation-level-2" : "bg-elevation-level-1",
       )}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       <button
         type="button"
@@ -117,9 +105,6 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           "flex flex-col items-start w-full h-full text-left",
           selected ? "btn-ghost-highlighted" : "btn-ghost",
         )}
-        // Without the room for a hover preview, the task is only reachable as
-        // the browser's own tooltip.
-        title={isDesktop ? undefined : thread.action || undefined}
         aria-pressed={selected}
         onClick={() => onSelect(thread.name, thread.key)}
       >
@@ -139,12 +124,11 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           >
             {thread.name}
           </span>
-          {showHint ? (
-            <TaskPreviewHoverHint
-              action={thread.action}
-              onOpenChange={setPreviewOpen}
-            />
-          ) : null}
+          {thread.weight && (
+            <span className="shrink-0 rounded-[3px] bg-elevation-level-3 px-1 text-[9px] uppercase tracking-wide text-basic-muted">
+              {thread.weight}
+            </span>
+          )}
         </div>
         {running || cancelled ? (
           <ThreadLogTail

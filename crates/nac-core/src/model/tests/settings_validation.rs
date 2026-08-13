@@ -331,6 +331,7 @@ fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence(
         ReasoningEffort::Medium,
         ReasoningEffort::High,
         ReasoningEffort::Xhigh,
+        ReasoningEffort::Max,
     ];
     let cases: &[(BackendKind, &str, &[ReasoningEffort])] = &[
         (
@@ -340,7 +341,7 @@ fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence(
                 ReasoningEffort::None,
                 ReasoningEffort::Low,
                 ReasoningEffort::High,
-                ReasoningEffort::Xhigh,
+                ReasoningEffort::Max,
             ],
         ),
         (
@@ -363,8 +364,12 @@ fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence(
                 ReasoningEffort::High,
             ],
         ),
-        (BackendKind::OpenAiResponses, "model", &all),
-        (BackendKind::ChatGptCodexResponses, "model", &all),
+        (BackendKind::OpenAiResponses, "model", &all[..all.len() - 1]),
+        (
+            BackendKind::ChatGptCodexResponses,
+            "model",
+            &all[..all.len() - 1],
+        ),
         (
             BackendKind::AnthropicMessages,
             "claude-opus-4-6",
@@ -442,7 +447,7 @@ fn validation_error_messages_are_preserved_verbatim() {
             BackendKind::DeepSeekChat,
             "model",
             ReasoningEffort::Minimal,
-            "invalid model configuration: reasoning effort 'minimal' is not supported by backend 'deepseek-chat'; supported values: none, low, high, or xhigh",
+            "invalid model configuration: reasoning effort 'minimal' is not supported by backend 'deepseek-chat'; supported values: none, low, high, or max",
         ),
         (
             BackendKind::FireworksChat,

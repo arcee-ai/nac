@@ -14,6 +14,7 @@ import { Breadcrumbs } from "@/app/components/Breadcrumbs";
 import { HeaderMenu } from "@/app/components/HeaderMenu";
 import { SessionHeaderActions } from "@/app/components/SessionHeaderActions";
 import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
+import { McpServersModal } from "@/app/components/modals/McpServersModal";
 import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
@@ -29,6 +30,7 @@ const SURFACE_STYLE = { backgroundImage: `${GROUND_FADE}, ${GROUND_FADE}` };
 export function TopBar() {
   const [configuring, setConfiguring] = useState(false);
   const [sshConfigs, setSshConfigs] = useState(false);
+  const [mcpServers, setMcpServers] = useState(false);
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const { pathname } = useLocation();
@@ -99,6 +101,7 @@ export function TopBar() {
           <HeaderMenu
             onConfigurations={() => setConfiguring(true)}
             onSshConfigs={() => setSshConfigs(true)}
+            onMcpServers={() => setMcpServers(true)}
           />
         </div>
       </header>
@@ -107,6 +110,7 @@ export function TopBar() {
         onClose={() => setConfiguring(false)}
       />
       <SshConfigsModal open={sshConfigs} onClose={() => setSshConfigs(false)} />
+      <McpServersModal open={mcpServers} onClose={() => setMcpServers(false)} />
     </>
   );
 }

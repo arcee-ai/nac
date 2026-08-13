@@ -24,6 +24,7 @@ libc = "0.2"
 portable-pty = "0.8"
 rmcp = { version = "1.3.0", default-features = false, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 toml = "0.8"
+toml_edit = "0.22"
 url = "2"
 serde_yaml_ng = "0.10"
 diffy = { version = "0.5.0", default-features = false }

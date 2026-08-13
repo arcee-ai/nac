@@ -103,6 +103,21 @@ pub struct AgentConfig {
     pub agents_md_message: Option<String>,
     pub thread_timeout_secs: u64,
     pub command_output_limits: crate::terminal::CommandOutputLimits,
+    /// Light worker model client; `None` keeps single-model dispatch.
+    pub light_client: Option<Arc<ModelClient>>,
+}
+
+/// Light-model addendum to the orchestrator system prompt: names the light
+/// model so weight classification has a real signal.
+fn light_model_prompt_guidance(light: &ModelClient) -> String {
+    format!(
+        "\n\nA light worker model is configured. Every thread dispatch requires a \
+         weight classification: light routes the dispatch to the light model — {} — \
+         and heavy runs your own model. Classify by the genuine difficulty of the \
+         bounded action: light for mechanical or well-scoped work (setup, running \
+         tests, simple edits), heavy for work needing real reasoning or broad context.",
+        tools::thread::describe_light_model(light)
+    )
 }
 
 pub struct Agent {
@@ -264,16 +279,22 @@ impl Agent {
             _ => None,
         };
 
-        let (system_prompt, mut tool_defs) = match config.mode {
+        let (mut system_prompt, mut tool_defs) = match config.mode {
             AgentMode::Worker => (
                 render_worker_system_prompt(&cwd),
                 tools::worker_tool_definitions(),
             ),
             AgentMode::Orchestrator => (
                 render_orchestrator_system_prompt(&cwd, thread_timeout_secs),
-                tools::orchestrator_tool_definitions(config.skills.as_deref()),
+                tools::orchestrator_tool_definitions(
+                    config.skills.as_deref(),
+                    config.light_client.as_deref(),
+                ),
             ),
         };
+        if let Some(light) = config.light_client.as_deref() {
+            system_prompt.push_str(&light_model_prompt_guidance(light));
+        }
         if config.mode == AgentMode::Worker {
             tool_defs.extend(config.extra_tool_defs);
         }
@@ -336,6 +357,7 @@ impl Agent {
                 command_cancellation: crate::tools::ThreadCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
+                light_client: config.light_client,
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -376,6 +398,7 @@ impl Agent {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
             },
         )
         .expect("default test agent config must be valid")
