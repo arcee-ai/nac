@@ -812,13 +812,7 @@ mod discovery_tool_definition_tests {
     }
 }
 
-// ------------------------------------------------------------------
-// Test helpers (shared across agent::dag, agent::tool_exec, tools::thread)
-// ------------------------------------------------------------------
-
-/// Create a `ToolRuntime` suitable for unit tests.  Uses the current
-/// directory as the workspace, an empty store path, a dummy session id,
-/// and no MCP / skills / worker executable.
+// Shared test fixture.
 #[cfg(test)]
 pub(crate) fn test_runtime() -> ToolRuntime {
     test_runtime_at(

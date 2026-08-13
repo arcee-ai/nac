@@ -144,7 +144,6 @@ export function clearRuntimeThreads(): void {
   setState({ threads: {} });
 }
 
-/** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
 export function setOptimisticUserPrompt(prompt: string | null): void {
   setState({ optimisticUserPrompt: prompt });
 }

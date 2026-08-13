@@ -72,14 +72,11 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
     const handleResize = () => {
       if (!containerRef.current) return;
 
-      // Throttle: if timeout already exists, don't reset it - let it execute
-      // This prevents infinite reset loop when ResizeObserver fires frequently
-      // Note: This is throttling (execute at most once per time period), not debouncing (delay until activity stops)
+      // Do not reset the pending timeout; ResizeObserver may fire continuously.
       if (scrollTimeoutRef.current !== null) {
         return;
       }
 
-      // Throttle scroll to bottom (100ms delay)
       scrollTimeoutRef.current = window.setTimeout(() => {
         if (containerRef.current) {
           containerRef.current.scrollTop = containerRef.current.scrollHeight;

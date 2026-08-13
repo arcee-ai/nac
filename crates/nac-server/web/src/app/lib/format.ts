@@ -1,5 +1,4 @@
-// Presentation helpers ported from the legacy UI. Behaviour is intentionally
-// identical, including the exact placeholder strings.
+// Formatting and placeholder strings are user-visible API.
 
 import type {
   ActiveRunSnapshot,

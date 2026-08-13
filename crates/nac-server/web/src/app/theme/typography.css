@@ -1,17 +1,12 @@
-/* Typography from ArceeFM index.css, with @apply resolved to concrete values
-   (text-xs .75/1rem, text-sm .875/1.25, text-base 1/1.5, text-lg 1.125/1.75,
-   text-xl 1.25/1.75; medium 500, semibold 600, bold 700). Font: Inter. */
+/* Shared typography compatibility classes. */
 
 .title { font-family: Inter; font-weight: 500; font-size: 28px; line-height: 2rem; }
 @media (min-width: 768px) { .title { font-size: 32px; line-height: 36px; } }
 .subtitle { font-family: Inter; font-weight: 500; font-size: 22px; line-height: 1.75rem; }
 @media (min-width: 768px) { .subtitle { font-size: 24px; line-height: 32px; } }
 
-/* Figma "Header/Header-md": semibold 16/24, unlike .header-small which is bold. */
 .header-md { font-family: Inter; font-size: 1rem; line-height: 1.5rem; font-weight: 600; }
-/* Figma "Header/Header-sm": semibold 14/20. */
 .header-sm { font-family: Inter; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; }
-/* Figma "Header/Header-2xl": semibold 24/32, unlike .subtitle which is medium. */
 .header-2xl { font-family: Inter; font-size: 1.5rem; line-height: 2rem; font-weight: 600; }
 
 .header-medium { font-family: Inter; font-size: 1.125rem; line-height: 1.5rem; font-weight: 700; }

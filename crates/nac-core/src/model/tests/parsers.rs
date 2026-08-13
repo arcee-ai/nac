@@ -46,9 +46,7 @@ fn parses_deepseek_chat_output() {
     assert_eq!(usage.output_tokens, 20);
     assert_eq!(usage.cache_read_tokens, 0);
     assert_eq!(usage.cache_write_tokens, 0);
-    // S6: the unified parser reads the nested reasoning_tokens shape for
-    // every completions provider (previously DeepSeek/Fireworks/Arcee
-    // always parsed 0).
+    // Nested reasoning tokens contribute to usage.
     assert_eq!(usage.reasoning_tokens, 9);
     assert_eq!(usage.orchestrator_context_tokens, 30);
 }

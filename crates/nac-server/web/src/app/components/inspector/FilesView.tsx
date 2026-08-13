@@ -125,8 +125,6 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
           active={selected === file.path}
           title={file.path}
           labelClassName={statusLabelClass(file.status)}
-          // The status letter used to sit here; the label colour already says
-          // as much, so the slot shows what kind of file it is instead.
           icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
           onClick={() => onSelect(file.path)}
         />

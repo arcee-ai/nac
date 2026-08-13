@@ -323,9 +323,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             PROVIDER_DEFAULT_MODEL_ID,
             true,
             deepseek_levels(),
-            // DeepSeek V4 accepts temperature (confirmed via API testing;
-            // the old "rejects temperature on reasoning models" note was
-            // specific to the deprecated R1 reasoner model).
+            // DeepSeek V4 accepts temperature; use 0.0 for deterministic requests.
             completions_compat(
                 Some(CompletionsThinkingFormat::Deepseek),
                 "reasoning_content",

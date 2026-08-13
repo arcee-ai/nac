@@ -45,9 +45,8 @@ pub fn define_workset(path: &Path, session_id: &str, workset: &WorksetDefinition
     )?;
 
     for (index, item) in workset.items.iter().enumerate() {
-        // Worksets used to expose kind/instruction/thread-oriented fields. Keep the
-        // old SQLite columns as compatibility storage while the public schema uses
-        // goal/role/depends_on/acceptance/notes.
+        // Legacy SQLite columns remain populated for storage compatibility; the public
+        // schema uses goal/role/depends_on/acceptance/notes.
         tx.execute(
             "INSERT INTO workset_items (
                  workset_id, session_id, position, title, thread_name, scope, description,

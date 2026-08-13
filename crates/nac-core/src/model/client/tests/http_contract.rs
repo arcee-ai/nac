@@ -644,9 +644,8 @@ async fn anthropic_max_tokens_come_from_the_resolved_catalog_metadata() {
         ("claude-opus-4-5", 64_000),
         ("claude-haiku-4-5", 64_000),
         ("claude-sonnet-4-5", 64_000),
-        // Deprecated models are no longer catalogued and resolve conservatively.
+        // Uncatalogued model IDs use the conservative fallback.
         ("claude-opus-4-1", 16_384),
-        // No catalog entry: the conservative fallback (was 128_000).
         ("claude-unknown-future", 16_384),
     ] {
         let server = ScriptedServer::start(vec![s5_anthropic_response()]);

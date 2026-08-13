@@ -118,21 +118,18 @@
         )
         .is_err());
 
-        // The `[compaction]` section is no longer consulted: a config that
-        // has one produces the same result as one without.
+        // Legacy `[compaction]` parses but does not affect new-session threshold resolution.
         let config_with_compaction: NacConfig =
             toml::from_str("[compaction]\nthreshold_tokens = 64000\n").unwrap();
         assert_eq!(
             effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
             Some(140_000)
         );
-        // The field still parses (backward compat) but is dead.
         assert_eq!(
             config_with_compaction.compaction.threshold_tokens,
             Some(64_000)
         );
 
-        // NonModelNacConfig still omits compaction entirely.
         let worker_config: NacConfig =
             toml::from_str::<NonModelNacConfig>("[compaction]\nthreshold_tokens = 64000\n")
                 .unwrap()

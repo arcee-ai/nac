@@ -27,8 +27,6 @@ fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
     );
     assert!(absent.get("thinking").is_none());
     assert!(absent.get("reasoning_effort").is_none());
-    // DeepSeek's compat sends temperature 0.0 (V4 models accept it; the
-    // old "rejects temperature on reasoning models" note was R1-specific).
     assert_eq!(absent["temperature"], json!(0.0));
     assert_eq!(
         absent["messages"][0]["reasoning_content"],

@@ -1,6 +1,6 @@
 // Model and credential rules shared by the launch and settings modals: managed
-// backends with a fixed base URL, credential modes, reasoning-effort clearing
-// and extra-header validation. Ported from the legacy UI unchanged.
+// backends with a fixed base URL, credential modes, reasoning-effort clearing,
+// and extra-header validation.
 
 import type { UpdateConfigRequest } from "@/app/types/api";
 

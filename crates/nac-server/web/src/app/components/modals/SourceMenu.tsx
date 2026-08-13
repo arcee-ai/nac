@@ -22,7 +22,6 @@ export type Source =
   | { kind: "file" }
   | { kind: "saved"; configId: string };
 
-/** Create a setup, read one from a file, or reuse one saved earlier. */
 export function SourceMenu({
   label,
   configurations,
