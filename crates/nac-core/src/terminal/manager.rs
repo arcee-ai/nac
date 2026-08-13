@@ -356,7 +356,10 @@ impl TerminalManager {
             if let Some(pidfile) = pidfile.as_deref() {
                 let _ = backend.terminal_pipe_kill(pidfile).await;
             }
-            terminate_child_tree(&mut child).await;
+            if let Err(error) = terminate_child_tree(&mut child).await {
+                status = CommandStatus::SpawnError;
+                runtime_error = Some(format!("command cleanup failed: {error}"));
+            }
             exit_code = None;
         }
 

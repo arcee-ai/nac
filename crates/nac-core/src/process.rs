@@ -113,14 +113,19 @@ impl ProcessTreeGuard {
         self.disarm();
     }
 
-    pub async fn terminate(&mut self, child: &mut Child) {
+    pub async fn terminate(&mut self, child: &mut Child) -> std::io::Result<()> {
+        let mut cleanup_error = None;
         #[cfg(unix)]
         if let Some(pgid) = self.pgid {
             let leader_pid = self
                 .root_pid
                 .filter(|root_pid| child.id() == Some(*root_pid as u32));
             if let Some(root_pid) = leader_pid {
-                signal_discovered(descendants_outside_group(root_pid, pgid), libc::SIGTERM);
+                if let Err(error) =
+                    signal_discovered(descendants_outside_group(root_pid, pgid), libc::SIGTERM)
+                {
+                    cleanup_error = Some(error);
+                }
 
                 let deadline = sleep(TERMINATE_GRACE);
                 tokio::pin!(deadline);
@@ -130,7 +135,7 @@ impl ProcessTreeGuard {
                     }
                     let descendants = descendants_outside_group(root_pid, pgid);
                     report_capture_failures(&descendants.failures);
-                    if descendants.processes.is_empty() {
+                    if descendants.processes.is_empty() && descendants.failures.is_empty() {
                         break;
                     }
                     tokio::select! {
@@ -139,7 +144,11 @@ impl ProcessTreeGuard {
                     }
                 }
                 if child.id() == Some(root_pid as u32) {
-                    signal_discovered(descendants_outside_group(root_pid, pgid), libc::SIGKILL);
+                    if let Err(error) =
+                        signal_discovered(descendants_outside_group(root_pid, pgid), libc::SIGKILL)
+                    {
+                        cleanup_error = Some(error);
+                    }
                 }
             }
 
@@ -148,7 +157,7 @@ impl ProcessTreeGuard {
                 let _ = child.wait().await;
             }
             self.disarm();
-            return;
+            return cleanup_error.map_or(Ok(()), Err);
         }
 
         // The child is not a process-group leader, so killpg cannot reach
@@ -156,12 +165,15 @@ impl ProcessTreeGuard {
         // finish, then kill the child itself.
         #[cfg(unix)]
         if let Some(root_pid) = self.root_pid {
-            signal_descendants(root_pid, libc::SIGKILL);
+            if let Err(error) = signal_descendants(root_pid, libc::SIGKILL) {
+                cleanup_error = Some(error);
+            }
         }
 
         let _ = child.kill().await;
         let _ = child.wait().await;
         self.disarm();
+        cleanup_error.map_or(Ok(()), Err)
     }
 
     #[cfg(unix)]
@@ -218,14 +230,32 @@ fn descendants_outside_group(root: libc::pid_t, pgid: libc::pid_t) -> Descendant
 }
 
 #[cfg(unix)]
-pub(crate) fn signal_descendants(root: libc::pid_t, signal: libc::c_int) {
-    signal_discovered(descendant_processes(root), signal);
+pub(crate) fn signal_descendants(root: libc::pid_t, signal: libc::c_int) -> std::io::Result<()> {
+    signal_discovered(descendant_processes(root), signal)
 }
 
 #[cfg(unix)]
-fn signal_discovered(descendants: DescendantProcesses, signal: libc::c_int) {
+fn signal_discovered(descendants: DescendantProcesses, signal: libc::c_int) -> std::io::Result<()> {
     signal_processes(&descendants.processes, signal);
     report_capture_failures(&descendants.failures);
+    capture_failure_error(&descendants.failures).map_or(Ok(()), Err)
+}
+
+#[cfg(target_os = "linux")]
+fn capture_failure_error(failures: &[ProcessCaptureFailure]) -> Option<std::io::Error> {
+    let first = failures.first()?;
+    Some(std::io::Error::new(
+        first.error.kind(),
+        format!(
+            "could not safely identify {} descendant process(es); pidfd_open failed first for pid {}: {}",
+            failures.len(), first.pid, first.error
+        ),
+    ))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn capture_failure_error(_failures: &[ProcessCaptureFailure]) -> Option<std::io::Error> {
+    None
 }
 
 #[cfg(target_os = "linux")]
@@ -263,9 +293,9 @@ pub fn isolate_process_group(command: &mut Command) {
     }
 }
 
-pub async fn terminate_child_tree(child: &mut Child) {
+pub async fn terminate_child_tree(child: &mut Child) -> std::io::Result<()> {
     let mut guard = ProcessTreeGuard::for_child(child);
-    guard.terminate(child).await;
+    guard.terminate(child).await
 }
 
 #[cfg(unix)]
@@ -343,7 +373,11 @@ impl ProcessIdentity {
         // meant to close. If the kernel cannot provide a stable handle, leave
         // this descendant unsignaled and report the failure after signaling
         // every sibling whose identity was captured successfully.
-        let pidfd = open_pidfd(snapshot.pid)?;
+        let pidfd = match open_pidfd(snapshot.pid) {
+            Ok(pidfd) => pidfd,
+            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let stat = match std::fs::read_to_string(format!("/proc/{}/stat", snapshot.pid)) {
             Ok(stat) => stat,
             Err(_) => return Ok(None),
@@ -534,6 +568,37 @@ mod tests {
         assert_eq!(parse_process_stat(stat), Some((4, 22)));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn capture_failures_are_returned_as_partial_cleanup_errors() {
+        let error = signal_discovered(
+            DescendantProcesses {
+                processes: Vec::new(),
+                failures: vec![ProcessCaptureFailure {
+                    pid: 123,
+                    error: std::io::Error::from_raw_os_error(libc::EMFILE),
+                }],
+            },
+            libc::SIGKILL,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("pid 123"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn vanished_process_is_not_a_capture_failure() {
+        let process = ProcessIdentity::capture(ProcessSnapshot {
+            pid: libc::pid_t::MAX,
+            ppid: 1,
+            start_time: 0,
+        })
+        .unwrap();
+
+        assert!(process.is_none());
+    }
+
     #[test]
     fn isolated_descendant_helper() {
         let Some(root) = std::env::var_os("NAC_PROCESS_TREE_TEST_ROOT") else {
@@ -588,7 +653,7 @@ mod tests {
         .await
         .expect("isolated descendant never became ready");
 
-        guard.terminate(&mut child).await;
+        guard.terminate(&mut child).await.unwrap();
         sleep(Duration::from_millis(1100)).await;
         assert!(
             !root.join("late-write").exists(),

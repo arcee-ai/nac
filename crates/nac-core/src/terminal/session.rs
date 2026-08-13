@@ -185,13 +185,16 @@ impl TerminalSession {
         }
 
         #[cfg(unix)]
-        {
-            self.signal_descendants(libc::SIGKILL);
+        let descendant_result = {
+            let descendant_result = self.signal_descendants(libc::SIGKILL);
             self.signal_process_group(libc::SIGKILL);
-        }
+            descendant_result
+        };
 
         self.reap_child().await;
         self.alive.store(false, Ordering::SeqCst);
+        #[cfg(unix)]
+        descendant_result?;
         Ok(())
     }
 
@@ -207,14 +210,18 @@ impl TerminalSession {
     }
 
     #[cfg(unix)]
-    fn signal_descendants(&self, signal: libc::c_int) {
+    fn signal_descendants(&self, signal: libc::c_int) -> std::io::Result<()> {
         if let Some(pid) = self.child.process_id() {
-            signal_descendants(pid as libc::pid_t, signal);
+            signal_descendants(pid as libc::pid_t, signal)
+        } else {
+            Ok(())
         }
     }
 
     #[cfg(not(unix))]
-    fn signal_descendants(&self, _signal: i32) {}
+    fn signal_descendants(&self, _signal: i32) -> std::io::Result<()> {
+        Ok(())
+    }
 
     #[cfg(unix)]
     fn signal_process_group(&self, signal: libc::c_int) {
@@ -261,7 +268,7 @@ impl Drop for TerminalSession {
         let _ = self.writer.flush();
         #[cfg(unix)]
         {
-            self.signal_descendants(libc::SIGTERM);
+            let _ = self.signal_descendants(libc::SIGTERM);
             self.signal_process_group(libc::SIGTERM);
         }
         self.alive.store(false, Ordering::SeqCst);

@@ -380,7 +380,7 @@ pub(super) async fn run_worker(
     let timed_out = matches!(outcome, WaitOutcome::TimedOut);
     let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
     if timed_out || (cancelled && !cooperatively_cancelled) {
-        process_tree.terminate(&mut child).await;
+        process_tree.terminate(&mut child).await?;
     }
 
     let readers = async {
@@ -396,7 +396,7 @@ pub(super) async fn run_worker(
             biased;
             _ = cancellation.cancelled() => {
                 cancelled = true;
-                process_tree.terminate(&mut child).await;
+                process_tree.terminate(&mut child).await?;
                 readers.await
             }
             output = &mut readers => output,
