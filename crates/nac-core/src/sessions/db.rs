@@ -97,8 +97,8 @@ pub fn increment_run_count(path: &Path, session_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Messages-sparing run-end save (DB-direct transcript workset, step 4 —
-/// never-fold): UPDATEs only run-state and row-context columns.
+/// Messages-sparing run-end save that updates only run-state and row-context
+/// columns.
 /// `messages_json` is written once at session creation
 /// (`insert_or_replace_session`) and never rewritten at run end — the live
 /// transcript is the orchestrator transcript log (store/transcript.rs), so
@@ -756,11 +756,10 @@ impl SessionSummaryRow {
                 None => Some(cwd.clone()),
             }
         };
-        // Never-fold (step 4): the blob is write-once (system head ++ legacy
-        // prefix) and the recent transcript lives in the orchestrator
-        // transcript log, so these two are materialized columns rather than a
-        // count over the blob: the log writer adds its delta on every append,
-        // a truncation rebuilds them, and the migration backfills blob ++ log.
+        // The blob is a write-once system-head and legacy prefix; the recent
+        // transcript lives in the orchestrator transcript log. These two are
+        // materialized columns rather than counts over the blob: each append
+        // adds its delta, and truncation rebuilds them from blob and log.
         let visible_message_count = usize::try_from(self.visible_message_count)
             .context("session visible message count overflowed")?;
         let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
@@ -801,13 +800,12 @@ fn insert_or_replace_session(
         .as_ref()
         .map(serialize_sandbox)
         .transpose()?;
-    // NEVER-FOLD (DB-direct transcript workset, step 4): this is the only
-    // writer of messages_json — session creation and the legacy full upsert
-    // below. Run end never rewrites the blob (`save_session_run_state`):
+    // This is the only writer of messages_json: session creation and the
+    // legacy full upsert below. Run end never rewrites the blob
+    // (`save_session_run_state`):
     // the live transcript is the orchestrator transcript log
     // (store/transcript.rs) and the blob is the write-once system head ++
-    // legacy prefix. DOWNGRADE CAVEAT (user-accepted): builds older than
-    // the transcript-log workset read only messages_json, so they show this
+    // legacy prefix. Older builds read only messages_json, so they show this
     // store's history truncated to the blob — invisibility, not corruption;
     // the log rows are untouched and a current build reads the full
     // transcript again.

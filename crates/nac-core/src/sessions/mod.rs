@@ -1782,8 +1782,8 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = crate::test_utils::temp_store_path("summary_blob_plus_log");
 
-        // Never-fold session shape (step 4): a write-once blob (system head
-        // ++ legacy prefix) plus the live transcript in the log.
+        // Session shape: a write-once blob (system head and legacy prefix)
+        // plus the live transcript in the append-only log.
         let mut with_log = test_snapshot(
             "session-with-log",
             "2026-01-01 00:00:00.000000000",

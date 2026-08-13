@@ -72,8 +72,8 @@ pub fn refresh_snapshot(
     }
 }
 
-/// Run-state fields refreshed at run end (DB-direct transcript workset,
-/// step 4 — never-fold): the token/timing bookkeeping persisted by
+/// Run-state fields refreshed at run end: the token/timing bookkeeping
+/// persisted by
 /// [`crate::sessions::save_session_run_state`]. Everything else about a
 /// session row — above all `messages_json` — is deliberately untouched at
 /// run end.
@@ -101,8 +101,8 @@ pub struct SessionRunStateUpdate {
 }
 
 impl SessionSnapshot {
-    /// Apply run-end state to the in-memory snapshot IN PLACE (never-fold:
-    /// `messages` is not touched — the blob is write-once) and capture the
+    /// Apply run-end state to the in-memory snapshot in place without
+    /// touching `messages` (the blob is write-once), and capture the
     /// sparing persistence update for `save_session_run_state`. `updated_at`
     /// is stamped once and shared by the in-memory copy and the store write.
     pub fn apply_run_state(&mut self, run_state: SessionRunState) -> SessionRunStateUpdate {

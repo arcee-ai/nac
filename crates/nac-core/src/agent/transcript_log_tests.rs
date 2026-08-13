@@ -1,6 +1,5 @@
-//! Step-2 tests for the DB-direct transcript workset: the in-loop dual-write
-//! (four commit points), the orchestrator-only construction gate, the
-//! blob ++ log restore merge, and crash/cancel log normalization.
+//! Tests for transcript commit points, the orchestrator-only construction
+//! gate, blob-prefix and log-tail restore, and crash/cancel normalization.
 use super::*;
 use crate::test_utils::TempStore;
 

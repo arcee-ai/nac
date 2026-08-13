@@ -115,9 +115,9 @@ pub struct Agent {
     thread_name: Option<String>,
     steering_dispatch_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
-    /// Orchestrator transcript log sink (DB-direct transcript workset, see
-    /// store/transcript.rs). Present only for orchestrator agents with a
-    /// session id — workers (separate `__worker` processes) never log.
+    /// Orchestrator transcript log sink (see store/transcript.rs). Present
+    /// only for orchestrator agents with a session id; workers (separate
+    /// `__worker` processes) never log.
     transcript_log: Option<TranscriptLogSink>,
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
@@ -1042,8 +1042,8 @@ impl Agent {
         tokio::task::spawn_blocking(move || writer.append_batch(&session_id, start_idx, &messages))
             .await
             .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
-        // Live trigger (step 3): emitted after the log commit, before the
-        // vec push — the store-backed read path sees the rows immediately.
+        // Emit after the log commit, before the vec push, so store-backed
+        // reads see the rows before subscribers are notified.
         self.event_sink
             .emit_transcript_appended(start_idx + batch_len);
         Ok(())
@@ -1061,7 +1061,7 @@ impl Agent {
         tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
             .await
             .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
-        // Live trigger (step 3): see log_transcript_batch.
+        // Notify subscribers only after the log commit.
         self.event_sink.emit_transcript_appended(idx + 1);
         Ok(())
     }

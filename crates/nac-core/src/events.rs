@@ -351,9 +351,9 @@ pub enum SessionEvent {
     SnapshotSaved {
         session_id: String,
     },
-    /// Live-only signal that the orchestrator transcript log gained rows
-    /// (DB-direct transcript workset, step 3). `transcript_len` is the raw
-    /// merged transcript length after the append. Emitted at each transcript
+    /// Live-only signal that the orchestrator transcript log gained rows.
+    /// `transcript_len` is the raw merged transcript length after the append.
+    /// Emitted at each transcript
     /// commit point so subscribers refetch the store-backed transcript
     /// mid-run. Never persisted: the bus persists only Agent events.
     TranscriptAppended {
@@ -1222,9 +1222,9 @@ impl EventSink {
         }
     }
 
-    /// Live-only transcript growth signal (DB-direct transcript workset,
-    /// step 3). Emitted by the agent at each transcript commit point, after
-    /// the log append commits, so session subscribers refetch the
+    /// Live-only transcript growth signal. Emitted by the agent at each
+    /// transcript commit point after the log append commits, so session
+    /// subscribers refetch the
     /// store-backed transcript mid-run. A no-op without a bus (workers,
     /// channel sinks, tests).
     /// Live-only model output, for the transcript to render before the

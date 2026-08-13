@@ -473,7 +473,7 @@ pub struct SessionService {
     transcript_recovery_warning: Arc<Option<String>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
     /// go through the same connection as the agent's appends, so store-backed
-    /// transcript reads serialize against commit points (step 3).
+    /// transcript reads serialize against commit points.
     transcript_log: Option<Arc<crate::store::TranscriptLogWriter>>,
     /// Incremental scan of the merged store transcript (snapshot blob ++ log
     /// tail), rebuilt from the restored transcript at construction and
@@ -513,8 +513,8 @@ struct ActiveRunState {
     finishing: bool,
     task: Option<JoinHandle<()>>,
     /// Visible-response count of the store transcript at run start,
-    /// captured by the run task before its first append (step 4,
-    /// never-fold): the diff base for the run-end token/timing bookkeeping.
+    /// captured by the run task before its first append as the diff base for
+    /// run-end token/timing bookkeeping.
     /// `None` until the task captures it — an early cancel then diffs
     /// against the run-end count, which is exact when nothing was appended.
     transcript_baseline: Option<usize>,
@@ -556,7 +556,7 @@ enum OperationAdmissionPreparationError {
 /// never visible responses (assistant messages without tool calls). A
 /// straggler row from an aborted append that is scanned in the cancel
 /// window before its `delete_from` would overcount — the same accepted
-/// imprecision class as `user_copies` (step 3).
+/// imprecision class as `user_copies`.
 #[derive(Default)]
 struct TranscriptScanCache {
     /// Raw merged-transcript length scanned so far.
@@ -568,9 +568,8 @@ struct TranscriptScanCache {
     user_copies: HashMap<String, usize>,
     /// Assistant messages with no tool calls (user-visible responses).
     /// Diffed between run start and run end for the run-end token/timing
-    /// bookkeeping (step 4, never-fold): the snapshot blob is never
-    /// rewritten at run end, so the old-vs-new vec diff became a
-    /// store-count diff.
+    /// bookkeeping. Because the snapshot blob is not rewritten at run end,
+    /// the calculation uses a store-count diff.
     visible_response_count: usize,
 }
 
@@ -1109,10 +1108,9 @@ impl SessionService {
         let blocking = blocking
             .map_err(|error| anyhow::anyhow!("frontend snapshot load task failed: {error}"))??;
 
-        // Store-backed transcript reads (step 3): the snapshot blob (legacy
-        // prefix) ++ the transcript log tail, ALWAYS. The agent-or-persisted
-        // duality and the stale-during-run fallback are gone — mid-run
-        // appends are visible as they commit to the log.
+        // Store-backed transcript reads always merge the snapshot blob prefix
+        // with the transcript log tail, so mid-run appends are visible as they
+        // commit to the log.
         self.update_transcript_scan().await?;
         let response_timing = {
             let snapshot = self.session_snapshot.lock().await;
@@ -1242,9 +1240,9 @@ impl SessionService {
 
     /// The merged store transcript: the snapshot blob (authoritative legacy
     /// prefix) ++ the transcript log tail (rows with `idx >= blob_len`).
-    /// This is exactly the agent's in-memory transcript, mid-run and
-    /// post-run alike — never-fold (step 4): the blob is write-once and the
-    /// tail only grows, run end no longer folds the log into the blob.
+    /// This matches the agent's in-memory transcript mid-run and post-run:
+    /// the blob is write-once, the tail is append-only, and run end does not
+    /// fold the log into the blob.
     async fn store_backed_transcript(&self) -> Result<Vec<Message>> {
         let (blob_len, mut messages) = {
             let snapshot = self.session_snapshot.lock().await;
@@ -1591,9 +1589,9 @@ impl SessionService {
 
     /// Advance the incremental transcript scan over newly appended rows.
     /// The delta is read from the store: the log window past the scanned
-    /// cursor, plus the blob part when the blob grew past it — dead in
-    /// production since step 4 (never-fold: the blob is write-once), kept
-    /// for tests that reseed the blob. Positions already consumed by a
+    /// cursor, plus the blob part when the blob grew past it. Blob growth is
+    /// supported for tests that reseed it; production blobs are write-once.
+    /// Positions already consumed by a
     /// concurrent update are skipped. A shrinking merged length means
     /// crash/cancel normalization trimmed a dangling (non-User) tail: the
     /// scan cursor rewinds, counts are unaffected.
@@ -1903,9 +1901,9 @@ impl SessionService {
         let event_bus = self.event_bus.clone();
         let service = self.clone();
         let task = tokio::spawn(async move {
-            // Step 4 (never-fold): capture the run-start visible-response
-            // count from the store transcript BEFORE this run's first
-            // append. It is the diff base for the run-end token/timing
+            // Capture the run-start visible-response count from the store
+            // transcript before this run's first append. It is the diff base
+            // for run-end token/timing
             // bookkeeping, which no longer has an old-vs-new messages vec
             // to diff. Best-effort: the run-end persist falls back to the
             // run-end count when this fails.
@@ -2314,8 +2312,8 @@ impl SessionService {
         active_run.task = Some(task);
     }
 
-    /// Store the run-start visible-response count captured by the run task
-    /// (step 4). Dropped when the run is already finishing/cancelling — the
+    /// Store the run-start visible-response count captured by the run task.
+    /// Dropped when the run is already finishing/cancelling; the
     /// persist path then falls back to the run-end count (exact when the
     /// task was cancelled before its first append).
     fn set_run_transcript_baseline(&self, run_id: &SessionRunId, baseline: usize) {
@@ -2346,9 +2344,9 @@ impl SessionService {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Run-end persist (DB-direct transcript workset, step 4 — never-fold):
-    /// performs NO `messages_json` rewrite. The snapshot blob is write-once
-    /// (system head ++ legacy prefix); the transcript lives in the
+    /// Run-end persistence performs no `messages_json` rewrite. The snapshot
+    /// blob is a write-once system-head and legacy prefix; the transcript
+    /// lives in the
     /// transcript log, appends-only. Token/timing bookkeeping diffs
     /// store-backed visible-response counts: `transcript_baseline` at run
     /// start (captured by the run task before its first append) vs the count
@@ -2684,8 +2682,8 @@ fn is_visible_response(message: &Message) -> bool {
     )
 }
 
-/// Run-end response-timing bookkeeping. The diff base is store-backed
-/// visible-response counts (step 4, never-fold): `previous_response_count`
+/// Run-end response-timing bookkeeping uses store-backed visible-response
+/// counts: `previous_response_count`
 /// at run START (captured from the store transcript when the run began) and
 /// `current_response_count` at run END. The persisted duration history is
 /// preserved and padded to both counts; a completed run's duration lands on
