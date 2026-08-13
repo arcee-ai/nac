@@ -8,11 +8,12 @@ use nac_core::{
 use crate::{enforce_trusted_base_url, nonblank_request_string};
 
 /// A top-level generated credential the light model may inherit. During
-/// rotation, `previous` identifies references that should follow the new key.
+/// rotation, `previous` identifies references that should follow the new
+/// destination; `name` is absent when managed auth clears the selector.
 #[derive(Clone, Copy)]
 pub(crate) struct InheritedCredential<'a> {
     pub backend: BackendKind,
-    pub name: &'a str,
+    pub name: Option<&'a str>,
     pub previous: Option<&'a str>,
 }
 
@@ -42,9 +43,9 @@ pub(crate) fn normalize(
     Ok(light)
 }
 
-/// Rotate an inherited light-model reference when a generated top-level
-/// credential is issued or changes. Only a light model on the same backend
-/// follows the new key, and never one holding an unrelated explicit selector.
+/// Rotate an inherited light-model reference when the top-level credential
+/// destination changes. Only a light model on the same backend follows the
+/// destination, and never one holding an unrelated explicit selector.
 pub(crate) fn rotate_inherited_credential(
     light: &mut LightModelSettings,
     credential: InheritedCredential<'_>,
@@ -55,7 +56,7 @@ pub(crate) fn rotate_inherited_credential(
     if light_backend == Some(credential.backend)
         && (light.api_key_env.is_none() || light.api_key_env.as_deref() == credential.previous)
     {
-        light.api_key_env = Some(credential.name.to_string());
+        light.api_key_env = credential.name.map(str::to_string);
     }
 }
 
@@ -63,7 +64,10 @@ pub(crate) fn rotate_inherited_credential(
 mod tests {
     use super::*;
 
-    fn light_settings(backend: Option<BackendKind>, api_key_env: Option<&str>) -> LightModelSettings {
+    fn light_settings(
+        backend: Option<BackendKind>,
+        api_key_env: Option<&str>,
+    ) -> LightModelSettings {
         LightModelSettings {
             model: "deepseek/deepseek-v4-flash-latest".to_string(),
             backend,
@@ -82,7 +86,7 @@ mod tests {
             &mut light,
             InheritedCredential {
                 backend: BackendKind::ArceeAuth,
-                name: "NEW_KEY",
+                name: Some("NEW_KEY"),
                 previous: Some("OLD_KEY"),
             },
         );
@@ -94,11 +98,24 @@ mod tests {
             &mut light,
             InheritedCredential {
                 backend: BackendKind::ArceeAuth,
-                name: "NEW_KEY",
+                name: Some("NEW_KEY"),
                 previous: Some("OLD_KEY"),
             },
         );
         assert_eq!(light.api_key_env.as_deref(), Some("NEW_KEY"));
+
+        // Managed auth clears an inherited selector instead of retaining the
+        // primary key that the normalized top-level configuration dropped.
+        let mut light = light_settings(Some(BackendKind::ArceeAuth), Some("OLD_KEY"));
+        rotate_inherited_credential(
+            &mut light,
+            InheritedCredential {
+                backend: BackendKind::ArceeAuth,
+                name: None,
+                previous: Some("OLD_KEY"),
+            },
+        );
+        assert_eq!(light.api_key_env, None);
     }
 
     #[test]
@@ -109,7 +126,7 @@ mod tests {
             &mut light,
             InheritedCredential {
                 backend: BackendKind::ArceeAuth,
-                name: "NEW_KEY",
+                name: Some("NEW_KEY"),
                 previous: Some("OLD_KEY"),
             },
         );
@@ -121,7 +138,7 @@ mod tests {
             &mut light,
             InheritedCredential {
                 backend: BackendKind::ArceeAuth,
-                name: "NEW_KEY",
+                name: Some("NEW_KEY"),
                 previous: Some("OLD_KEY"),
             },
         );

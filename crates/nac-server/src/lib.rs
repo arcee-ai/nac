@@ -1234,7 +1234,7 @@ impl SessionManager {
                         .or_else(|| model.api_model.as_deref().and_then(provider_for_model))?;
                     Some(light_model::InheritedCredential {
                         backend,
-                        name,
+                        name: Some(name),
                         previous: None,
                     })
                 });
@@ -1946,37 +1946,33 @@ impl SessionManager {
         // plain field patch does not, so it is settled here instead.
         let light_field = std::mem::take(&mut request.light_model);
         apply_raw_config_patch(&mut prospective, request)?;
-        let inherited_backend = prospective
-            .backend
-            .as_deref()
-            .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
-            .or_else(|| provider_for_model(&prospective.model));
+        if matches!(&light_field, RequestField::Omitted)
+            && current.diagnostics.iter().any(|diagnostic| {
+                diagnostic.starts_with(sessions::MALFORMED_LIGHT_MODEL_DIAGNOSTIC)
+            })
+        {
+            return Err(request_configuration_error(
+                "stored light-model settings are malformed; include light_model in the update to repair them, or null to return to single-model mode",
+            ));
+        }
+        let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
+            &mut prospective,
+            backend_selected,
+            base_url_omitted,
+            api_key_env_omitted,
+        )?;
         match light_field {
             RequestField::Omitted => {
-                // An unrelated patch must not persist the parse failure as a
-                // clear; only an explicit set or null may replace the column.
-                if current.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.starts_with(sessions::MALFORMED_LIGHT_MODEL_DIAGNOSTIC)
-                }) {
-                    return Err(request_configuration_error(
-                        "stored light-model settings are malformed; include light_model in the update to repair them, or null to return to single-model mode",
-                    ));
-                }
                 // A key-only patch still moves an inherited light selector
-                // along to the new primary selector.
-                if let (Some(light), Some(name), Some(backend)) = (
-                    prospective.light_model.as_mut(),
-                    prospective.api_key_env.as_deref(),
-                    inherited_backend,
-                ) {
-                    light_model::rotate_inherited_credential(
-                        light,
-                        light_model::InheritedCredential {
-                            backend,
-                            name,
-                            previous: current.api_key_env.as_deref(),
-                        },
-                    );
+                // along to the normalized primary selector, including a clear
+                // when the primary switches to managed auth.
+                let inherited = light_model::InheritedCredential {
+                    backend,
+                    name: prospective.api_key_env.as_deref(),
+                    previous: current.api_key_env.as_deref(),
+                };
+                if let Some(light) = prospective.light_model.as_mut() {
+                    light_model::rotate_inherited_credential(light, inherited);
                 }
             }
             RequestField::Null => prospective.light_model = None,
@@ -1984,13 +1980,12 @@ impl SessionManager {
                 // A same-backend light model with no explicit selector
                 // inherits the session's primary one, following it when the
                 // primary selector changes.
-                let inherited = prospective.api_key_env.as_deref().and_then(|name| {
-                    let backend = inherited_backend?;
-                    Some(light_model::InheritedCredential {
+                let inherited = prospective.api_key_env.as_deref().map(|name| {
+                    light_model::InheritedCredential {
                         backend,
-                        name,
+                        name: Some(name),
                         previous: current.api_key_env.as_deref(),
-                    })
+                    }
                 });
                 prospective.light_model = Some(light_model::normalize(
                     light,
@@ -1999,12 +1994,6 @@ impl SessionManager {
                 )?);
             }
         }
-        let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
-            &mut prospective,
-            backend_selected,
-            base_url_omitted,
-            api_key_env_omitted,
-        )?;
 
         // An untouched destination carries no new risk, so only a patch that
         // moves the endpoint or switches the credential type is authorized.
@@ -2639,7 +2628,7 @@ async fn create_model_config_handler(
                     .as_deref()
                     .map(|name| light_model::InheritedCredential {
                         backend,
-                        name,
+                        name: Some(name),
                         previous: None,
                     }),
             )
@@ -2827,7 +2816,7 @@ async fn update_model_config_handler(
                     .as_deref()
                     .map(|name| light_model::InheritedCredential {
                         backend,
-                        name,
+                        name: Some(name),
                         previous: existing.api_key_env.as_deref(),
                     }),
             )?),
@@ -2838,7 +2827,7 @@ async fn update_model_config_handler(
                         &mut light,
                         light_model::InheritedCredential {
                             backend,
-                            name,
+                            name: Some(name),
                             previous: existing.api_key_env.as_deref(),
                         },
                     );
@@ -7013,16 +7002,24 @@ model = "gpt-5.2"
         let store_path = root.join("store.db");
         let manager = test_manager(&root);
 
-        for (session_id, backend, expected_base) in [
+        for (session_id, backend, expected_base, light_api_key_env) in [
             (
                 "repair-codex",
                 BackendKind::ChatGptCodexResponses,
                 nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
+                Some("STALE_API_KEY"),
             ),
             (
                 "repair-arcee",
                 BackendKind::ArceeAuth,
                 nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+                Some("STALE_API_KEY"),
+            ),
+            (
+                "repair-arcee-without-light-selector",
+                BackendKind::ArceeAuth,
+                nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
+                None,
             ),
         ] {
             seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
@@ -7033,6 +7030,18 @@ model = "gpt-5.2"
             }
             incomplete.base_url.clear();
             incomplete.api_key_env = Some("STALE_API_KEY".to_string());
+            incomplete.light_model = Some(LightModelSettings {
+                model: match backend {
+                    BackendKind::ArceeAuth => "trinity-large-thinking",
+                    BackendKind::ChatGptCodexResponses => "gpt-5.2-codex",
+                    _ => unreachable!("test only covers managed backends"),
+                }
+                .to_string(),
+                backend: Some(backend),
+                base_url: Some(expected_base.to_string()),
+                api_key_env: light_api_key_env.map(str::to_string),
+                reasoning_effort: None,
+            });
             sessions::update_session_config(&store_path, &incomplete).unwrap();
 
             manager
@@ -7042,9 +7051,23 @@ model = "gpt-5.2"
             let repaired = sessions::load_session(&store_path, session_id).unwrap();
             assert_eq!(repaired.base_url, expected_base);
             assert_eq!(repaired.api_key_env, None);
+            assert_eq!(
+                repaired
+                    .light_model
+                    .as_ref()
+                    .and_then(|light| light.api_key_env.as_deref()),
+                None
+            );
             let rehydrated = manager.session_config(session_id).unwrap();
             assert_eq!(rehydrated.base_url, expected_base);
             assert_eq!(rehydrated.api_key_env, None);
+            assert_eq!(
+                rehydrated
+                    .light_model
+                    .as_ref()
+                    .and_then(|light| light.api_key_env.as_deref()),
+                None
+            );
             let resumed = manager.snapshot(session_id).await.unwrap();
             assert_eq!(resumed.metadata.base_url, expected_base);
         }
