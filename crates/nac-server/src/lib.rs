@@ -2225,21 +2225,36 @@ fn response_compression_layer() -> CompressionLayer<impl Predicate> {
         .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
 }
 
-fn validate_bind_address(addr: SocketAddr) -> Result<()> {
-    if !addr.ip().is_loopback() {
-        anyhow::bail!(
-            "refusing non-loopback bind address {addr}; nac-web has no remote authentication"
-        );
+/// Whether a server listener may be reachable beyond this machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindPolicy {
+    /// Preserve the default trust boundary: only this machine can connect.
+    LoopbackOnly,
+    /// The operator has arranged an authenticated, encrypted network boundary
+    /// and accepts every reachable client as equivalent to the local user.
+    AllowRemote,
+}
+
+impl BindPolicy {
+    /// Validate an address before starting any server setup work.
+    pub fn validate(self, addr: SocketAddr) -> Result<()> {
+        if !addr.ip().is_loopback() && self != Self::AllowRemote {
+            anyhow::bail!(
+                "refusing non-loopback bind address {addr}; every reachable client would receive \
+                 full control of nac-web. Configure an authenticated, encrypted network boundary \
+                 and explicitly allow remote access (CLI: --allow-remote)"
+            );
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Extra names this server answers to, as a comma-separated list.
 ///
-/// A tunnel or reverse proxy forwards its own public name in `Host`, which the
-/// rebinding guard below would otherwise refuse. Naming it here is the
-/// operator's statement that whatever fronts the server authenticates callers
-/// before traffic reaches it. `*` disables the guard entirely.
+/// A tunnel, reverse proxy, or direct client may use a DNS name in `Host`, which
+/// the rebinding guard below would otherwise refuse. Naming it here is the
+/// operator's statement that the name is expected to reach this server. `*`
+/// disables the guard entirely.
 const ALLOWED_HOSTS_ENV: &str = "NAC_ALLOWED_HOSTS";
 
 fn configured_allowed_hosts() -> Vec<String> {
@@ -2262,25 +2277,22 @@ fn bare_host(host: &str) -> Option<&str> {
     }
 }
 
-/// Whether a `Host` header names this loopback server.
+/// Whether a `Host` header cannot itself be changed through DNS rebinding.
 ///
-/// Binding to loopback does not keep a hostile page out: an attacker can point
-/// their own domain at 127.0.0.1 (DNS rebinding) and drive this unauthenticated
-/// API from the victim's browser. A browser always sends the name it dialled,
-/// and it cannot forge that name, so refusing every host but the loopback ones
-/// closes the hole.
-fn is_loopback_host(host: &str) -> bool {
+/// An attacker can point their own domain at an address on the machine running
+/// nac-web and drive the API from a victim's browser. A browser always sends the
+/// name it dialled and cannot forge an IP-literal `Host`, so localhost and IP
+/// literals do not need the DNS-name allowlist. This is not client
+/// authentication and does not make a reachable address trusted.
+fn is_non_rebindable_host(host: &str) -> bool {
     let Some(bare) = bare_host(host) else {
         return false;
     };
-    bare.eq_ignore_ascii_case("localhost")
-        || bare
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|address| address.is_loopback())
+    bare.eq_ignore_ascii_case("localhost") || bare.parse::<std::net::IpAddr>().is_ok()
 }
 
 fn host_is_allowed(host: &str, allowed: &[String]) -> bool {
-    if is_loopback_host(host) {
+    if is_non_rebindable_host(host) {
         return true;
     }
     let host = host.trim().to_ascii_lowercase();
@@ -2307,13 +2319,79 @@ async fn reject_foreign_host(
         Some(host) if !host_is_allowed(host, &allowed) => (
             StatusCode::FORBIDDEN,
             format!(
-                "refusing request for host '{host}'; set {ALLOWED_HOSTS_ENV} to serve it through \
-                 an authenticating proxy"
+                "refusing request for host '{host}'; add it to {ALLOWED_HOSTS_ENV} if this name \
+                 is expected to reach nac-web"
             ),
         )
             .into_response(),
         _ => next.run(request).await,
     }
+}
+
+fn is_safe_method(method: &axum::http::Method) -> bool {
+    method == axum::http::Method::GET
+        || method == axum::http::Method::HEAD
+        || method == axum::http::Method::OPTIONS
+}
+
+fn origin_matches_host(origin: &str, host: &str) -> bool {
+    origin
+        .parse::<axum::http::Uri>()
+        .ok()
+        .and_then(|uri| {
+            uri.authority()
+                .map(|authority| authority.as_str().to_string())
+        })
+        .is_some_and(|authority| authority.eq_ignore_ascii_case(host.trim()))
+}
+
+/// Reject browser-forged mutations independently of the DNS-rebinding guard.
+///
+/// Fetch Metadata is browser-controlled. Origin is the fallback for browsers
+/// that omit it; requests carrying neither remain available to non-browser API
+/// clients. Host validation still runs separately for every request.
+async fn reject_cross_origin_mutation(request: axum::extract::Request, next: Next) -> Response {
+    if is_safe_method(request.method()) {
+        return next.run(request).await;
+    }
+
+    let headers = request.headers();
+    let fetch_site = headers
+        .get(header::HeaderName::from_static("sec-fetch-site"))
+        .and_then(|value| value.to_str().ok());
+    if matches!(fetch_site, Some("cross-site" | "same-site")) {
+        return (
+            StatusCode::FORBIDDEN,
+            "refusing a cross-origin state-changing browser request",
+        )
+            .into_response();
+    }
+
+    if !matches!(fetch_site, Some("same-origin" | "none")) {
+        if let Some(origin) = headers
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+        {
+            let host = headers
+                .get(header::HOST)
+                .and_then(|value| value.to_str().ok())
+                .or_else(|| {
+                    request
+                        .uri()
+                        .authority()
+                        .map(|authority| authority.as_str())
+                });
+            if !host.is_some_and(|host| origin_matches_host(origin, host)) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    "refusing a cross-origin state-changing browser request",
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    next.run(request).await
 }
 async fn secure_docs(request: axum::extract::Request, next: Next) -> Response {
     let mut response = next.run(request).await;
@@ -2333,7 +2411,7 @@ async fn secure_docs(request: axum::extract::Request, next: Next) -> Response {
     info(
         title = "nac-web HTTP API",
         version = env!("CARGO_PKG_VERSION"),
-        description = "Live OpenAPI 3.1 contract for nac-web's REST and SSE surface. nac-web binds to loopback by default and rejects foreign Host values unless NAC_ALLOWED_HOSTS permits an authenticating proxy; the API itself has no authentication. Finite JSON responses may be gzip-compressed. The SSE stream is text/event-stream and is never gzip-compressed. Credential values are write-only. /mcp is streamable-HTTP MCP (JSON-RPC), not REST, and is intentionally out of band."
+        description = "Live OpenAPI 3.1 contract for nac-web's REST and SSE surface. nac-web binds to loopback by default. Non-loopback binds require --allow-remote and an authenticated, encrypted network boundary; every reachable client receives control equivalent to the local user because the API has no client authentication. IP-literal Host values bypass only the DNS-name allowlist, not authentication. DNS names must be listed in NAC_ALLOWED_HOSTS. Cross-origin browser mutations are rejected independently. Finite JSON responses may be gzip-compressed. The SSE stream is text/event-stream and is never gzip-compressed. Credential values are write-only. /mcp is streamable-HTTP MCP (JSON-RPC), not REST, and is intentionally out of band."
     ),
     components(schemas(
         filesystem::BrowseKind,
@@ -2361,6 +2439,7 @@ pub fn router(manager: SessionManager) -> Router {
     api.merge(docs)
         .merge(embedded_frontend_router())
         .layer(response_compression_layer())
+        .layer(middleware::from_fn(reject_cross_origin_mutation))
         .layer(middleware::from_fn_with_state(
             Arc::new(configured_allowed_hosts()),
             reject_foreign_host,
@@ -2467,7 +2546,17 @@ pub async fn serve_with(
     manager: SessionManager,
     on_listening: impl FnOnce(SocketAddr),
 ) -> Result<()> {
-    validate_bind_address(addr)?;
+    serve_with_policy(addr, BindPolicy::LoopbackOnly, manager, on_listening).await
+}
+
+/// Serve under an explicit network exposure policy.
+pub async fn serve_with_policy(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    on_listening: impl FnOnce(SocketAddr),
+) -> Result<()> {
+    policy.validate(addr)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
@@ -5348,6 +5437,23 @@ mod tests {
             )
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/missing/steering")
+                    .header(header::HOST, "preview-1234.ngrok-free.app")
+                    .header(header::ORIGIN, "https://preview-1234.ngrok-free.app")
+                    .header("sec-fetch-site", "same-origin")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"instruction":"do nothing"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let response = app
@@ -5411,6 +5517,8 @@ mod tests {
             "127.0.0.1:3210",
             "localhost:3210",
             "[::1]:3210",
+            "192.168.1.10:3210",
+            "[fd00::1]:3210",
             "LOCALHOST",
         ] {
             assert_eq!(
@@ -5469,6 +5577,76 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[tokio::test]
+    async fn cross_origin_browser_mutations_are_refused() {
+        let root = temp_root("cross_origin_mutation");
+        let app = router(test_manager(&root));
+        let request = |fetch_site: Option<&str>, origin: Option<&str>| {
+            let mut request = Request::builder()
+                .method("POST")
+                .uri("/sessions/missing/compact")
+                .header(header::HOST, "192.168.1.20:3210");
+            if let Some(fetch_site) = fetch_site {
+                request = request.header("sec-fetch-site", fetch_site);
+            }
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+            request.body(Body::empty()).unwrap()
+        };
+
+        for fetch_site in ["cross-site", "same-site"] {
+            let response = app
+                .clone()
+                .oneshot(request(Some(fetch_site), None))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{fetch_site}");
+        }
+
+        let wrong_origin = app
+            .clone()
+            .oneshot(request(None, Some("http://attacker.example")))
+            .await
+            .unwrap();
+        assert_eq!(wrong_origin.status(), StatusCode::FORBIDDEN);
+
+        let invalid_fetch_metadata = app
+            .clone()
+            .oneshot(request(Some("unexpected"), Some("http://attacker.example")))
+            .await
+            .unwrap();
+        assert_eq!(invalid_fetch_metadata.status(), StatusCode::FORBIDDEN);
+
+        // Same-origin browsers and non-browser clients reach the handler. The
+        // missing session then proves the origin middleware admitted them.
+        for admitted in [
+            request(Some("same-origin"), None),
+            request(None, Some("http://192.168.1.20:3210")),
+            request(None, None),
+        ] {
+            let response = app.clone().oneshot(admitted).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+
+        let cross_site_read = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .header(header::HOST, "192.168.1.20:3210")
+                    .header("sec-fetch-site", "cross-site")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cross_site_read.status(), StatusCode::OK);
+
+        drop(app);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn host_headers_are_split_from_their_port_before_they_are_judged() {
         assert_eq!(bare_host("example.com:8443"), Some("example.com"));
@@ -5485,16 +5663,23 @@ mod tests {
             "localhost",
             "LocalHost:1",
         ] {
-            assert!(is_loopback_host(host), "{host} should be loopback");
+            assert!(
+                is_non_rebindable_host(host),
+                "{host} should not be rebindable"
+            );
         }
-        for host in [
-            "example.com",
-            "127.0.0.1.example.com",
-            "[::1",
-            "",
-            "10.0.0.1",
-        ] {
-            assert!(!is_loopback_host(host), "{host} should not be loopback");
+        for host in ["example.com", "127.0.0.1.example.com", "[::1", ""] {
+            assert!(
+                !is_non_rebindable_host(host),
+                "{host} should require an allowlist entry"
+            );
+        }
+
+        for host in ["10.0.0.1", "192.168.1.10:3210", "[fd00::1]:3210"] {
+            assert!(
+                is_non_rebindable_host(host),
+                "{host} is an IP literal and cannot be rebound"
+            );
         }
     }
 
@@ -5510,14 +5695,41 @@ mod tests {
         assert!(host_is_allowed("localhost:3210", &[]));
     }
 
+    #[tokio::test]
+    async fn an_explicit_non_loopback_bind_is_accepted() {
+        let root = temp_root("non_loopback_bind");
+        let manager = test_manager(&root);
+        let (listening_tx, listening_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            serve_with_policy(
+                "0.0.0.0:0".parse().unwrap(),
+                BindPolicy::AllowRemote,
+                manager,
+                move |bound| {
+                    let _ = listening_tx.send(bound);
+                },
+            )
+            .await
+        });
+
+        let bound = tokio::time::timeout(Duration::from_secs(2), listening_rx)
+            .await
+            .expect("non-loopback bind timed out")
+            .expect("server stopped before listening");
+        assert!(bound.ip().is_unspecified());
+        assert_ne!(bound.port(), 0);
+
+        server.abort();
+        let _ = server.await;
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
-    fn bind_address_must_be_ipv4_or_ipv6_loopback() {
-        for address in ["127.0.0.1:0", "[::1]:0"] {
-            validate_bind_address(address.parse().unwrap()).unwrap();
-        }
-        for address in ["0.0.0.0:3210", "[::]:3210", "192.168.1.10:3210"] {
-            assert!(validate_bind_address(address.parse().unwrap()).is_err());
-        }
+    fn non_loopback_bind_is_refused_without_explicit_policy() {
+        let error = BindPolicy::LoopbackOnly
+            .validate("192.168.1.20:3210".parse().unwrap())
+            .unwrap_err();
+        assert!(error.to_string().contains("--allow-remote"));
     }
 
     /// Path of a bundled script, whose name carries a content hash that changes
