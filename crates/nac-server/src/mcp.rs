@@ -4,8 +4,9 @@
 //! streamable-http transport at `/mcp`.
 
 use crate::{
-    CreateSessionRequest, OrchestratorSteeringRequest, RequestField, SessionManager,
-    SubmitPromptRequest, ThreadSteeringRequest, UpdateConfigRequest,
+    CreateSessionRequest, HeadersRequest, OrchestratorSteeringRequest, RequestField,
+    SandboxRequest, SessionManager, SubmitPromptRequest, ThreadSteeringRequest,
+    UpdateConfigRequest,
 };
 
 use rmcp::handler::server::wrapper::Parameters;
@@ -40,16 +41,28 @@ pub struct NacMcpService {
 struct CreateSessionParams {
     #[schemars(description = "Working directory for the session")]
     cwd: Option<String>,
-    #[schemars(description = "Model id, e.g. \"claude-sonnet-4-20250514\". Call list_models to see available ids.")]
+    #[schemars(description = "Model id, e.g. \"claude-sonnet-4-20250514\". Call list_models first.")]
     model: Option<String>,
-    #[schemars(description = "Backend kind: \"anthropic\", \"openai\", \"deepseek\", etc. Auto-detected from the model id — pass only to override.")]
+    #[schemars(description = "Backend kind: \"anthropic\", \"openai\", \"deepseek\", etc.")]
     backend: Option<String>,
     #[schemars(description = "Reasoning effort level. Valid values: none, minimal, low, medium, high, xhigh, max. Not all models support all levels — check list_models output.")]
     reasoning_effort: Option<String>,
-    #[schemars(description = "Custom API base URL (overrides the provider default)")]
+    #[schemars(description = "Base URL for the model API endpoint")]
     base_url: Option<String>,
-    #[schemars(description = "Environment variable name holding the API key (overrides the provider conventional var)")]
+    #[schemars(description = "Environment variable name for the API key")]
     api_key_env: Option<String>,
+    #[schemars(description = "SSH host for remote sessions (e.g. \"user@host\")")]
+    ssh_host: Option<String>,
+    #[schemars(description = "SSH port (default 22)")]
+    ssh_port: Option<u16>,
+    #[schemars(description = "Path to SSH identity file")]
+    ssh_identity_file: Option<String>,
+    #[schemars(description = "Enable sandbox mode (restricts file access and tool execution)")]
+    sandbox: Option<bool>,
+    #[schemars(description = "Extra HTTP headers to send with model API requests (JSON object of header name to value)")]
+    extra_headers: Option<serde_json::Value>,
+    #[schemars(description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)")]
+    compaction_threshold: Option<u64>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -142,11 +155,26 @@ struct UpdateSessionParams {
 
 #[tool_router]
 impl NacMcpService {
-    #[tool(name = "create_session", description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max.")]
+    #[tool(name = "create_session", description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true.")]
     async fn create_session(
         &self,
         Parameters(params): Parameters<CreateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let extra_headers = match params.extra_headers {
+            None => RequestField::Omitted,
+            Some(v) => {
+                let map: std::collections::BTreeMap<String, String> =
+                    match serde_json::from_value(v) {
+                        Ok(map) => map,
+                        Err(e) => {
+                            return Ok(CallToolResult::error(vec![Content::text(
+                                format!("Invalid extra_headers: {e}"),
+                            )]));
+                        }
+                    };
+                RequestField::Value(HeadersRequest(map))
+            }
+        };
         let request = CreateSessionRequest {
             cwd: params.cwd.map(std::path::PathBuf::from),
             model: field(params.model),
@@ -154,12 +182,18 @@ impl NacMcpService {
             backend: field(params.backend),
             reasoning_effort: field(params.reasoning_effort),
             api_key_env: field(params.api_key_env),
-            extra_headers: RequestField::Omitted,
-            orchestrator_compaction_threshold: RequestField::Omitted,
-            ssh_host: None,
-            ssh_port: None,
-            ssh_identity_file: None,
-            sandbox: Default::default(),
+            extra_headers,
+            orchestrator_compaction_threshold: params
+                .compaction_threshold
+                .map(RequestField::Value)
+                .unwrap_or(RequestField::Omitted),
+            ssh_host: params.ssh_host,
+            ssh_port: params.ssh_port,
+            ssh_identity_file: params.ssh_identity_file,
+            sandbox: SandboxRequest {
+                enabled: params.sandbox.unwrap_or(false),
+                ..Default::default()
+            },
         };
         match self.manager.create_session(request).await {
             Ok(snapshot) => {
