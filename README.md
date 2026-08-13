@@ -5,12 +5,13 @@
 <p align="center">
   <a href="https://arcee.ai">Arcee</a> &bull;
   <a href="#documentation">Documentation</a> &bull;
-  <a href="https://github.com/arcee-ai/nac/releases">Releases</a>
+  <a href="https://github.com/arcee-ai/nac/releases">Releases</a> &bull;
+  <a href="https://platform.arcee.ai">Arcee Open Model API</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/arcee-ai/nac/actions/workflows/release.yml">
-    <img src="https://github.com/arcee-ai/nac/actions/workflows/release.yml/badge.svg" alt="CI" />
+    <img src="https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white" alt="CI" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" />
