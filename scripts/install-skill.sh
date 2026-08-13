@@ -17,6 +17,9 @@ Targets: auto, agents, nac, codex, claude, opencode, project
 
 Use --path DIRECTORY to install into a custom skill directory for any other
 compatible agent. --path cannot be combined with --target.
+
+For a private nac repository, authenticate GitHub CLI (`gh auth login`) or set
+GITHUB_TOKEN before running this installer.
 EOF
 }
 
@@ -54,12 +57,30 @@ skill_file=$(mktemp "${TMPDIR:-/tmp}/nac-onboarding-skill.XXXXXX")
 metadata_file=$(mktemp "${TMPDIR:-/tmp}/nac-onboarding-metadata.XXXXXX")
 trap 'rm -f "$skill_file" "$metadata_file"' EXIT HUP INT TERM
 
-curl -fsSL \
-  https://raw.githubusercontent.com/arcee-ai/nac/main/plugins/nac-agent-skills/skills/nac-onboarding/SKILL.md \
-  -o "$skill_file"
-curl -fsSL \
-  https://raw.githubusercontent.com/arcee-ai/nac/main/plugins/nac-agent-skills/skills/nac-onboarding/agents/openai.yaml \
-  -o "$metadata_file"
+ref=${NAC_SKILL_REF:-main}
+
+fetch_file() {
+  path=$1
+  output=$2
+
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh api -H 'Accept: application/vnd.github.raw+json' \
+      "repos/arcee-ai/nac/contents/$path?ref=$ref" > "$output"
+  elif [ -n "${GITHUB_TOKEN:-}" ]; then
+    curl -fsSL \
+      -H 'Accept: application/vnd.github.raw+json' \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      "https://api.github.com/repos/arcee-ai/nac/contents/$path?ref=$ref" \
+      -o "$output"
+  else
+    curl -fsSL \
+      "https://raw.githubusercontent.com/arcee-ai/nac/$ref/$path" \
+      -o "$output"
+  fi
+}
+
+fetch_file plugins/nac-agent-skills/skills/nac-onboarding/SKILL.md "$skill_file"
+fetch_file plugins/nac-agent-skills/skills/nac-onboarding/agents/openai.yaml "$metadata_file"
 
 mkdir -p "$skill_dir/agents"
 mv "$skill_file" "$skill_dir/SKILL.md"

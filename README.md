@@ -37,14 +37,20 @@ Then open Codex's plugin UI, find **NAC Agent Skills** in the **Arcee NAC** mark
 For OpenCode and other compatible agents, install the skill into the agent's skill directory:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target codex
+gh api -H 'Accept: application/vnd.github.raw+json' repos/arcee-ai/nac/contents/scripts/install-skill.sh | sh -s -- --target codex
 ```
 
 Replace `codex` with `claude`, `opencode`, `nac`, `agents` (the cross-agent default), or `project`. For an agent with a different skill location, use `--path /path/to/skills`. Run the command with `--help` to see every option. Then ask the agent to use `nac-onboarding`.
 
+If this repository is public, the equivalent curl command is:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target codex
+```
+
 Or paste this into your agent:
 
-> Install the nac onboarding skill with `curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
+> Install the nac onboarding skill with `gh api -H 'Accept: application/vnd.github.raw+json' repos/arcee-ai/nac/contents/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
 
 The canonical skill lives in [`plugins/nac-agent-skills/skills/nac-onboarding`](plugins/nac-agent-skills/skills/nac-onboarding) and covers the complete setup, including nac's built-in MCP endpoint.
 
