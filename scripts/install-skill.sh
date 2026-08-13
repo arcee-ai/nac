@@ -46,13 +46,19 @@ case "$target" in
 esac
 
 skill_dir="$destination/nac-onboarding"
-mkdir -p "$skill_dir"
-temp_file=$(mktemp "${TMPDIR:-/tmp}/nac-onboarding.XXXXXX")
-trap 'rm -f "$temp_file"' EXIT HUP INT TERM
+skill_file=$(mktemp "${TMPDIR:-/tmp}/nac-onboarding-skill.XXXXXX")
+metadata_file=$(mktemp "${TMPDIR:-/tmp}/nac-onboarding-metadata.XXXXXX")
+trap 'rm -f "$skill_file" "$metadata_file"' EXIT HUP INT TERM
 
 curl -fsSL \
   https://raw.githubusercontent.com/arcee-ai/nac/main/skills/nac-onboarding/SKILL.md \
-  -o "$temp_file"
-mv "$temp_file" "$skill_dir/SKILL.md"
+  -o "$skill_file"
+curl -fsSL \
+  https://raw.githubusercontent.com/arcee-ai/nac/main/skills/nac-onboarding/agents/openai.yaml \
+  -o "$metadata_file"
+
+mkdir -p "$skill_dir/agents"
+mv "$skill_file" "$skill_dir/SKILL.md"
+mv "$metadata_file" "$skill_dir/agents/openai.yaml"
 
 printf 'Installed nac-onboarding at %s\n' "$skill_dir"
