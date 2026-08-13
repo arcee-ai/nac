@@ -15,6 +15,7 @@ use tokio::task::JoinSet;
 /// What a library server needs before it can connect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum McpLibraryAuth {
     /// Works as-is.
     None,
@@ -28,6 +29,7 @@ pub enum McpLibraryAuth {
 /// pre-fill, never a hidden configuration — what is saved is exactly what the
 /// form shows.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct McpLibraryEntry {
     /// Stable identifier, recorded on servers created from the entry.
     pub id: String,

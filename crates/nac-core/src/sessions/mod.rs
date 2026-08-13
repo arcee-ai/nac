@@ -36,6 +36,7 @@ use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RawSessionConfig {
     pub session_id: String,
     pub model: String,

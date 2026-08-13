@@ -20,6 +20,7 @@ where
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum Message {
     System {
         content: String,
@@ -30,6 +31,7 @@ pub enum Message {
     #[serde(rename = "assistant")]
     Assistant {
         #[serde(serialize_with = "serialize_nullable_content")]
+        #[cfg_attr(feature = "openapi", schema(required))]
         content: Option<String>,
         #[serde(
             default,
@@ -71,12 +73,14 @@ pub enum Message {
 /// reasoning items, completions reasoning text) are only replayed to the
 /// same origin; a different origin makes the wire normalization strip them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelOrigin {
     pub backend: BackendKind,
     pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ToolCall {
     pub id: String,
     #[serde(rename = "type")]
@@ -85,12 +89,14 @@ pub struct ToolCall {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ToolDefinition {
     #[serde(rename = "type")]
     pub def_type: String,
@@ -98,6 +104,7 @@ pub struct ToolDefinition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FunctionDef {
     pub name: String,
     pub description: String,

@@ -9,6 +9,7 @@ name = "nac_core"
 [features]
 default = []
 test-support = []
+openapi = ["dep:utoipa"]
 
 [dependencies]
 tokio = { version = "1", default-features = false, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
@@ -38,3 +39,4 @@ grep-matcher = "0.1"
 grep-regex = "0.1"
 ignore = "0.4"
 openssh-sftp-client = { version = "0.15", default-features = false }
+utoipa = { version = "5.5", optional = true, features = ["uuid"] }

@@ -11,7 +11,7 @@ name = "nac-web"
 path = "src/main.rs"
 
 [dependencies]
-nac-core = { path = "../nac-core" }
+nac-core = { path = "../nac-core", features = ["openapi"] }
 anyhow = "1"
 async-stream = "0.3"
 axum = "0.8"
@@ -24,6 +24,9 @@ tokio = { version = "1", default-features = false, features = ["macros", "net", 
 rmcp = { version = "1.3", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
 tower-http = { version = "0.6", features = ["compression-gzip"] }
 uuid = { version = "1", features = ["v4"] }
+utoipa = "5.5"
+utoipa-axum = "0.2"
+utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum", "vendored"] }
 
 [dev-dependencies]
 flate2 = "1"

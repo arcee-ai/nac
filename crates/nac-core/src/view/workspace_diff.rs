@@ -12,6 +12,7 @@ const WORKSPACE_DIFF_MAX_LINES: usize = 5_000;
 const WORKSPACE_DIFF_MAX_LINE_CHARS: usize = 20_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceFileDiff {
     pub path: String,
     pub old_path: Option<String>,
@@ -20,6 +21,7 @@ pub struct WorkspaceFileDiff {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceDiffSection {
     pub stage: String,
     pub status: String,
@@ -33,6 +35,7 @@ pub struct WorkspaceDiffSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceDiffHunk {
     pub old_start: usize,
     pub old_lines: usize,
@@ -43,6 +46,7 @@ pub struct WorkspaceDiffHunk {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceDiffLine {
     pub kind: String,
     pub old_lineno: Option<usize>,

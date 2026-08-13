@@ -3,12 +3,14 @@ use serde::{Deserialize, Serialize};
 /// Slash commands understood by NAC.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SlashCommand {
     Compact,
 }
 
 /// User-facing metadata shared by command parsing and frontend discovery.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SlashCommandDefinition {
     pub command: SlashCommand,
     pub name: &'static str,
@@ -168,8 +170,7 @@ mod tests {
         let expanded_plan =
             "# /plan: Workset Planning\n\nUser instruction:\nsplit this into reviewable units\n\n\
              Create exactly one durable high-level workset with `workset_define`.";
-        let expanded_run =
-            "# /run: Workset Execution\n\nWorkset id:\nauth-refresh\n\n\
+        let expanded_run = "# /run: Workset Execution\n\nWorkset id:\nauth-refresh\n\n\
              Execute an existing workset.";
 
         assert_eq!(

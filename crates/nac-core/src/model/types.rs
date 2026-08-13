@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum BackendKind {
     #[serde(rename = "deepseek-chat")]
     DeepSeekChat,
@@ -84,6 +85,7 @@ impl<'de> Deserialize<'de> for BackendKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ReasoningEffort {
     None,
     Minimal,
@@ -368,6 +370,7 @@ pub struct AssistantTurn {
 /// directly. Missing fields deserialize as zero so partial records stay
 /// loadable.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TokenCostMicros {
     #[serde(default)]
     pub input: u64,
@@ -432,6 +435,7 @@ pub(crate) fn calculate_cost(
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,

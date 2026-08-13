@@ -23,14 +23,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ApiError, RequestField, SessionManager};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct McpLibraryResponse {
     pub entries: Vec<mcp::McpLibraryEntry>,
 }
 
 /// A saved server as the dashboard sees it: env and header values are
 /// redacted, everything else round-trips.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct McpServerView {
     pub name: String,
     pub enabled: bool,
@@ -43,12 +43,12 @@ pub struct McpServerView {
     pub library_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct McpServerList {
     pub servers: Vec<McpServerView>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct CreateMcpServerRequest {
     pub name: String,
     #[serde(default = "default_enabled")]
@@ -58,9 +58,11 @@ pub struct CreateMcpServerRequest {
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
+    #[schema(write_only, example = json!({"TOKEN": "fake-token"}))]
     pub env: BTreeMap<String, String>,
     pub url: Option<String>,
     #[serde(default)]
+    #[schema(write_only, example = json!({"Authorization": "Bearer fake-token"}))]
     pub headers: BTreeMap<String, String>,
     pub library_id: Option<String>,
 }
@@ -75,7 +77,7 @@ fn default_enabled() -> bool {
 /// `env` and `headers` replace the whole map when sent, except that a null
 /// value under a key keeps the stored value for that key — the stored value
 /// is never echoed back, so this is how an untouched secret survives an edit.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct UpdateMcpServerRequest {
     #[serde(default)]
     pub name: RequestField<String>,
@@ -88,10 +90,12 @@ pub struct UpdateMcpServerRequest {
     #[serde(default)]
     pub args: RequestField<Vec<String>>,
     #[serde(default)]
+    #[schema(write_only, example = json!({"TOKEN": "fake-replacement-token"}))]
     pub env: RequestField<BTreeMap<String, Option<String>>>,
     #[serde(default)]
     pub url: RequestField<String>,
     #[serde(default)]
+    #[schema(write_only, example = json!({"Authorization": "Bearer fake-replacement-token"}))]
     pub headers: RequestField<BTreeMap<String, Option<String>>>,
     #[serde(default)]
     pub library_id: RequestField<String>,
@@ -100,19 +104,21 @@ pub struct UpdateMcpServerRequest {
 /// Probes a server before anything is saved. Either names a saved server or
 /// carries the draft inline; inline map values may be null to borrow the
 /// stored value when `stored_name` is also given.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct TestMcpServerRequest {
     pub stored_name: Option<String>,
     pub name: Option<String>,
     pub transport: Option<String>,
     pub command: Option<String>,
     pub args: Option<Vec<String>>,
+    #[schema(write_only, example = json!({"TOKEN": "fake-probe-token"}))]
     pub env: Option<BTreeMap<String, Option<String>>>,
     pub url: Option<String>,
+    #[schema(write_only, example = json!({"Authorization": "Bearer fake-probe-token"}))]
     pub headers: Option<BTreeMap<String, Option<String>>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct TestMcpServerResponse {
     pub tools: Vec<McpProbedTool>,
 }
@@ -215,6 +221,13 @@ static LIBRARY_CACHE: tokio::sync::Mutex<Option<(Instant, Vec<mcp::McpLibraryEnt
 
 /// The embedded catalog, extended by verified servers from the Smithery
 /// registry when it answers in time.
+#[utoipa::path(
+    get,
+    path = "/mcp_library/library",
+    operation_id = "get_mcp_library_library",
+    tag = "mcp-library",
+    responses((status = 200, description = "Success", body = McpLibraryResponse, content_type = "application/json"))
+)]
 pub async fn library_handler() -> Json<McpLibraryResponse> {
     Json(McpLibraryResponse {
         entries: library_entries().await,
@@ -281,6 +294,13 @@ async fn refresh_library_cache(
     entries
 }
 
+#[utoipa::path(
+    get,
+    path = "/mcp_library/servers",
+    operation_id = "get_mcp_library_servers",
+    tag = "mcp-library",
+    responses((status = 200, description = "Success", body = McpServerList, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub async fn list_servers_handler(
     State(manager): State<SessionManager>,
 ) -> Result<Json<McpServerList>, ApiError> {
@@ -291,6 +311,14 @@ pub async fn list_servers_handler(
     Ok(Json(McpServerList { servers }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/mcp_library/servers",
+    operation_id = "post_mcp_library_servers",
+    tag = "mcp-library",
+    request_body(content = CreateMcpServerRequest, content_type = "application/json"),
+    responses((status = 201, description = "Success", body = McpServerView, content_type = "application/json"), (status = 400, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub async fn create_server_handler(
     State(manager): State<SessionManager>,
     payload: Result<Json<CreateMcpServerRequest>, JsonRejection>,
@@ -312,6 +340,15 @@ pub async fn create_server_handler(
     Ok((StatusCode::CREATED, Json(view(record))))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/mcp_library/servers/{server_name}",
+    operation_id = "patch_mcp_library_servers_server_name",
+    tag = "mcp-library",
+    params(("server_name" = String, Path)),
+    request_body(content = UpdateMcpServerRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = McpServerView, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((crate::ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub async fn update_server_handler(
     State(manager): State<SessionManager>,
     AxumPath(server_name): AxumPath<String>,
@@ -371,6 +408,14 @@ pub async fn update_server_handler(
     Ok(Json(view(record)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/mcp_library/servers/{server_name}",
+    operation_id = "delete_mcp_library_servers_server_name",
+    tag = "mcp-library",
+    params(("server_name" = String, Path)),
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub async fn delete_server_handler(
     State(manager): State<SessionManager>,
     AxumPath(server_name): AxumPath<String>,
@@ -382,6 +427,14 @@ pub async fn delete_server_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/mcp_library/servers/test",
+    operation_id = "post_mcp_library_servers_test",
+    tag = "mcp-library",
+    request_body(content = TestMcpServerRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = TestMcpServerResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub async fn test_server_handler(
     State(manager): State<SessionManager>,
     payload: Result<Json<TestMcpServerRequest>, JsonRejection>,
@@ -492,7 +545,7 @@ pub async fn test_server_handler(
         other => {
             return Err(ApiError::bad_request(format!(
                 "transport must be '{MCP_TRANSPORT_STDIO}' or \
-                 '{MCP_TRANSPORT_STREAMABLE_HTTP}', not '{other}'"
+             '{MCP_TRANSPORT_STREAMABLE_HTTP}', not '{other}'"
             )));
         }
     };

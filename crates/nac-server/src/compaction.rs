@@ -13,10 +13,11 @@ use nac_core::{
 };
 use serde::Serialize;
 
-use crate::SessionManager;
+use crate::{ApiErrorBody, SessionManager};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[derive(utoipa::ToSchema)]
 pub enum CompactSessionResponse {
     Compacted {
         compaction_id: String,
@@ -55,9 +56,9 @@ impl IntoResponse for CompactSessionError {
         };
         (
             status,
-            Json(serde_json::json!({
-                "error": self.to_string(),
-            })),
+            Json(ApiErrorBody {
+                error: self.to_string(),
+            }),
         )
             .into_response()
     }
@@ -159,6 +160,14 @@ fn report_failure(
     CompactSessionError::Failed
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/compact",
+    operation_id = "post_sessions_session_id_compact",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = CompactSessionResponse, content_type = "application/json"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,

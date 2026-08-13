@@ -6,6 +6,7 @@ use super::*;
 /// commit; this row is only the bookkeeping that tells us which commit belongs
 /// to which run, and what it should be compared against.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceRevisionRecord {
     pub id: i64,
     pub session_id: String,
