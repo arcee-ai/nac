@@ -23,7 +23,7 @@
 
 use super::{
     api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelCostRates, ModelMetadata,
-    ModelSource, ProviderCatalog, ThinkingLevelMap, FALLBACK_MAX_TOKENS, PROVIDER_DEFAULT_MODEL_ID,
+    ModelSource, ProviderCatalog, ThinkingLevelMap, PROVIDER_DEFAULT_MODEL_ID,
 };
 use crate::model::{BackendKind, ReasoningEffort};
 use std::collections::BTreeMap;
@@ -242,8 +242,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
 /// `supported_reasoning_efforts` is always null, so the API-derived map is
 /// always empty; these tiers are what the arcee API actually honors for each
 /// model family (confirmed via API testing, PR #128): deepseek/glm take
-/// none/high/max, kimi low/high/max (thinking is always enabled), minimax
-/// none/max (a thinking toggle, not graduated efforts).
+/// none/high/max, kimi low/high/max (thinking is always enabled).
 const THIRD_PARTY_NONE_HIGH_MAX_LEVELS: &[(ReasoningEffort, &str)] = &[
     (ReasoningEffort::None, "none"),
     (ReasoningEffort::High, "high"),
@@ -252,10 +251,6 @@ const THIRD_PARTY_NONE_HIGH_MAX_LEVELS: &[(ReasoningEffort, &str)] = &[
 const THIRD_PARTY_LOW_HIGH_MAX_LEVELS: &[(ReasoningEffort, &str)] = &[
     (ReasoningEffort::Low, "low"),
     (ReasoningEffort::High, "high"),
-    (ReasoningEffort::Max, "max"),
-];
-const THIRD_PARTY_NONE_MAX_LEVELS: &[(ReasoningEffort, &str)] = &[
-    (ReasoningEffort::None, "none"),
     (ReasoningEffort::Max, "max"),
 ];
 
@@ -312,13 +307,6 @@ pub(super) const ARCEE_THIRD_PARTY_SEED_MODELS: &[ThirdPartySeedModel] = &[
         max_tokens: 131_072,
         efforts: THIRD_PARTY_LOW_HIGH_MAX_LEVELS,
     },
-    ThirdPartySeedModel {
-        id: "minimaxai/minimax-m3",
-        display_name: "MiniMax-M3",
-        context_window: 512_000,
-        max_tokens: 250_000,
-        efforts: THIRD_PARTY_NONE_MAX_LEVELS,
-    },
 ];
 
 /// Effort map for a known arcee third-party model, looked up from
@@ -345,16 +333,15 @@ pub(super) fn third_party_seed_limits(model_id: &str) -> Option<(u64, u64)> {
 /// Arcee known models (shared by arcee-auth and arcee-api): the Trinity
 /// lineup from Arcee's own docs (docs.arcee.ai/get-started/models-overview
 /// and /pricing). `trinity-large-thinking` is the documented hosted API id
-/// (also the README's example); the other two ids follow the same
-/// lowercase-hyphen convention from the pricing page's model names. Context
+/// (also the README's example). Context
 /// windows use Arcee's stated hosted value (128k; the Large models support
 /// more when self-hosted — patch via models.json where a deployment allows
 /// it). Max output is undocumented except trinity-large-thinking's 80k
-/// (Vercel AI Gateway's arcee-ai integration); the others keep the
-/// conservative fallback. Cache pricing is undocumented (zero = unknown).
+/// (Vercel AI Gateway's arcee-ai integration). Cache pricing is undocumented
+/// (zero = unknown).
 /// Effort maps stay empty for the Trinity models: trinity-large-thinking
-/// always reasons (no effort knob), and the non-thinking variants accept no
-/// reasoning control. The Arcee third-party models (deepseek-v4-pro, glm-5.2,
+/// always reasons (no effort knob). The Arcee third-party models
+/// (deepseek-v4-pro, glm-5.2,
 /// etc.) are seeded too — from [`ARCEE_THIRD_PARTY_SEED_MODELS`], which the
 /// arcee overlay also reads — so the frontend's default pick resolves real
 /// limits even before the live overlay loads; without a seed entry they fall
@@ -400,29 +387,13 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
             ),
         )
     };
-    let mut models = vec![
-        model(
-            "trinity-large-thinking",
-            "Trinity-Large-Thinking",
-            80_000,
-            rates(0.25, 0.80, 0.0, 0.0),
-            true,
-        ),
-        model(
-            "trinity-mini",
-            "Trinity-Mini",
-            FALLBACK_MAX_TOKENS,
-            rates(0.045, 0.15, 0.0, 0.0),
-            false,
-        ),
-        model(
-            "trinity-large-preview",
-            "Trinity-Large-Preview",
-            FALLBACK_MAX_TOKENS,
-            rates(0.45, 0.15, 0.0, 0.0),
-            false,
-        ),
-    ];
+    let mut models = vec![model(
+        "trinity-large-thinking",
+        "Trinity-Large-Thinking",
+        80_000,
+        rates(0.25, 0.80, 0.0, 0.0),
+        true,
+    )];
     models.extend(ARCEE_THIRD_PARTY_SEED_MODELS.iter().map(third_party));
     models
 }
