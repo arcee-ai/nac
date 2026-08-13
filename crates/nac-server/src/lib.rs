@@ -1258,27 +1258,53 @@ impl SessionManager {
     }
 
     async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
+        const MAX_ATTEMPTS: usize = 2;
+
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
-            return Ok(Arc::clone(service));
-        }
-        let operation_lease = match sessions::SessionOperationLease::try_acquire(
-            &self.inner.store_path,
-            session_id,
-        ) {
-            Ok(lease) => Some(lease),
-            Err(sessions::SessionOperationLeaseError::Busy(_)) => None,
-            Err(error) => return Err(error.into()),
-        };
-        if let Some(operation_lease) = operation_lease.as_ref() {
-            self.attach_session_locked(session_id, Some(operation_lease))
+        for _ in 0..MAX_ATTEMPTS {
+            if let Some(service) = self
+                .inner
+                .active_sessions
+                .read()
                 .await
-        } else {
-            self.resume_session(session_id, None, false)
+                .get(session_id)
+                .cloned()
+            {
+                let version = self.session_config(session_id)?.config_version;
+                if service.config_version() == Some(version) {
+                    return Ok(service);
+                }
+                let mut active = self.inner.active_sessions.write().await;
+                if active
+                    .get(session_id)
+                    .is_some_and(|cached| Arc::ptr_eq(cached, &service))
+                {
+                    active.remove(session_id);
+                }
+            }
+
+            let (service, cacheable, _operation_lease) =
+                self.resume_session_attachment(session_id).await?;
+            let service = Arc::new(service);
+            if !cacheable {
+                return Ok(service);
+            }
+            let version = self.session_config(session_id)?.config_version;
+            if service.config_version() != Some(version) {
+                continue;
+            }
+            self.inner
+                .active_sessions
+                .write()
                 .await
-                .map(Arc::new)
+                .insert(session_id.to_string(), Arc::clone(&service));
+            return Ok(service);
         }
+        Err(anyhow!(
+            "session '{}' configuration kept changing during attachment",
+            session_id
+        ))
     }
 
     /// Attaches while the caller holds this session's lifecycle gate. Keeping
@@ -1293,10 +1319,7 @@ impl SessionManager {
             return Ok(Arc::clone(service));
         }
 
-        let service = Arc::new(
-            self.resume_session(session_id, operation_lease, true)
-                .await?,
-        );
+        let service = Arc::new(self.resume_session(session_id, operation_lease).await?);
         let mut active = self.inner.active_sessions.write().await;
         if let Some(existing) = active.get(session_id) {
             return Ok(Arc::clone(existing));
@@ -1917,7 +1940,6 @@ impl SessionManager {
         &self,
         session_id: &str,
         operation_lease: Option<&sessions::SessionOperationLease>,
-        persist_recovery: bool,
     ) -> Result<SessionService> {
         let summary = self
             .list_sessions(false)
@@ -1942,17 +1964,8 @@ impl SessionManager {
                 operation_lease,
             )
             .await?
-        } else if persist_recovery {
-            runtime::build_resume_config_for_session(
-                self.inner.store_path.clone(),
-                session_id,
-                &config,
-                self.inner.root_cwd.clone(),
-                Some(self.inner.worker_executable.clone()),
-            )
-            .await?
         } else {
-            runtime::build_resume_config_for_session_transient(
+            runtime::build_resume_config_for_session(
                 self.inner.store_path.clone(),
                 session_id,
                 &config,
@@ -1962,6 +1975,43 @@ impl SessionManager {
             .await?
         };
         Ok(SessionService::from_orchestrator_run_config(run_config).service)
+    }
+
+    async fn resume_session_attachment(
+        &self,
+        session_id: &str,
+    ) -> Result<(
+        SessionService,
+        bool,
+        Option<sessions::SessionOperationLease>,
+    )> {
+        let summary = self
+            .list_sessions(false)
+            .await?
+            .into_iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .map(|entry| entry.summary)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let config_cwd = if summary.ssh_host.is_some() {
+            &self.inner.root_cwd
+        } else {
+            &summary.cwd
+        };
+        let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
+        let (run_config, cacheable, operation_lease) =
+            runtime::build_resume_config_for_session_attachment(
+                self.inner.store_path.clone(),
+                session_id,
+                &config,
+                self.inner.root_cwd.clone(),
+                Some(self.inner.worker_executable.clone()),
+            )
+            .await?;
+        Ok((
+            SessionService::from_orchestrator_run_config(run_config).service,
+            cacheable,
+            operation_lease,
+        ))
     }
 }
 
@@ -6225,6 +6275,37 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
+    async fn ordinary_attachment_does_not_open_operation_lease_sidecar() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("attachment_without_effort_migration");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
+        let snapshot = sessions::new_snapshot(
+            "session".to_string(),
+            root.clone(),
+            "claude-sonnet-4-6-20251001".to_string(),
+            "https://api.anthropic.com/v1".to_string(),
+            BackendKind::AnthropicMessages,
+            Some(ReasoningEffort::High),
+            None,
+            None,
+            Vec::new(),
+            Some("ANTHROPIC_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+        std::fs::write(root.join("store.db.run-locks"), b"unavailable").unwrap();
+        let manager = test_manager(&root);
+
+        let first = manager.attach_session("session").await.unwrap();
+        let second = manager.attach_session("session").await.unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(first.config_version(), Some(0));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn busy_attachment_is_transient_and_next_attach_observes_durable_config() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("busy_transient_effort_recovery");
@@ -6276,6 +6357,8 @@ thread_timeout_secs = 7200
         assert_eq!(current.metadata().model, "claude-opus-4-6");
         assert_eq!(current.metadata().reasoning_effort.as_deref(), Some("high"));
         assert_eq!(current.config_version(), Some(1));
+        let cached = reader.attach_session("session").await.unwrap();
+        assert!(Arc::ptr_eq(&current, &cached));
         let _ = std::fs::remove_dir_all(root);
     }
 

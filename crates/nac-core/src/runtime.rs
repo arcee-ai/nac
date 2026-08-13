@@ -12,7 +12,7 @@ use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
     managed_backend_base_url, resolve_model_metadata, BackendKind, EffectiveModelSettings,
-    ModelClient, ModelConfigurationError, ReasoningEffort,
+    ModelClient, ModelConfigurationError, ModelMetadata, ReasoningEffort,
 };
 use crate::paths::PathContext;
 /// Public because callers outside this crate build the connections that sessions
@@ -1105,6 +1105,7 @@ pub async fn build_resume_config(
         options.worker_executable,
         None,
         true,
+        None,
     )
     .await
 }
@@ -1125,28 +1126,74 @@ pub async fn build_resume_config_for_session(
         worker_executable,
         None,
         true,
+        None,
     )
     .await
 }
 
-pub async fn build_resume_config_for_session_transient(
+pub async fn build_resume_config_for_session_attachment(
     store_path: PathBuf,
     session_id: &str,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<(
+    OrchestratorRunConfig,
+    bool,
+    Option<sessions::SessionOperationLease>,
+)> {
     let snapshot = sessions::load_session(&store_path, session_id)?;
-    build_resume_config_from_snapshot(
-        snapshot,
-        store_path,
-        config,
-        resume_base_cwd,
-        worker_executable,
-        None,
-        false,
-    )
-    .await
+    let metadata = resolve_model_metadata(snapshot.backend, &snapshot.model);
+    let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
+        metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
+    });
+    if !requires_migration {
+        let run_config = build_resume_config_from_snapshot(
+            snapshot,
+            store_path,
+            config,
+            resume_base_cwd,
+            worker_executable,
+            None,
+            true,
+            Some(metadata),
+        )
+        .await?;
+        return Ok((run_config, true, None));
+    }
+
+    match sessions::SessionOperationLease::try_acquire(&store_path, session_id) {
+        Ok(lease) => {
+            let snapshot = sessions::load_session(&store_path, session_id)?;
+            let run_config = build_resume_config_from_snapshot(
+                snapshot,
+                store_path,
+                config,
+                resume_base_cwd,
+                worker_executable,
+                Some(&lease),
+                true,
+                None,
+            )
+            .await?;
+            Ok((run_config, true, Some(lease)))
+        }
+        Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+            let run_config = build_resume_config_from_snapshot(
+                snapshot,
+                store_path,
+                config,
+                resume_base_cwd,
+                worker_executable,
+                None,
+                false,
+                Some(metadata),
+            )
+            .await?;
+            Ok((run_config, false, None))
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub async fn build_resume_config_for_session_with_lease(
@@ -1167,6 +1214,7 @@ pub async fn build_resume_config_for_session_with_lease(
         worker_executable,
         Some(operation_lease),
         true,
+        None,
     )
     .await
 }
@@ -1179,6 +1227,7 @@ async fn build_resume_config_from_snapshot(
     worker_executable: Option<PathBuf>,
     operation_lease: Option<&sessions::SessionOperationLease>,
     persist_recovery: bool,
+    resolved_metadata: Option<ModelMetadata>,
 ) -> Result<OrchestratorRunConfig> {
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     // Resume reaches the host with the connection the session recorded, not with
@@ -1200,7 +1249,8 @@ async fn build_resume_config_from_snapshot(
     let stored_model = snapshot.model.clone();
     let stored_base_url = snapshot.base_url.clone();
     let stored_reasoning_effort = snapshot.reasoning_effort;
-    let metadata = resolve_model_metadata(snapshot.backend, &stored_model);
+    let metadata = resolved_metadata
+        .unwrap_or_else(|| resolve_model_metadata(snapshot.backend, &stored_model));
     if let Some(effort) = stored_reasoning_effort {
         if !metadata.thinking_level_map.is_supported(effort) {
             snapshot.reasoning_effort =
@@ -2631,6 +2681,7 @@ X-Config = "yes"
             None,
             None,
             true,
+            None,
         )
         .await
         {
@@ -3259,6 +3310,7 @@ X-Config = "yes"
             None,
             None,
             true,
+            None,
         )
         .await
         {
@@ -3297,6 +3349,7 @@ X-Config = "yes"
             None,
             None,
             true,
+            None,
         )
         .await
         {
