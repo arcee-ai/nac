@@ -10,7 +10,7 @@ use nac_core::{
     model::{
         list_managed_provider_models, list_provider_models, provider_default_base_url,
         provider_for_model, resolve_backend_api_key, resolve_model_base_url, BackendKind,
-        ManagedAuthProvider, ProviderModel, ReasoningEffort,
+        ManagedAuthProvider, ModelConfigurationError, ProviderModel, ReasoningEffort,
     },
     model_configurations,
     runtime::NacConfig,
@@ -138,11 +138,23 @@ async fn provider_models_handler(
     )?;
     let models = list_provider_models(backend, &base_url, &api_key)
         .await
-        .map_err(|error| ApiError {
-            status: StatusCode::BAD_GATEWAY,
-            message: error.to_string(),
-        })?;
+        .map_err(provider_model_discovery_error)?;
     Ok(Json(ProviderModelList { base_url, models }))
+}
+
+fn provider_model_discovery_error(error: anyhow::Error) -> ApiError {
+    let status = if error
+        .chain()
+        .any(|cause| cause.is::<ModelConfigurationError>())
+    {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::BAD_GATEWAY
+    };
+    ApiError {
+        status,
+        message: error.to_string(),
+    }
 }
 
 pub(super) fn settle_base_url(

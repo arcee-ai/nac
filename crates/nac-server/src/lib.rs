@@ -7887,7 +7887,10 @@ model = "gpt-5.2"
     /// One-shot stand-in for a provider's model index, answering the first
     /// request with `body` and reporting the `Authorization` header it saw — so
     /// a test can tell which credential actually went out on the wire.
-    fn scripted_model_index(body: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+    fn scripted_model_index(
+        status: &'static str,
+        body: &'static str,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
         use std::io::{Read, Write};
 
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind model index");
@@ -7909,7 +7912,7 @@ model = "gpt-5.2"
                 .map(|line| line[line.find(':').unwrap() + 1..].trim().to_string())
                 .unwrap_or_default();
             let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                 body.len()
             );
             let _ = socket.write_all(response.as_bytes());
@@ -7952,7 +7955,8 @@ model = "gpt-5.2"
             "a stored key must never be readable back: {listed}"
         );
 
-        let (base_url, authorization) = scripted_model_index(r#"{"data":[{"id":"model-a"}]}"#);
+        let (base_url, authorization) =
+            scripted_model_index("200 OK", r#"{"data":[{"id":"model-a"}]}"#);
         let models = post_json(
             app,
             "/providers/models",
@@ -7977,7 +7981,7 @@ model = "gpt-5.2"
     }
 
     #[tokio::test]
-    async fn provider_models_preserves_malformed_base_url_status_by_backend() {
+    async fn provider_models_rejects_malformed_base_urls_for_all_backends() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("provider_models_malformed_base_url");
         let nac_home = root.join("nac-home");
@@ -7988,13 +7992,7 @@ model = "gpt-5.2"
             "error": "invalid model configuration: base_url 'not a url' is not a valid absolute URL: relative URL without a base"
         });
 
-        // OpenAI's trust policy parses caller-supplied URLs before discovery,
-        // while Arcee owns its origin policy and therefore reaches discovery's
-        // historical BAD_GATEWAY mapping for the same malformed value.
-        for (backend, expected_status) in [
-            ("openai-responses", StatusCode::BAD_REQUEST),
-            ("arcee-api", StatusCode::BAD_GATEWAY),
-        ] {
+        for backend in ["openai-responses", "arcee-api"] {
             let response = post_json(
                 app.clone(),
                 "/providers/models",
@@ -8005,10 +8003,46 @@ model = "gpt-5.2"
                 }),
             )
             .await;
-            assert_eq!(response.status(), expected_status, "{backend}");
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{backend}");
             assert_eq!(response_json(response).await, expected_error, "{backend}");
         }
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn provider_models_maps_provider_rejection_to_bad_gateway() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("provider_models_provider_rejection");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).expect("create NAC home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let app = router(test_manager(&root));
+        let (base_url, authorization) =
+            scripted_model_index("401 Unauthorized", r#"{"error":"invalid api key"}"#);
+
+        let response = post_json(
+            app,
+            "/providers/models",
+            serde_json::json!({
+                "backend": "openai-responses",
+                "api_key": "wrong-key",
+                "base_url": base_url,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert!(response_json(response).await["error"]
+            .as_str()
+            .unwrap()
+            .contains("provider rejected this API key"));
+        assert_eq!(
+            authorization
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the model index was asked"),
+            "Bearer wrong-key"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
