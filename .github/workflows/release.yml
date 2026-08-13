@@ -124,8 +124,9 @@ jobs:
         run: |
           mkdir -p dist/pkg
           cp "target/${{ matrix.target }}/release/nac-web" dist/pkg/nac-web
+          cp LICENSE dist/pkg/LICENSE
           tar -czf "dist/nac-${{ matrix.target }}.tar.gz" \
-            -C dist/pkg nac-web
+            -C dist/pkg nac-web LICENSE
 
       - name: Upload archive
         uses: actions/upload-artifact@v4
