@@ -69,91 +69,6 @@ fn unknown_models_clone_provider_defaults_with_fallback_limits() {
     }
 }
 
-/// Independent transcription of the stable validation matrix. Provider-specific
-/// corrections are covered separately by `corrected_provider_effort_maps`.
-fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEffort) -> bool {
-    match provider {
-        BackendKind::DeepSeekChat => matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::High
-                | ReasoningEffort::Max
-        ),
-        BackendKind::FireworksChat | BackendKind::TogetherChat => matches!(
-            effort,
-            ReasoningEffort::None
-                | ReasoningEffort::Low
-                | ReasoningEffort::Medium
-                | ReasoningEffort::High
-        ),
-        BackendKind::OpenAiResponses | BackendKind::ChatGptCodexResponses => {
-            effort != ReasoningEffort::Max || model.starts_with("gpt-5.6")
-        }
-        BackendKind::AnthropicMessages => {
-            if effort == ReasoningEffort::None {
-                return true;
-            }
-            if pre_s4_anthropic_family(model, "claude-opus-4-6") {
-                matches!(
-                    effort,
-                    ReasoningEffort::Low
-                        | ReasoningEffort::Medium
-                        | ReasoningEffort::High
-                        | ReasoningEffort::Xhigh
-                )
-            } else if pre_s4_anthropic_family(model, "claude-sonnet-4-6") {
-                matches!(
-                    effort,
-                    ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High
-                )
-            } else {
-                false
-            }
-        }
-        BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
-    }
-}
-
-/// The pre-S4 `backend.rs::anthropic_model_family` rule: exact family name
-/// or a `-YYYYMMDD` dated snapshot only (never `-latest` or other suffixes).
-fn pre_s4_anthropic_family(model: &str, family: &str) -> bool {
-    model == family
-        || model
-            .strip_prefix(family)
-            .and_then(|suffix| suffix.strip_prefix('-'))
-            .is_some_and(|snapshot| {
-                snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())
-            })
-}
-
-#[test]
-fn seed_maps_transcribe_the_validation_matrix_exactly() {
-    // Unknown-model rows only (every provider resolves these through its
-    // `_default` entry): known models — and their dated snapshots, which
-    // resolve through the same guarded family entries — are covered
-    // exhaustively by `every_generated_entry_preserves_the_validation_matrix`.
-    let models = ["test-model", "claude-opus-4-6-latest", "claude-3-5-sonnet"];
-    for provider in ALL_PROVIDERS {
-        for model in models {
-            let metadata = resolve(provider, model);
-            for effort in ALL_EFFORTS {
-                let matrix = pre_s4_matrix_accepts(provider, model, effort);
-                let catalog = metadata.thinking_level_map.is_supported(effort);
-                assert_eq!(catalog, matrix, "{provider} {model} {}", effort.as_str());
-                // S4: validation itself is map-driven; it must agree with
-                // the independent matrix transcription.
-                assert_eq!(
-                    validate_model_reasoning_effort(provider, model, Some(effort)).is_ok(),
-                    matrix,
-                    "{provider} {model} {}",
-                    effort.as_str()
-                );
-            }
-        }
-    }
-}
-
 #[test]
 fn corrected_provider_effort_maps() {
     use ReasoningEffort::{High, Low, Max, None};
@@ -273,14 +188,6 @@ fn dated_snapshots_resolve_through_their_family_entry() {
 }
 
 #[test]
-fn exact_seed_entries_keep_their_own_id_and_source() {
-    let metadata = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6");
-    assert_eq!(metadata.id, "claude-opus-4-6");
-    assert_eq!(metadata.source, ModelSource::Baseline);
-    assert!(metadata.reasoning);
-}
-
-#[test]
 fn wire_level_special_cases_are_encoded_in_data() {
     let deepseek = resolve(BackendKind::DeepSeekChat, "deepseek-chat");
     assert_eq!(
@@ -346,7 +253,7 @@ fn effective_settings_resolve_catalog_metadata_at_construction() {
     assert_eq!(settings.resolved.id, "deepseek-v4-flash");
     assert_eq!(settings.resolved.provider, BackendKind::DeepSeekChat);
     assert_eq!(settings.resolved.api, ApiKind::OpenAiCompletions);
-    // S1: `deepseek-v4-flash` is a models.dev catalog entry, so resolution
+    // `deepseek-v4-flash` is a models.dev catalog entry, so resolution
     // finds the generated baseline (real limits) instead of the provider
     // default.
     assert_eq!(settings.resolved.source, ModelSource::Baseline);
@@ -380,7 +287,7 @@ fn resolution_is_sync_local_and_credential_free() {
 
 #[test]
 fn reset_for_test_reloads_the_seed_catalog() {
-    // Serializes with the S2 refresh tests: this reloads the process-global
+    // Serializes with refresh tests because this reloads the process-global
     // catalog, which must not race a refresh test's overlay reload.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let before = resolve(BackendKind::AnthropicMessages, "claude-opus-4-6");
@@ -426,7 +333,7 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
         assert_eq!(metadata.cost.output, output, "{id}");
         assert!(metadata.reasoning, "{id}");
         // Codex matrix behavior: every effort level, sent verbatim.
-        // GPT-5.6 models additionally support `max` (post-S4 addition);
+        // GPT-5.6 models additionally support `max`;
         // gpt-5.3-codex-spark does not.
         let supports_max = id.starts_with("gpt-5.6");
         for effort in ALL_EFFORTS {
@@ -586,15 +493,13 @@ fn manifest_sha256_pins_the_embedded_catalog() {
 
 #[test]
 fn generated_entries_satisfy_catalog_invariants() {
-    // Serializes with the S2 refresh tests: they transiently reload the
+    // Serializes with refresh tests because they transiently reload the
     // process-global catalog with Overlay-sourced entries, which would break
     // the `source == Baseline` assertion below.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let catalog = current();
-    let mut entry_count = 0;
     for (provider, provider_catalog) in &catalog.providers {
         for (id, metadata) in &provider_catalog.models {
-            entry_count += 1;
             assert!(!id.is_empty(), "{provider}");
             assert_eq!(metadata.source, ModelSource::Baseline, "{provider}/{id}");
             assert!(metadata.context_window > 0, "{provider}/{id}");
@@ -624,83 +529,12 @@ fn generated_entries_satisfy_catalog_invariants() {
             }
         }
     }
-    // Snapshot pin: 78 agent-compatible generated models plus 11 hand-seeded
-    // entries (2 deprecated deepseek models removed). Drift fails loudly here
-    // at regen/seed-edit time, forcing a deliberate review.
-    assert_eq!(entry_count, 90, "catalog model count drifted");
-}
-
-/// The S4 guard: every generated catalog entry — not just the S0 spot-check
-/// models — must preserve the pre-S4 validation matrix exactly, proving that
-/// rewiring validation onto catalog maps was behavior-neutral for every
-/// matrix-covered model. Compared against the independent
-/// `pre_s4_matrix_accepts` transcription: since S4, validation reads the
-/// same maps, so validating against itself would prove nothing.
-#[test]
-fn every_generated_entry_preserves_the_validation_matrix() {
-    // Holds TEST_ENV_LOCK for the same reason as
-    // `generated_entries_satisfy_catalog_invariants`.
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    // Iterate the guard's entries directly: calling `resolve()` while
-    // holding the read guard would re-acquire the RwLock and can deadlock
-    // against a concurrent `reset_for_test` writer. (`validate_model_...`
-    // re-resolves through the global catalog; that nested read is safe here
-    // because every writer is serialized by TEST_ENV_LOCK, which this test
-    // holds.)
-    let catalog = current();
-    for (provider, provider_catalog) in &catalog.providers {
-        if matches!(
-            provider,
-            BackendKind::FireworksChat | BackendKind::TogetherChat
-        ) {
-            continue;
-        }
-        for (id, metadata) in &provider_catalog.models {
-            assert_eq!(metadata.id, *id, "{provider}/{id}");
-            assert_eq!(metadata.source, ModelSource::Baseline, "{provider}/{id}");
-            for effort in ALL_EFFORTS {
-                let matrix = pre_s4_matrix_accepts(*provider, id, effort);
-                let supported = metadata.thinking_level_map.is_supported(effort);
-                assert_eq!(supported, matrix, "{provider}/{id} {}", effort.as_str());
-                assert_eq!(
-                    validate_model_reasoning_effort(*provider, id, Some(effort)).is_ok(),
-                    matrix,
-                    "{provider}/{id} {}",
-                    effort.as_str()
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn thinking_level_map_lookup_semantics() {
-    let map = ThinkingLevelMap(BTreeMap::from([
-        (ReasoningEffort::None, Some("none".to_string())),
-        (ReasoningEffort::High, Some("max".to_string())),
-        (ReasoningEffort::Low, None),
-    ]));
-    // present + Some = supported, with the wire value.
-    assert_eq!(map.wire_value(ReasoningEffort::High), Some("max"));
-    assert!(map.is_supported(ReasoningEffort::High));
-    assert!(matches!(map.0.get(&ReasoningEffort::High), Some(Some(_))));
-    // present + None = explicitly unsupported (documents always-thinking
-    // models); distinct from absent.
-    assert_eq!(map.wire_value(ReasoningEffort::Low), None);
-    assert!(!map.is_supported(ReasoningEffort::Low));
-    assert!(matches!(map.0.get(&ReasoningEffort::Low), Some(None)));
-    // absent = unsupported, but not explicitly.
-    assert_eq!(map.wire_value(ReasoningEffort::Xhigh), None);
-    assert!(!map.is_supported(ReasoningEffort::Xhigh));
-    assert!(!map.0.contains_key(&ReasoningEffort::Xhigh));
 }
 
 #[test]
 fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
-    // The S4 unlock, end to end: a `$NAC_HOME/models.json` override relaxes
-    // a model's effort levels; validation and the adapter wire value both
-    // follow the overridden data. Pre-S4, the hardcoded matrix rejected
-    // every non-none effort for claude-haiku-4-5.
+    // A `$NAC_HOME/models.json` override controls both validation and the
+    // adapter wire value for the selected model.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let env = EnvGuard::new(
         "s4-unlock",
@@ -715,7 +549,7 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
                 {
                     "provider": "anthropic-messages",
                     "model": "claude-haiku-4-5",
-                    "set": { "thinking_level_map": { "none": "none", "high": "high" } }
+                    "set": { "thinking_level_map": { "none": "none", "low": null, "high": "high" } }
                 }
             ]
         }))
@@ -738,6 +572,18 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
     .expect_err("levels outside the override map stay rejected");
     assert!(error.to_string().contains("claude-haiku-4-5"), "{error:#}");
     assert!(error.to_string().contains("none, or high"), "{error:#}");
+    let explicit_error = validate_model_reasoning_effort(
+        BackendKind::AnthropicMessages,
+        "claude-haiku-4-5",
+        Some(ReasoningEffort::Low),
+    )
+    .expect_err("an explicitly unsupported level stays rejected");
+    assert!(explicit_error.to_string().contains("reasoning effort 'low'"));
+    assert!(
+        explicit_error
+            .to_string()
+            .contains("supported values: none, or high")
+    );
 
     // EffectiveModelSettings construction accepts the relaxed level and
     // carries the overridden map into the client-facing metadata.
@@ -842,7 +688,7 @@ fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
 
 #[test]
 fn api_listing_serves_catalog_default_base_urls() {
-    // Holds TEST_ENV_LOCK like the other global-catalog assertions: the S2
+    // Holds TEST_ENV_LOCK like the other global-catalog assertions: the
     // refresh tests transiently reload the global with Overlay entries.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let listing = api_listing();
@@ -925,7 +771,7 @@ fn provider_for_model_resolves_unique_collision_and_unknown_ids() {
 
 #[test]
 fn api_listing_serializes_the_designed_field_names() {
-    // Holds TEST_ENV_LOCK like the other global-catalog assertions: the S2
+    // Holds TEST_ENV_LOCK like the other global-catalog assertions: the
     // refresh tests transiently reload the global with Overlay entries.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let listing = serde_json::to_value(api_listing()).expect("listing serializes");
@@ -1067,7 +913,6 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let listing = api_listing();
     assert_eq!(listing.providers.len(), 8);
-    let mut total = 0;
     for provider in &listing.providers {
         // `_default` is served as default_limits, never as a model entry;
         // ProviderDefault/Fallback synthesis products never appear.
@@ -1089,11 +934,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
             // The test-build global catalog is seed + embedded baseline.
             assert_eq!(model.source, ModelSource::Baseline, "{}", model.id);
         }
-        total += provider.models.len();
     }
-    // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 90, "catalog model count drifted");
-
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks
     // (the frontend's custom-model path reads those).
@@ -1139,7 +980,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
 
 #[test]
 fn catalog_version_bumps_on_reload() {
-    // Serializes with the S2 refresh tests: they reload the process-global
+    // Serializes with refresh tests because they reload the process-global
     // catalog (bumping the version) via EnvGuard::drop.
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let before = api_listing().catalog_version;

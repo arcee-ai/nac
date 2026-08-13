@@ -1,15 +1,5 @@
-//! S5 reasoning discipline: golden wire tests. These pin the exact
-//! history-replay shape each adapter emits through `send_turn` (which
-//! normalizes history once before dispatch). The same-model and legacy
-//! (no-origin) cases must produce byte-identical requests to pre-S5
-//! behavior; the cross-model case must strip foreign reasoning while
-//! keeping the rest of the turn valid.
-//!
-//! The OpenAI-responses same-model case has no dedicated wire test: the
-//! item expansion is pinned byte-exactly by
-//! `responses_input_items_expand_reasoning_and_tool_state`, the same-origin
-//! pass-through by history.rs's unit tests, and the full `input` array
-//! composition through `send_turn` by the cross-model test below.
+//! Wire-level history normalization invariants. Same-model and unstamped
+//! history retain provider reasoning, while cross-model history drops it.
 
 use super::*;
 use crate::model::test_http::ScriptedServer;
@@ -54,7 +44,7 @@ async fn same_model_history_replays_reasoning_on_completions_backends() {
                 {"role": "tool", "tool_call_id": "call-1", "content": "tool output"},
                 {"role": "user", "content": "second"}
             ]),
-            "{backend} same-model replay must be byte-identical to pre-S5"
+            "{backend} same-model history retains its complete assistant turn"
         );
     }
 }
@@ -99,9 +89,8 @@ async fn same_model_history_replays_thinking_blocks_on_anthropic() {
 
 #[tokio::test]
 async fn legacy_history_without_origin_replays_exactly_like_same_model() {
-    // The safety rail, pinned end-to-end: pre-S5 transcripts have no
-    // origin stamp and must replay reasoning exactly as before —
-    // Anthropic requires the thinking blocks alongside their tool_use.
+    // Unstamped transcripts retain reasoning; Anthropic requires thinking
+    // blocks alongside their tool_use.
     let server = ScriptedServer::start(vec![s5_anthropic_response()]);
     let client = test_model_client(
         BackendKind::AnthropicMessages,

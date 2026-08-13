@@ -300,13 +300,11 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
         on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
-        // S5 reasoning discipline: same-model gate, orphan reconciliation.
-        // Runs once here so every adapter (and the compaction summary call)
+        // Normalize once so every adapter (and the compaction summary call)
         // inherits it; operates on the send-time copy, never the transcript.
         let messages = normalize_history(messages, &self.model_origin());
-        // S6: dispatch on the resolved catalog api (the wire protocol), not
-        // the provider id. BackendKind remains the auth/base-url/catalog axis
-        // (approved decision #1); within the completions adapter it still
+        // Dispatch on the resolved catalog wire protocol, not the provider
+        // id. BackendKind remains the auth/base-url/catalog axis; it still
         // selects the URL join and credential style.
         match self.resolved_model.api {
             catalog::ApiKind::OpenAiCompletions => {
@@ -337,7 +335,7 @@ impl ModelClient {
         }
     }
 
-    /// The origin stamp for assistant messages this client produces (S5):
+    /// The origin stamp for assistant messages this client produces; it is
     /// recorded on the transcript at the push site and compared against
     /// history stamps by `normalize_history` on every send.
     pub(crate) fn model_origin(&self) -> ModelOrigin {
@@ -367,8 +365,8 @@ impl ModelClient {
         &self.extra_headers
     }
 
-    /// Attach per-response cost computed from the resolved catalog metadata
-    /// (S3). Anthropic 1-hour-TTL cache writes (orchestrator clients) bill at
+    /// Attach per-response cost computed from the resolved catalog metadata.
+    /// Anthropic 1-hour-TTL cache writes (orchestrator clients) bill at
     /// the metadata's 1h rate — 2x input when the catalog has no explicit
     /// value; everything else bills at the standard rates. Unknown pricing
     /// (all-zero rates) yields zero cost, never an error.
@@ -382,7 +380,7 @@ impl ModelClient {
         response
     }
 
-    /// The single OpenAI-completions-family adapter (S6): one request
+    /// The single OpenAI-completions-family adapter: one request
     /// builder and one parser, both driven by the resolved catalog `compat`
     /// data. The provider axis (BackendKind) still owns the URL join and
     /// credential style: Arcee uses its custom URL join and, for
