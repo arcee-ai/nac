@@ -1221,11 +1221,29 @@ impl SessionManager {
         )?;
         model.light_model = match request.light_model {
             RequestField::Omitted | RequestField::Null => None,
-            RequestField::Value(light) => Some(light_model::normalize(
-                light,
-                &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
-                None,
-            )?),
+            RequestField::Value(light) => {
+                // A same-backend light model with no explicit selector
+                // inherits the session's primary one.
+                let primary_key = match &model.api_key_env {
+                    OptionalModelOption::Value(name) => Some(name.clone()),
+                    OptionalModelOption::Inherit | OptionalModelOption::Clear => None,
+                };
+                let inherited = primary_key.as_deref().and_then(|name| {
+                    let backend = model
+                        .backend
+                        .or_else(|| model.api_model.as_deref().and_then(provider_for_model))?;
+                    Some(light_model::InheritedCredential {
+                        backend,
+                        name,
+                        previous: None,
+                    })
+                });
+                Some(light_model::normalize(
+                    light,
+                    &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
+                    inherited,
+                )?)
+            }
         };
         // Mirror the launch-time resolution so the destination is checked
         // against the backend the session will actually use.
@@ -1942,10 +1960,25 @@ impl SessionManager {
             }
             RequestField::Null => prospective.light_model = None,
             RequestField::Value(light) => {
+                // A same-backend light model with no explicit selector
+                // inherits the session's primary one, following it when the
+                // primary selector changes.
+                let inherited = prospective.api_key_env.as_deref().and_then(|name| {
+                    let backend = prospective
+                        .backend
+                        .as_deref()
+                        .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
+                        .or_else(|| provider_for_model(&prospective.model))?;
+                    Some(light_model::InheritedCredential {
+                        backend,
+                        name,
+                        previous: current.api_key_env.as_deref(),
+                    })
+                });
                 prospective.light_model = Some(light_model::normalize(
                     light,
                     &NacConfig::load_credential_destination_policy(&self.inner.root_cwd)?,
-                    None,
+                    inherited,
                 )?);
             }
         }
