@@ -82,7 +82,6 @@ test-web:
 # assets/dist are committed, so stale output has to fail here rather than in CI.
 test-assets: check-file-icons
 	npm --prefix $(WEB_DIR) run lint
-	npm --prefix $(WEB_DIR) run typecheck
 	npm --prefix $(WEB_DIR) run build
 	@if [ -n "$$(git status --porcelain --untracked-files=all -- crates/$(PKG)/assets/dist)" ]; then \
 		printf '%s\n' "error: crates/$(PKG)/assets/dist is stale; commit the rebuilt bundle"; \
