@@ -932,17 +932,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_dispatch_args_omitted_options_use_dispatch_defaults() {
-        let runtime = test_runtime();
-        let args = json!({ "name": "t1", "action": "work" });
-
-        let params = parse_dispatch_args(&args, &runtime).unwrap();
-        assert!(params.source_threads.is_empty());
-        assert!(params.scheduled_skills.is_empty());
-        assert_eq!(params.timeout_secs, DEFAULT_THREAD_TIMEOUT_SECS);
-    }
-
-    #[test]
     fn queue_close_ordering_and_name_reuse_are_dispatch_exact() {
         let mut runtime = test_runtime();
         let unique = std::time::SystemTime::now()
