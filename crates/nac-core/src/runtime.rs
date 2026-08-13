@@ -1104,6 +1104,7 @@ pub async fn build_resume_config(
         lookup_cwd,
         options.worker_executable,
         None,
+        true,
     )
     .await
 }
@@ -1123,6 +1124,27 @@ pub async fn build_resume_config_for_session(
         resume_base_cwd,
         worker_executable,
         None,
+        true,
+    )
+    .await
+}
+
+pub async fn build_resume_config_for_session_transient(
+    store_path: PathBuf,
+    session_id: &str,
+    config: &NacConfig,
+    resume_base_cwd: PathBuf,
+    worker_executable: Option<PathBuf>,
+) -> Result<OrchestratorRunConfig> {
+    let snapshot = sessions::load_session(&store_path, session_id)?;
+    build_resume_config_from_snapshot(
+        snapshot,
+        store_path,
+        config,
+        resume_base_cwd,
+        worker_executable,
+        None,
+        false,
     )
     .await
 }
@@ -1135,6 +1157,7 @@ pub async fn build_resume_config_for_session_with_lease(
     worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
 ) -> Result<OrchestratorRunConfig> {
+    operation_lease.validate(&store_path, session_id)?;
     let snapshot = sessions::load_session(&store_path, session_id)?;
     build_resume_config_from_snapshot(
         snapshot,
@@ -1143,6 +1166,7 @@ pub async fn build_resume_config_for_session_with_lease(
         resume_base_cwd,
         worker_executable,
         Some(operation_lease),
+        true,
     )
     .await
 }
@@ -1154,6 +1178,7 @@ async fn build_resume_config_from_snapshot(
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
     operation_lease: Option<&sessions::SessionOperationLease>,
+    persist_recovery: bool,
 ) -> Result<OrchestratorRunConfig> {
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     // Resume reaches the host with the connection the session recorded, not with
@@ -1175,18 +1200,22 @@ async fn build_resume_config_from_snapshot(
     let stored_model = snapshot.model.clone();
     let stored_base_url = snapshot.base_url.clone();
     let stored_reasoning_effort = snapshot.reasoning_effort;
-    let thinking_level_map =
-        resolve_model_metadata(snapshot.backend, &stored_model).thinking_level_map;
-    if stored_reasoning_effort.is_some_and(|effort| !thinking_level_map.is_supported(effort)) {
-        snapshot.reasoning_effort = thinking_level_map.max_supported_effort();
+    let metadata = resolve_model_metadata(snapshot.backend, &stored_model);
+    if let Some(effort) = stored_reasoning_effort {
+        if !metadata.thinking_level_map.is_supported(effort) {
+            snapshot.reasoning_effort =
+                metadata.thinking_level_map.closest_supported_effort(effort);
+        }
     }
-    let snapshot_settings = EffectiveModelSettings::new(
+    let authoritative = metadata.source.is_authoritative();
+    let snapshot_settings = EffectiveModelSettings::new_with_resolved(
         snapshot.backend,
         stored_model.clone(),
         stored_base_url.clone(),
         snapshot.reasoning_effort,
         snapshot.api_key_env.clone(),
         snapshot.extra_headers.clone(),
+        metadata,
     )
     .map_err(|error| {
         anyhow::anyhow!(
@@ -1199,7 +1228,15 @@ async fn build_resume_config_from_snapshot(
             "stored session model settings are invalid; settings repair required: model and base_url must be stored in normalized nonblank form"
         );
     }
-    if snapshot.reasoning_effort != stored_reasoning_effort {
+    if persist_recovery && snapshot.reasoning_effort != stored_reasoning_effort && authoritative {
+        let migration_lease;
+        if let Some(lease) = operation_lease {
+            lease.validate(&store_path, &snapshot.session_id)?;
+        } else {
+            migration_lease =
+                sessions::SessionOperationLease::try_acquire(&store_path, &snapshot.session_id)?;
+            migration_lease.validate(&store_path, &snapshot.session_id)?;
+        }
         snapshot.config_version = sessions::update_session_config(&store_path, &snapshot)?;
     }
     let client = ModelClient::from_effective_settings(snapshot_settings)
@@ -1517,6 +1554,7 @@ mod tests {
     ) -> SessionSnapshot {
         let base_url = match backend {
             BackendKind::TogetherChat => "https://api.together.xyz/v1",
+            BackendKind::AnthropicMessages => "https://api.anthropic.com/v1",
             BackendKind::ArceeApi => "https://api.arcee.ai/api/v1",
             _ => unreachable!(),
         };
@@ -2592,6 +2630,7 @@ X-Config = "yes"
             root.clone(),
             None,
             None,
+            true,
         )
         .await
         {
@@ -2753,7 +2792,7 @@ X-Config = "yes"
     }
 
     #[tokio::test]
-    async fn resume_durably_migrates_only_unsupported_persisted_efforts() {
+    async fn resume_recovers_effort_and_only_persists_authoritative_changes() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let key_name = "NAC_RESUME_EFFORT_MIGRATION_KEY";
         let original_key = std::env::var_os(key_name);
@@ -2767,30 +2806,30 @@ X-Config = "yes"
         let store_path = root.join("store.db");
         store::initialize(&store_path).unwrap();
 
-        for (session_id, backend, model, stored_effort, expected_effort, expected_version) in [
+        for (session_id, model, stored_effort, effective_effort, stored_after, version) in [
             (
-                "unsupported-effort",
-                BackendKind::TogetherChat,
-                "deepseek-ai/DeepSeek-V4-Pro",
-                ReasoningEffort::Medium,
-                Some(ReasoningEffort::Max),
+                "dated-family",
+                "claude-sonnet-4-6-20251001",
+                ReasoningEffort::Xhigh,
+                Some(ReasoningEffort::High),
+                Some(ReasoningEffort::High),
                 1,
             ),
             (
-                "supported-effort",
-                BackendKind::TogetherChat,
-                "deepseek-ai/DeepSeek-V4-Pro",
+                "supported",
+                "claude-sonnet-4-6-20251001",
                 ReasoningEffort::High,
+                Some(ReasoningEffort::High),
                 Some(ReasoningEffort::High),
                 0,
             ),
             (
-                "no-explicit-efforts",
-                BackendKind::ArceeApi,
-                "model",
-                ReasoningEffort::Low,
-                None,
-                1,
+                "provider-default",
+                "unknown-model",
+                ReasoningEffort::Medium,
+                Some(ReasoningEffort::None),
+                Some(ReasoningEffort::Medium),
+                0,
             ),
         ] {
             let active = create_and_resume_effort_snapshot(
@@ -2798,22 +2837,38 @@ X-Config = "yes"
                 &root,
                 key_name,
                 session_id,
-                backend,
+                BackendKind::AnthropicMessages,
                 model,
                 stored_effort,
             )
             .await;
-            assert_eq!(active.reasoning_effort, expected_effort);
-            assert_eq!(active.config_version, expected_version);
-
+            assert_eq!(active.reasoning_effort, effective_effort);
+            assert_eq!(active.config_version, version);
             let stored = sessions::load_session(&store_path, session_id).unwrap();
-            assert_eq!(stored.reasoning_effort, expected_effort);
-            assert_eq!(stored.config_version, expected_version);
+            assert_eq!(stored.reasoning_effort, stored_after);
+            assert_eq!(stored.config_version, version);
         }
 
-        unsafe { std::env::remove_var(key_name) };
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
+    }
+
+    #[tokio::test]
+    async fn resume_effort_migration_requires_operation_lease() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_RESUME_EFFORT_LEASE_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("resume_effort_lease")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
         let snapshot = sessions::new_snapshot(
-            "missing-credential".to_string(),
+            "session".to_string(),
             root.clone(),
             "deepseek-ai/DeepSeek-V4-Pro".to_string(),
             "https://api.together.xyz/v1".to_string(),
@@ -2826,39 +2881,43 @@ X-Config = "yes"
             BTreeMap::new(),
         );
         sessions::create_session(&store_path, &snapshot).unwrap();
+
+        let lease = sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
         assert!(build_resume_config_for_session(
             store_path.clone(),
-            "missing-credential",
+            "session",
             &NacConfig::default(),
             root.clone(),
             None,
         )
         .await
         .is_err());
-        let stored = sessions::load_session(&store_path, "missing-credential").unwrap();
-        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Max));
-        assert_eq!(stored.config_version, 1);
+        assert_eq!(
+            sessions::load_session(&store_path, "session")
+                .unwrap()
+                .reasoning_effort,
+            Some(ReasoningEffort::Medium)
+        );
 
-        unsafe { std::env::set_var(key_name, "test-key") };
-        let resumed_again = build_resume_config_for_session(
+        let resumed = build_resume_config_for_session_with_lease(
             store_path.clone(),
-            "unsupported-effort",
+            "session",
             &NacConfig::default(),
             root.clone(),
             None,
+            &lease,
         )
         .await
         .unwrap();
         assert_eq!(
-            resumed_again
-                .session
-                .into_snapshot()
-                .unwrap()
-                .config_version,
-            1,
-            "an already-migrated effort must not cause another write"
+            resumed.client.reasoning_effort(),
+            Some(ReasoningEffort::High)
         );
+        let stored = sessions::load_session(&store_path, "session").unwrap();
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(stored.config_version, 1);
 
+        drop(lease);
         let _ = std::fs::remove_dir_all(root);
         restore_env(key_name, original_key);
     }
@@ -3199,6 +3258,7 @@ X-Config = "yes"
             PathBuf::from("/local/resume/base"),
             None,
             None,
+            true,
         )
         .await
         {
@@ -3236,6 +3296,7 @@ X-Config = "yes"
             PathBuf::from("/local/resume/base"),
             None,
             None,
+            true,
         )
         .await
         {

@@ -1,6 +1,6 @@
 {
   "sha256": "479502f34bb3ed73fe73f4cb6b10db94c848ca1387f8c1f2086d010574d70e38",
-  "generated_at": "2026-08-12T21:05:54Z",
+  "generated_at": "2026-08-13T00:35:55Z",
   "models_dev_url": "crates/nac-catalog-gen/fixtures/models-dev-api.json",
   "models_dev_etag": null,
   "model_counts": {

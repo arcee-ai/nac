@@ -94,11 +94,16 @@ impl ThinkingLevelMap {
             .collect()
     }
 
-    /// The highest supported effort level, or `None` when the model accepts
-    /// no explicit effort levels. Used to migrate obsolete persisted effort
-    /// selections during session resume.
-    pub fn max_supported_effort(&self) -> Option<ReasoningEffort> {
-        self.supported_efforts().last().copied()
+    /// The closest supported effort by canonical rank. Ties prefer higher effort.
+    pub fn closest_supported_effort(&self, requested: ReasoningEffort) -> Option<ReasoningEffort> {
+        let requested = requested as usize;
+        self.0
+            .iter()
+            .filter_map(|(effort, wire)| wire.as_ref().map(|_| *effort))
+            .min_by_key(|effort| {
+                let rank = *effort as usize;
+                (rank.abs_diff(requested), std::cmp::Reverse(rank))
+            })
     }
 }
 
@@ -135,6 +140,12 @@ pub enum ModelSource {
     /// Last-resort synthesized metadata; carries the 128k/16k/zero-cost
     /// defaults. Unreachable while every provider ships a `_default` entry.
     Fallback,
+}
+
+impl ModelSource {
+    pub(crate) fn is_authoritative(self) -> bool {
+        matches!(self, Self::Baseline | Self::Overlay | Self::UserOverride)
+    }
 }
 
 /// Central model metadata record resolved from the catalog.
@@ -298,4 +309,35 @@ pub struct ModelListing {
     /// surface only; v1 attaches no cache semantics.
     pub catalog_version: u64,
     pub providers: Vec<ProviderListing>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn levels(efforts: &[ReasoningEffort]) -> ThinkingLevelMap {
+        ThinkingLevelMap(
+            efforts
+                .iter()
+                .map(|effort| (*effort, Some(effort.as_str().to_string())))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn closest_supported_effort_uses_canonical_distance() {
+        use ReasoningEffort::{High, Low, Max, Medium, None, Xhigh};
+        for (supported, requested, expected) in [
+            (&[Low, Medium, High][..], Medium, Some(Medium)),
+            (&[None, Xhigh][..], Low, Some(None)),
+            (&[High, Max][..], Xhigh, Some(Max)),
+            (&[Low, High][..], Medium, Some(High)),
+            (&[][..], Max, Option::<ReasoningEffort>::None),
+        ] {
+            assert_eq!(
+                levels(supported).closest_supported_effort(requested),
+                expected
+            );
+        }
+    }
 }

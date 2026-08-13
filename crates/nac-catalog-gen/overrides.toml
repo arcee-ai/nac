@@ -48,16 +48,8 @@ default_thinking_levels = { none = "none", low = "low", high = "high", max = "ma
 [providers."fireworks-chat"]
 default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
 
-# Post-S4 per-model extensions for Fireworks: provider docs show
-# model-specific effort tiers that the uniform pre-S4 matrix did not
-# capture. GPT-OSS and MiniMax M2P7 are reasoning-only (the API
-# rejects `none`); DeepSeek V4 uses the 4 real effort levels (none,
-# low, high, max — official docs confirm medium→high and xhigh→high
-# are compatibility aliases); GLM 5.2 supports only `none`, `high`,
-# and `max` (the model's chat template maps anything other than `high`
-# to `max`); MiniMax M3 uses a 3-mode toggle (enabled/adaptive/
-# disabled), mapped here as `none` (disabled) and `max` (enabled).
-# Dated snapshots inherit the family override.
+# Model-specific tiers below supersede provider defaults; dated snapshots
+# inherit their family override.
 
 # GPT-OSS models: reasoning-only, `none` is rejected by the API.
 [providers."fireworks-chat".models."accounts/fireworks/models/gpt-oss-120b"]
@@ -109,15 +101,8 @@ thinking_levels = { low = "low", high = "high", max = "max" }
 default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
 default_base_url = "https://api.together.xyz/v1"
 
-# Post-S4 per-model extensions for Together: provider docs show
-# model-specific effort tiers. GLM-5.2 supports only `none`, `high`,
-# and `max`; DeepSeek V4 models use the 4 real effort levels (none,
-# low, high, max — official docs confirm medium→high and xhigh→high
-# are compatibility aliases, and Together normalizes them the same
-# way); MiniMax M3 uses a 3-mode toggle mapped as `none` (disabled)
-# and `max` (enabled); non-reasoning models (Qwen2.5-7B, Qwen3.7-Max,
-# Llama-3.3-70B) accept no explicit effort levels. Dated snapshots
-# inherit the family override.
+# Model-specific tiers below supersede provider defaults; dated snapshots
+# inherit their family override.
 
 # GLM-5.2: fix context window to 512K (models.dev underreports);
 # native levels are `high` and `max`; `none` disables thinking.

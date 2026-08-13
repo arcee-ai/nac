@@ -1260,7 +1260,25 @@ impl SessionManager {
     async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        self.attach_session_locked(session_id, None).await
+        if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
+            return Ok(Arc::clone(service));
+        }
+        let operation_lease = match sessions::SessionOperationLease::try_acquire(
+            &self.inner.store_path,
+            session_id,
+        ) {
+            Ok(lease) => Some(lease),
+            Err(sessions::SessionOperationLeaseError::Busy(_)) => None,
+            Err(error) => return Err(error.into()),
+        };
+        if let Some(operation_lease) = operation_lease.as_ref() {
+            self.attach_session_locked(session_id, Some(operation_lease))
+                .await
+        } else {
+            self.resume_session(session_id, None, false)
+                .await
+                .map(Arc::new)
+        }
     }
 
     /// Attaches while the caller holds this session's lifecycle gate. Keeping
@@ -1275,7 +1293,10 @@ impl SessionManager {
             return Ok(Arc::clone(service));
         }
 
-        let service = Arc::new(self.resume_session(session_id, operation_lease).await?);
+        let service = Arc::new(
+            self.resume_session(session_id, operation_lease, true)
+                .await?,
+        );
         let mut active = self.inner.active_sessions.write().await;
         if let Some(existing) = active.get(session_id) {
             return Ok(Arc::clone(existing));
@@ -1896,6 +1917,7 @@ impl SessionManager {
         &self,
         session_id: &str,
         operation_lease: Option<&sessions::SessionOperationLease>,
+        persist_recovery: bool,
     ) -> Result<SessionService> {
         let summary = self
             .list_sessions(false)
@@ -1920,8 +1942,17 @@ impl SessionManager {
                 operation_lease,
             )
             .await?
-        } else {
+        } else if persist_recovery {
             runtime::build_resume_config_for_session(
+                self.inner.store_path.clone(),
+                session_id,
+                &config,
+                self.inner.root_cwd.clone(),
+                Some(self.inner.worker_executable.clone()),
+            )
+            .await?
+        } else {
+            runtime::build_resume_config_for_session_transient(
                 self.inner.store_path.clone(),
                 session_id,
                 &config,
@@ -6190,6 +6221,61 @@ thread_timeout_secs = 7200
 
         stale_manager.cancel_active_run("session").await.unwrap();
         endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn busy_attachment_is_transient_and_next_attach_observes_durable_config() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("busy_transient_effort_recovery");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
+        let snapshot = sessions::new_snapshot(
+            "session".to_string(),
+            root.clone(),
+            "claude-sonnet-4-6-20251001".to_string(),
+            "https://api.anthropic.com/v1".to_string(),
+            BackendKind::AnthropicMessages,
+            Some(ReasoningEffort::Xhigh),
+            None,
+            None,
+            Vec::new(),
+            Some("ANTHROPIC_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+        let lease = sessions::SessionOperationLease::try_acquire(&root.join("store.db"), "session")
+            .unwrap();
+        let reader = test_manager(&root);
+        let writer = test_manager(&root);
+
+        let transient = reader.attach_session("session").await.unwrap();
+        assert_eq!(
+            transient.metadata().reasoning_effort.as_deref(),
+            Some("high")
+        );
+        let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Xhigh));
+        assert_eq!(stored.config_version, 0);
+
+        drop(lease);
+        writer
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("claude-opus-4-6".to_string()),
+                    reasoning_effort: RequestField::Value("high".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let current = reader.attach_session("session").await.unwrap();
+        assert_eq!(current.metadata().model, "claude-opus-4-6");
+        assert_eq!(current.metadata().reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(current.config_version(), Some(1));
         let _ = std::fs::remove_dir_all(root);
     }
 
