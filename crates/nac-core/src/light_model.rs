@@ -51,6 +51,9 @@ pub(crate) fn resolve_light_client(
         session_headers.clone(),
     )
     .and_then(ModelClient::from_effective_settings)
+    // Embed the full cause chain in the context message while keeping the
+    // original error as the source for downcasting. Callers must render this
+    // error with `{}` (`to_string`); `{:#}` would print the cause twice.
     .map_err(|error| {
         let message = format!("invalid light model settings: {error:#}");
         error.context(message)

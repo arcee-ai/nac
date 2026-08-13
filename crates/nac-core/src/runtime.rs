@@ -1344,10 +1344,14 @@ async fn build_resume_config_from_snapshot(
         .map(|light| resolve_light_client(light, &snapshot.extra_headers))
         .transpose()
         .map_err(|error| {
-            anyhow::anyhow!(
-                "stored session light-model settings are invalid; settings repair required: {:#}",
+            if error.downcast_ref::<ModelConfigurationError>().is_some() {
+                let message = format!(
+                    "stored session light-model settings are invalid; settings repair required: {error}"
+                );
+                error.context(message)
+            } else {
                 error
-            )
+            }
         })?
         .map(std::sync::Arc::new);
     let sandbox = if ssh.is_some() {

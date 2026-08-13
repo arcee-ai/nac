@@ -2121,7 +2121,7 @@ impl SessionManager {
         // Fail a broken light model here, not at the session's next launch.
         if let Some(light) = prospective.light_model.as_ref() {
             nac_core::light_model::validate(light, &extra_headers)
-                .map_err(|error| request_configuration_error(format!("{error:#}")))?;
+                .map_err(|error| request_configuration_error(error.to_string()))?;
         }
         validate_model_configuration(
             backend,
@@ -2886,7 +2886,7 @@ async fn create_model_config_handler(
             if let Some(name) = credential_name.as_deref() {
                 let _ = remove_api_key(name);
             }
-            return Err(request_configuration_error(format!("{error:#}")).into());
+            return Err(request_configuration_error(error.to_string()).into());
         }
     }
     let record = model_configurations::insert_model_configuration(
@@ -3072,7 +3072,7 @@ async fn update_model_config_handler(
             if let Some((name, _)) = replacement_credential.as_ref() {
                 let _ = remove_api_key(name);
             }
-            return Err(request_configuration_error(format!("{error:#}")).into());
+            return Err(request_configuration_error(error.to_string()).into());
         }
     }
     match model_configurations::update_model_configuration(
@@ -8328,6 +8328,52 @@ model = "gpt-5.2"
             response.message
         );
         assert!(manager.list_sessions(false).await.unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn update_reports_the_missing_light_model_credential_exactly_once() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("update_missing_light_credential");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        seed_editable_session(&root, "session");
+        let manager = test_manager(&root);
+
+        let error = manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    light_model: RequestField::Value(LightModelSettings {
+                        model: "deepseek/deepseek-v4-flash-latest".to_string(),
+                        backend: Some(BackendKind::ArceeApi),
+                        base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+                        api_key_env: None,
+                        reasoning_effort: None,
+                    }),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("an API-key light model without a key must fail the update");
+        let response = ApiError::from(error);
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(
+            response.message.contains("invalid light model settings"),
+            "{}",
+            response.message
+        );
+        // The resolver's message already embeds the cause chain; rendering it
+        // with `{:#}` would repeat the cause.
+        assert_eq!(
+            response.message.matches("ARCEE_API_KEY").count(),
+            1,
+            "{}",
+            response.message
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
