@@ -1,10 +1,17 @@
-name: Edge Release
+name: Release
 
 on:
   push:
     branches: [main]
   pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to upload binaries to
+        required: false
+        type: string
 
 jobs:
   test-server:
@@ -14,6 +21,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -61,6 +70,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -99,6 +110,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Install musl tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
@@ -135,7 +148,9 @@ jobs:
           path: dist/nac-${{ matrix.target }}.tar.gz
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
@@ -143,6 +158,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Download archives
         uses: actions/download-artifact@v4
@@ -151,22 +168,10 @@ jobs:
           pattern: nac-*
           merge-multiple: true
 
-      - name: Publish edge release
+      - name: Upload release archives
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
           set -euo pipefail
-
-          git fetch --tags origin
-
-          if gh release view edge >/dev/null 2>&1; then
-            git tag -f edge "$GITHUB_SHA"
-            git push origin refs/tags/edge --force
-            gh release upload edge dist/* --clobber
-          else
-            gh release create edge dist/* \
-              --title edge \
-              --notes "Latest main build of nac." \
-              --prerelease \
-              --target "$GITHUB_SHA"
-          fi
+          gh release upload "$RELEASE_TAG" dist/* --clobber
