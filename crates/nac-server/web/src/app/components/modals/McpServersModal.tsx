@@ -80,7 +80,9 @@ function rowsFromRecord(map: Record<string, string>): KvRow[] {
 
 /**
  * Literal map for create/test payloads; null borrows the stored secret. A
- * blank value with nothing stored drops the row instead of sending "".
+ * blank value with nothing stored drops the row instead of sending "". A
+ * stored row whose key was renamed still sends null, so the server rejects
+ * the save with a clear error instead of silently deleting the secret.
  */
 function mapFromRows(rows: KvRow[]): Record<string, string | null> {
   const map: Record<string, string | null> = {};
@@ -88,7 +90,7 @@ function mapFromRows(rows: KvRow[]): Record<string, string | null> {
     const key = row.key.trim();
     if (!key) continue;
     if (!row.value) {
-      if (key === row.storedKey) map[key] = null;
+      if (row.storedKey) map[key] = null;
       continue;
     }
     map[key] = row.value;
