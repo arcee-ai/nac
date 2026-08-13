@@ -72,7 +72,6 @@
         .unwrap()
         .session
         .into_snapshot()
-        .unwrap()
     }
 
     /// A config whose `[model]` section resolves through the catalog:
