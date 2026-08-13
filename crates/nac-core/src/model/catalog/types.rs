@@ -111,6 +111,7 @@ impl ThinkingLevelMap {
 /// fallback); `calculate_cost` bills unknown pricing as zero. Missing fields
 /// deserialize as zero so partial catalog records stay loadable.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelCostRates {
     #[serde(default)]
     pub input: f64,
@@ -127,6 +128,7 @@ pub struct ModelCostRates {
 /// user-overridden and unrecognized (provider-default) models from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ModelSource {
     /// Checked-in baseline catalog (S0 seed; generated models.dev data in S1).
     Baseline,
@@ -231,6 +233,7 @@ impl ModelMetadata {
 /// managed providers still read only their stored credential file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AuthStatus {
     /// A usable credential exists: the provider's conventional env var or
     /// the configured selector names a set variable (API-key providers), or
@@ -245,6 +248,7 @@ pub enum AuthStatus {
 /// *requirements* (drives picker field visibility and hints), not status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ProviderAuth {
     /// API key read from the environment variable named by `api_key_env`.
     ApiKeyEnv,
@@ -258,6 +262,7 @@ pub enum ProviderAuth {
 /// `GET /models`: powers the frontend's unrecognized-model badge, estimated
 /// context gauge and custom-model effort list without a second resolve call.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DefaultLimits {
     pub context_window: u64,
     pub max_tokens: u64,
@@ -267,6 +272,7 @@ pub struct DefaultLimits {
 /// One real catalog entry as served by `GET /models` (never a
 /// ProviderDefault/Fallback synthesis product).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelEntry {
     pub id: String,
     pub display_name: Option<String>,
@@ -280,6 +286,7 @@ pub struct ModelEntry {
 
 /// One provider group in the `GET /models` listing.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProviderListing {
     pub id: BackendKind,
     pub auth: ProviderAuth,
@@ -303,6 +310,7 @@ pub struct ProviderListing {
 
 /// The full catalog listing served by `GET /models`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelListing {
     /// Monotonic version of the process-global catalog, bumped on every
     /// reload (the initial load is version 1). Debugging/future-staleness

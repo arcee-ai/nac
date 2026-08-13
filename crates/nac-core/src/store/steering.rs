@@ -4,6 +4,7 @@ use super::*;
 pub const ORCHESTRATOR_STEERING_TARGET: &str = "__orchestrator__";
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ThreadSteeringRecord {
     pub id: i64,
     pub session_id: String,

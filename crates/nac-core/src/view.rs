@@ -25,10 +25,13 @@ pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;
 pub type NumstatSummary = (NumstatPairs, u64, u64);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionSummarySnapshot {
     pub session_id: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub cwd: PathBuf,
     #[serde(skip)]
+    #[cfg_attr(feature = "openapi", schema(ignore))]
     pub workspace_host_path: Option<PathBuf>,
     pub model: String,
     pub backend: String,
@@ -70,6 +73,7 @@ pub struct SessionSummarySnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ThreadSnapshot {
     pub name: String,
     pub session_id: String,
@@ -80,6 +84,7 @@ pub struct ThreadSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EpisodeSnapshot {
     pub id: i64,
     pub thread_name: String,
@@ -98,6 +103,7 @@ fn retained_episode_status() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorksetSummarySnapshot {
     pub id: String,
     pub status: String,
@@ -107,6 +113,7 @@ pub struct WorksetSummarySnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorksetItemSnapshot {
     pub position: i64,
     pub title: String,
@@ -120,6 +127,7 @@ pub struct WorksetItemSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorksetSnapshot {
     pub id: String,
     pub session_id: String,
@@ -133,12 +141,14 @@ pub struct WorksetSnapshot {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorksetsSnapshot {
     pub items: Vec<WorksetSnapshot>,
     pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct GitStatusCounts {
     pub modified: usize,
     pub staged: usize,
@@ -149,6 +159,7 @@ pub struct GitStatusCounts {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ChangedFileStat {
     pub status: String,
     pub path: String,
@@ -157,6 +168,7 @@ pub struct ChangedFileStat {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceDiffTotals {
     pub total_additions: u64,
     pub total_deletions: u64,
@@ -164,6 +176,7 @@ pub struct WorkspaceDiffTotals {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceRevisionChanges {
     pub changed_files: Vec<ChangedFileStat>,
     pub total_additions: u64,
@@ -172,7 +185,9 @@ pub struct WorkspaceRevisionChanges {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceSnapshot {
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub host_root: Option<PathBuf>,
     pub workspace_display: String,
     pub repo_label: Option<String>,

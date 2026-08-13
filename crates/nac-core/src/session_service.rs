@@ -41,9 +41,12 @@ pub use manual_compaction::{
 pub type AgentEventReceiver = mpsc::UnboundedReceiver<AgentEvent>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionMetadata {
     pub cwd: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub workspace_host_path: Option<PathBuf>,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub store_path: PathBuf,
     pub model: String,
     pub backend: String,
@@ -61,6 +64,7 @@ pub struct SessionMetadata {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResponseTimingSnapshot {
     pub last_response_duration_ms: Option<u64>,
     pub previous_response_duration_ms: Option<u64>,
@@ -130,6 +134,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ActiveRunSnapshot {
     pub run_id: SessionRunId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,6 +146,7 @@ pub struct ActiveRunSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ActiveCompactionSnapshot {
     pub compaction_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -150,6 +156,7 @@ pub struct ActiveCompactionSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ActiveSessionOperationSnapshot {
     Run {
         run: ActiveRunSnapshot,
@@ -167,6 +174,7 @@ pub struct SessionServiceInit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionFrontendSnapshot {
     pub metadata: SessionMetadata,
     pub messages: Vec<Message>,
@@ -273,6 +281,7 @@ pub struct SessionFrontendSnapshotLoad {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ThreadEventPageItem {
     pub id: i64,
     pub created_at: String,
@@ -280,6 +289,7 @@ pub struct ThreadEventPageItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ThreadEventPage {
     pub events: Vec<ThreadEventPageItem>,
     pub has_older: bool,
@@ -291,6 +301,7 @@ pub struct ThreadEventPage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ThreadEventDecodeDiagnostic {
     pub id: i64,
     pub thread_name: String,

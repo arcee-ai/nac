@@ -2,6 +2,7 @@ use super::*;
 
 /// A named, reusable SSH connection offered by the launch modal.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SshConfigurationRecord {
     pub config_id: String,
     pub name: String,

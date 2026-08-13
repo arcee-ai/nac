@@ -20,12 +20,14 @@ pub use revisions::{capture, forget, restore, rewind_ref, RevisionCapture};
 pub(crate) use git::{first_stderr_line, WorktreeRead};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Branch {
     pub name: String,
     pub is_current: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BranchList {
     /// None on a detached HEAD or in a repository without commits.
     pub current: Option<String>,
@@ -82,6 +84,7 @@ pub fn switch_branch(target: &GitTarget, name: &str) -> Result<BranchList> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CommitOutcome {
     pub sha: String,
     /// None on a detached HEAD.

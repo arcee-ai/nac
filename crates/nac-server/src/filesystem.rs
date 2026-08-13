@@ -16,6 +16,7 @@ const MAX_ENTRIES: usize = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(utoipa::ToSchema)]
 pub enum BrowseKind {
     /// Directories only, for picking a working directory.
     #[default]
@@ -27,7 +28,8 @@ pub enum BrowseKind {
     File,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct BrowseQuery {
     /// Absolute path to list. A leading `~` expands to the home directory.
     pub path: Option<String>,
@@ -38,14 +40,14 @@ pub struct BrowseQuery {
     pub hidden: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct BrowseEntry {
     pub name: String,
     pub path: String,
     pub is_directory: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct BrowseListing {
     /// Canonical path of the listed directory.
     pub path: String,

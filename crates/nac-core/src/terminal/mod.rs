@@ -26,6 +26,7 @@ pub struct TerminalInfo {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum CommandStatus {
     Completed,
     TimedOut,

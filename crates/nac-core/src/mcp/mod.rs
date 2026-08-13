@@ -48,6 +48,7 @@ pub use registry::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 
 /// A tool a probe discovered on a server, before anything is saved.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct McpProbedTool {
     pub name: String,
     pub description: Option<String>,

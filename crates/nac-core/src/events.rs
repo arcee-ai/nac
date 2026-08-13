@@ -20,6 +20,7 @@ pub const ASSISTANT_DELTA_CHANNEL_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionClientId(String);
 
 impl SessionClientId {
@@ -46,6 +47,7 @@ impl std::fmt::Display for SessionClientId {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionSubscriptionId(String);
 
 impl SessionSubscriptionId {
@@ -72,6 +74,7 @@ impl std::fmt::Display for SessionSubscriptionId {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionRunId(String);
 
 impl SessionRunId {
@@ -98,6 +101,7 @@ impl std::fmt::Display for SessionRunId {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum CompactionReason {
     Auto,
     Manual,
@@ -105,6 +109,7 @@ pub enum CompactionReason {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum CompactionSkipReason {
     NoEligibleBoundary,
     AlreadyCompacted,
@@ -112,6 +117,7 @@ pub enum CompactionSkipReason {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum CompactionFailure {
     SummaryRequestFailed,
     SummaryRejected,
@@ -121,6 +127,7 @@ pub enum CompactionFailure {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AgentEvent {
     RunStarted {
         thread_name: Option<String>,
@@ -289,6 +296,7 @@ impl AgentEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionEventEnvelope {
     pub session_id: Option<String>,
     pub epoch_id: String,
@@ -301,18 +309,21 @@ pub struct SessionEventEnvelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionEventBoundary {
     pub epoch_id: String,
     pub sequence_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionReplayGap {
     pub missing_from_sequence_id: u64,
     pub missing_to_sequence_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SubmittedUserMessageSnapshot {
     pub run_id: SessionRunId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -323,6 +334,7 @@ pub struct SubmittedUserMessageSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SessionEvent {
     /// Agent/model progress. The canonical top-level session busy lifecycle is
     /// represented by RunStarted/RunCompleted/RunFailed/RunCancelled. AgentEvent
@@ -375,6 +387,7 @@ pub enum SessionEvent {
 /// no persistence — a subscriber that falls behind just misses text it is about
 /// to receive in full anyway.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssistantStreamDelta {
     pub thread_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -18,23 +18,25 @@ use axum::{
 use nac_core::{commands::PreparedUserInput, session_service::RevertOutcome, sessions};
 use serde::{Deserialize, Serialize};
 
-use crate::{frontend_command_name, submit_response, SessionManager, SubmitPromptResponse};
+use crate::{
+    frontend_command_name, submit_response, ApiErrorBody, SessionManager, SubmitPromptResponse,
+};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct RevertSessionRequest {
     /// Transcript index of the user message to go back to. That message and
     /// everything after it are dropped.
     pub message_idx: usize,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct RegenerateSessionRequest {
     /// Transcript index of the user message to answer again. It and everything
     /// after it are dropped before the same prompt is submitted afresh.
     pub message_idx: usize,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct RevertSessionResponse {
     pub transcript_len: usize,
     pub messages_removed: usize,
@@ -114,7 +116,9 @@ impl IntoResponse for RegenerateSessionError {
         };
         (
             status,
-            Json(serde_json::json!({ "error": self.to_string() })),
+            Json(ApiErrorBody {
+                error: self.to_string(),
+            }),
         )
             .into_response()
     }
@@ -130,7 +134,9 @@ impl IntoResponse for RevertSessionError {
         };
         (
             status,
-            Json(serde_json::json!({ "error": self.to_string() })),
+            Json(ApiErrorBody {
+                error: self.to_string(),
+            }),
         )
             .into_response()
     }
@@ -311,6 +317,15 @@ fn report_failure(
     RevertSessionError::Failed
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/revert",
+    operation_id = "post_sessions_session_id_revert",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = RevertSessionRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = RevertSessionResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((crate::ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 413, description = "Request body too large", body = String, content_type = "text/plain"), (status = 415, description = "Unsupported media type", body = String, content_type = "text/plain"), (status = 422, description = "JSON body validation failed", body = String, content_type = "text/plain"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -323,6 +338,15 @@ pub(crate) async fn handler(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/regenerate",
+    operation_id = "post_sessions_session_id_regenerate",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = RegenerateSessionRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = crate::SubmitPromptResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((crate::ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 413, description = "Request body too large", body = String, content_type = "text/plain"), (status = 415, description = "Unsupported media type", body = String, content_type = "text/plain"), (status = 422, description = "JSON body validation failed", body = String, content_type = "text/plain"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn regenerate_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,

@@ -14,6 +14,7 @@ use crate::model::{
 /// id; backend and reasoning effort are typed before entering the domain
 /// model, and the credential is always a selector name, never a key value.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LightModelSettings {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]

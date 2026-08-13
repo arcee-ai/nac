@@ -29,6 +29,7 @@ const MAX_FILE_BYTES: u64 = 512 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceFileList {
     pub files: Vec<String>,
     /// The repository has more files than were returned.
@@ -36,6 +37,7 @@ pub struct WorkspaceFileList {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceFileContent {
     pub path: String,
     /// None whenever the file cannot be shown as text.
@@ -254,6 +256,7 @@ fn run_git_optional(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Opt
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OpenLocalPathResult {
     /// Absolute path handed to the OS opener.
     pub opened: String,

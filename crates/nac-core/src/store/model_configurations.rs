@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 /// in the credential store (or the environment), exactly as it does for a
 /// configuration written by hand in `config.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelConfigurationRecord {
     pub config_id: String,
     pub name: String,

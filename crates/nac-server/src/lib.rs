@@ -40,7 +40,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
-    routing::{delete, get, patch, post, put},
+    routing::get,
     Json, Router,
 };
 use include_dir::{include_dir, Dir};
@@ -88,6 +88,9 @@ use tower_http::compression::{
     predicate::{DefaultPredicate, NotForContentType, Predicate},
     CompressionLayer,
 };
+use utoipa::OpenApi;
+use utoipa_axum::{router::OpenApiRouter, routes};
+use utoipa_swagger_ui::{Config as SwaggerConfig, SwaggerUi};
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
 const DEFAULT_MESSAGE_PAGE_LIMIT: usize = 24;
@@ -215,15 +218,29 @@ impl GitProbeCacheEntry {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct HealthResponse {
+    pub status: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct ApiErrorBody {
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct StoreInfo {
+    #[schema(value_type = String)]
     pub root_cwd: PathBuf,
+    #[schema(value_type = String)]
     pub store_path: PathBuf,
+    #[schema(value_type = String)]
     pub worker_executable: PathBuf,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct LaunchModelDefaultsRequest {
+    #[schema(value_type = Option<String>)]
     pub cwd: Option<PathBuf>,
     /// OpenSSH target for remote sessions; remote paths never select local config.
     #[serde(default, alias = "host_id")]
@@ -238,7 +255,7 @@ pub struct LaunchModelDefaultsRequest {
 ///
 /// The connection is described in the request rather than taken from a session,
 /// because this is what the launch form asks *before* there is a session.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct SshBrowseRequest {
     pub ssh_host: Option<String>,
     #[serde(default)]
@@ -254,7 +271,7 @@ pub struct SshBrowseRequest {
     pub hidden: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct LaunchModelDefaults {
     /// Configured model id; lets the launch dialog render the inherited
     /// "from config" selection resolved against the model catalog (the
@@ -265,7 +282,7 @@ pub struct LaunchModelDefaults {
     pub configured_reasoning_effort: Option<ReasoningEffort>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ManagedSessionSummary {
     pub summary: SessionSummarySnapshot,
     pub active: bool,
@@ -274,7 +291,8 @@ pub struct ManagedSessionSummary {
     pub workspace_diff: Option<view::WorkspaceDiffTotals>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListSessionsQuery {
     #[serde(default)]
     pub workspace_stats: bool,
@@ -305,6 +323,45 @@ where
             Some(value) => Self::Value(value),
             None => Self::Null,
         })
+    }
+}
+
+impl<T> utoipa::__dev::ComposeSchema for RequestField<T>
+where
+    T: utoipa::__dev::ComposeSchema,
+{
+    fn compose(
+        schemas: Vec<utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>>,
+    ) -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        let value = schemas
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| T::compose(Vec::new()));
+        utoipa::openapi::schema::OneOfBuilder::new()
+            .item(
+                utoipa::openapi::schema::ObjectBuilder::new()
+                    .schema_type(utoipa::openapi::schema::Type::Null),
+            )
+            .item(value)
+            .into()
+    }
+}
+
+impl<T> utoipa::ToSchema for RequestField<T>
+where
+    T: utoipa::ToSchema + utoipa::__dev::ComposeSchema,
+{
+    fn name() -> std::borrow::Cow<'static, str> {
+        format!("RequestField_{}", T::name()).into()
+    }
+
+    fn schemas(
+        schemas: &mut Vec<(
+            String,
+            utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>,
+        )>,
+    ) {
+        T::schemas(schemas);
     }
 }
 
@@ -343,8 +400,41 @@ impl<'de> Deserialize<'de> for HeadersRequest {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+impl utoipa::__dev::ComposeSchema for HeadersRequest {
+    fn compose(
+        _: Vec<utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>>,
+    ) -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        use utoipa::openapi::schema::{ObjectBuilder, OneOfBuilder};
+
+        OneOfBuilder::new()
+            .item(
+                ObjectBuilder::new()
+                    .additional_properties(Some(<String as utoipa::PartialSchema>::schema())),
+            )
+            .item(
+                ObjectBuilder::new()
+                    .schema_type(utoipa::openapi::schema::Type::String)
+                    .pattern(Some(r".*\S.*"))
+                    .description(Some(
+                        "Compatibility form: a nonblank string containing a JSON object with string values.",
+                    )),
+            )
+            .description(Some(
+                "Prefer an object of header names to values. The JSON-encoded string form is accepted for compatibility.",
+            ))
+            .into()
+    }
+}
+
+impl utoipa::ToSchema for HeadersRequest {
+    fn name() -> std::borrow::Cow<'static, str> {
+        "HeadersRequest".into()
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct CreateSessionRequest {
+    #[schema(value_type = Option<String>)]
     pub cwd: Option<PathBuf>,
     #[serde(default)]
     pub model: RequestField<String>,
@@ -380,7 +470,7 @@ pub struct CreateSessionRequest {
     pub sandbox: SandboxRequest,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct SandboxRequest {
     #[serde(default)]
     pub enabled: bool,
@@ -401,14 +491,14 @@ pub struct SandboxRequest {
     pub memory_mib: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct StoredCredentialSummary {
     pub name: String,
     /// Empty when the secret is too short for a suffix to be safe to show.
     pub last_four: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct StoredCredentialList {
     pub credentials: Vec<StoredCredentialSummary>,
 }
@@ -417,13 +507,14 @@ pub struct StoredCredentialList {
 /// deleting one never removes a key the operator manages themselves.
 const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct CreateModelConfigurationRequest {
     pub name: String,
     pub backend: BackendKind,
     pub model: String,
     /// Defaults to the provider's canonical URL.
     pub base_url: Option<String>,
+    #[schema(write_only, example = "fake-api-key")]
     pub api_key: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub extra_headers: Option<BTreeMap<String, String>>,
@@ -443,7 +534,7 @@ pub struct CreateModelConfigurationRequest {
 /// `api_key` is the exception that cannot be read back — the secret lives in
 /// the credential store — so omitting it keeps the credential the row already
 /// points at, and sending one files a fresh credential in its place.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct UpdateModelConfigurationRequest {
     #[serde(default)]
     pub name: RequestField<String>,
@@ -454,6 +545,7 @@ pub struct UpdateModelConfigurationRequest {
     #[serde(default)]
     pub base_url: RequestField<String>,
     #[serde(default)]
+    #[schema(write_only, example = "fake-replacement-key")]
     pub api_key: RequestField<String>,
     #[serde(default)]
     pub reasoning_effort: RequestField<ReasoningEffort>,
@@ -467,12 +559,12 @@ pub struct UpdateModelConfigurationRequest {
     pub light_model: RequestField<LightModelSettings>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ModelConfigurationList {
     pub configurations: Vec<ModelConfigurationRecord>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct CreateSshConfigurationRequest {
     pub name: String,
     pub ssh_host: String,
@@ -482,7 +574,7 @@ pub struct CreateSshConfigurationRequest {
 
 /// Edits a saved SSH setup in place. Every field is tri-state: omit it to keep
 /// what is stored, send null to clear it, send a value to replace it.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct UpdateSshConfigurationRequest {
     #[serde(default)]
     pub name: RequestField<String>,
@@ -494,12 +586,12 @@ pub struct UpdateSshConfigurationRequest {
     pub ssh_identity_file: RequestField<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SshConfigurationList {
     pub configurations: Vec<SshConfigurationRecord>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ModelConfigFromFileRequest {
     pub path: String,
 }
@@ -507,7 +599,7 @@ pub struct ModelConfigFromFileRequest {
 /// A configuration that has been checked end to end: the destination is
 /// approved, the credential resolves, and the provider answered with the
 /// models it allows.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ResolvedModelConfiguration {
     pub backend: BackendKind,
     pub model: Option<String>,
@@ -520,9 +612,10 @@ pub struct ResolvedModelConfiguration {
     pub models_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ProviderModelsRequest {
     pub backend: BackendKind,
+    #[schema(write_only, example = "fake-provider-key")]
     pub api_key: Option<String>,
     /// Names a key already held in the environment or in NAC home, for a caller
     /// that has one on file and no copy of the secret to send.
@@ -531,7 +624,7 @@ pub struct ProviderModelsRequest {
     pub base_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ProviderModelList {
     /// The URL the models were actually read from, so the caller can persist
     /// the same destination it validated against.
@@ -539,17 +632,18 @@ pub struct ProviderModelList {
     pub models: Vec<ProviderModel>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct StoreCredentialRequest {
+    #[schema(write_only, example = "fake-credential-value")]
     pub value: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct GeneratedCredential {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct UpdateConfigRequest {
     #[serde(default)]
     pub model: RequestField<String>,
@@ -588,32 +682,32 @@ impl UpdateConfigRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct UpdateSessionPresentationRequest {
     pub title: String,
     pub pinned: bool,
     pub expected_version: i64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ReorderSessionsRequest {
     pub pinned: bool,
     pub session_ids: Vec<String>,
     pub expected_versions: BTreeMap<String, i64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ReorderSessionsResponse {
     pub pinned: bool,
     pub sessions: Vec<SessionSummarySnapshot>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct SubmitPromptRequest {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct SwitchBranchRequest {
     pub name: String,
     /// Make the branch first, off the current HEAD.
@@ -621,36 +715,36 @@ pub struct SwitchBranchRequest {
     pub create: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct CommitWorkspaceRequest {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SubmitPromptResponse {
     pub run_id: String,
     pub client_id: Option<String>,
     pub display_prompt: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct OrchestratorSteeringRequest {
     pub instruction: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct OrchestratorSteeringResponse {
     pub steering_id: i64,
     pub status: String,
     pub instruction_preview: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ThreadSteeringRequest {
     pub instruction: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ThreadSteeringResponse {
     pub steering_id: i64,
     pub thread_name: String,
@@ -658,13 +752,15 @@ pub struct ThreadSteeringResponse {
     pub instruction_preview: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EventsQuery {
     pub after_sequence_id: Option<u64>,
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SessionSnapshotQuery {
     pub message_limit: Option<usize>,
     pub thread_event_limit: Option<usize>,
@@ -673,7 +769,8 @@ pub struct SessionSnapshotQuery {
     pub include_system: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct MessagesQuery {
     pub before: Option<usize>,
     pub limit: Option<usize>,
@@ -681,13 +778,14 @@ pub struct MessagesQuery {
     pub include_system: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ThreadEventsQuery {
     pub before_id: Option<i64>,
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct MessagePageMetadata {
     pub start: usize,
     pub end: usize,
@@ -695,20 +793,20 @@ pub struct MessagePageMetadata {
     pub has_older: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct MessagesPageResponse {
     pub messages: Vec<Message>,
     pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct MessageCycleMetadata {
     pub marker: String,
     pub thread_names: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SessionSnapshotResponse {
     #[serde(flatten)]
     pub snapshot: SessionFrontendSnapshot,
@@ -748,12 +846,13 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct RecentEventsResponse {
     pub events: Vec<SessionEventEnvelope>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct WorkspaceDiffQuery {
     pub path: String,
     pub stage: Option<String>,
@@ -762,31 +861,38 @@ pub struct WorkspaceDiffQuery {
     pub revision: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct WorkspaceFileQuery {
     pub path: String,
     pub revision: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct OpenWorkspacePathRequest {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct WorkspaceRevisionQuery {
     pub revision: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ReplayBoundaryEvent {
     pub epoch_id: String,
     pub replay_boundary_sequence_id: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ReplayGapEvent {
     pub replay_gap: SessionReplayGap,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct LaggedEvent {
+    pub missed: u64,
 }
 
 impl SessionManager {
@@ -816,6 +922,7 @@ impl SessionManager {
                 store_path,
                 worker_executable,
                 active_sessions: RwLock::new(HashMap::new()),
+
                 lifecycle_gates: StdMutex::new(HashMap::new()),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
                 git_probe_cache: RwLock::new(HashMap::new()),
@@ -2208,12 +2315,50 @@ async fn reject_foreign_host(
         _ => next.run(request).await,
     }
 }
+async fn secure_docs(request: axum::extract::Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        header::HeaderName::from_static("content-security-policy"),
+        header::HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+    response.headers_mut().insert(
+        header::HeaderName::from_static("x-frame-options"),
+        header::HeaderValue::from_static("DENY"),
+    );
+    response
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "nac-web HTTP API",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "Live OpenAPI 3.1 contract for nac-web's REST and SSE surface. nac-web binds to loopback by default and rejects foreign Host values unless NAC_ALLOWED_HOSTS permits an authenticating proxy; the API itself has no authentication. Finite JSON responses may be gzip-compressed. The SSE stream is text/event-stream and is never gzip-compressed. Credential values are write-only. /mcp is streamable-HTTP MCP (JSON-RPC), not REST, and is intentionally out of band."
+    ),
+    components(schemas(
+        filesystem::BrowseKind,
+        ReplayBoundaryEvent,
+        ReplayGapEvent,
+        SessionEventEnvelope,
+        AssistantStreamDelta,
+        LaggedEvent
+    ))
+)]
+struct ApiDoc;
 
 pub fn router(manager: SessionManager) -> Router {
     // The registry answer takes a few seconds, so it is warmed in the
     // background rather than on the first picker open.
     tokio::spawn(mcp_api::warm_library_cache());
-    api_router(manager)
+    let (api, openapi) = api_router(manager);
+    let docs = Router::new()
+        .merge(
+            SwaggerUi::new("/docs")
+                .url("/openapi.json", openapi)
+                .config(SwaggerConfig::default().validator_url("none")),
+        )
+        .layer(middleware::from_fn(secure_docs));
+    api.merge(docs)
         .merge(embedded_frontend_router())
         .layer(response_compression_layer())
         .layer(middleware::from_fn_with_state(
@@ -2229,142 +2374,83 @@ fn embedded_frontend_router() -> Router {
         .route("/assets/{*path}", get(serve_asset))
 }
 
-fn api_router(manager: SessionManager) -> Router {
-    Router::new()
-        .route("/health", get(health))
-        .route("/store", get(store_info))
-        .route("/fs/browse", get(browse_filesystem_handler))
-        .route("/ssh/browse", post(browse_ssh_handler))
-        .route("/providers/models", post(provider_models_handler))
-        .route(
-            "/model-configs",
-            get(list_model_configs_handler).post(create_model_config_handler),
-        )
-        .route(
-            "/model-configs/from-file",
-            post(model_config_from_file_handler),
-        )
-        .route(
-            "/model-configs/{config_id}",
-            patch(update_model_config_handler).delete(delete_model_config_handler),
-        )
-        .route(
-            "/model-configs/{config_id}/models",
-            post(saved_model_config_models_handler),
-        )
-        .route(
-            "/ssh-configs",
-            get(list_ssh_configs_handler).post(create_ssh_config_handler),
-        )
-        .route(
-            "/ssh-configs/{config_id}",
-            patch(update_ssh_config_handler).delete(delete_ssh_config_handler),
-        )
-        .route("/mcp_library/library", get(mcp_api::library_handler))
-        .route(
-            "/mcp_library/servers",
-            get(mcp_api::list_servers_handler).post(mcp_api::create_server_handler),
-        )
-        .route(
-            "/mcp_library/servers/test",
-            post(mcp_api::test_server_handler),
-        )
-        .route(
-            "/mcp_library/servers/{server_name}",
-            patch(mcp_api::update_server_handler).delete(mcp_api::delete_server_handler),
-        )
-        .route("/auth", get(managed_auth::list_handler))
-        .route("/auth/{provider}", delete(managed_auth::logout_handler))
-        .route(
-            "/auth/{provider}/login",
-            post(managed_auth::start_login_handler),
-        )
-        .route(
-            "/auth/{provider}/login/{login_id}",
-            get(managed_auth::poll_login_handler).delete(managed_auth::cancel_login_handler),
-        )
-        .route(
-            "/credentials",
-            get(list_credentials_handler).post(store_generated_credential_handler),
-        )
-        .route(
-            "/credentials/{name}",
-            put(store_credential_handler).delete(delete_credential_handler),
-        )
-        .route(
-            "/sessions/launch-defaults",
-            post(launch_model_defaults_handler),
-        )
-        .route("/models", get(models_handler))
-        .route("/commands", get(commands_handler))
-        .route("/sessions", get(list_sessions).post(create_session))
-        .route("/sessions/order", put(reorder_sessions_handler))
-        .route(
-            "/sessions/{session_id}/presentation",
-            put(update_session_presentation_handler),
-        )
-        .route("/sessions/{session_id}/messages", get(session_messages))
-        .route(
-            "/sessions/{session_id}/threads/{thread_name}/events",
-            get(thread_events),
-        )
-        .route("/sessions/{session_id}/workspace/diff", get(workspace_diff))
-        .route(
-            "/sessions/{session_id}/workspace/files",
-            get(workspace_files),
-        )
-        .route("/sessions/{session_id}/workspace/file", get(workspace_file))
-        .route(
-            "/sessions/{session_id}/workspace/open",
-            post(open_workspace_path),
-        )
-        .route(
-            "/sessions/{session_id}/workspace/branches",
-            get(workspace_branches).post(switch_workspace_branch),
-        )
-        .route(
-            "/sessions/{session_id}/workspace/commit",
-            post(commit_workspace),
-        )
-        .route(
-            "/sessions/{session_id}/workspace/revisions",
-            get(workspace_revisions),
-        )
-        .route(
-            "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
-            get(workspace_revision_changes),
-        )
-        .route(
-            "/sessions/{session_id}",
-            get(session_snapshot).delete(delete_session_handler),
-        )
-        .route(
-            "/sessions/{session_id}/config",
-            get(session_config_handler).patch(update_config_handler),
-        )
-        .route("/sessions/{session_id}/runs", post(submit_prompt))
-        .route("/sessions/{session_id}/compact", post(compaction::handler))
-        .route("/sessions/{session_id}/revert", post(revert::handler))
-        .route(
-            "/sessions/{session_id}/regenerate",
-            post(revert::regenerate_handler),
-        )
-        .route(
-            "/sessions/{session_id}/steering",
-            post(queue_orchestrator_steering_handler),
-        )
-        .route(
-            "/sessions/{session_id}/threads/{thread_name}/steering",
-            post(queue_thread_steering_handler),
-        )
-        .route("/sessions/{session_id}/events", get(recent_events))
-        .route("/sessions/{session_id}/events/stream", get(stream_events))
-        .route(
-            "/sessions/{session_id}/cancel-active-run",
-            post(cancel_active_run),
-        )
-        .nest_service("/mcp", mcp::streamable_http_service(manager.clone()))
-        .with_state(manager)
+fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
+    let documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(health))
+        .routes(routes!(store_info))
+        .routes(routes!(browse_filesystem_handler))
+        .routes(routes!(browse_ssh_handler))
+        .routes(routes!(provider_models_handler))
+        .routes(routes!(
+            list_model_configs_handler,
+            create_model_config_handler
+        ))
+        .routes(routes!(model_config_from_file_handler))
+        .routes(routes!(
+            update_model_config_handler,
+            delete_model_config_handler
+        ))
+        .routes(routes!(saved_model_config_models_handler))
+        .routes(routes!(list_ssh_configs_handler, create_ssh_config_handler))
+        .routes(routes!(
+            update_ssh_config_handler,
+            delete_ssh_config_handler
+        ))
+        .routes(routes!(mcp_api::library_handler))
+        .routes(routes!(
+            mcp_api::list_servers_handler,
+            mcp_api::create_server_handler
+        ))
+        .routes(routes!(mcp_api::test_server_handler))
+        .routes(routes!(
+            mcp_api::update_server_handler,
+            mcp_api::delete_server_handler
+        ))
+        .routes(routes!(managed_auth::list_handler))
+        .routes(routes!(managed_auth::logout_handler))
+        .routes(routes!(managed_auth::start_login_handler))
+        .routes(routes!(
+            managed_auth::poll_login_handler,
+            managed_auth::cancel_login_handler
+        ))
+        .routes(routes!(
+            list_credentials_handler,
+            store_generated_credential_handler
+        ))
+        .routes(routes!(store_credential_handler, delete_credential_handler))
+        .routes(routes!(launch_model_defaults_handler))
+        .routes(routes!(models_handler))
+        .routes(routes!(commands_handler))
+        .routes(routes!(list_sessions, create_session))
+        .routes(routes!(reorder_sessions_handler))
+        .routes(routes!(update_session_presentation_handler))
+        .routes(routes!(session_messages))
+        .routes(routes!(thread_events))
+        .routes(routes!(workspace_diff))
+        .routes(routes!(workspace_files))
+        .routes(routes!(workspace_file))
+        .routes(routes!(open_workspace_path))
+        .routes(routes!(workspace_branches, switch_workspace_branch))
+        .routes(routes!(commit_workspace))
+        .routes(routes!(workspace_revisions))
+        .routes(routes!(workspace_revision_changes))
+        .routes(routes!(session_snapshot, delete_session_handler))
+        .routes(routes!(session_config_handler, update_config_handler))
+        .routes(routes!(submit_prompt))
+        .routes(routes!(compaction::handler))
+        .routes(routes!(revert::handler))
+        .routes(routes!(revert::regenerate_handler))
+        .routes(routes!(queue_orchestrator_steering_handler))
+        .routes(routes!(queue_thread_steering_handler))
+        .routes(routes!(recent_events))
+        .routes(routes!(stream_events))
+        .routes(routes!(cancel_active_run))
+        .with_state(manager.clone());
+    let (router, openapi) = documented.split_for_parts();
+    (
+        router.nest_service("/mcp", mcp::streamable_http_service(manager)),
+        openapi,
+    )
 }
 
 pub async fn serve(addr: SocketAddr, manager: SessionManager) -> Result<()> {
@@ -2394,8 +2480,15 @@ pub async fn serve_with(
         .context("server stopped unexpectedly")
 }
 
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok" }))
+#[utoipa::path(
+    get,
+    path = "/health",
+    operation_id = "get_health",
+    tag = "system",
+    responses((status = 200, description = "Success", body = HealthResponse, content_type = "application/json"))
+)]
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok" })
 }
 
 // The frontend is a Vite/React app built from `web/` into `assets/dist/`. That
@@ -2458,12 +2551,27 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/store",
+    operation_id = "get_store",
+    tag = "system",
+    responses((status = 200, description = "Success", body = StoreInfo, content_type = "application/json"))
+)]
 async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {
     Json(manager.store_info())
 }
 
 /// The picker starts wherever the caller last was; with no path yet it opens on
 /// the server root the session would default to anyway.
+#[utoipa::path(
+    get,
+    path = "/fs/browse",
+    operation_id = "get_fs_browse",
+    tag = "filesystem",
+    params(filesystem::BrowseQuery),
+    responses((status = 200, description = "Success", body = filesystem::BrowseListing, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 403, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn browse_filesystem_handler(
     State(manager): State<SessionManager>,
     Query(query): Query<filesystem::BrowseQuery>,
@@ -2474,6 +2582,14 @@ async fn browse_filesystem_handler(
 
 /// The same listing for a directory on an SSH host, which is also how the launch
 /// form tests the connection before it offers the rest of the form.
+#[utoipa::path(
+    post,
+    path = "/ssh/browse",
+    operation_id = "post_ssh_browse",
+    tag = "filesystem",
+    request_body(content = SshBrowseRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = filesystem::BrowseListing, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 403, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn browse_ssh_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<SshBrowseRequest>, JsonRejection>,
@@ -2490,6 +2606,14 @@ async fn browse_ssh_handler(
 /// check as a session launch. A provider signed in through the browser has no
 /// key to send, so the stored login answers instead — and its answer is the
 /// same evidence the launch UI needs that the login still works.
+#[utoipa::path(
+    post,
+    path = "/providers/models",
+    operation_id = "post_providers_models",
+    tag = "models",
+    request_body(content = ProviderModelsRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ProviderModelList, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn provider_models_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<ProviderModelsRequest>, JsonRejection>,
@@ -2569,6 +2693,13 @@ async fn provider_models_handler(
     Ok(Json(ProviderModelList { base_url, models }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/model-configs",
+    operation_id = "get_model_configs",
+    tag = "model-configs",
+    responses((status = 200, description = "Success", body = ModelConfigurationList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn list_model_configs_handler(
     State(manager): State<SessionManager>,
 ) -> std::result::Result<Json<ModelConfigurationList>, ApiError> {
@@ -2582,6 +2713,14 @@ async fn list_model_configs_handler(
 /// The key is filed in the credential store under a generated name that the
 /// row then points at, so the secret stays out of the database and a launched
 /// session resolves it through the ordinary `api_key_env` path.
+#[utoipa::path(
+    post,
+    path = "/model-configs",
+    operation_id = "post_model_configs",
+    tag = "model-configs",
+    request_body(content = CreateModelConfigurationRequest, content_type = "application/json"),
+    responses((status = 201, description = "Success", body = ModelConfigurationRecord, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn create_model_config_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<CreateModelConfigurationRequest>, JsonRejection>,
@@ -2712,6 +2851,15 @@ fn settle_configuration_base_url(
 /// it; the credential it replaces is dropped only once the row has actually
 /// moved, so a failed edit never leaves the configuration pointing at a secret
 /// that is gone.
+#[utoipa::path(
+    patch,
+    path = "/model-configs/{config_id}",
+    operation_id = "patch_model_configs_config_id",
+    tag = "model-configs",
+    params(("config_id" = String, Path)),
+    request_body(content = UpdateModelConfigurationRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ModelConfigurationRecord, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn update_model_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(config_id): AxumPath<String>,
@@ -2895,6 +3043,14 @@ fn replaceable_text(field: RequestField<String>, current: &str) -> String {
 /// The key is never sent by the client here: the file names an environment
 /// variable or stored credential, and the server resolves it the same way a
 /// session would.
+#[utoipa::path(
+    post,
+    path = "/model-configs/from-file",
+    operation_id = "post_model_configs_from_file",
+    tag = "model-configs",
+    request_body(content = ModelConfigFromFileRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ResolvedModelConfiguration, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn model_config_from_file_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<ModelConfigFromFileRequest>, JsonRejection>,
@@ -2941,6 +3097,14 @@ async fn model_config_from_file_handler(
     .await
 }
 
+#[utoipa::path(
+    post,
+    path = "/model-configs/{config_id}/models",
+    operation_id = "post_model_configs_config_id_models",
+    tag = "model-configs",
+    params(("config_id" = String, Path)),
+    responses((status = 200, description = "Success", body = ResolvedModelConfiguration, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn saved_model_config_models_handler(
     State(manager): State<SessionManager>,
     AxumPath(config_id): AxumPath<String>,
@@ -3037,6 +3201,14 @@ async fn resolve_configuration(
     }))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/model-configs/{config_id}",
+    operation_id = "delete_model_configs_config_id",
+    tag = "model-configs",
+    params(("config_id" = String, Path)),
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn delete_model_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(config_id): AxumPath<String>,
@@ -3067,6 +3239,13 @@ async fn delete_model_config_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/ssh-configs",
+    operation_id = "get_ssh_configs",
+    tag = "ssh-configs",
+    responses((status = 200, description = "Success", body = SshConfigurationList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn list_ssh_configs_handler(
     State(manager): State<SessionManager>,
 ) -> std::result::Result<Json<SshConfigurationList>, ApiError> {
@@ -3075,6 +3254,14 @@ async fn list_ssh_configs_handler(
 }
 
 /// Save a named SSH connection under a reusable setup.
+#[utoipa::path(
+    post,
+    path = "/ssh-configs",
+    operation_id = "post_ssh_configs",
+    tag = "ssh-configs",
+    request_body(content = CreateSshConfigurationRequest, content_type = "application/json"),
+    responses((status = 201, description = "Success", body = SshConfigurationRecord, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn create_ssh_config_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<CreateSshConfigurationRequest>, JsonRejection>,
@@ -3096,6 +3283,15 @@ async fn create_ssh_config_handler(
 }
 
 /// Edit a saved SSH setup, keeping whatever the request leaves out.
+#[utoipa::path(
+    patch,
+    path = "/ssh-configs/{config_id}",
+    operation_id = "patch_ssh_configs_config_id",
+    tag = "ssh-configs",
+    params(("config_id" = String, Path)),
+    request_body(content = UpdateSshConfigurationRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = SshConfigurationRecord, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn update_ssh_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(config_id): AxumPath<String>,
@@ -3128,6 +3324,14 @@ async fn update_ssh_config_handler(
     Ok(Json(record))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/ssh-configs/{config_id}",
+    operation_id = "delete_ssh_configs_config_id",
+    tag = "ssh-configs",
+    params(("config_id" = String, Path)),
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn delete_ssh_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(config_id): AxumPath<String>,
@@ -3140,6 +3344,13 @@ async fn delete_ssh_config_handler(
 /// Stored credentials are write-only over HTTP: a caller may add, replace or
 /// drop a key, but the value is never echoed back. Only enough of a suffix to
 /// tell two keys apart leaves the process.
+#[utoipa::path(
+    get,
+    path = "/credentials",
+    operation_id = "get_credentials",
+    tag = "credentials",
+    responses((status = 200, description = "Success", body = StoredCredentialList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn list_credentials_handler() -> std::result::Result<Json<StoredCredentialList>, ApiError> {
     let credentials = list_stored_api_keys()?
         .into_iter()
@@ -3151,6 +3362,15 @@ async fn list_credentials_handler() -> std::result::Result<Json<StoredCredential
     Ok(Json(StoredCredentialList { credentials }))
 }
 
+#[utoipa::path(
+    put,
+    path = "/credentials/{name}",
+    operation_id = "put_credentials_name",
+    tag = "credentials",
+    params(("name" = String, Path)),
+    request_body(content = StoreCredentialRequest, content_type = "application/json"),
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn store_credential_handler(
     AxumPath(name): AxumPath<String>,
     payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
@@ -3163,6 +3383,14 @@ async fn store_credential_handler(
 /// Files a key away without the caller having to name it. The generated name is
 /// what a session stores in place of the secret, and its prefix marks the key as
 /// this server's to clean up rather than one the operator manages by hand.
+#[utoipa::path(
+    post,
+    path = "/credentials",
+    operation_id = "post_credentials",
+    tag = "credentials",
+    request_body(content = StoreCredentialRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = GeneratedCredential, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn store_generated_credential_handler(
     payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
 ) -> std::result::Result<Json<GeneratedCredential>, ApiError> {
@@ -3175,6 +3403,14 @@ async fn store_generated_credential_handler(
     Ok(Json(GeneratedCredential { name }))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/credentials/{name}",
+    operation_id = "delete_credentials_name",
+    tag = "credentials",
+    params(("name" = String, Path)),
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn delete_credential_handler(
     AxumPath(name): AxumPath<String>,
 ) -> std::result::Result<StatusCode, ApiError> {
@@ -3188,6 +3424,14 @@ async fn delete_credential_handler(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/launch-defaults",
+    operation_id = "post_sessions_launch_defaults",
+    tag = "sessions",
+    request_body(content = LaunchModelDefaultsRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = LaunchModelDefaults, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn launch_model_defaults_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<LaunchModelDefaultsRequest>, JsonRejection>,
@@ -3202,14 +3446,36 @@ async fn launch_model_defaults_handler(
 /// synchronous, local-only, never fails. `auth_status`/`auth_hint` are
 /// computed per request from the process environment and the managed
 /// credential files.
+#[utoipa::path(
+    get,
+    path = "/models",
+    operation_id = "get_models",
+    tag = "models",
+    responses((status = 200, description = "Success", body = ModelListing, content_type = "application/json"))
+)]
 async fn models_handler() -> Json<ModelListing> {
     Json(nac_core::model::api_listing())
 }
 
+#[utoipa::path(
+    get,
+    path = "/commands",
+    operation_id = "get_commands",
+    tag = "system",
+    responses((status = 200, description = "Success", body = Vec<SlashCommandDefinition>, content_type = "application/json"))
+)]
 async fn commands_handler() -> Json<&'static [SlashCommandDefinition]> {
     Json(slash_command_definitions())
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions",
+    operation_id = "get_sessions",
+    tag = "sessions",
+    params(ListSessionsQuery),
+    responses((status = 200, description = "Success", body = Vec<ManagedSessionSummary>, content_type = "application/json"), (status = 400, description = "Query extraction failed", body = String, content_type = "text/plain"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn list_sessions(
     State(manager): State<SessionManager>,
     Query(query): Query<ListSessionsQuery>,
@@ -3217,6 +3483,15 @@ async fn list_sessions(
     Ok(Json(manager.list_sessions(query.workspace_stats).await?))
 }
 
+#[utoipa::path(
+    put,
+    path = "/sessions/{session_id}/presentation",
+    operation_id = "put_sessions_session_id_presentation",
+    tag = "sessions",
+    params(("session_id" = String, Path)),
+    request_body(content = UpdateSessionPresentationRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = SessionSummarySnapshot, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn update_session_presentation_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3234,6 +3509,14 @@ async fn update_session_presentation_handler(
     Ok(Json(summary))
 }
 
+#[utoipa::path(
+    put,
+    path = "/sessions/order",
+    operation_id = "put_sessions_order",
+    tag = "sessions",
+    request_body(content = ReorderSessionsRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ReorderSessionsResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn reorder_sessions_handler(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<ReorderSessionsRequest>, JsonRejection>,
@@ -3252,6 +3535,14 @@ async fn reorder_sessions_handler(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions",
+    operation_id = "post_sessions",
+    tag = "sessions",
+    request_body(content = CreateSessionRequest, content_type = "application/json"),
+    responses((status = 201, description = "Success", body = SessionFrontendSnapshot, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn create_session(
     State(manager): State<SessionManager>,
     payload: std::result::Result<Json<CreateSessionRequest>, JsonRejection>,
@@ -3263,6 +3554,14 @@ async fn create_session(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}",
+    operation_id = "get_sessions_session_id",
+    tag = "sessions",
+    params(SessionSnapshotQuery, ("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = SessionSnapshotResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn session_snapshot(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3289,6 +3588,14 @@ async fn session_snapshot(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/messages",
+    operation_id = "get_sessions_session_id_messages",
+    tag = "conversation",
+    params(MessagesQuery, ("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = MessagesPageResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn session_messages(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3310,6 +3617,14 @@ async fn session_messages(
     Ok(Json(page.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/threads/{thread_name}/events",
+    operation_id = "get_sessions_session_id_threads_thread_name_events",
+    tag = "conversation",
+    params(ThreadEventsQuery, ("session_id" = String, Path), ("thread_name" = String, Path)),
+    responses((status = 200, description = "Success", body = ThreadEventPage, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn thread_events(
     State(manager): State<SessionManager>,
     AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
@@ -3330,6 +3645,14 @@ async fn thread_events(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/workspace/diff",
+    operation_id = "get_sessions_session_id_workspace_diff",
+    tag = "workspace",
+    params(WorkspaceDiffQuery, ("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = view::WorkspaceFileDiff, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn workspace_diff(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3338,6 +3661,14 @@ async fn workspace_diff(
     Ok(Json(manager.workspace_file_diff(&session_id, query).await?))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/workspace/files",
+    operation_id = "get_sessions_session_id_workspace_files",
+    tag = "workspace",
+    params(WorkspaceRevisionQuery, ("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = view::WorkspaceFileList, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn workspace_files(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3348,6 +3679,14 @@ async fn workspace_files(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/workspace/file",
+    operation_id = "get_sessions_session_id_workspace_file",
+    tag = "workspace",
+    params(WorkspaceFileQuery, ("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = view::WorkspaceFileContent, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn workspace_file(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3360,6 +3699,15 @@ async fn workspace_file(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/workspace/open",
+    operation_id = "post_sessions_session_id_workspace_open",
+    tag = "workspace",
+    params(("session_id" = String, Path)),
+    request_body(content = OpenWorkspacePathRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = view::OpenLocalPathResult, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 501, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn open_workspace_path(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3373,6 +3721,14 @@ async fn open_workspace_path(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/workspace/revisions",
+    operation_id = "get_sessions_session_id_workspace_revisions",
+    tag = "workspace",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = Vec<view::WorkspaceRevisionRecord>, content_type = "application/json"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn workspace_revisions(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3380,6 +3736,14 @@ async fn workspace_revisions(
     Ok(Json(manager.workspace_revisions(&session_id)?))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
+    operation_id = "get_sessions_session_id_workspace_revisions_revision_id_changes",
+    tag = "workspace",
+    params(("session_id" = String, Path), ("revision_id" = i64, Path)),
+    responses((status = 200, description = "Success", body = view::WorkspaceRevisionChanges, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn workspace_revision_changes(
     State(manager): State<SessionManager>,
     AxumPath((session_id, revision_id)): AxumPath<(String, i64)>,
@@ -3391,6 +3755,14 @@ async fn workspace_revision_changes(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/workspace/branches",
+    operation_id = "get_sessions_session_id_workspace_branches",
+    tag = "workspace",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = workspace::BranchList, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn workspace_branches(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3398,6 +3770,15 @@ async fn workspace_branches(
     Ok(Json(manager.workspace_branches(&session_id).await?))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/workspace/branches",
+    operation_id = "post_sessions_session_id_workspace_branches",
+    tag = "workspace",
+    params(("session_id" = String, Path)),
+    request_body(content = SwitchBranchRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = workspace::BranchList, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn switch_workspace_branch(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3411,6 +3792,15 @@ async fn switch_workspace_branch(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/workspace/commit",
+    operation_id = "post_sessions_session_id_workspace_commit",
+    tag = "workspace",
+    params(("session_id" = String, Path)),
+    request_body(content = CommitWorkspaceRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = workspace::CommitOutcome, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn commit_workspace(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3420,6 +3810,15 @@ async fn commit_workspace(
     Ok(Json(manager.commit_workspace(&session_id, request).await?))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/runs",
+    operation_id = "post_sessions_session_id_runs",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = SubmitPromptRequest, content_type = "application/json"),
+    responses((status = 202, description = "Success", body = SubmitPromptResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 413, description = "Request body too large", body = String, content_type = "text/plain"), (status = 415, description = "Unsupported media type", body = String, content_type = "text/plain"), (status = 422, description = "JSON body validation failed", body = String, content_type = "text/plain"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 501, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn submit_prompt(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3431,6 +3830,15 @@ async fn submit_prompt(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/steering",
+    operation_id = "post_sessions_session_id_steering",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = OrchestratorSteeringRequest, content_type = "application/json"),
+    responses((status = 202, description = "Success", body = OrchestratorSteeringResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn queue_orchestrator_steering_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3448,6 +3856,15 @@ async fn queue_orchestrator_steering_handler(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/threads/{thread_name}/steering",
+    operation_id = "post_sessions_session_id_threads_thread_name_steering",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("thread_name" = String, Path)),
+    request_body(content = ThreadSteeringRequest, content_type = "application/json"),
+    responses((status = 202, description = "Success", body = ThreadSteeringResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn queue_thread_steering_handler(
     State(manager): State<SessionManager>,
     AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
@@ -3465,6 +3882,14 @@ async fn queue_thread_steering_handler(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/events",
+    operation_id = "get_sessions_session_id_events",
+    tag = "events",
+    params(EventsQuery, ("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = RecentEventsResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn recent_events(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3480,6 +3905,14 @@ async fn recent_events(
     Ok(Json(RecentEventsResponse { events }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/events/stream",
+    operation_id = "get_sessions_session_id_events_stream",
+    tag = "events",
+    params(EventsQuery, ("session_id" = String, Path)),
+    responses((status = 200, description = "Server-sent events. Event names and JSON data schemas: replay_boundary (ReplayBoundaryEvent), replay_gap (ReplayGapEvent), session_event (SessionEventEnvelope), assistant_delta (AssistantStreamDelta), and lagged (LaggedEvent). Only session_event carries an SSE id. This response is never gzip-compressed.", body = String, content_type = "text/event-stream"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn stream_events(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3518,6 +3951,14 @@ async fn stream_events(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/cancel-active-run",
+    operation_id = "post_sessions_session_id_cancel_active_run",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    responses((status = 202, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 501, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn cancel_active_run(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3526,6 +3967,14 @@ async fn cancel_active_run(
     Ok(StatusCode::ACCEPTED)
 }
 
+#[utoipa::path(
+    delete,
+    path = "/sessions/{session_id}",
+    operation_id = "delete_sessions_session_id",
+    tag = "sessions",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn delete_session_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3534,6 +3983,14 @@ async fn delete_session_handler(
     Ok(StatusCode::OK)
 }
 
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/config",
+    operation_id = "get_sessions_session_id_config",
+    tag = "sessions",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = sessions::RawSessionConfig, content_type = "application/json"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn session_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3541,6 +3998,15 @@ async fn session_config_handler(
     Ok(Json(manager.session_config(&session_id)?))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/sessions/{session_id}/config",
+    operation_id = "patch_sessions_session_id_config",
+    tag = "sessions",
+    params(("session_id" = String, Path)),
+    request_body(content = UpdateConfigRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success with no response body"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
 async fn update_config_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
@@ -3914,9 +4380,8 @@ fn session_event_stream(
             };
             match next {
                 StreamItem::Session(Ok(envelope)) => yield Ok(sse_envelope_event(&envelope)),
-                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
-                    let payload = serde_json::json!({ "missed": count });
-                    yield Ok(sse_json_event("lagged", None, &payload));
+                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Lagged(missed))) => {
+                    yield Ok(sse_json_event("lagged", None, &LaggedEvent { missed }));
                 }
                 StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
                 StreamItem::Delta(Ok(delta)) => {
@@ -4165,9 +4630,9 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (
             self.status,
-            Json(serde_json::json!({
-                "error": self.message,
-            })),
+            Json(ApiErrorBody {
+                error: self.message,
+            }),
         )
             .into_response()
     }
@@ -4184,6 +4649,479 @@ mod tests {
     };
     use flate2::read::GzDecoder;
     use tower::ServiceExt;
+
+    const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
+        ("DELETE", "/auth/{provider}"),
+        ("DELETE", "/auth/{provider}/login/{login_id}"),
+        ("DELETE", "/credentials/{name}"),
+        ("DELETE", "/mcp_library/servers/{server_name}"),
+        ("DELETE", "/model-configs/{config_id}"),
+        ("DELETE", "/sessions/{session_id}"),
+        ("DELETE", "/ssh-configs/{config_id}"),
+        ("GET", "/auth"),
+        ("GET", "/auth/{provider}/login/{login_id}"),
+        ("GET", "/commands"),
+        ("GET", "/credentials"),
+        ("GET", "/fs/browse"),
+        ("GET", "/health"),
+        ("GET", "/mcp_library/library"),
+        ("GET", "/mcp_library/servers"),
+        ("GET", "/model-configs"),
+        ("GET", "/models"),
+        ("GET", "/sessions"),
+        ("GET", "/sessions/{session_id}"),
+        ("GET", "/sessions/{session_id}/config"),
+        ("GET", "/sessions/{session_id}/events"),
+        ("GET", "/sessions/{session_id}/events/stream"),
+        ("GET", "/sessions/{session_id}/messages"),
+        ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
+        ("GET", "/sessions/{session_id}/workspace/branches"),
+        ("GET", "/sessions/{session_id}/workspace/diff"),
+        ("GET", "/sessions/{session_id}/workspace/file"),
+        ("GET", "/sessions/{session_id}/workspace/files"),
+        ("GET", "/sessions/{session_id}/workspace/revisions"),
+        (
+            "GET",
+            "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
+        ),
+        ("GET", "/ssh-configs"),
+        ("GET", "/store"),
+        ("PATCH", "/mcp_library/servers/{server_name}"),
+        ("PATCH", "/model-configs/{config_id}"),
+        ("PATCH", "/sessions/{session_id}/config"),
+        ("PATCH", "/ssh-configs/{config_id}"),
+        ("POST", "/auth/{provider}/login"),
+        ("POST", "/credentials"),
+        ("POST", "/mcp_library/servers"),
+        ("POST", "/mcp_library/servers/test"),
+        ("POST", "/model-configs"),
+        ("POST", "/model-configs/from-file"),
+        ("POST", "/model-configs/{config_id}/models"),
+        ("POST", "/providers/models"),
+        ("POST", "/sessions"),
+        ("POST", "/sessions/launch-defaults"),
+        ("POST", "/sessions/{session_id}/cancel-active-run"),
+        ("POST", "/sessions/{session_id}/compact"),
+        ("POST", "/sessions/{session_id}/regenerate"),
+        ("POST", "/sessions/{session_id}/revert"),
+        ("POST", "/sessions/{session_id}/runs"),
+        ("POST", "/sessions/{session_id}/steering"),
+        (
+            "POST",
+            "/sessions/{session_id}/threads/{thread_name}/steering",
+        ),
+        ("POST", "/sessions/{session_id}/workspace/branches"),
+        ("POST", "/sessions/{session_id}/workspace/commit"),
+        ("POST", "/sessions/{session_id}/workspace/open"),
+        ("POST", "/ssh-configs"),
+        ("POST", "/ssh/browse"),
+        ("PUT", "/credentials/{name}"),
+        ("PUT", "/sessions/order"),
+        ("PUT", "/sessions/{session_id}/presentation"),
+    ];
+
+    fn concrete_api_path(path: &str) -> String {
+        path.replace("{provider}", "arcee")
+            .replace("{login_id}", "missing-login")
+            .replace("{name}", "MISSING_CREDENTIAL")
+            .replace("{server_name}", "missing-server")
+            .replace("{config_id}", "missing-config")
+            .replace("{session_id}", "missing-session")
+            .replace("{thread_name}", "missing-thread")
+            .replace("{revision_id}", "1")
+    }
+
+    fn assert_local_refs_resolve(document: &serde_json::Value, value: &serde_json::Value) {
+        match value {
+            serde_json::Value::Object(object) => {
+                if let Some(reference) = object.get("$ref").and_then(serde_json::Value::as_str) {
+                    let pointer = reference
+                        .strip_prefix('#')
+                        .expect("only local OpenAPI references are expected");
+                    assert!(
+                        document.pointer(pointer).is_some(),
+                        "unresolved OpenAPI reference {reference}"
+                    );
+                }
+                for child in object.values() {
+                    assert_local_refs_resolve(document, child);
+                }
+            }
+            serde_json::Value::Array(array) => {
+                for child in array {
+                    assert_local_refs_resolve(document, child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn openapi_document_matches_the_running_api_router() {
+        let root = temp_root("openapi_contract");
+        let app = router(test_manager(&root));
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/openapi.json")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("application/json"))
+        );
+        let document: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(document["openapi"], "3.1.0");
+
+        let mut documented = std::collections::BTreeSet::new();
+        for (path, item) in document["paths"].as_object().expect("OpenAPI paths") {
+            let item = item.as_object().expect("OpenAPI path item");
+            for method in ["get", "post", "put", "patch", "delete"] {
+                if item.contains_key(method) {
+                    documented.insert((method.to_uppercase(), path.clone()));
+                }
+            }
+        }
+        let expected: std::collections::BTreeSet<_> = EXPECTED_OPENAPI_OPERATIONS
+            .iter()
+            .map(|(method, path)| ((*method).to_string(), (*path).to_string()))
+            .collect();
+        assert_eq!(documented, expected);
+
+        let mut operation_ids = std::collections::BTreeSet::new();
+        for (method, path) in EXPECTED_OPENAPI_OPERATIONS {
+            let operation = &document["paths"][path][method.to_ascii_lowercase()];
+            let operation_id = operation["operationId"].as_str().expect("operation id");
+            assert!(
+                operation_ids.insert(operation_id),
+                "duplicate operation id {operation_id}"
+            );
+            for parameter_name in path
+                .split('{')
+                .skip(1)
+                .filter_map(|tail| tail.split_once('}').map(|(name, _)| name))
+            {
+                let matches = operation["parameters"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|parameter| {
+                        parameter["name"] == parameter_name
+                            && parameter["in"] == "path"
+                            && parameter["required"] == true
+                    })
+                    .count();
+                assert_eq!(
+                    matches, 1,
+                    "{method} {path} must document required path parameter {parameter_name}"
+                );
+            }
+        }
+        assert_local_refs_resolve(&document, &document);
+
+        for path in expected
+            .iter()
+            .map(|(_, path)| path)
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(axum::http::Method::OPTIONS)
+                        .uri(concrete_api_path(path))
+                        .header(header::HOST, "127.0.0.1")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_ne!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "documented runtime path {path} is not routed"
+            );
+            let allow = response
+                .headers()
+                .get(header::ALLOW)
+                .expect("method router must report Allow")
+                .to_str()
+                .unwrap();
+            for (method, expected_path) in &expected {
+                if expected_path == path {
+                    assert!(
+                        allow.split(',').any(|allowed| allowed.trim() == method),
+                        "{path} runtime Allow={allow:?} is missing {method}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn openapi_special_wire_schemas_and_docs_are_live() {
+        let root = temp_root("openapi_special_schemas");
+        let app = router(test_manager(&root));
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/openapi.json")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let document: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+
+        let create = &document["components"]["schemas"]["CreateSessionRequest"];
+        assert!(!create["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|field| field == "model")));
+        let model = &create["properties"]["model"];
+        let model_ref = model["$ref"].as_str().expect("model schema reference");
+        let variants = document
+            .pointer(
+                model_ref
+                    .strip_prefix('#')
+                    .expect("local model schema reference"),
+            )
+            .and_then(|schema| schema["oneOf"].as_array())
+            .expect("nullable model oneOf");
+        assert!(variants.iter().any(|variant| variant["type"] == "null"));
+        assert!(variants.iter().any(|variant| variant["type"] == "string"));
+        let headers_ref = create["properties"]["extra_headers"]["$ref"]
+            .as_str()
+            .expect("tri-state headers reference");
+        let headers_variants = document
+            .pointer(
+                headers_ref
+                    .strip_prefix('#')
+                    .expect("local headers schema reference"),
+            )
+            .and_then(|schema| schema["oneOf"].as_array())
+            .expect("nullable headers oneOf");
+        assert!(headers_variants
+            .iter()
+            .any(|variant| variant["type"] == "null"));
+        let headers = headers_variants
+            .iter()
+            .find_map(|variant| variant["oneOf"].as_array())
+            .expect("HeadersRequest object/string oneOf");
+        assert_eq!(headers.len(), 2);
+        assert!(headers.iter().any(|schema| schema["type"] == "object"));
+        assert!(headers.iter().any(|schema| schema["type"] == "string"));
+        let model_headers_ref = document["components"]["schemas"]
+            ["UpdateModelConfigurationRequest"]["properties"]["extra_headers"]["$ref"]
+            .as_str()
+            .expect("model header map schema reference");
+        let mcp_env_ref = document["components"]["schemas"]["UpdateMcpServerRequest"]["properties"]
+            ["env"]["$ref"]
+            .as_str()
+            .expect("MCP environment map schema reference");
+        assert_ne!(model_headers_ref, mcp_env_ref);
+        let model_headers = document
+            .pointer(model_headers_ref.strip_prefix('#').unwrap())
+            .and_then(|schema| schema["oneOf"].as_array())
+            .and_then(|variants| variants.iter().find(|variant| variant["type"] == "object"))
+            .expect("model header map variant");
+        assert_eq!(model_headers["additionalProperties"]["type"], "string");
+        let mcp_env = document
+            .pointer(mcp_env_ref.strip_prefix('#').unwrap())
+            .and_then(|schema| schema["oneOf"].as_array())
+            .and_then(|variants| variants.iter().find(|variant| variant["type"] == "object"))
+            .expect("MCP environment map variant");
+        assert!(mcp_env["additionalProperties"]["oneOf"]
+            .as_array()
+            .is_some_and(|variants| variants.iter().any(|variant| variant["type"] == "null")));
+
+        let assistant_message = document["components"]["schemas"]["Message"]["oneOf"]
+            .as_array()
+            .and_then(|variants| {
+                variants.iter().find(|variant| {
+                    variant["properties"]["role"]["enum"]
+                        .as_array()
+                        .is_some_and(|roles| roles.iter().any(|role| role == "assistant"))
+                })
+            })
+            .expect("assistant message variant");
+        assert!(assistant_message["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|field| field == "content")));
+
+        for (schema, field, example) in [
+            ("StoreCredentialRequest", "value", "fake-credential-value"),
+            ("ProviderModelsRequest", "api_key", "fake-provider-key"),
+            ("CreateModelConfigurationRequest", "api_key", "fake-api-key"),
+        ] {
+            let property = &document["components"]["schemas"][schema]["properties"][field];
+            assert_eq!(property["writeOnly"], true, "{schema}.{field}");
+            assert_eq!(property["example"], example, "{schema}.{field}");
+        }
+
+        let stream =
+            &document["paths"]["/sessions/{session_id}/events/stream"]["get"]["responses"]["200"];
+        assert!(stream["content"]["text/event-stream"].is_object());
+        let description = stream["description"].as_str().unwrap();
+        for event in [
+            "replay_boundary",
+            "replay_gap",
+            "session_event",
+            "assistant_delta",
+            "lagged",
+        ] {
+            assert!(description.contains(event), "missing SSE event {event}");
+        }
+        for (method, path, status) in [
+            ("get", "/sessions", "400"),
+            ("post", "/providers/models", "500"),
+            ("post", "/sessions/{session_id}/runs", "501"),
+            ("delete", "/model-configs/{config_id}", "400"),
+            ("delete", "/ssh-configs/{config_id}", "400"),
+            ("delete", "/credentials/{name}", "400"),
+            ("get", "/sessions/{session_id}/workspace/revisions", "400"),
+            ("post", "/sessions/{session_id}/cancel-active-run", "400"),
+            ("delete", "/sessions/{session_id}", "400"),
+            ("get", "/sessions/{session_id}/config", "400"),
+            ("post", "/sessions/{session_id}/compact", "400"),
+            ("delete", "/mcp_library/servers/{server_name}", "400"),
+        ] {
+            assert!(
+                document["paths"][path][method]["responses"][status].is_object(),
+                "missing {method} {path} response {status}"
+            );
+        }
+        for (method, path) in [
+            ("post", "/model-configs"),
+            ("patch", "/model-configs/{config_id}"),
+            ("post", "/mcp_library/servers"),
+            ("patch", "/mcp_library/servers/{server_name}"),
+            ("post", "/mcp_library/servers/test"),
+            ("post", "/auth/{provider}/login"),
+        ] {
+            assert!(
+                document["paths"][path][method]["responses"]["502"].is_null(),
+                "unexpected {method} {path} response 502"
+            );
+        }
+
+        let invalid_query = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions?workspace_stats=not-a-bool")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid_query.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            invalid_query.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static(
+                "text/plain; charset=utf-8"
+            ))
+        );
+
+        let redirect = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/docs")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(redirect.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            redirect.headers().get(header::LOCATION),
+            Some(&header::HeaderValue::from_static("/docs/"))
+        );
+        let docs = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/docs/")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(docs.status(), StatusCode::OK);
+        assert_eq!(
+            docs.headers().get("content-security-policy"),
+            Some(&header::HeaderValue::from_static("frame-ancestors 'none'"))
+        );
+        assert_eq!(
+            docs.headers().get("x-frame-options"),
+            Some(&header::HeaderValue::from_static("DENY"))
+        );
+        let html = String::from_utf8(
+            to_bytes(docs.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(html.contains("swagger-initializer.js"));
+        let initializer = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/docs/swagger-initializer.js")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(initializer.status(), StatusCode::OK);
+        let initializer = String::from_utf8(
+            to_bytes(initializer.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(initializer.contains("/openapi.json"));
+        assert!(initializer.contains("\"validatorUrl\": \"none\""));
+
+        for uri in ["/openapi.json", "/docs"] {
+            let rejected = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(uri)
+                        .header(header::HOST, "example.com")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(rejected.status(), StatusCode::FORBIDDEN, "{uri}");
+            assert_eq!(
+                rejected.headers().get(header::CONTENT_TYPE),
+                Some(&header::HeaderValue::from_static(
+                    "text/plain; charset=utf-8"
+                ))
+            );
+        }
+    }
 
     #[path = "compaction.rs"]
     mod compaction;

@@ -33,7 +33,7 @@ use crate::{ApiError, SessionManager};
 /// abandoned one does not sit around.
 const COMPLETED_RETENTION: Duration = Duration::from_secs(120);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ManagedAuthStatusResponse {
     pub provider: String,
     /// The backend a session selects to use this login.
@@ -61,12 +61,12 @@ impl From<ManagedAuthSnapshot> for ManagedAuthStatusResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ManagedAuthListResponse {
     pub providers: Vec<ManagedAuthStatusResponse>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct DeviceLoginStartedResponse {
     /// Handle for polling this login; it names nothing on disk.
     pub login_id: String,
@@ -82,6 +82,7 @@ pub struct DeviceLoginStartedResponse {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[derive(utoipa::ToSchema)]
 pub enum DeviceLoginStateResponse {
     /// The provider has not seen the user approve it yet.
     Pending,
@@ -275,6 +276,13 @@ impl SessionManager {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth",
+    operation_id = "get_auth",
+    tag = "auth",
+    responses((status = 200, description = "Success", body = ManagedAuthListResponse, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn list_handler(
     State(manager): State<SessionManager>,
 ) -> Result<Json<ManagedAuthListResponse>, ApiError> {
@@ -305,6 +313,14 @@ fn browser_shares_this_machine(headers: &HeaderMap) -> bool {
     )
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/{provider}/login",
+    operation_id = "post_auth_provider_login",
+    tag = "auth",
+    params(("provider" = String, Path)),
+    responses((status = 200, description = "Success", body = DeviceLoginStartedResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((crate::ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 409, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn start_login_handler(
     State(manager): State<SessionManager>,
     AxumPath(provider): AxumPath<String>,
@@ -336,6 +352,14 @@ pub(crate) async fn start_login_handler(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/{provider}/login/{login_id}",
+    operation_id = "get_auth_provider_login_login_id",
+    tag = "auth",
+    params(("provider" = String, Path), ("login_id" = String, Path)),
+    responses((status = 200, description = "Success", body = DeviceLoginStateResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((crate::ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn poll_login_handler(
     State(manager): State<SessionManager>,
     AxumPath((provider, login_id)): AxumPath<(String, String)>,
@@ -344,6 +368,14 @@ pub(crate) async fn poll_login_handler(
     Ok(Json(manager.poll_managed_login(provider, &login_id)?))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/auth/{provider}/login/{login_id}",
+    operation_id = "delete_auth_provider_login_login_id",
+    tag = "auth",
+    params(("provider" = String, Path), ("login_id" = String, Path)),
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((crate::ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn cancel_login_handler(
     State(manager): State<SessionManager>,
     AxumPath((provider, login_id)): AxumPath<(String, String)>,
@@ -359,6 +391,14 @@ pub(crate) async fn cancel_login_handler(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/auth/{provider}",
+    operation_id = "delete_auth_provider",
+    tag = "auth",
+    params(("provider" = String, Path)),
+    responses((status = 200, description = "Success", body = ManagedAuthStatusResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((crate::ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
 pub(crate) async fn logout_handler(
     AxumPath(provider): AxumPath<String>,
 ) -> Result<Json<ManagedAuthStatusResponse>, ApiError> {
