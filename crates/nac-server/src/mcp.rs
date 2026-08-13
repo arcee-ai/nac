@@ -396,8 +396,6 @@ impl NacMcpService {
                             "created_at": e.created_at,
                         }));
                     }
-
-                    }
                 }
                 all.sort_by(|a, b| {
                     let thread_a = a["thread_name"].as_str().unwrap_or("");

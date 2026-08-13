@@ -93,6 +93,8 @@ pub struct SandboxConfig {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct WorkerConfig {
     pub thread_timeout_secs: Option<u64>,
+    pub command_output_max_bytes: Option<usize>,
+    pub command_output_session_max_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -732,6 +734,22 @@ pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
         .thread_timeout_secs
         .unwrap_or(crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS)
         .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
+}
+
+pub(crate) fn worker_command_output_limits(
+    config: &NacConfig,
+) -> Result<crate::terminal::CommandOutputLimits> {
+    crate::terminal::CommandOutputLimits {
+        per_command_bytes: config
+            .worker
+            .command_output_max_bytes
+            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES),
+        per_session_bytes: config
+            .worker
+            .command_output_session_max_bytes
+            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES),
+    }
+    .validate()
 }
 
 fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
