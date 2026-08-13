@@ -1980,12 +1980,10 @@ impl SessionManager {
                 // A same-backend light model with no explicit selector
                 // inherits the session's primary one, following it when the
                 // primary selector changes.
-                let inherited = prospective.api_key_env.as_deref().map(|name| {
-                    light_model::InheritedCredential {
-                        backend,
-                        name: Some(name),
-                        previous: current.api_key_env.as_deref(),
-                    }
+                let inherited = Some(light_model::InheritedCredential {
+                    backend,
+                    name: prospective.api_key_env.as_deref(),
+                    previous: current.api_key_env.as_deref(),
                 });
                 prospective.light_model = Some(light_model::normalize(
                     light,
@@ -2782,6 +2780,11 @@ async fn update_model_config_handler(
         (existing.api_key_env.clone(), None)
     };
 
+    let inherited = light_model::InheritedCredential {
+        backend,
+        name: api_key_env.as_deref(),
+        previous: existing.api_key_env.as_deref(),
+    };
     let configuration = model_configurations::NewModelConfiguration {
         name: replaceable_text(request.name, &existing.name),
         backend: backend.to_string(),
@@ -2812,26 +2815,11 @@ async fn update_model_config_handler(
             RequestField::Value(light) => Some(light_model::normalize(
                 light,
                 &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-                api_key_env
-                    .as_deref()
-                    .map(|name| light_model::InheritedCredential {
-                        backend,
-                        name: Some(name),
-                        previous: existing.api_key_env.as_deref(),
-                    }),
+                Some(inherited),
             )?),
             RequestField::Null => None,
             RequestField::Omitted => existing.light_model.clone().map(|mut light| {
-                if let Some(name) = api_key_env.as_deref() {
-                    light_model::rotate_inherited_credential(
-                        &mut light,
-                        light_model::InheritedCredential {
-                            backend,
-                            name: Some(name),
-                            previous: existing.api_key_env.as_deref(),
-                        },
-                    );
-                }
+                light_model::rotate_inherited_credential(&mut light, inherited);
                 light
             }),
         },
@@ -7087,6 +7075,10 @@ model = "gpt-5.2"
         let store_path = root.join("store.db");
         let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
         api_key_session.reasoning_effort = None;
+        let inherited_selector = api_key_session
+            .api_key_env
+            .clone()
+            .expect("seeded API-key session has a selector");
         sessions::update_session_config(&store_path, &api_key_session).unwrap();
         let manager = test_manager(&root);
 
@@ -7096,6 +7088,13 @@ model = "gpt-5.2"
                 UpdateConfigRequest {
                     backend: RequestField::Value("arcee-auth".to_string()),
                     model: RequestField::Value("trinity-large-thinking".to_string()),
+                    light_model: RequestField::Value(LightModelSettings {
+                        model: "trinity-large-thinking".to_string(),
+                        backend: Some(BackendKind::ArceeAuth),
+                        base_url: None,
+                        api_key_env: Some(inherited_selector),
+                        reasoning_effort: None,
+                    }),
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -7109,6 +7108,13 @@ model = "gpt-5.2"
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
         );
         assert_eq!(stored.api_key_env, None);
+        assert_eq!(
+            stored
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
+        );
         let rehydrated = manager.session_config("session").unwrap();
         assert_eq!(rehydrated.backend.as_deref(), Some("arcee-auth"));
         assert_eq!(
@@ -7116,6 +7122,13 @@ model = "gpt-5.2"
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
         );
         assert_eq!(rehydrated.api_key_env, None);
+        assert_eq!(
+            rehydrated
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -8709,6 +8722,96 @@ model = "gpt-5.2"
                 .recv_timeout(std::time::Duration::from_secs(5))
                 .expect("the model index was asked"),
             "Bearer sk-server-test-key"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn saved_config_managed_updates_clear_inherited_light_selectors() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("saved_config_managed_light_clear");
+        let nac_home = root.join("nac-home");
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        let manager = test_manager(&root);
+        let inherited_selector = "NAC_CONFIG_OLD_KEY";
+        let managed_light = || LightModelSettings {
+            model: "trinity-large-thinking".to_string(),
+            backend: Some(BackendKind::ArceeAuth),
+            base_url: None,
+            api_key_env: Some(inherited_selector.to_string()),
+            reasoning_effort: None,
+        };
+
+        model_configurations::insert_model_configuration(
+            &manager.inner.store_path,
+            "repair",
+            model_configurations::NewModelConfiguration {
+                name: "Managed repair".to_string(),
+                backend: BackendKind::ArceeAuth.to_string(),
+                model: "trinity-large-thinking".to_string(),
+                base_url: nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL.to_string(),
+                api_key_env: Some(inherited_selector.to_string()),
+                reasoning_effort: None,
+                extra_headers: BTreeMap::new(),
+                orchestrator_compaction_threshold: None,
+                initial_prompt: None,
+                light_model: Some(managed_light()),
+            },
+        )
+        .unwrap();
+        let Json(repaired) = update_model_config_handler(
+            State(manager.clone()),
+            AxumPath("repair".to_string()),
+            Ok(Json(UpdateModelConfigurationRequest::default())),
+        )
+        .await
+        .expect("managed repair clears inherited selectors");
+        assert_eq!(repaired.api_key_env, None);
+        assert_eq!(
+            repaired
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
+        );
+
+        model_configurations::insert_model_configuration(
+            &manager.inner.store_path,
+            "switch",
+            model_configurations::NewModelConfiguration {
+                name: "Managed switch".to_string(),
+                backend: BackendKind::ArceeApi.to_string(),
+                model: "trinity-large-thinking".to_string(),
+                base_url: "https://api.arcee.ai/api/v1".to_string(),
+                api_key_env: Some(inherited_selector.to_string()),
+                reasoning_effort: None,
+                extra_headers: BTreeMap::new(),
+                orchestrator_compaction_threshold: None,
+                initial_prompt: None,
+                light_model: None,
+            },
+        )
+        .unwrap();
+        let Json(switched) = update_model_config_handler(
+            State(manager.clone()),
+            AxumPath("switch".to_string()),
+            Ok(Json(UpdateModelConfigurationRequest {
+                backend: RequestField::Value(BackendKind::ArceeAuth),
+                light_model: RequestField::Value(managed_light()),
+                ..UpdateModelConfigurationRequest::default()
+            })),
+        )
+        .await
+        .expect("managed switch clears inherited selectors");
+        assert_eq!(switched.api_key_env, None);
+        assert_eq!(
+            switched
+                .light_model
+                .as_ref()
+                .and_then(|light| light.api_key_env.as_deref()),
+            None
         );
 
         let _ = std::fs::remove_dir_all(root);
