@@ -15,6 +15,22 @@ The installer places one binary in `$HOME/.local/bin` by default:
 
 - `nac-web`: the web dashboard for managing multiple sessions, plus utility commands such as `codex-auth`, `arcee-auth`, and `upgrade`.
 
+### Set up nac from another coding agent
+
+This repository includes a portable onboarding skill for Codex, Claude Code, OpenCode, and compatible agents. Install it into the agent runtime you use:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target codex
+```
+
+Replace `codex` with `claude`, `opencode`, `nac`, `agents` (the cross-agent default), or `project`. Run the command with `--help` to see every destination. Then ask the agent to use `nac-onboarding`.
+
+Or paste this into your agent:
+
+> Install the nac onboarding skill with `curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
+
+The skill lives in [`skills/nac-onboarding`](skills/nac-onboarding) and covers the complete setup, including nac's built-in MCP endpoint.
+
 ### Choose auth
 
 Pick one path before you start a session — each unlocks a different set of models:
