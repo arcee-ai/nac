@@ -49,13 +49,18 @@ nac-web upgrade
 
 ### Model Provider Authentication
 
-Model providers and authentication can be configured from terminal or at the start of a session. These commands will let you pre-configure your logins and API keys.
+Pick one before you start a session, or configure it later from the dashboard.
 
-| Path | Command | Description|
-| --- | --- | --- |
-| **Arcee (recommended)** | `nac-web arcee-auth login` | Arcee account via device-code login → open / Trinity models, no API key |
-| **ChatGPT Codex** | `nac-web codex-auth login` | ChatGPT account via OAuth → OpenAI / Codex models |
-| **API key** | export the provider's conventional env var | Any catalog provider (DeepSeek, Fireworks, Together, OpenAI, Anthropic, `arcee-api`, …) |
+```sh
+# Recommended: Arcee device-code login → Latest Open & Arcee Trinity models
+nac-web arcee-auth login
+
+# ChatGPT account via OAuth → OpenAI models
+nac-web codex-auth login
+
+# Any catalog provider (DeepSeek, Fireworks, Together, OpenAI, Anthropic, arcee-api, …)
+export OPENAI_API_KEY=...   # or ANTHROPIC_API_KEY, TOGETHER_API_KEY, ARCEE_API_KEY, …
+```
 
 More details can be found in [Providers and logins](docs/configuration/credentials.md) and [Model configuration](docs/configuration/model.md). 
 
