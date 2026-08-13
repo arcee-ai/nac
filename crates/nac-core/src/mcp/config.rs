@@ -13,16 +13,20 @@ struct RawMcpConfigFile {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(super) struct McpServerConfig {
+pub struct McpServerConfig {
     #[serde(default = "default_enabled")]
-    pub(super) enabled: bool,
+    pub enabled: bool,
+    /// Library catalog entry the dashboard created this server from. Only the
+    /// dashboard reads it; the connect path ignores it.
+    #[serde(default)]
+    pub library_id: Option<String>,
     #[serde(flatten)]
-    pub(super) transport: McpTransportConfig,
+    pub transport: McpTransportConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "transport", rename_all = "snake_case")]
-pub(super) enum McpTransportConfig {
+pub enum McpTransportConfig {
     Stdio {
         command: String,
         #[serde(default)]

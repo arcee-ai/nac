@@ -20,6 +20,13 @@ import type {
   ManagedAuthStatus,
   GeneratedCredential,
   ManagedSessionSummary,
+  McpLibraryResponse,
+  McpServerList,
+  McpServerView,
+  CreateMcpServerRequest,
+  UpdateMcpServerRequest,
+  TestMcpServerRequest,
+  TestMcpServerResponse,
   MessagesPageResponse,
   ModelCatalog,
   ModelConfigurationList,
@@ -298,6 +305,36 @@ export const api = {
 
   deleteSshConfig: (configId: string) =>
     request<void>("DELETE", `/ssh-configs/${encodeURIComponent(configId)}`),
+
+  // The MCP library is a curated catalog served by the binary; servers are
+  // saved into config.toml, keyed by name, and parsed when a session starts.
+  getMcpLibrary: (signal?: AbortSignal) =>
+    request<McpLibraryResponse>("GET", "/mcp_library/library", { signal }),
+
+  listMcpServers: (signal?: AbortSignal) =>
+    request<McpServerList>("GET", "/mcp_library/servers", { signal }),
+
+  createMcpServer: (payload: CreateMcpServerRequest) =>
+    request<McpServerView>("POST", "/mcp_library/servers", { body: payload }),
+
+  updateMcpServer: (serverName: string, payload: UpdateMcpServerRequest) =>
+    request<McpServerView>(
+      "PATCH",
+      `/mcp_library/servers/${encodeURIComponent(serverName)}`,
+      { body: payload },
+    ),
+
+  deleteMcpServer: (serverName: string) =>
+    request<void>(
+      "DELETE",
+      `/mcp_library/servers/${encodeURIComponent(serverName)}`,
+    ),
+
+  /** Connects and lists tools without saving anything. */
+  testMcpServer: (payload: TestMcpServerRequest) =>
+    request<TestMcpServerResponse>("POST", "/mcp_library/servers/test", {
+      body: payload,
+    }),
 
   /** Resolves a saved configuration's credential and lists its models. */
   resolveModelConfig: (configId: string) =>
