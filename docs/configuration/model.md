@@ -26,7 +26,7 @@ The API-key backends are `openai-responses`, `together-chat`, `anthropic-message
 - With no explicit selector and no conventional variable set, validation fails with a guided error naming the provider's conventional variable.
 - The selected variable must exist, contain Unicode, and have a nonempty, non-whitespace value when settings are validated for use.
 
-`arcee-auth` and `chatgpt-codex-responses` instead use [managed credentials](../credentials/managed.md) and reject `api_key_env`, including an inherited selector. Clear it when switching a configured API-key session to either managed backend.
+`arcee-auth` and `chatgpt-codex-responses` instead use [providers and logins](credentials.md) and reject `api_key_env`, including an inherited selector. Clear it when switching a configured API-key session to either managed backend.
 
 ## Reasoning effort
 

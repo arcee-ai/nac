@@ -1,4 +1,6 @@
-# Managed credentials and endpoints
+# Providers and logins
+
+Arcee device login, ChatGPT Codex OAuth, and API-key backends. Managed logins reject `api_key_env`; API-key providers select a credential environment variable instead. See [Model configuration](model.md) for selector rules.
 
 ## ChatGPT Codex OAuth
 

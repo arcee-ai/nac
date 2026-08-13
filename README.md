@@ -57,7 +57,7 @@ Model providers and authentication can be configured from terminal or at the sta
 | **ChatGPT Codex** | `nac-web codex-auth login` | ChatGPT account via OAuth → OpenAI / Codex models |
 | **API key** | export the provider's conventional env var | Any catalog provider (DeepSeek, Fireworks, Together, OpenAI, Anthropic, `arcee-api`, …) |
 
-More details can be found in [Managed credentials and endpoints](docs/credentials/managed.md) and [Model configuration](docs/configuration/model.md). 
+More details can be found in [Providers and logins](docs/configuration/credentials.md) and [Model configuration](docs/configuration/model.md). 
 
 
 ### Uninstall
@@ -68,21 +68,17 @@ curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall
 
 ## Documentation
 
+- [Usage](docs/usage/README.md)
+  - [AGENTS.md Files](docs/usage/agents-md.md)
+  - [Skills](docs/usage/skills.md)
+  - [Sandbox](docs/usage/sandbox.md)
+- [Configuration](docs/configuration/README.md)
+  - [Example config](docs/configuration/example.md)
+  - [Model configuration](docs/configuration/model.md)
+  - [Catalog and cost](docs/configuration/catalog.md)
+  - [Providers and logins](docs/configuration/credentials.md)
 - [HTTP API](docs/api/http.md)
   - [Session Events](docs/api/http.md#session-events)
-- [Agent Directives](docs/usage/agent-directives.md)
-- [Sandbox](docs/usage/sandbox.md)
-- [Model configuration](docs/configuration/model.md)
-  - [Orchestrator compaction threshold](docs/configuration/model.md#orchestrator-compaction-threshold)
-  - [API-key selection](docs/configuration/model.md#api-key-selection)
-  - [Reasoning effort](docs/configuration/model.md#reasoning-effort)
-- [Example config](docs/configuration/example.md)
-- [Model catalog, overrides, and cost](docs/configuration/catalog.md)
-  - [Model selection in the dashboard](docs/configuration/catalog.md#model-selection-in-the-dashboard)
-- [Managed credentials and endpoints](docs/credentials/managed.md)
-  - [ChatGPT Codex OAuth](docs/credentials/managed.md#chatgpt-codex-oauth)
-  - [Arcee managed auth and API keys](docs/credentials/managed.md#arcee-managed-auth-and-api-keys)
-  - [Credential files](docs/credentials/managed.md#credential-files)
 - [Model request security](docs/security/model-requests.md)
 
 ## Contributing

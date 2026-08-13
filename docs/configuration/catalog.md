@@ -1,4 +1,4 @@
-# Model catalog, overrides, and cost
+# Catalog and cost
 
 NAC ships an embedded model catalog generated from [models.dev](https://models.dev): per-model context windows, maximum output tokens, pricing per 1M tokens, and supported reasoning effort levels for the `deepseek-chat`, `fireworks-chat`, `together-chat`, `openai-responses`, and `anthropic-messages` backends (`arcee-auth`/`arcee-api` and `chatgpt-codex-responses` entries are maintained by hand). Effort validation, Anthropic `max_tokens`, and per-response cost all read this catalog. Each provider also carries a conventional credential variable name and an endpoint default base URL, which drive credential auto-selection and absent-`base_url` materialization; a configured model id resolves its provider through the catalog (unique exact match; collisions prefer the non-managed provider with a warning). A model the catalog does not know resolves from its provider's default entry with conservative fallbacks (128k context, 16k max output, zero cost), so unknown models keep working.
 
