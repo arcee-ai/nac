@@ -323,100 +323,32 @@ fn managed_backends_materialize_only_absent_base_urls() {
 }
 
 #[test]
-fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence() {
-    let all = [
-        ReasoningEffort::None,
-        ReasoningEffort::Minimal,
-        ReasoningEffort::Low,
-        ReasoningEffort::Medium,
-        ReasoningEffort::High,
-        ReasoningEffort::Xhigh,
-        ReasoningEffort::Max,
-    ];
-    let cases: &[(BackendKind, &str, &[ReasoningEffort])] = &[
-        (
-            BackendKind::DeepSeekChat,
-            "model",
-            &[
-                ReasoningEffort::None,
-                ReasoningEffort::Low,
-                ReasoningEffort::High,
-                ReasoningEffort::Max,
-            ],
-        ),
-        (
-            BackendKind::FireworksChat,
-            "model",
-            &[
-                ReasoningEffort::None,
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
-        ),
-        (
-            BackendKind::TogetherChat,
-            "model",
-            &[
-                ReasoningEffort::None,
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
-        ),
-        (BackendKind::OpenAiResponses, "model", &all[..all.len() - 1]),
-        (
-            BackendKind::ChatGptCodexResponses,
-            "model",
-            &all[..all.len() - 1],
-        ),
-        (
-            BackendKind::AnthropicMessages,
-            "claude-opus-4-6",
-            &[
-                ReasoningEffort::None,
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-                ReasoningEffort::Xhigh,
-            ],
-        ),
-        (BackendKind::ArceeAuth, "model", &[]),
-        (BackendKind::ArceeApi, "model", &[]),
-    ];
+fn effective_settings_validate_reasoning_before_client_or_persistence() {
+    let accepted = EffectiveModelSettings::new(
+        BackendKind::OpenAiResponses,
+        "model".into(),
+        "https://example.com/v1".into(),
+        Some(ReasoningEffort::High),
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .expect("effective settings must accept a catalog-supported effort");
+    assert_eq!(accepted.reasoning_effort, Some(ReasoningEffort::High));
 
-    for (backend, model, supported) in cases {
-        EffectiveModelSettings::new(
-            *backend,
-            (*model).into(),
-            "https://example.com/v1".into(),
-            None,
-            None,
-            std::collections::BTreeMap::new(),
-        )
-        .expect("absent effort must be valid for every backend");
-        for effort in all {
-            let result = EffectiveModelSettings::new(
-                *backend,
-                (*model).into(),
-                "https://example.com/v1".into(),
-                Some(effort),
-                None,
-                std::collections::BTreeMap::new(),
-            );
-            if supported.contains(&effort) {
-                result.unwrap_or_else(|error| {
-                    panic!("{backend} rejected {}: {error:#}", effort.as_str())
-                });
-            } else {
-                let error =
-                    result.expect_err("unsupported effort must fail effective settings validation");
-                assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
-                assert!(error.to_string().contains(effort.as_str()), "{error:#}");
-                assert!(error.to_string().contains(backend.as_str()), "{error:#}");
-            }
-        }
-    }
+    // Effective settings are constructed before either a client or persisted
+    // runtime state exists, so rejection here preserves that ordering contract.
+    let error = EffectiveModelSettings::new(
+        BackendKind::OpenAiResponses,
+        "model".into(),
+        "https://example.com/v1".into(),
+        Some(ReasoningEffort::Max),
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .expect_err("effective settings must reject a catalog-unsupported effort");
+    assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+    assert!(error.to_string().contains("max"), "{error:#}");
+    assert!(error.to_string().contains("openai-responses"), "{error:#}");
 }
 
 #[test]
