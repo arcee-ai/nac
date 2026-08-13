@@ -118,6 +118,9 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
     };
     client.resolved_model.max_tokens = 500_000;
+    // The wire cap only applies to authoritative catalog values; a synthetic
+    // provider-default limit is omitted from the request instead.
+    client.resolved_model.source = catalog::ModelSource::Baseline;
     let messages = vec![
         Message::System {
             content: "Follow instructions".to_string(),
@@ -201,6 +204,40 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         body["tools"],
         serde_json::to_value(&tools).expect("tool definitions serialize")
     );
+}
+
+#[tokio::test]
+async fn completions_request_omits_max_tokens_for_unknown_models() {
+    // An unknown model resolves through the provider `_default` clone; the
+    // synthetic fallback limit must not hit the wire (the provider knows the
+    // model's real limit better than a guess — issue #124).
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        r#"{"choices": [{"message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}"#,
+    )]);
+    let client = test_model_client(
+        BackendKind::DeepSeekChat,
+        server.base_url.clone(),
+        std::collections::BTreeMap::new(),
+    );
+    assert_eq!(
+        client.resolved_model.source,
+        catalog::ModelSource::ProviderDefault
+    );
+
+    client
+        .send_turn(
+            vec![Message::User {
+                content: "hello".to_string(),
+            }],
+            vec![],
+        )
+        .await
+        .expect("response parses");
+
+    let requests = server.finish();
+    let body: Value = serde_json::from_slice(&requests[0].body).expect("request JSON");
+    assert!(body.get("max_tokens").is_none(), "{body}");
 }
 
 #[tokio::test]

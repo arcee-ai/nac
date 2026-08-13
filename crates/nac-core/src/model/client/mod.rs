@@ -411,7 +411,13 @@ impl ModelClient {
                 CompletionsMessageShape::Standard
             },
         );
-        request["max_tokens"] = json!(self.resolved_model.max_tokens.min(262_144));
+        // Clamp output only when the catalog carries a real limit for this
+        // model. A synthetic provider-default value (the 16k fallback) would
+        // silently truncate models whose true limit the provider knows
+        // better than we do (issue #124).
+        if self.resolved_model.source.is_authoritative() {
+            request["max_tokens"] = json!(self.resolved_model.max_tokens.min(262_144));
+        }
         if self.backend == BackendKind::TogetherChat {
             request["context_length_exceeded_behavior"] = json!("truncate");
         }
