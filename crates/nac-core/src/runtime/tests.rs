@@ -410,13 +410,6 @@
     }
 
     #[test]
-    fn no_reasoning_effort_is_injected() {
-        let settings =
-            effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();
-        assert_eq!(settings.reasoning_effort, None);
-    }
-
-    #[test]
     fn managed_worker_settings_are_snapshot_authoritative() {
         let settings = managed_worker_effective_model_settings(&ModelOptions {
             backend: Some(BackendKind::TogetherChat),

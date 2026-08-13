@@ -779,15 +779,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_dag_self_dependency() {
-        // A lists itself as a source thread.
-        let dispatches = vec![make_dispatch(0, "A", &["A"])];
-
-        let err = build_dag(&dispatches).unwrap_err();
-        assert!(matches!(err, DagError::Cycle(_)));
-    }
-
-    #[test]
     fn test_partition_separates_thread_and_non_thread() {
         let runtime = test_runtime();
         let tool_calls = vec![

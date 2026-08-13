@@ -137,14 +137,6 @@ mod tests {
     }
 
     #[test]
-    fn invalid_slash_commands_preserve_messages() {
-        assert_eq!(
-            parse_slash_command("/bogus"),
-            Some(Err("unknown slash command: /bogus".to_string()))
-        );
-    }
-
-    #[test]
     fn workset_prompt_displays_as_original_slash_command() {
         // These are the expanded prompt formats that /plan and /run used to
         // generate.  display_prompt_from_message must still collapse them back

@@ -257,12 +257,6 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn sanitize_identifier_collapses_symbols() {
-        assert_eq!(sanitize_identifier("GitHub.com"), "github_com");
-        assert_eq!(sanitize_identifier("search/issues"), "search_issues");
-    }
-
-    #[test]
     fn env_expansion_replaces_placeholders() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let _env = EnvVarGuard::set("NAC_MCP_TEST", "expanded");

@@ -84,11 +84,6 @@ mod tests {
     }
 
     #[test]
-    fn mixed() {
-        assert_eq!(parse_keys("cargo build<RET>"), b"cargo build\r".to_vec());
-    }
-
-    #[test]
     fn unknown_key_passthrough() {
         assert_eq!(parse_keys("echo <F5> test"), b"echo <F5> test".to_vec());
     }

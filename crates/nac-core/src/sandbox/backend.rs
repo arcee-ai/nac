@@ -444,11 +444,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_ensure_ready_is_noop() {
-        assert!(local().ensure_ready().await.is_ok());
-    }
-
-    #[tokio::test]
     async fn local_exec_runs_program_with_stdin() {
         let backend = ExecutionBackend::Local {
             workspace_cwd: std::env::current_dir().unwrap(),

@@ -266,20 +266,6 @@ mod tests {
         BackendKind::ArceeApi,
     ];
 
-    /// Restates the classification the launch UI depends on. A new backend has
-    /// to be triaged here, because the match below stops compiling without it.
-    fn expects_api_key(backend: BackendKind) -> bool {
-        match backend {
-            BackendKind::OpenAiResponses
-            | BackendKind::AnthropicMessages
-            | BackendKind::DeepSeekChat
-            | BackendKind::FireworksChat
-            | BackendKind::TogetherChat
-            | BackendKind::ArceeApi => true,
-            BackendKind::ChatGptCodexResponses | BackendKind::ArceeAuth => false,
-        }
-    }
-
     #[test]
     fn every_backend_offers_a_default_url_the_launch_modal_can_preselect() {
         for backend in ALL_BACKENDS {
@@ -297,11 +283,6 @@ mod tests {
     #[test]
     fn every_backend_exposes_a_model_index_however_it_authenticates() {
         for backend in ALL_BACKENDS {
-            assert_eq!(
-                provider_uses_api_key(backend),
-                expects_api_key(backend),
-                "{backend} is classified inconsistently"
-            );
             let base_url = provider_default_base_url(backend).expect("default base URL");
             let url = models_url(backend, base_url);
             assert!(

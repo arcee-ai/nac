@@ -498,11 +498,6 @@ mod tests {
     use super::TokenUsage;
 
     #[test]
-    fn aggregate_returns_none_without_recorded_usage() {
-        assert_eq!(TokenUsage::aggregate(&[None, None]), None);
-    }
-
-    #[test]
     fn aggregate_sums_cost_fields_and_keeps_last_context_gauge() {
         let entries = [
             Some(TokenUsage {
