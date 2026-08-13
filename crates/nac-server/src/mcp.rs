@@ -23,18 +23,10 @@ use rmcp::transport::streamable_http_server::tower::StreamableHttpService;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
 pub struct NacMcpService {
     manager: SessionManager,
 }
-
-// ---------------------------------------------------------------------------
-// Parameter structs
-// ---------------------------------------------------------------------------
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct CreateSessionParams {
@@ -135,10 +127,6 @@ struct UpdateSessionParams {
     #[schemars(description = "New reasoning effort")]
     reasoning_effort: Option<String>,
 }
-
-// ---------------------------------------------------------------------------
-// Tool router — 11 tools
-// ---------------------------------------------------------------------------
 
 #[tool_router]
 impl NacMcpService {
@@ -574,10 +562,6 @@ impl NacMcpService {
 #[tool_handler(instructions = "nac is an AI coding agent orchestrator. It manages coding sessions where an orchestrator agent receives your prompt, plans the work, and dispatches worker threads to execute tasks autonomously. Each worker operates independently — reading files, writing code, running commands, and calling tools — then reports back with its results. The orchestrator reviews thread output, compacts context when approaching the model's context window limit, and either dispatches more threads or produces a final response. Each worker's final output is retained as an episode you can inspect.\n\nSessions are asynchronous: send_message returns immediately with a run_id and the work continues in the background. Poll get_session_status to check completion, use steer to guide running tasks mid-flight, and inspect results with get_messages, get_thread_episodes, and get_thread_events. Sessions persist across server restarts and you can manage multiple simultaneously.")]
 impl ServerHandler for NacMcpService {}
 
-// ---------------------------------------------------------------------------
-// Service factory
-// ---------------------------------------------------------------------------
-
 pub fn streamable_http_service(
     manager: SessionManager,
 ) -> StreamableHttpService<NacMcpService, LocalSessionManager> {
@@ -587,10 +571,6 @@ pub fn streamable_http_service(
         StreamableHttpServerConfig::default(),
     )
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn render_success(value: &impl Serialize) -> Result<CallToolResult, ErrorData> {
     let text = serde_json::to_string_pretty(value)

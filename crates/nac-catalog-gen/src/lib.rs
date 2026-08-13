@@ -48,10 +48,6 @@ pub const PROVIDER_MAP: [(&str, &str); 5] = [
 /// Effort levels nac knows, in `ReasoningEffort` serde (lowercase) form.
 pub const EFFORT_NAMES: [&str; 7] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-// ---------------------------------------------------------------------------
-// models.dev input schema (strict where drift matters, tolerant elsewhere)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Deserialize)]
 struct ModelsDevProvider {
     /// Conventional credential environment variable names (status-only
@@ -122,10 +118,6 @@ enum ReasoningOption {
     Unknown,
 }
 
-// ---------------------------------------------------------------------------
-// Emitted catalog document (the JSON contract nac-core deserializes)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CostDoc {
     pub input: f64,
@@ -185,10 +177,6 @@ pub struct ManifestDoc {
     pub models_dev_etag: Option<String>,
     pub model_counts: BTreeMap<String, usize>,
 }
-
-// ---------------------------------------------------------------------------
-// Curated overrides (overrides.toml)
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Default, Deserialize)]
 pub struct OverridesDoc {
@@ -271,10 +259,6 @@ fn validate_levels(levels: &BTreeMap<String, String>) -> Result<()> {
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Seed mapping (models.dev → pre-override entry)
-// ---------------------------------------------------------------------------
 
 /// models.dev `api` / curated override → the provider's default base URL.
 /// The curated override wins when both exist (the table stays
@@ -466,10 +450,6 @@ fn validate_final_model(provider: &str, model: &str, entry: &ModelDoc) -> Result
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Generation pipeline
-// ---------------------------------------------------------------------------
-
 /// Generator output: the catalog document, its exact serialized bytes,
 /// per-provider counts of seed maps replaced by curated overrides, and
 /// regen-time review notes (e.g. unmatched overrides).
@@ -642,10 +622,6 @@ fn dated_snapshot_family(model: &str) -> Option<&str> {
     let (base, snapshot) = model.rsplit_once('-')?;
     (snapshot.len() == 8 && snapshot.bytes().all(|byte| byte.is_ascii_digit())).then_some(base)
 }
-
-// ---------------------------------------------------------------------------
-// Manifest
-// ---------------------------------------------------------------------------
 
 pub fn manifest(
     catalog: &CatalogDoc,
