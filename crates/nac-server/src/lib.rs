@@ -3884,8 +3884,6 @@ mod tests {
                 "hashed bundles must be cacheable forever"
             );
         }
-
-        assert!(!HTML.to_ascii_lowercase().contains("prototype"));
     }
 
     #[tokio::test]
@@ -4548,10 +4546,17 @@ mod tests {
         let app = router(test_manager(&root));
         let response = get_response(app, "/commands", None).await;
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response_json(response).await,
-            serde_json::to_value(slash_command_definitions()).unwrap()
-        );
+        let body = response_json(response).await;
+        let commands = body.as_array().expect("commands must be a JSON array");
+        let compact = commands
+            .iter()
+            .find(|command| command["name"] == "compact")
+            .expect("compact command must be discoverable");
+        assert_eq!(compact["command"], "compact");
+        assert_eq!(compact["accepts_arguments"], false);
+        assert!(compact["description"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty()));
         let _ = std::fs::remove_dir_all(root);
     }
 

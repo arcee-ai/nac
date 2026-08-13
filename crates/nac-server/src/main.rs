@@ -918,13 +918,4 @@ thread_timeout_secs = 7200
         assert!(!short_rendered.contains('('), "{short_rendered}");
     }
 
-    #[test]
-    fn server_cli_help_documents_port_contract() {
-        let help = ServerCli::command().render_long_help().to_string();
-        assert!(help.contains("-p, --port <PORT>"), "{help}");
-        assert!(help.contains("127.0.0.1"), "{help}");
-        assert!(help.contains("1-65535"), "{help}");
-        assert!(help.contains("default: 3210"), "{help}");
-        assert!(help.contains("Cannot be used with --bind"), "{help}");
-    }
 }

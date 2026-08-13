@@ -143,7 +143,6 @@ describe("raw message windows", () => {
 
     const accepted = prependMessagePage(current, older, 4);
     expect(accepted?.message_page).toMatchObject({ start: 2, end: 6, total: 6 });
-    expect(accepted?.message_page?.start).toBe(2);
     expect(prependMessagePage(current, older, 3)).toBeNull();
   });
 
