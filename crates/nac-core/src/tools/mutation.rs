@@ -1099,9 +1099,36 @@ fn publish(
 fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
     let result = unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) };
     if result == -1 {
-        return Err(io::Error::last_os_error());
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::PermissionDenied {
+            return Err(error);
+        }
+
+        // Replacement may be permitted even when restoring a foreign owner is not.
+        // Keep the original group when possible; special bits are cleared below if
+        // either principal necessarily changes with the inode.
+        let current = file.metadata()?;
+        if current.gid() != metadata.gid() {
+            let result =
+                unsafe { libc::fchown(file.as_raw_fd(), libc::uid_t::MAX, metadata.gid()) };
+            if result == -1 {
+                let error = io::Error::last_os_error();
+                if error.kind() != io::ErrorKind::PermissionDenied {
+                    return Err(error);
+                }
+            }
+        }
     }
-    file.set_permissions(fs::Permissions::from_mode(metadata.mode()))
+
+    let current = file.metadata()?;
+    let mut mode = metadata.mode() & 0o7777;
+    if current.uid() != metadata.uid() {
+        mode &= !(libc::S_ISUID as u32);
+    }
+    if current.gid() != metadata.gid() {
+        mode &= !(libc::S_ISGID as u32);
+    }
+    file.set_permissions(fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
@@ -1314,6 +1341,15 @@ sys.excepthook = uncaught_error
 def normalize(text):
     return text.replace("\r\n", "\n")
 
+def lf_lines(text):
+    if not text:
+        return []
+    parts = text.split("\n")
+    lines = [part + "\n" for part in parts[:-1]]
+    if parts[-1]:
+        lines.append(parts[-1])
+    return lines
+
 def decode(data, path):
     try:
         text = data.decode("utf-8")
@@ -1338,8 +1374,8 @@ def original_offset(original, normalized_offset):
 
 def changed_ranges(old, new):
     matcher = difflib.SequenceMatcher(
-        a=old.splitlines(keepends=True),
-        b=new.splitlines(keepends=True),
+        a=lf_lines(old),
+        b=lf_lines(new),
         autojunk=False,
     )
     ranges = []
@@ -1356,8 +1392,8 @@ def changed_ranges(old, new):
 
 def unified_diff(old, new, path):
     records = difflib.unified_diff(
-        old.splitlines(keepends=True),
-        new.splitlines(keepends=True),
+        lf_lines(old),
+        lf_lines(new),
         fromfile="a/" + path,
         tofile="b/" + path,
         n=3,
@@ -1422,8 +1458,24 @@ def publish(
     try:
         with os.fdopen(descriptor, "wb", closefd=True) as target:
             if old_stat is not None:
-                os.fchown(target.fileno(), old_stat.st_uid, old_stat.st_gid)
-                os.fchmod(target.fileno(), old_stat.st_mode)
+                try:
+                    os.fchown(target.fileno(), old_stat.st_uid, old_stat.st_gid)
+                except PermissionError:
+                    current_stat = os.fstat(target.fileno())
+                    # A replaceable file can have an owner the caller cannot assign.
+                    # Preserve its group when possible and clear affected special bits.
+                    if current_stat.st_gid != old_stat.st_gid:
+                        try:
+                            os.fchown(target.fileno(), -1, old_stat.st_gid)
+                        except PermissionError:
+                            pass
+                current_stat = os.fstat(target.fileno())
+                mode = stat.S_IMODE(old_stat.st_mode)
+                if current_stat.st_uid != old_stat.st_uid:
+                    mode &= ~stat.S_ISUID
+                if current_stat.st_gid != old_stat.st_gid:
+                    mode &= ~stat.S_ISGID
+                os.fchmod(target.fileno(), mode)
             else:
                 os.fchmod(target.fileno(), default_creation_mode())
             target.write(new)
@@ -1479,7 +1531,7 @@ if operation == "read":
     if text.startswith("\ufeff"):
         text = text[1:]
     text = normalize(text)
-    lines = text.splitlines(keepends=True)
+    lines = lf_lines(text)
     offset = min(payload["offset"], len(lines))
     selected_end = min(offset + payload["limit"], len(lines))
     content_parts = []
@@ -1657,6 +1709,25 @@ mod tests {
         assert!(result.truncated);
         assert_eq!(result.end_line, 1);
         assert_eq!(result.next_offset, Some(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metadata_preservation_does_not_require_recreating_a_foreign_owner() {
+        let dir = std::env::temp_dir().join(format!("nac-metadata-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file.txt");
+        let file = File::create(&path).unwrap();
+        let foreign_metadata = fs::metadata("/dev/null").unwrap();
+
+        preserve_metadata(&file, &foreign_metadata).unwrap();
+
+        let published_metadata = file.metadata().unwrap();
+        assert_eq!(
+            published_metadata.mode() & 0o7777,
+            foreign_metadata.mode() & 0o7777
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -2138,6 +2209,38 @@ mod tests {
     }
 
     #[test]
+    fn remote_read_matches_local_lf_only_pagination() {
+        use std::process::{Command, Stdio};
+
+        let dir = std::env::temp_dir().join(format!("nac-remote-read-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file.txt");
+        let bytes = "first\ronly\u{2028}same\nsecond\r\nthird".as_bytes();
+        fs::write(&path, bytes).unwrap();
+        let local = read_result("file.txt".into(), bytes, 1, 2).unwrap();
+        let payload = json!({
+            "operation": "read",
+            "path": "file.txt",
+            "resolved_path": path,
+            "offset": 1,
+            "limit": 2
+        });
+
+        let remote = run_python_protocol(&payload, &mut Command::new("python3"), Stdio::piped());
+        assert!(
+            remote.status.success(),
+            "{}",
+            String::from_utf8_lossy(&remote.stderr)
+        );
+        let remote: Value = serde_json::from_slice(&remote.stdout).unwrap();
+        assert_eq!(remote["content"], local.content);
+        assert_eq!(remote["start_line"], local.start_line);
+        assert_eq!(remote["end_line"], local.end_line);
+        assert_eq!(remote["next_offset"], json!(local.next_offset));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn remote_protocol_reads_and_applies_a_batched_edit() {
         use std::process::{Command, Stdio};
 
@@ -2210,6 +2313,48 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(fs::read(&path).unwrap(), b"alpha\r\nchanged\ngamma\r\n");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_metadata_preservation_does_not_require_recreating_a_foreign_owner() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        use std::process::Command;
+
+        let foreign_metadata = fs::metadata("/dev/null").unwrap();
+        if foreign_metadata.uid() == unsafe { libc::geteuid() } {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("nac-remote-metadata-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file.txt");
+        fs::write(&path, b"before").unwrap();
+        let definitions = REMOTE_MUTATION_SCRIPT
+            .split_once("payload = json.load(sys.stdin)")
+            .unwrap()
+            .0;
+        let script = format!(
+            "{definitions}\npath = Path(sys.argv[1])\nold_stat = os.stat('/dev/null')\n\
+             publish(path, True, b'after', old_stat, {{'new_revision': rev(b'after')}})\n"
+        );
+
+        let output = Command::new("python3")
+            .args(["-I", "-c", &script])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"after");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+            foreign_metadata.mode() & 0o7777
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
