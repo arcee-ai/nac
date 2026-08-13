@@ -1,7 +1,9 @@
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::collections::VecDeque;
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::Duration;
 
 use tokio::process::{Child, Command};
@@ -118,7 +120,7 @@ impl ProcessTreeGuard {
                 .root_pid
                 .filter(|root_pid| child.id() == Some(*root_pid as u32));
             if let Some(root_pid) = leader_pid {
-                signal_pids(&descendants_outside_group(root_pid, pgid), libc::SIGTERM);
+                signal_processes(&descendants_outside_group(root_pid, pgid), libc::SIGTERM);
 
                 let deadline = sleep(TERMINATE_GRACE);
                 tokio::pin!(deadline);
@@ -134,7 +136,7 @@ impl ProcessTreeGuard {
                     }
                 }
                 if child.id() == Some(root_pid as u32) {
-                    signal_pids(&descendants_outside_group(root_pid, pgid), libc::SIGKILL);
+                    signal_processes(&descendants_outside_group(root_pid, pgid), libc::SIGKILL);
                 }
             }
 
@@ -151,7 +153,7 @@ impl ProcessTreeGuard {
         // finish, then kill the child itself.
         #[cfg(unix)]
         if let Some(root_pid) = self.root_pid {
-            signal_pids(&descendant_pids(root_pid), libc::SIGKILL);
+            signal_processes(&descendant_processes(root_pid), libc::SIGKILL);
         }
 
         let _ = child.kill().await;
@@ -203,11 +205,11 @@ impl Drop for ProcessTreeGuard {
     }
 }
 #[cfg(unix)]
-fn descendants_outside_group(root: libc::pid_t, pgid: libc::pid_t) -> Vec<libc::pid_t> {
-    descendant_pids(root)
+fn descendants_outside_group(root: libc::pid_t, pgid: libc::pid_t) -> Vec<ProcessIdentity> {
+    descendant_processes(root)
         .into_iter()
-        .filter(|pid| {
-            let child_pgid = unsafe { libc::getpgid(*pid) };
+        .filter(|process| {
+            let child_pgid = unsafe { libc::getpgid(process.pid) };
             child_pgid > 0 && child_pgid != pgid
         })
         .collect()
@@ -226,49 +228,126 @@ pub async fn terminate_child_tree(child: &mut Child) {
 }
 
 #[cfg(unix)]
-pub(crate) fn descendant_pids(root: libc::pid_t) -> Vec<libc::pid_t> {
+pub(crate) fn descendant_processes(root: libc::pid_t) -> Vec<ProcessIdentity> {
     #[cfg(target_os = "macos")]
     {
         descendant_pids_macos(root)
+            .into_iter()
+            .map(|pid| ProcessIdentity { pid })
+            .collect()
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
-        descendant_pids_from_pairs(root, process_parent_pairs())
+        descendant_snapshots(root, process_snapshots())
+            .into_iter()
+            .filter_map(ProcessIdentity::capture)
+            .collect()
+    }
+
+    #[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
+    {
+        Vec::new()
     }
 }
 
 #[cfg(unix)]
-pub(crate) fn signal_pids(pids: &[libc::pid_t], signal: libc::c_int) {
-    for &pid in pids {
+pub(crate) fn signal_processes(processes: &[ProcessIdentity], signal: libc::c_int) {
+    for process in processes {
+        #[cfg(target_os = "linux")]
+        match &process.handle {
+            ProcessHandle::PidFd(pidfd) => unsafe {
+                libc::syscall(
+                    libc::SYS_pidfd_send_signal,
+                    pidfd.as_raw_fd(),
+                    signal,
+                    std::ptr::null::<libc::siginfo_t>(),
+                    0,
+                );
+            },
+            ProcessHandle::CheckedStartTime(start_time) => {
+                let stat = std::fs::read_to_string(format!("/proc/{}/stat", process.pid));
+                if stat
+                    .ok()
+                    .and_then(|stat| parse_process_stat(&stat))
+                    .is_some_and(|(_, current_start_time)| current_start_time == *start_time)
+                {
+                    unsafe {
+                        libc::kill(process.pid, signal);
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
         unsafe {
-            libc::kill(pid, signal);
+            libc::kill(process.pid, signal);
         }
     }
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn descendant_pids_from_pairs(
+#[cfg(target_os = "linux")]
+pub(crate) struct ProcessIdentity {
+    pid: libc::pid_t,
+    handle: ProcessHandle,
+}
+
+#[cfg(target_os = "linux")]
+enum ProcessHandle {
+    PidFd(OwnedFd),
+    CheckedStartTime(u64),
+}
+
+#[cfg(target_os = "linux")]
+impl ProcessIdentity {
+    fn capture(snapshot: ProcessSnapshot) -> Option<Self> {
+        let handle = match open_pidfd(snapshot.pid) {
+            Ok(pidfd) => ProcessHandle::PidFd(pidfd),
+            Err(_) => ProcessHandle::CheckedStartTime(snapshot.start_time),
+        };
+        let stat = std::fs::read_to_string(format!("/proc/{}/stat", snapshot.pid)).ok()?;
+        let (_, start_time) = parse_process_stat(&stat)?;
+        (start_time == snapshot.start_time).then_some(Self {
+            pid: snapshot.pid,
+            handle,
+        })
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+pub(crate) struct ProcessIdentity {
+    pid: libc::pid_t,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+struct ProcessSnapshot {
+    pid: libc::pid_t,
+    ppid: libc::pid_t,
+    start_time: u64,
+}
+
+#[cfg(target_os = "linux")]
+fn descendant_snapshots(
     root: libc::pid_t,
-    pairs: Vec<(libc::pid_t, libc::pid_t)>,
-) -> Vec<libc::pid_t> {
-    let mut children: HashMap<libc::pid_t, Vec<libc::pid_t>> = HashMap::new();
-    for (pid, ppid) in pairs {
-        children.entry(ppid).or_default().push(pid);
+    snapshots: Vec<ProcessSnapshot>,
+) -> Vec<ProcessSnapshot> {
+    let mut children: HashMap<libc::pid_t, Vec<ProcessSnapshot>> = HashMap::new();
+    for snapshot in snapshots {
+        children.entry(snapshot.ppid).or_default().push(snapshot);
     }
 
     let mut found = Vec::new();
     let mut queue = VecDeque::from([root]);
     while let Some(parent) = queue.pop_front() {
-        let Some(direct_children) = children.get(&parent) else {
+        let Some(direct_children) = children.remove(&parent) else {
             continue;
         };
-        for &child in direct_children {
-            if child <= 1 || found.contains(&child) {
+        for snapshot in direct_children {
+            if snapshot.pid <= 1 {
                 continue;
             }
-            found.push(child);
-            queue.push_back(child);
+            queue.push_back(snapshot.pid);
+            found.push(snapshot);
         }
     }
     found
@@ -317,10 +396,10 @@ fn direct_child_pids_macos(parent: libc::pid_t) -> Vec<libc::pid_t> {
 }
 
 #[cfg(target_os = "linux")]
-fn process_parent_pairs() -> Vec<(libc::pid_t, libc::pid_t)> {
-    let mut pairs = Vec::new();
+fn process_snapshots() -> Vec<ProcessSnapshot> {
+    let mut processes = Vec::new();
     let Ok(entries) = std::fs::read_dir("/proc") else {
-        return pairs;
+        return processes;
     };
     for entry in entries.flatten() {
         let Some(pid) = entry
@@ -333,25 +412,36 @@ fn process_parent_pairs() -> Vec<(libc::pid_t, libc::pid_t)> {
         let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
             continue;
         };
-        let Some((_, rest)) = stat.rsplit_once(") ") else {
+        let Some((ppid, start_time)) = parse_process_stat(&stat) else {
             continue;
         };
-        let mut fields = rest.split_whitespace();
-        let _state = fields.next();
-        let Some(ppid) = fields
-            .next()
-            .and_then(|value| value.parse::<libc::pid_t>().ok())
-        else {
-            continue;
-        };
-        pairs.push((pid, ppid));
+        processes.push(ProcessSnapshot {
+            pid,
+            ppid,
+            start_time,
+        });
     }
-    pairs
+    processes
 }
 
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-fn process_parent_pairs() -> Vec<(libc::pid_t, libc::pid_t)> {
-    Vec::new()
+#[cfg(target_os = "linux")]
+fn parse_process_stat(stat: &str) -> Option<(libc::pid_t, u64)> {
+    let (_, rest) = stat.rsplit_once(") ")?;
+    let mut fields = rest.split_whitespace();
+    let _state = fields.next()?;
+    let ppid = fields.next()?.parse().ok()?;
+    let start_time = fields.nth(17)?.parse().ok()?;
+    Some((ppid, start_time))
+}
+
+#[cfg(target_os = "linux")]
+fn open_pidfd(pid: libc::pid_t) -> std::io::Result<OwnedFd> {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as libc::c_int };
+    if fd < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -359,6 +449,64 @@ mod tests {
     use super::*;
     use std::os::unix::process::CommandExt;
     use std::process::Stdio;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn signaling_uses_captured_process_identity_instead_of_numeric_pid() {
+        let mut exited = std::process::Command::new("/bin/true").spawn().unwrap();
+        let exited_pid = exited.id() as libc::pid_t;
+        let Ok(pidfd) = open_pidfd(exited_pid) else {
+            exited.wait().unwrap();
+            return;
+        };
+        exited.wait().unwrap();
+
+        let mut sentinel = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let identity = ProcessIdentity {
+            pid: sentinel.id() as libc::pid_t,
+            handle: ProcessHandle::PidFd(pidfd),
+        };
+
+        signal_processes(&[identity], libc::SIGKILL);
+
+        assert!(
+            sentinel.try_wait().unwrap().is_none(),
+            "signaling followed the numeric PID instead of the captured process identity"
+        );
+        sentinel.kill().unwrap();
+        sentinel.wait().unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fallback_signaling_skips_a_mismatched_process_identity() {
+        let mut sentinel = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let identity = ProcessIdentity {
+            pid: sentinel.id() as libc::pid_t,
+            handle: ProcessHandle::CheckedStartTime(u64::MAX),
+        };
+
+        signal_processes(&[identity], libc::SIGKILL);
+
+        assert!(sentinel.try_wait().unwrap().is_none());
+        sentinel.kill().unwrap();
+        sentinel.wait().unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_parent_and_start_time_from_proc_stat() {
+        let stat =
+            "123 (command with ) parens) S 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23";
+
+        assert_eq!(parse_process_stat(stat), Some((4, 22)));
+    }
 
     #[test]
     fn isolated_descendant_helper() {
