@@ -1,10 +1,3 @@
-//! Orchestrator transcript log — the DB-direct transcript workset
-//! (research/guidance-persistence). Step 1 landed these primitives plus the
-//! guards below; step 2 wired the agent loop to them (every orchestrator
-//! message is appended here when it enters `Agent.messages`); step 3 made
-//! the read paths store-backed; step 4 made the log the ONLY growing
-//! transcript store (never-fold — see below).
-//!
 //! # Storage
 //!
 //! The orchestrator transcript is an append-only log in the existing
@@ -55,19 +48,17 @@
 //! - The log's first row is not necessarily index 0: initial system prompts
 //!   enter the vector before logging and are carried by the snapshot blob.
 //!
-//! # Load path (step 2)
+//! # Load path
 //!
 //! Session restore is blob ++ log: the snapshot blob is authoritative for
-//! `[0, blob_len)`, log rows with `idx >= blob_len` are the tail. Under
-//! step 2-3's dual-write the tail was only a crashed run's rows (run end
-//! folded it into the blob); since step 4 (never-fold) the tail is every
-//! message after the write-once blob. An empty tail is exactly the pre-log
-//! behavior. After the merge, `truncate_incomplete_tool_turn` trims
+//! `[0, blob_len)`, and log rows with `idx >= blob_len` are the tail containing
+//! every message after the write-once blob. After the merge,
+//! `truncate_incomplete_tool_turn` trims
 //! a dangling tool turn from the restored transcript and `delete_from`
 //! removes the matching log tail (crash normalization). The session cancel
 //! path performs the same normalization before appending its marker.
 //!
-//! # Store-backed read paths (step 3)
+//! # Store-backed read paths
 //!
 //! The session service reads the transcript as blob ++ log ALWAYS (frontend
 //! snapshots, message pages, steering coverage, message-cycle metadata), so
@@ -79,7 +70,7 @@
 //! tail row is a visible message, which keeps the visible↔raw index mapping
 //! a constant offset (`blob_visible = blob_len - system_head_len`).
 //!
-//! # Run end and summaries (step 4 — never-fold)
+//! # Run end and summaries (never-fold)
 //!
 //! Run end performs NO `messages_json` rewrite: the snapshot blob is
 //! write-once (the system head ++ the legacy prefix a resumed session
@@ -91,12 +82,12 @@
 //! the same transaction as the log rows, while tail truncation rebuilds them
 //! from blob ++ remaining log. The polling read path therefore never scans
 //! transcript history. DOWNGRADE CAVEAT (accepted by the user): a build older
-//! than the transcript-log workset reads only `messages_json`, so it shows
+//! than the transcript log reads only `messages_json`, so it shows
 //! this store's history truncated to the head/legacy prefix — invisibility,
 //! not corruption; the log rows are untouched and a current build reads the
 //! full transcript again.
 //!
-//! # Guards (landed with step 1)
+//! # Guards
 //!
 //! 1. `load_all_thread_events` / `load_thread_events_page` exclude
 //!    `__orchestrator__` rows in SQL (thread_events.rs), so transcript rows

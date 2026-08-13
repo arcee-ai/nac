@@ -1,5 +1,3 @@
-/* Ported from ArceeFM ChatResponse/index.css — prose for model replies. */
-
 .chat-response {
   will-change: auto;
   backface-visibility: hidden;
@@ -7,7 +5,6 @@
   transform: translateZ(0);
 }
 
-/* Streaming animation for paragraphs, list items, and headers */
 .chat-response.streaming p,
 .chat-response.streaming li,
 .chat-response.streaming h1,

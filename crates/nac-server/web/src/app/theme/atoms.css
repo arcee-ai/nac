@@ -1,7 +1,4 @@
-/* Atom styles ported from ArceeFM (button/index.css, input/index.css) with
-   @apply resolved to concrete values. Colours use design tokens directly.
-   The size matrix is generalized to size+content (variant-agnostic) since the
-   values are identical across variants (plus a secondary large-icon override). */
+/* Shared icon, button, input, and tooltip atom styles. */
 
 /* ============================ ICON ============================ */
 .icon { display: block; }

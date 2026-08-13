@@ -7,13 +7,9 @@ pub(super) async fn execute_tools_parallel(
     event_sink: EventSink,
     thread_name: Option<String>,
 ) -> Vec<(String, String, ToolResult)> {
-    // 1. Partition tool calls into thread dispatches, non-thread calls, and
-    //    parse errors.
     let (thread_dispatches, other_calls, parse_errors) =
         dag::partition_tool_calls(tool_calls, &runtime);
 
-    // 2. If there are no thread dispatches, use the simple path — just spawn
-    //    all non-thread calls into a JoinSet, same as the original logic.
     if thread_dispatches.is_empty() {
         return execute_simple(
             other_calls,
@@ -26,13 +22,9 @@ pub(super) async fn execute_tools_parallel(
         .await;
     }
 
-    // 3. Build the DAG from thread dispatches.
     let dag = match dag::build_dag(&thread_dispatches) {
         Ok(d) => d,
         Err(dag_err) => {
-            // DAG construction failed (cycle or duplicate names).  Execute
-            // non-thread tools normally and return error ToolResults for all
-            // thread calls.
             return execute_with_dag_error(
                 thread_dispatches,
                 other_calls,
@@ -49,7 +41,6 @@ pub(super) async fn execute_tools_parallel(
         }
     };
 
-    // 4. Execute with the DAG coordinator.
     dag::execute_with_dag(
         thread_dispatches,
         other_calls,
@@ -114,9 +105,7 @@ async fn spawn_and_collect_non_thread(
     results
 }
 
-/// Simple execution path: no thread dispatches, just non-thread tools and parse
-/// errors.  Preserves the original `execute_tools_parallel` behavior for the
-/// common case.
+/// Executes non-thread tools and collects parse errors when there are no thread dispatches.
 async fn execute_simple(
     other_calls: Vec<(usize, String, String, String)>,
     parse_errors: Vec<(usize, String, String, ToolResult)>,
@@ -127,14 +116,12 @@ async fn execute_simple(
 ) -> Vec<(String, String, ToolResult)> {
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
-    // Collect parse errors immediately (emit start + finish events for each).
     all_results.extend(dag::collect_parse_errors(
         parse_errors,
         &event_sink,
         &thread_name,
     ));
 
-    // Execute non-thread calls.
     let non_thread_results =
         spawn_and_collect_non_thread(other_calls, &runtime, &client, &event_sink, &thread_name)
             .await;
@@ -164,14 +151,12 @@ async fn execute_with_dag_error(
 
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
-    // Collect parse errors immediately.
     all_results.extend(dag::collect_parse_errors(
         parse_errors,
         &event_sink,
         &thread_name,
     ));
 
-    // Produce error ToolResults for all thread dispatches.
     let error_message = match &dag_err {
         dag::DagError::DuplicateName(name) => {
             format!("Duplicate thread name '{}' in parallel dispatch", name)
@@ -208,7 +193,6 @@ async fn execute_with_dag_error(
         ));
     }
 
-    // Execute non-thread calls normally.
     let non_thread_results =
         spawn_and_collect_non_thread(other_calls, &runtime, &client, &event_sink, &thread_name)
             .await;
@@ -224,10 +208,6 @@ mod tests {
     use crate::types::FunctionCall;
     use serde_json::json;
 
-    // ------------------------------------------------------------------
-    // Test helpers
-    // ------------------------------------------------------------------
-
     fn make_tool_call(id: &str, name: &str, args: serde_json::Value) -> ToolCall {
         ToolCall {
             id: id.to_string(),
@@ -238,10 +218,6 @@ mod tests {
             },
         }
     }
-
-    // ------------------------------------------------------------------
-    // Integration tests
-    // ------------------------------------------------------------------
 
     /// When there are no thread calls, the simple path executes non-thread
     /// tools and returns results sorted by original index.
