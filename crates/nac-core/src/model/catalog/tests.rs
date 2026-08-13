@@ -447,25 +447,14 @@ fn hand_seeded_arcee_and_codex_entries_carry_documented_values() {
         }
     }
 
-    let arcee_cases = [
-        (
-            "trinity-large-thinking",
-            "Trinity-Large-Thinking",
-            80_000,
-            0.25,
-            0.80,
-            true,
-        ),
-        ("trinity-mini", "Trinity-Mini", 16_384, 0.045, 0.15, false),
-        (
-            "trinity-large-preview",
-            "Trinity-Large-Preview",
-            16_384,
-            0.45,
-            0.15,
-            false,
-        ),
-    ];
+    let arcee_cases = [(
+        "trinity-large-thinking",
+        "Trinity-Large-Thinking",
+        80_000,
+        0.25,
+        0.80,
+        true,
+    )];
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         for (id, display_name, max_tokens, input, output, reasoning) in &arcee_cases {
             let metadata = resolve(backend, id);
@@ -538,7 +527,7 @@ fn arcee_third_party_models_are_seeded_with_real_limits() {
         }
     }
     // Spot-check the family differences: deepseek tops out at max, kimi has
-    // no `none` (thinking is always enabled), minimax is a none/max toggle.
+    // no `none` (thinking is always enabled).
     let flash = resolve(BackendKind::ArceeAuth, "deepseek/deepseek-v4-flash-latest");
     assert_eq!(
         flash.thinking_level_map.wire_value(ReasoningEffort::Max),
@@ -546,11 +535,6 @@ fn arcee_third_party_models_are_seeded_with_real_limits() {
     );
     let kimi = resolve(BackendKind::ArceeAuth, "moonshotai/kimi-k3");
     assert_eq!(kimi.thinking_level_map.wire_value(ReasoningEffort::None), None);
-    let minimax = resolve(BackendKind::ArceeAuth, "minimaxai/minimax-m3");
-    assert_eq!(
-        minimax.thinking_level_map.wire_value(ReasoningEffort::High),
-        None
-    );
 }
 
 #[test]
@@ -680,7 +664,7 @@ fn generated_entries_satisfy_catalog_invariants() {
     // Snapshot pin: 79 agent-compatible generated models plus 21 hand-seeded
     // entries (2 deprecated deepseek models removed). Drift fails loudly here
     // at regen/seed-edit time, forcing a deliberate review.
-    assert_eq!(entry_count, 100, "catalog model count drifted");
+    assert_eq!(entry_count, 94, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -1176,7 +1160,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 100, "catalog model count drifted");
+    assert_eq!(total, 94, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks
@@ -1203,7 +1187,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
             .iter()
             .find(|provider| provider.id == backend)
             .unwrap();
-        assert_eq!(provider.models.len(), 8, "{backend}");
+        assert_eq!(provider.models.len(), 5, "{backend}");
         assert!(
             provider
                 .models

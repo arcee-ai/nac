@@ -348,7 +348,7 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
 
     // Third-party models always produce reasoning_content (confirmed via API
     // testing); the `supported_features` field is null for some of them
-    // (minimax-m3, kimi-k3, deepseek-v4-flash-latest), so the features check
+    // (kimi-k3, deepseek-v4-flash-latest), so the features check
     // alone is unreliable. Any model with a third-party effort map reasons.
     let reasoning = third_party_map.is_some()
         || model
