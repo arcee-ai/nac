@@ -465,6 +465,9 @@ pub(super) fn merge_arcee_overlay(
         if entry.model.max_tokens == super::FALLBACK_MAX_TOKENS {
             entry.model.max_tokens = arcee_max_tokens_fallback(&entry.id);
         }
+        // Same cap as `map_arcee_model`: a stale or sparse cache entry must
+        // never carry max_tokens above its context window.
+        entry.model.max_tokens = entry.model.max_tokens.min(entry.model.context_window);
         models.insert(entry.id.clone(), entry.model);
     }
 
