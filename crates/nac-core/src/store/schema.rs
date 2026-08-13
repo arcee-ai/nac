@@ -1,10 +1,11 @@
 use super::*;
 
-// 12 carries the same schema as 11 (which added episodes.status; 10 added the
-// ssh_configurations table; 9 the per-session ssh port and key columns): 12
-// was claimed by a since-removed migration of an intermediate branch revision,
-// so it stays burned rather than reused for something different.
-const STORE_SCHEMA_VERSION: i64 = 12;
+// 13 adds the light-model columns (`light_model_json` on both `sessions` and
+// `model_configurations`) — `open_runtime_connection` returns early whenever
+// the stored version already equals this one. (12 carries the same schema as
+// 11, which added episodes.status; 10 added the ssh_configurations table; 9
+// the per-session ssh port and key columns.)
+const STORE_SCHEMA_VERSION: i64 = 13;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -141,10 +142,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -190,6 +191,9 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "status",
         "TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error', 'timed_out', 'cancelled'))",
     )?;
+    // Light worker model; NULL keeps single-model behavior, so legacy rows
+    // load unchanged.
+    ensure_column(&transaction, "sessions", "light_model_json", "TEXT")?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -208,6 +212,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER CHECK (transcript_len IS NULL OR transcript_len >= 0)",
     )?;
     create_model_configurations_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "model_configurations",
+        "light_model_json",
+        "TEXT",
+    )?;
     create_ssh_configurations_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
@@ -231,9 +241,9 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              session_id TEXT NOT NULL,
              action TEXT NOT NULL,
              content TEXT NOT NULL,
+             created_at TEXT NOT NULL,
              status TEXT NOT NULL DEFAULT 'ok'
                  CHECK (status IN ('ok', 'error', 'timed_out', 'cancelled')),
-             created_at TEXT NOT NULL,
              FOREIGN KEY (thread_name, session_id) REFERENCES threads(name, session_id)
          );
          CREATE TABLE IF NOT EXISTS worksets (

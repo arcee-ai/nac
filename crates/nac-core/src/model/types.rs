@@ -108,6 +108,39 @@ impl ReasoningEffort {
     }
 }
 
+/// Weight class the orchestrator assigns to a thread dispatch when a light
+/// model is configured. Light dispatches run the light model; heavy
+/// dispatches run the orchestrator's own model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DispatchWeight {
+    Light,
+    Heavy,
+}
+
+impl DispatchWeight {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Heavy => "heavy",
+        }
+    }
+}
+
+impl std::str::FromStr for DispatchWeight {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "light" => Ok(Self::Light),
+            "heavy" => Ok(Self::Heavy),
+            other => Err(format!(
+                "unsupported weight '{other}'; select one of: light, heavy"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveModelSettings {
     pub(crate) backend: BackendKind,
