@@ -83,7 +83,6 @@ curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall
   - [Catalog and cost](docs/configuration/catalog.md)
   - [Providers and logins](docs/configuration/credentials.md)
 - [HTTP API](docs/api/http.md)
-  - [Session Events](docs/api/http.md#session-events)
 - [Model request security](docs/security/model-requests.md)
 
 ## Contributing
