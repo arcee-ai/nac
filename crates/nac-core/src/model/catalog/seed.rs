@@ -35,13 +35,15 @@ fn levels(entries: &[(ReasoningEffort, &str)]) -> ThinkingLevelMap {
     )
 }
 
-/// deepseek-chat: none/low/high/xhigh; xhigh is the wire-level tier `max`.
+/// deepseek-chat: none/low/high/max — the V4 API's real effort levels
+/// (official docs: medium→high and xhigh→high are compatibility aliases,
+/// not offered as distinct tiers).
 fn deepseek_levels() -> ThinkingLevelMap {
     levels(&[
         (ReasoningEffort::None, "none"),
         (ReasoningEffort::Low, "low"),
         (ReasoningEffort::High, "high"),
-        (ReasoningEffort::Xhigh, "max"),
+        (ReasoningEffort::Max, "max"),
     ])
 }
 

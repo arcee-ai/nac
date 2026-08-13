@@ -118,7 +118,7 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     assert_eq!(entry["context_window"], 999_000);
     assert_eq!(entry["max_tokens"], 77_000);
     // The thinking map derives from the deepseek seed default (the matrix row).
-    assert_eq!(entry["thinking_level_map"]["xhigh"], "max");
+    assert_eq!(entry["thinking_level_map"]["max"], "max");
     let generated_at = written["generated_at"].as_str().unwrap();
     assert!(is_utc_iso8601(generated_at), "{generated_at}");
     let baseline_generated_at = data::parse_manifest().unwrap().generated_at;
@@ -152,7 +152,7 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     assert_eq!(
         metadata
             .thinking_level_map
-            .wire_value(ReasoningEffort::Xhigh),
+            .wire_value(ReasoningEffort::Max),
         Some("max")
     );
     assert!(metadata

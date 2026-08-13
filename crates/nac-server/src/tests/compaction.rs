@@ -679,9 +679,9 @@ async fn manager_attached_during_external_compaction_refreshes_before_next_run()
         .get("session")
         .cloned()
         .unwrap();
-    assert!(Arc::ptr_eq(&cached_b, &current_b));
+    assert!(Arc::ptr_eq(&current_b, &cached_b));
     tokio::time::timeout(Duration::from_secs(2), async {
-        while cached_b.has_active_operation() {
+        while current_b.has_active_operation() {
             tokio::task::yield_now().await;
         }
     })

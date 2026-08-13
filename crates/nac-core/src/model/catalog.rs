@@ -26,11 +26,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 
+mod anthropic_overlay;
+mod arcee_overlay;
 mod auth_status;
 #[cfg(test)]
 mod auth_status_tests;
-mod anthropic_overlay;
-mod arcee_overlay;
 mod data;
 mod overlay;
 #[cfg(test)]
@@ -454,14 +454,7 @@ pub fn api_listing() -> ModelListing {
                 models: provider_catalog
                     .models
                     .values()
-                    .filter(|metadata| {
-                        matches!(
-                            metadata.source,
-                            ModelSource::Baseline
-                                | ModelSource::Overlay
-                                | ModelSource::UserOverride
-                        )
-                    })
+                    .filter(|metadata| metadata.source.is_authoritative())
                     .map(|metadata| ModelEntry {
                         id: metadata.id.clone(),
                         display_name: metadata.display_name.clone(),

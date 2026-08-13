@@ -396,26 +396,32 @@ fn parse_pricing_rate(value: Option<&str>) -> f64 {
 /// Effort map for known arcee passthrough models. The arcee API's
 /// `supported_reasoning_efforts` is always null, so the API-derived map is
 /// always empty. These models pass through to the same underlying models
-/// served by Fireworks/Together, and the arcee API accepts `reasoning_effort`
-/// for all of them (confirmed via API testing). The maps match the union of
-/// Fireworks/Together effort levels for each model.
+/// served by Fireworks/Together, but the arcee API accepts only a subset of
+/// the effort levels that the upstream providers accept (confirmed via API
+/// testing). The maps reflect what the arcee API actually honors.
 ///
 /// Returns `None` for unknown models and trinity-large-thinking (arcee's own
 /// model, which rejects all `reasoning_effort` values).
 fn passthrough_effort_map(model_id: &str) -> Option<super::ThinkingLevelMap> {
     let entries: &[(ReasoningEffort, &str)] = match model_id {
-        "deepseek-ai/deepseek-v4-pro" | "deepseek/deepseek-v4-flash-latest" | "zai-org/glm-5.2" => &[
+        "deepseek-ai/deepseek-v4-pro" | "deepseek/deepseek-v4-flash-latest" => &[
             (ReasoningEffort::None, "none"),
-            (ReasoningEffort::Low, "low"),
-            (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
-            (ReasoningEffort::Xhigh, "max"),
+            (ReasoningEffort::Max, "max"),
         ],
-        "moonshotai/kimi-k3" | "minimaxai/minimax-m3" => &[
+        "zai-org/glm-5.2" => &[
             (ReasoningEffort::None, "none"),
-            (ReasoningEffort::Low, "low"),
-            (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Max, "max"),
+        ],
+        "moonshotai/kimi-k3" => &[
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Max, "max"),
+        ],
+        "minimaxai/minimax-m3" => &[
+            (ReasoningEffort::None, "none"),
+            (ReasoningEffort::Max, "max"),
         ],
         _ => return None,
     };

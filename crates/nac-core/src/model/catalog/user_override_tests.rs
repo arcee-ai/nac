@@ -49,7 +49,7 @@ fn user_override_patches_an_exact_model() {
     assert_eq!(
         metadata
             .thinking_level_map
-            .wire_value(ReasoningEffort::Xhigh),
+            .wire_value(ReasoningEffort::Max),
         Some("max")
     );
 }
