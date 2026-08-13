@@ -313,14 +313,18 @@ pub(super) fn map_arcee_api_response(body: &str) -> Result<Vec<ArceeOverlayEntry
 }
 
 fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
+    // Known third-party models fall back to their seeded limits when the API
+    // record omits them, so pre- and post-overlay values agree.
+    let seed_limits = super::seed::third_party_seed_limits(&model.id);
     let context_window = model
         .context_length
         .filter(|&c| c > 0)
+        .or(seed_limits.map(|(context, _)| context))
         .unwrap_or(super::FALLBACK_CONTEXT_WINDOW);
     let max_tokens = model
         .max_output_length
         .filter(|&m| m > 0)
-        .unwrap_or_else(|| arcee_max_tokens_fallback(&model.id, context_window));
+        .unwrap_or_else(|| arcee_max_tokens_fallback(&model.id));
     let max_tokens = max_tokens.min(context_window);
 
     let pricing = model.pricing.as_ref();
@@ -331,22 +335,22 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
         cache_write: parse_pricing_rate(pricing.and_then(|p| p.input_cache_writes.as_deref())),
     };
 
-    // Known passthrough models get a hardcoded effort map matching the
+    // Known third-party models get a hardcoded effort map matching the
     // underlying model's capabilities (the arcee API's
     // `supported_reasoning_efforts` is always null, so the API-derived map
     // is always empty). Unknown models and trinity-large-thinking fall back
     // to the API-derived map (empty), so validation rejects every explicit
     // effort for them.
-    let passthrough_map = passthrough_effort_map(&model.id);
-    let thinking_level_map = passthrough_map
+    let third_party_map = super::seed::third_party_effort_map(&model.id);
+    let thinking_level_map = third_party_map
         .clone()
         .unwrap_or_else(|| map_reasoning_efforts(model.supported_reasoning_efforts.as_deref()));
 
-    // Passthrough models always produce reasoning_content (confirmed via API
+    // Third-party models always produce reasoning_content (confirmed via API
     // testing); the `supported_features` field is null for some of them
     // (minimax-m3, kimi-k3, deepseek-v4-flash-latest), so the features check
-    // alone is unreliable. Any model with a passthrough effort map reasons.
-    let reasoning = passthrough_map.is_some()
+    // alone is unreliable. Any model with a third-party effort map reasons.
+    let reasoning = third_party_map.is_some()
         || model
             .supported_features
             .as_ref()
@@ -369,13 +373,12 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
     }
 }
 
-fn arcee_max_tokens_fallback(model_id: &str, context_window: u64) -> u64 {
+fn arcee_max_tokens_fallback(model_id: &str) -> u64 {
     match model_id {
         "trinity-large-thinking" => 80_000,
-        id if passthrough_effort_map(id).is_some() => {
-            262_144.min((context_window / 2).max(1))
-        }
-        _ => super::FALLBACK_MAX_TOKENS,
+        id => super::seed::third_party_seed_limits(id)
+            .map(|(_, max_tokens)| max_tokens)
+            .unwrap_or(super::FALLBACK_MAX_TOKENS),
     }
 }
 
@@ -391,46 +394,6 @@ fn parse_pricing_rate(value: Option<&str>) -> f64 {
     } else {
         per_million
     }
-}
-
-/// Effort map for known arcee passthrough models. The arcee API's
-/// `supported_reasoning_efforts` is always null, so the API-derived map is
-/// always empty. These models pass through to the same underlying models
-/// served by Fireworks/Together, but the arcee API accepts only a subset of
-/// the effort levels that the upstream providers accept (confirmed via API
-/// testing). The maps reflect what the arcee API actually honors.
-///
-/// Returns `None` for unknown models and trinity-large-thinking (arcee's own
-/// model, which rejects all `reasoning_effort` values).
-fn passthrough_effort_map(model_id: &str) -> Option<super::ThinkingLevelMap> {
-    let entries: &[(ReasoningEffort, &str)] = match model_id {
-        "deepseek-ai/deepseek-v4-pro" | "deepseek/deepseek-v4-flash-latest" => &[
-            (ReasoningEffort::None, "none"),
-            (ReasoningEffort::High, "high"),
-            (ReasoningEffort::Max, "max"),
-        ],
-        "zai-org/glm-5.2" => &[
-            (ReasoningEffort::None, "none"),
-            (ReasoningEffort::High, "high"),
-            (ReasoningEffort::Max, "max"),
-        ],
-        "moonshotai/kimi-k3" => &[
-            (ReasoningEffort::Low, "low"),
-            (ReasoningEffort::High, "high"),
-            (ReasoningEffort::Max, "max"),
-        ],
-        "minimaxai/minimax-m3" => &[
-            (ReasoningEffort::None, "none"),
-            (ReasoningEffort::Max, "max"),
-        ],
-        _ => return None,
-    };
-    Some(super::ThinkingLevelMap(
-        entries
-            .iter()
-            .map(|(effort, wire)| (*effort, Some((*wire).to_string())))
-            .collect(),
-    ))
 }
 
 /// Map the API's `supported_reasoning_efforts` array to a
@@ -500,8 +463,7 @@ pub(super) fn merge_arcee_overlay(
     let mut models = BTreeMap::new();
     for mut entry in entries {
         if entry.model.max_tokens == super::FALLBACK_MAX_TOKENS {
-            entry.model.max_tokens =
-                arcee_max_tokens_fallback(&entry.id, entry.model.context_window);
+            entry.model.max_tokens = arcee_max_tokens_fallback(&entry.id);
         }
         models.insert(entry.id.clone(), entry.model);
     }

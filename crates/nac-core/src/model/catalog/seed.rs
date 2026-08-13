@@ -17,7 +17,9 @@
 //! standard OpenAI API's 1.05M for the same GPT-5.6 models; max output
 //! tokens and pricing match the models.dev openai baseline. Every entry's
 //! thinking map still matches the provider's matrix behavior exactly —
-//! codex all-levels verbatim, arcee rejects every explicit effort.
+//! codex all-levels verbatim, arcee rejects every explicit effort except on
+//! the seeded third-party models (whose maps come from
+//! [`ARCEE_THIRD_PARTY_SEED_MODELS`]).
 
 use super::{
     api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelCostRates, ModelMetadata,
@@ -236,6 +238,107 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
     ]
 }
 
+/// Effort tiers for the seeded arcee third-party models. The arcee API's
+/// `supported_reasoning_efforts` is always null, so the API-derived map is
+/// always empty; these tiers are what the arcee API actually honors for each
+/// model family (confirmed via API testing, PR #128): deepseek/glm take
+/// none/high/max, kimi low/high/max (thinking is always enabled), minimax
+/// none/max (a thinking toggle, not graduated efforts).
+const THIRD_PARTY_NONE_HIGH_MAX_LEVELS: &[(ReasoningEffort, &str)] = &[
+    (ReasoningEffort::None, "none"),
+    (ReasoningEffort::High, "high"),
+    (ReasoningEffort::Max, "max"),
+];
+const THIRD_PARTY_LOW_HIGH_MAX_LEVELS: &[(ReasoningEffort, &str)] = &[
+    (ReasoningEffort::Low, "low"),
+    (ReasoningEffort::High, "high"),
+    (ReasoningEffort::Max, "max"),
+];
+const THIRD_PARTY_NONE_MAX_LEVELS: &[(ReasoningEffort, &str)] = &[
+    (ReasoningEffort::None, "none"),
+    (ReasoningEffort::Max, "max"),
+];
+
+/// One seeded arcee third-party model.
+pub(super) struct ThirdPartySeedModel {
+    /// Model id exactly as the arcee API lists it.
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub context_window: u64,
+    pub max_tokens: u64,
+    /// Effort levels the arcee API honors for this model (see the tier
+    /// consts above).
+    pub efforts: &'static [(ReasoningEffort, &'static str)],
+}
+
+/// The seeded arcee third-party lineup. This table is the single source of
+/// truth for the class: the seed catalog registers these entries, the arcee
+/// overlay derives effort maps and fallback limits from it, and the catalog
+/// tests read it (including the pre-S4 validation-matrix exemption).
+///
+/// To release a new model or drop an old one, add or remove a row here —
+/// that one edit is complete. Limits follow the underlying models' published
+/// values (max output capped at 256k); pricing is unpublished (zero =
+/// unknown) and arrives with the live overlay.
+pub(super) const ARCEE_THIRD_PARTY_SEED_MODELS: &[ThirdPartySeedModel] = &[
+    ThirdPartySeedModel {
+        id: "deepseek/deepseek-v4-flash-latest",
+        display_name: "DeepSeek-V4-Flash",
+        context_window: 1_000_000,
+        max_tokens: 262_144,
+        efforts: THIRD_PARTY_NONE_HIGH_MAX_LEVELS,
+    },
+    ThirdPartySeedModel {
+        id: "deepseek-ai/deepseek-v4-pro",
+        display_name: "DeepSeek-V4-Pro",
+        context_window: 1_000_000,
+        max_tokens: 262_144,
+        efforts: THIRD_PARTY_NONE_HIGH_MAX_LEVELS,
+    },
+    ThirdPartySeedModel {
+        id: "zai-org/glm-5.2",
+        display_name: "GLM-5.2",
+        context_window: 524_288,
+        max_tokens: 164_000,
+        efforts: THIRD_PARTY_NONE_HIGH_MAX_LEVELS,
+    },
+    ThirdPartySeedModel {
+        id: "moonshotai/kimi-k3",
+        display_name: "Kimi-K3",
+        context_window: 1_048_576,
+        max_tokens: 131_072,
+        efforts: THIRD_PARTY_LOW_HIGH_MAX_LEVELS,
+    },
+    ThirdPartySeedModel {
+        id: "minimaxai/minimax-m3",
+        display_name: "MiniMax-M3",
+        context_window: 524_288,
+        max_tokens: 250_000,
+        efforts: THIRD_PARTY_NONE_MAX_LEVELS,
+    },
+];
+
+/// Effort map for a known arcee third-party model, looked up from
+/// [`ARCEE_THIRD_PARTY_SEED_MODELS`]. Returns `None` for unknown models and
+/// trinity-large-thinking (arcee's own model, which rejects all
+/// `reasoning_effort` values).
+pub(super) fn third_party_effort_map(model_id: &str) -> Option<ThinkingLevelMap> {
+    ARCEE_THIRD_PARTY_SEED_MODELS
+        .iter()
+        .find(|model| model.id == model_id)
+        .map(|model| levels(model.efforts))
+}
+
+/// Seeded (context window, max output) for a known arcee third-party model.
+/// The arcee overlay falls back to these when the API record omits the
+/// fields, so pre- and post-overlay limits agree for the same model.
+pub(super) fn third_party_seed_limits(model_id: &str) -> Option<(u64, u64)> {
+    ARCEE_THIRD_PARTY_SEED_MODELS
+        .iter()
+        .find(|model| model.id == model_id)
+        .map(|model| (model.context_window, model.max_tokens))
+}
+
 /// Arcee known models (shared by arcee-auth and arcee-api): the Trinity
 /// lineup from Arcee's own docs (docs.arcee.ai/get-started/models-overview
 /// and /pricing). `trinity-large-thinking` is the documented hosted API id
@@ -248,9 +351,15 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
 /// conservative fallback. Cache pricing is undocumented (zero = unknown).
 /// Effort maps stay empty for the Trinity models: trinity-large-thinking
 /// always reasons (no effort knob), and the non-thinking variants accept no
-/// reasoning control. The Arcee passthrough models (deepseek-v4-pro, glm-5.2,
-/// etc.) get their effort maps from the arcee overlay's
-/// `passthrough_effort_map`. `reasoning` marks the thinking variant's
+/// reasoning control. The Arcee third-party models (deepseek-v4-pro, glm-5.2,
+/// etc.) are seeded too — from [`ARCEE_THIRD_PARTY_SEED_MODELS`], which the
+/// arcee overlay also reads — so the frontend's default pick resolves real
+/// limits even before the live overlay loads; without a seed entry they fall
+/// through to the provider `_default` clone and requests go out with the 16k
+/// fallback max_tokens (issue #124). Their limits follow the underlying
+/// models' published values (max output capped at 256k); third-party pricing
+/// is unpublished (zero = unknown). The overlay still upgrades every field
+/// once live data arrives. `reasoning` marks the thinking variant's
 /// reasoning_content output.
 fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
     let model =
@@ -271,7 +380,24 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
                 ),
             )
         };
-    vec![
+    let third_party = |seed: &ThirdPartySeedModel| {
+        seeded_model(
+            provider,
+            seed.id,
+            seed.display_name,
+            seed.context_window,
+            seed.max_tokens,
+            rates(0.0, 0.0, 0.0, 0.0),
+            true,
+            levels(seed.efforts),
+            completions_compat(
+                Some(CompletionsThinkingFormat::Arcee),
+                "reasoning_content",
+                Some(0.0),
+            ),
+        )
+    };
+    let mut models = vec![
         model(
             "trinity-large-thinking",
             "Trinity-Large-Thinking",
@@ -293,7 +419,9 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
             rates(0.45, 0.15, 0.0, 0.0),
             false,
         ),
-    ]
+    ];
+    models.extend(ARCEE_THIRD_PARTY_SEED_MODELS.iter().map(third_party));
+    models
 }
 
 pub(super) fn seed_catalog() -> ModelCatalog {
@@ -433,7 +561,7 @@ pub(super) fn seed_catalog() -> ModelCatalog {
     );
     for backend in [BackendKind::ArceeAuth, BackendKind::ArceeApi] {
         register(
-            // Arcee passthrough models accept bare `reasoning_effort`; the
+            // Arcee third-party models accept bare `reasoning_effort`; the
             // Arcee thinking format sends it without wrapper objects. The
             // seed models (trinity-*) keep an empty thinking_level_map, so
             // validation rejects every explicit effort and the format is
