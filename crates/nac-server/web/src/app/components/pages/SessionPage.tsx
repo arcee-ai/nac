@@ -16,7 +16,6 @@ import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
-import { TaskButton } from "@/app/components/inspector/TaskPreview";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import {
@@ -25,7 +24,6 @@ import {
 } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
-import { dispatchActions } from "@/app/lib/transcript";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
   DEFAULT_SESSION_PANEL,
@@ -193,12 +191,6 @@ export default function SessionPage() {
   // this header stays aligned with the detail pane (including title shimmer).
   const currentThreadName = selectedThread;
   const threadTitleRunning = panel === "threads" && selectedThreadRunning;
-  // The phone has no panel header of its own, so the dialog's title carries the
-  // open thread's task the way the wider layouts carry it beside the name.
-  const threadTask =
-    panel === "threads" && currentThreadName
-      ? dispatchActions(snapshot?.messages ?? [])[currentThreadName]
-      : undefined;
 
   const sideBox = (
     <SessionSideBox
@@ -341,7 +333,7 @@ export default function SessionPage() {
                 </div>
                 {panel === "files" ? fileBadge : null}
               </div>
-              {threadTask ? <TaskButton action={threadTask} large /> : null}
+
               {snapshot?.workspace?.branch ? (
                 <BranchPicker
                   sessionId={id}

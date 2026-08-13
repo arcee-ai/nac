@@ -31,7 +31,7 @@ import {
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
-import { TaskButton } from "@/app/components/inspector/TaskPreview";
+import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
 import {
@@ -209,18 +209,20 @@ const LogEntryView = memo(function LogEntryView({
 });
 
 /** How a dispatch that produced no handoff ended, as the badge reads it. */
-const FAILED_EPISODE_BADGE: Record<string, { label: string; color: BadgeColor }> =
-  {
-    error: { label: "Failed", color: BadgeColor.Red },
-    timed_out: { label: "Timed out", color: BadgeColor.Yellow },
-    cancelled: { label: "Cancelled", color: BadgeColor.Gray },
-  };
+const FAILED_EPISODE_BADGE: Record<
+  string,
+  { label: string; color: BadgeColor }
+> = {
+  error: { label: "Failed", color: BadgeColor.Red },
+  timed_out: { label: "Timed out", color: BadgeColor.Yellow },
+  cancelled: { label: "Cancelled", color: BadgeColor.Yellow },
+};
 
 /**
- * One dispatch as a collapsible tab. Collapsed it shows the index, how the
- * dispatch ended and a truncated action preview; expanded it reveals the full
- * action and what came back beneath. Each tab owns its own open state so
- * several can be read at once.
+ * One dispatch as a collapsible tab. The row carries the index and how the
+ * dispatch ended; expanding it reveals only what the thread handed back, since
+ * the prompt is already one click away under the panel's own Task control.
+ * Each tab owns its open state so several can be read at once.
  */
 function EpisodeTab({
   episode,
@@ -232,11 +234,12 @@ function EpisodeTab({
   const [expanded, setExpanded] = useState(false);
   const isMobile = useIsMobile();
   const failure = FAILED_EPISODE_BADGE[episode.status];
+  const labelClass = isMobile ? "label-small" : "label-micro";
   return (
     <div className="flex flex-col items-start w-full">
       <button
         type="button"
-        className="group flex items-center gap-2 py-3 pl-1 pr-3 md:py-2 md:pl-3 md:pr-2 rounded-[4px] w-full btn-ghost"
+        className="group flex items-center gap-2 w-full py-3 pl-1 pr-3 md:py-2 md:pl-3 md:pr-2 rounded-[4px] btn-ghost"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
@@ -245,9 +248,7 @@ function EpisodeTab({
           size={16}
           className="shrink-0 text-basic-muted"
         />
-        <span
-          className={`shrink-0 ${isMobile ? "label-small" : "label-micro"} text-basic-primary`}
-        >
+        <span className={`shrink-0 ${labelClass} text-basic-primary`}>
           {`Episode ${index + 1}`}
         </span>
         {failure ? (
@@ -257,19 +258,20 @@ function EpisodeTab({
             className="shrink-0"
           />
         ) : null}
-        <span
-          className={`flex-1 min-w-0 ${isMobile ? "label-small" : "label-micro"} text-basic-secondary truncate`}
-        >
-          {episode.action}
-        </span>
       </button>
       <DropdownContent isOpen={expanded} className="w-full">
-        <div className="flex flex-col gap-4 md:pl-3 md:pr-2 py-6">
-          <Markdown className="text-basic-secondary">{episode.action}</Markdown>
-          <Separator />
-          <Markdown className="text-basic-secondary">
-            {episode.content}
-          </Markdown>
+        <div className="flex flex-col pl-1 pr-1 md:pl-3 md:pr-2 pt-2 pb-6">
+          {episode.content.trim() ? (
+            <Markdown className="text-basic-primary">
+              {episode.content}
+            </Markdown>
+          ) : (
+            <p className="label-small text-basic-muted">
+              {failure
+                ? "The dispatch ended before the thread answered."
+                : "The thread answered with nothing."}
+            </p>
+          )}
         </div>
       </DropdownContent>
     </div>
@@ -386,7 +388,7 @@ function LogPane({
   const firstEntryKey =
     entries[0]?.kind === "tool_call"
       ? `call-${entries[0].callId}`
-      : entries[0]?.key ?? null;
+      : (entries[0]?.key ?? null);
 
   useLayoutEffect(() => {
     const anchor = prependAnchor.current;
@@ -521,18 +523,24 @@ const VIEW_LABEL: Record<ThreadDetailView, string> = {
 const THREAD_DETAIL_VIEWS: ThreadDetailView[] = ["log", "overview"];
 
 /**
- * Phone form of the switch: two pills floating over the view they change, since
- * the box header at that width is already full.
+ * Phone form of the switch: pills floating over the view they change, since the
+ * box header at that width is already full. The phone's dialog title has no
+ * room for the task the wider headers carry beside the thread name, so it rides
+ * along here as a third pill — one that opens a sheet instead of swapping the
+ * view, and so takes only the width of its own word rather than an equal share.
  */
 function ViewPills({
   view,
+  action,
   onChange,
 }: {
   view: ThreadDetailView;
+  /** What the open thread was asked to do, if the dispatch is known. */
+  action: string;
   onChange: (view: ThreadDetailView) => void;
 }) {
   return (
-    <div className="absolute inset-x-0 top-0 flex items-center gap-4 p-2">
+    <div className="absolute inset-x-0 top-0 flex items-center gap-2 p-2">
       {THREAD_DETAIL_VIEWS.map((name) => (
         <div
           key={name}
@@ -551,6 +559,11 @@ function ViewPills({
           </Button>
         </div>
       ))}
+      {action ? (
+        <div className="flex shrink-0 rounded-full bg-elevation-level-3 shadow-2xl overflow-hidden">
+          <TaskPill action={action} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -667,11 +680,7 @@ function Detail({
         className={bodyOffset}
       />
     ) : (
-      <Episodes
-        episodes={episodes}
-        running={running}
-        className={bodyOffset}
-      />
+      <Episodes episodes={episodes} running={running} className={bodyOffset} />
     );
 
   // Phone: floating pills over the body. Tablet: switch lives in PanelSplit.
@@ -679,7 +688,9 @@ function Detail({
     return (
       <div className="relative flex flex-col flex-1 min-h-0 min-w-0">
         {body}
-        {isMobile ? <ViewPills view={view} onChange={onViewChange} /> : null}
+        {isMobile ? (
+          <ViewPills view={view} action={action} onChange={onViewChange} />
+        ) : null}
       </div>
     );
   }
@@ -850,9 +861,7 @@ export function ThreadsView({
     <PanelSplit
       listTitle="Threads"
       title={current?.name}
-      titleAction={
-        currentAction ? <TaskButton action={currentAction} /> : null
-      }
+      titleAction={currentAction ? <TaskButton action={currentAction} /> : null}
       actions={
         current ? <ThreadViewSelect view={view} onChange={setView} /> : null
       }
@@ -925,9 +934,7 @@ export function ThreadsView({
           thread={current}
           action={currentAction}
           episodes={snapshot.thread_episodes?.[current.name] ?? []}
-          events={
-            pagedEvents ?? snapshot.thread_events?.[current.name]
-          }
+          events={pagedEvents ?? snapshot.thread_events?.[current.name]}
           liveLog={live?.log ?? []}
           running={runningNames.has(current.name)}
           hasOlder={Boolean(eventPages.hasNextPage)}
@@ -938,9 +945,7 @@ export function ThreadsView({
           }
           onLoadOlder={() => eventPages.fetchNextPage()}
           onRetry={() =>
-            eventPages.data
-              ? eventPages.fetchNextPage()
-              : eventPages.refetch()
+            eventPages.data ? eventPages.fetchNextPage() : eventPages.refetch()
           }
           view={view}
           onViewChange={setView}

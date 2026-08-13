@@ -23,10 +23,10 @@ import {
   StickyButton,
   TextArea,
 } from "@/app/atoms";
-import { AuthenticationRow } from "@/app/components/modals/AuthenticationRow";
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
+import { ManagedAuthCallout } from "@/app/components/modals/ManagedAuthCallout";
 import {
   REASONING_OPTIONS,
   reasoningOptionsFor,
@@ -530,36 +530,38 @@ function ConfigurationForm({
           />
           <Separator />
           {needsKey ? (
-            <ConfigRow
-              label="API Key"
-              required
-              invalid={validation.status === "error"}
-              verticalOnMobile
-              hint={
-                record
-                  ? "Held by NAC for this configuration; type a new key to replace it."
-                  : "Stored in NAC under a generated name once the setup is saved."
-              }
-              control={
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  className="w-full md:w-[280px]"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={
-                    record?.api_key_env ? MASKED_KEY : "Paste the provider key"
-                  }
-                  leadingSlot={<KeyStatus status={keyStatus} />}
-                  validation={validation.status === "error"}
-                  value={apiKey}
-                  onChange={(event) => edit(setApiKey)(event.target.value)}
-                />
-              }
-            />
-          ) : (
-            <AuthenticationRow backend={backend} />
-          )}
-          <Separator />
+            <>
+              <ConfigRow
+                label="API Key"
+                required
+                invalid={validation.status === "error"}
+                verticalOnMobile
+                hint={
+                  record
+                    ? "Held by NAC for this configuration; type a new key to replace it."
+                    : "Stored in NAC under a generated name once the setup is saved."
+                }
+                control={
+                  <Input
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    className="w-full md:w-[280px]"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      record?.api_key_env
+                        ? MASKED_KEY
+                        : "Paste the provider key"
+                    }
+                    leadingSlot={<KeyStatus status={keyStatus} />}
+                    validation={validation.status === "error"}
+                    value={apiKey}
+                    onChange={(event) => edit(setApiKey)(event.target.value)}
+                  />
+                }
+              />
+              <Separator />
+            </>
+          ) : null}
           <ConfigRow
             label="Base URL"
             hint="Endpoint the session sends its requests to; blank uses the provider's own."
@@ -658,6 +660,7 @@ function ConfigurationForm({
             textAreaClassName="h-[92px] resize-none"
           />
         </div>
+        <ManagedAuthCallout backend={backend} className="mt-2" />
         {error ? (
           <p className="label-micro text-error-primary pt-2">{error}</p>
         ) : null}

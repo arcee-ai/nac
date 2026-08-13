@@ -13,10 +13,10 @@ import {
   type SelectItem,
   Separator,
 } from "@/app/atoms";
-import { AuthenticationRow } from "@/app/components/modals/AuthenticationRow";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
+import { ManagedAuthCallout } from "@/app/components/modals/ManagedAuthCallout";
 import { PROTOCOL_ITEMS } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { ResolvedRows } from "@/app/components/modals/ResolvedRows";
@@ -219,7 +219,7 @@ export function ConfigurationsPanel({
     ? catalogProvider?.auth_status === "ready"
     : signedIn;
   // Only an API-key provider can be fixed from here; a managed one needs its
-  // browser login, which the Authentication row owns.
+  // browser login, which the sign-in callout below the box owns.
   const catalogNeedsKey =
     source.kind === "catalog" &&
     Boolean(catalogPick) &&
@@ -484,9 +484,9 @@ export function ConfigurationsPanel({
     : (resolved?.models_error ?? "");
   const boxInvalid =
     invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
-  // Authentication already shows the failure (and Login again) for a managed
-  // provider whose model index refused; keep the footer for resolve / key / API
-  // key listing errors that have no other home.
+  // The sign-in callout already shows the failure (and offers signing in again)
+  // for a managed provider whose model index refused; keep the footer for
+  // resolve / key / API key listing errors that have no other home.
   const authOwnsError =
     loginQuery.isError ||
     Boolean(
@@ -500,12 +500,31 @@ export function ConfigurationsPanel({
       ? validation.message
       : resolveError || (authOwnsError ? "" : modelListError));
   // Resolve failures are always worth asking again. A saved setup whose model
-  // index failed is too — unless Authentication already offers Login again.
+  // index failed is too — unless the sign-in callout already offers a retry.
   const retry = resolveError
     ? configQuery.refetch
     : resolved?.models_error && providerUsesApiKey(resolved.backend)
       ? configQuery.refetch
       : null;
+
+  /**
+   * The backend whose browser sign-in this setup rests on, or null when the
+   * credential is a key the rows above ask for instead. A hand-written endpoint
+   * is left out on purpose: no sign-in offered here can speak for a URL the
+   * user typed.
+   */
+  const authBackend: BackendKind | null =
+    source.kind === "catalog"
+      ? catalogPick && !needsKey
+        ? backend
+        : null
+      : source.kind === "new"
+        ? provider !== CUSTOM && !needsKey
+          ? backend
+          : null
+        : savedBackend && !providerUsesApiKey(savedBackend)
+          ? savedBackend
+          : null;
 
   const sourceLabel =
     source.kind === "catalog"
@@ -663,12 +682,7 @@ export function ConfigurationsPanel({
                         </>
                       )}
                     </>
-                  ) : (
-                    <>
-                      <Separator />
-                      <AuthenticationRow backend={backend} />
-                    </>
-                  )}
+                  ) : null}
                 </>
               ) : null}
             </>
@@ -748,12 +762,6 @@ export function ConfigurationsPanel({
                   />
                 }
               />
-              {!needsKey && provider !== CUSTOM ? (
-                <>
-                  <Separator />
-                  <AuthenticationRow backend={backend} />
-                </>
-              ) : null}
               {needsKey ? (
                 <>
                   <Separator />
@@ -885,6 +893,10 @@ export function ConfigurationsPanel({
           ) : null}
         </div>
       </div>
+
+      {authBackend ? (
+        <ManagedAuthCallout backend={authBackend} className="mt-1" />
+      ) : null}
 
       {message ? (
         <div className="flex items-start gap-2">
