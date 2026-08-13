@@ -22,6 +22,7 @@ fn transcript_test_agent(
     Agent::with_config(
         client,
         AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode,
             store_path,
             session_id: session_id.map(str::to_string),

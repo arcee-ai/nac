@@ -3061,6 +3061,7 @@ pub(super) mod tests {
         Agent::with_config(
             client,
             AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Orchestrator,
                 store_path,
                 session_id,
@@ -3911,6 +3912,8 @@ pub(super) mod tests {
                 name: "read".to_string(),
                 content_preview: "done".to_string(),
                 is_error: false,
+                command_status: None,
+                exit_code: None,
             });
 
         let snapshot = parts.service.frontend_snapshot().await.unwrap();

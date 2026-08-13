@@ -3,15 +3,18 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::Command;
-use tokio::sync::Mutex;
-use tokio::time::sleep;
+use tokio::sync::{watch, Mutex};
+use tokio::time::{sleep, timeout};
 
 use crate::events::{decode_stderr_event, sanitize_external_agent_event, AgentEvent};
 use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
 use crate::tools::{ThreadCancellation, ToolRuntime};
+const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
+// SSH cleanup can spend five seconds in the kill request; Podman can spend two.
+const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
 
 pub(super) struct WorkerRun {
     pub(super) stdout: String,
@@ -233,7 +236,7 @@ pub(super) async fn run_worker(
     }
 
     command
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -247,12 +250,14 @@ pub(super) async fn run_worker(
     command.kill_on_drop(true);
 
     let (mut child, mut process_tree) = ProcessTreeGuard::spawn_supervised(&mut command)?;
+    let mut control_stdin = child.stdin.take();
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child.stderr.take().unwrap();
     let event_sink = runtime.event_sink.clone();
     let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
+    let (cancel_ack_tx, mut cancel_ack_rx) = watch::channel(false);
     let stderr_cancellation = cancellation.clone();
     let stderr_handle = tokio::spawn(async move {
         let reader = BufReader::new(stderr);
@@ -263,6 +268,10 @@ pub(super) async fn run_worker(
         while let Some(line) = next_pipe_line(&mut lines).await {
             if stderr_cancellation.is_cancelled() {
                 break;
+            }
+            if line == crate::worker::MANAGED_WORKER_CANCEL_ACK {
+                let _ = cancel_ack_tx.send(true);
+                continue;
             }
             if let Some(event) = decode_stderr_event(&line) {
                 timeout_trace_for_logs.lock().await.observe(&event);
@@ -305,8 +314,8 @@ pub(super) async fn run_worker(
         (output, usage, model_error)
     });
 
-    let stdout = child.stdout.take().unwrap();
     let stdout_cancellation = cancellation.clone();
+    let stdout = child.stdout.take().unwrap();
     let stdout_handle = tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -337,16 +346,40 @@ pub(super) async fn run_worker(
         result = child.wait() => WaitOutcome::Exited(result),
         _ = &mut deadline => WaitOutcome::TimedOut,
     };
-    if matches!(outcome, WaitOutcome::Exited(_)) {
+    let mut cooperatively_cancelled = false;
+    if matches!(outcome, WaitOutcome::Cancelled) {
+        if let Some(mut stdin) = control_stdin.take() {
+            let _ = stdin.write_all(b"cancel\n").await;
+            let _ = stdin.flush().await;
+        }
+        let acknowledged = if *cancel_ack_rx.borrow() {
+            true
+        } else {
+            timeout(
+                CANCEL_ACK_GRACE,
+                cancel_ack_rx.wait_for(|acknowledged| *acknowledged),
+            )
+            .await
+            .is_ok()
+        };
+        if acknowledged {
+            if let Ok(wait_result) = timeout(COOPERATIVE_CLEANUP_GRACE, child.wait()).await {
+                wait_result?;
+                process_tree.mark_leader_reaped();
+                cooperatively_cancelled = true;
+            }
+        }
+    } else if matches!(outcome, WaitOutcome::Exited(_)) {
         process_tree.mark_leader_reaped();
-    }
-    if matches!(outcome, WaitOutcome::Exited(_)) && cancellation.is_cancelled() {
-        outcome = WaitOutcome::Cancelled;
+        if cancellation.is_cancelled() {
+            outcome = WaitOutcome::Cancelled;
+            cooperatively_cancelled = true;
+        }
     }
 
     let timed_out = matches!(outcome, WaitOutcome::TimedOut);
     let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
-    if timed_out || cancelled {
+    if timed_out || (cancelled && !cooperatively_cancelled) {
         process_tree.terminate(&mut child).await;
     }
 

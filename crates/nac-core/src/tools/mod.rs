@@ -56,7 +56,7 @@ pub(crate) struct ThreadCancellation {
 }
 
 impl ThreadCancellation {
-    fn cancel(&self) {
+    pub(crate) fn cancel(&self) {
         if !self.cancelled.swap(true, Ordering::AcqRel) {
             self.activity.notify_waiters();
         }
@@ -375,6 +375,7 @@ pub struct ToolRuntime {
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
+    pub command_cancellation: ThreadCancellation,
     pub thread_timeout_secs: u64,
     /// Accumulated worker token usage from thread dispatches.  The agent
     /// loop reads and resets this after each tool-execution round so worker
@@ -655,6 +656,7 @@ pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
 
     tools.push(exec_command::exec_command_definition());
     tools.push(exec_command::write_stdin_definition());
+    tools.push(exec_command::read_command_output_definition());
 
     tools
 }
@@ -740,26 +742,9 @@ pub async fn execute_tool(
         "edit" => edit::execute(args, runtime).await,
         "glob" => glob::execute(args, runtime).await,
         "grep" => grep::execute(args, runtime).await,
-        "exec_command" => match exec_command::execute_exec_command(&args, runtime).await {
-            Ok(content) => ToolResult {
-                content,
-                is_error: false,
-            },
-            Err(e) => ToolResult {
-                content: format!("Error: {:#}", e),
-                is_error: true,
-            },
-        },
-        "write_stdin" => match exec_command::execute_write_stdin(&args, runtime).await {
-            Ok(content) => ToolResult {
-                content,
-                is_error: false,
-            },
-            Err(e) => ToolResult {
-                content: format!("Error: {:#}", e),
-                is_error: true,
-            },
-        },
+        "exec_command" => exec_command::execute_exec_command(&args, runtime).await,
+        "write_stdin" => exec_command::execute_write_stdin(&args, runtime).await,
+        "read_command_output" => exec_command::execute_read_command_output(&args, runtime),
         "thread" => thread::execute_dispatch(args, runtime, client).await,
         "threads" => thread::execute_threads(runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,
@@ -839,6 +824,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
     let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
     ToolRuntime {
+        command_cancellation: crate::tools::ThreadCancellation::default(),
         config_cwd: workspace_cwd.clone(),
         workspace_cwd,
         store_path: PathBuf::new(),

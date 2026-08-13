@@ -1,24 +1,23 @@
-use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use portable_pty::{NativePtySystem, PtySize, PtySystem};
 use tokio::sync::Notify;
 
+use super::{ArtifactKind, OutputRegistry, OutputStream};
 #[cfg(unix)]
 use crate::process::{descendant_pids, signal_pids};
 use crate::sandbox::ExecutionBackend;
 
-const MAX_SESSION_OUTPUT_BYTES: usize = 1024 * 1024;
-
 pub struct TerminalSession {
     pub name: String,
     writer: Box<dyn Write + Send>,
-    output: Arc<StdMutex<OutputBuffer>>,
+    output_id: String,
+    preview_cursor: u64,
     output_notify: Arc<Notify>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     _pty_pair: portable_pty::PtyPair,
@@ -42,6 +41,7 @@ impl TerminalSession {
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
+        output_registry: OutputRegistry,
     ) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pty_pair = pty_system
@@ -77,8 +77,9 @@ impl TerminalSession {
 
         let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = alive.clone();
-        let output = Arc::new(StdMutex::new(OutputBuffer::new(MAX_SESSION_OUTPUT_BYTES)));
-        let output_clone = output.clone();
+        let output_id = output_registry.create(ArtifactKind::Pty);
+        let reader_output_id = output_id.clone();
+        let reader_output_registry = output_registry.clone();
         let notify = Arc::new(Notify::new());
         let notify_clone = notify.clone();
 
@@ -93,9 +94,11 @@ impl TerminalSession {
                         break;
                     }
                     Ok(n) => {
-                        if let Ok(mut output) = output_clone.lock() {
-                            output.push(&buf[..n]);
-                        }
+                        let _ = reader_output_registry.append(
+                            &reader_output_id,
+                            OutputStream::Combined,
+                            buf[..n].to_vec(),
+                        );
                         notify_clone.notify_one();
                     }
                 }
@@ -105,7 +108,8 @@ impl TerminalSession {
         Ok(TerminalSession {
             name,
             writer,
-            output,
+            output_id,
+            preview_cursor: 0,
             output_notify: notify,
             child,
             _pty_pair: pty_pair,
@@ -130,17 +134,17 @@ impl TerminalSession {
         Ok(())
     }
 
-    pub fn read_output(&mut self) -> String {
-        let buf = self
-            .output
-            .lock()
-            .map(|mut output| output.take())
-            .unwrap_or_default();
-        if buf.is_empty() {
-            return String::new();
-        }
+    pub fn output_id(&self) -> &str {
+        &self.output_id
+    }
+
+    pub fn preview_cursor(&self) -> u64 {
+        self.preview_cursor
+    }
+
+    pub fn set_preview_cursor(&mut self, cursor: u64) {
+        self.preview_cursor = cursor;
         self.last_output_at = Instant::now();
-        String::from_utf8_lossy(&buf).into_owned()
     }
 
     pub fn output_notify(&self) -> &Arc<Notify> {
@@ -181,17 +185,7 @@ impl TerminalSession {
         }
 
         #[cfg(unix)]
-        let descendants = self.child_descendant_pids();
-        #[cfg(unix)]
         {
-            signal_pids(&descendants, libc::SIGTERM);
-            self.signal_process_group(libc::SIGTERM);
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        #[cfg(unix)]
-        {
-            signal_pids(&descendants, libc::SIGKILL);
             self.signal_descendants(libc::SIGKILL);
             self.signal_process_group(libc::SIGKILL);
         }
@@ -304,67 +298,6 @@ pub(crate) fn terminal_env_owned() -> Vec<(String, String)> {
         .collect()
 }
 
-struct OutputBuffer {
-    bytes: VecDeque<u8>,
-    capacity: usize,
-    dropped_bytes: usize,
-}
-
-impl OutputBuffer {
-    fn new(capacity: usize) -> Self {
-        Self {
-            bytes: VecDeque::with_capacity(capacity.min(8192)),
-            capacity,
-            dropped_bytes: 0,
-        }
-    }
-
-    fn push(&mut self, chunk: &[u8]) {
-        if self.capacity == 0 {
-            self.dropped_bytes = self.dropped_bytes.saturating_add(chunk.len());
-            return;
-        }
-
-        if chunk.len() >= self.capacity {
-            let dropped = self
-                .bytes
-                .len()
-                .saturating_add(chunk.len())
-                .saturating_sub(self.capacity);
-            self.dropped_bytes = self.dropped_bytes.saturating_add(dropped);
-            self.bytes.clear();
-            self.bytes
-                .extend(chunk[chunk.len() - self.capacity..].iter().copied());
-            return;
-        }
-
-        let overflow = self
-            .bytes
-            .len()
-            .saturating_add(chunk.len())
-            .saturating_sub(self.capacity);
-        if overflow > 0 {
-            for _ in 0..overflow {
-                self.bytes.pop_front();
-            }
-            self.dropped_bytes = self.dropped_bytes.saturating_add(overflow);
-        }
-        self.bytes.extend(chunk.iter().copied());
-    }
-
-    fn take(&mut self) -> Vec<u8> {
-        let mut out = Vec::new();
-        if self.dropped_bytes > 0 {
-            out.extend_from_slice(
-                format!("\n...[{} bytes omitted]...\n", self.dropped_bytes).as_bytes(),
-            );
-            self.dropped_bytes = 0;
-        }
-        out.extend(self.bytes.drain(..));
-        out
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,14 +327,33 @@ mod tests {
             None,
             &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
         );
-        let mut session =
-            TerminalSession::spawn("test".to_string(), None, 120, 40, &backend).unwrap();
+        let registry =
+            OutputRegistry::new(crate::terminal::CommandOutputLimits::default()).unwrap();
+        let mut session = TerminalSession::spawn(
+            "test".to_string(),
+            None,
+            120,
+            40,
+            &backend,
+            registry.clone(),
+        )
+        .unwrap();
         session.write(b"sleep 30 & echo NAC_CHILD:$!\r").unwrap();
 
+        let mut cursor = 0;
         let mut output = String::new();
         let mut child_pid = None;
         for _ in 0..40 {
-            output.push_str(&session.read_output());
+            let page = registry
+                .page(
+                    session.output_id(),
+                    OutputStream::Combined,
+                    cursor,
+                    32 * 1024,
+                )
+                .unwrap();
+            cursor = page.next_offset;
+            output.push_str(&page.content);
             child_pid = parse_child_pid(&output);
             if child_pid.is_some() {
                 break;

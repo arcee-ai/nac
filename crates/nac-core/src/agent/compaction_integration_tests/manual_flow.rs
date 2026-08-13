@@ -360,6 +360,7 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
     let mut worker = Agent::with_config(
         ModelClient::new_for_test(),
         AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
             store_path: path,
             session_id: Some("worker-session".to_string()),

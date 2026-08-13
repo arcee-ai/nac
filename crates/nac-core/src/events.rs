@@ -150,6 +150,10 @@ pub enum AgentEvent {
         name: String,
         content_preview: String,
         is_error: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command_status: Option<crate::terminal::CommandStatus>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
     },
     ThreadStarted {
         name: String,
@@ -239,6 +243,49 @@ pub enum AgentEvent {
     RunFinished {
         thread_name: Option<String>,
     },
+}
+
+impl AgentEvent {
+    pub(crate) fn tool_call_finished(
+        thread_name: Option<String>,
+        call_id: String,
+        name: String,
+        result: &crate::tools::ToolResult,
+    ) -> Self {
+        let (command_status, exit_code) = if name == "exec_command" {
+            serde_json::from_str::<serde_json::Value>(&result.content)
+                .ok()
+                .map(|value| {
+                    let status = value
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|status| match status {
+                            "completed" => Some(crate::terminal::CommandStatus::Completed),
+                            "timed_out" => Some(crate::terminal::CommandStatus::TimedOut),
+                            "cancelled" => Some(crate::terminal::CommandStatus::Cancelled),
+                            "spawn_error" => Some(crate::terminal::CommandStatus::SpawnError),
+                            _ => None,
+                        });
+                    let exit_code = value
+                        .get("exit_code")
+                        .and_then(serde_json::Value::as_i64)
+                        .and_then(|code| i32::try_from(code).ok());
+                    (status, exit_code)
+                })
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
+        Self::ToolCallFinished {
+            thread_name,
+            call_id,
+            name: name.clone(),
+            content_preview: crate::agent::preview::preview_tool_result(&name, result),
+            is_error: result.is_error,
+            command_status,
+            exit_code,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -736,12 +783,16 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             name,
             content_preview,
             is_error,
+            command_status,
+            exit_code,
         } => AgentEvent::ToolCallFinished {
             thread_name,
             call_id,
             name,
             content_preview,
             is_error,
+            command_status,
+            exit_code,
         },
         AgentEvent::ThreadStarted {
             name,
@@ -862,6 +913,7 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
                 "edit" => "edit",
                 "exec_command" => "execute",
                 "write_stdin" => "terminal_input",
+                "read_command_output" => "read_command_output",
                 "thread" => "dispatch",
                 "threads" => "list_threads",
                 "thread_read" => "read_thread",
@@ -901,6 +953,12 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
             copy_safe_u64(object, &mut safe, "input_chars");
             copy_safe_u64(object, &mut safe, "yield_time_ms");
             copy_safe_u64(object, &mut safe, "max_output_chars");
+        }
+        "read_command_output" => {
+            copy_safe_string(object, &mut safe, "output_id");
+            copy_safe_string(object, &mut safe, "stream");
+            copy_safe_u64(object, &mut safe, "offset");
+            copy_safe_u64(object, &mut safe, "limit");
         }
         "thread" => {
             copy_safe_string(object, &mut safe, "name");
@@ -1960,6 +2018,8 @@ mod tests {
             name: "exec_command".to_string(),
             content_preview: "exit 7: test result".to_string(),
             is_error: true,
+            command_status: Some(crate::terminal::CommandStatus::Completed),
+            exit_code: Some(7),
         });
         bus_sink.emit(AgentEvent::Error {
             thread_name: Some("worker".to_string()),

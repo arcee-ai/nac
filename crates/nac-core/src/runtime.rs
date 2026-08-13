@@ -93,6 +93,8 @@ pub struct SandboxConfig {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct WorkerConfig {
     pub thread_timeout_secs: Option<u64>,
+    pub command_output_max_bytes: Option<usize>,
+    pub command_output_session_max_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -755,6 +757,22 @@ pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
         .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
 }
 
+pub(crate) fn worker_command_output_limits(
+    config: &NacConfig,
+) -> Result<crate::terminal::CommandOutputLimits> {
+    crate::terminal::CommandOutputLimits {
+        per_command_bytes: config
+            .worker
+            .command_output_max_bytes
+            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES),
+        per_session_bytes: config
+            .worker
+            .command_output_session_max_bytes
+            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES),
+    }
+    .validate()
+}
+
 fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
     let is_ssh = ssh_host
         .map(str::trim)
@@ -817,6 +835,7 @@ pub async fn build_run_config(
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
+                command_output_limits: worker_command_output_limits(config)?,
                 mode: AgentMode::Orchestrator,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
@@ -901,6 +920,7 @@ pub async fn build_run_config(
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
+            command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Orchestrator,
             store_path: store_path.clone(),
             session_id: Some(session_id.clone()),
@@ -1030,6 +1050,7 @@ pub async fn build_managed_worker_config(
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
+            command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Worker,
             store_path: store_path.clone(),
             session_id: Some(options.dispatch.session_id.clone()),
@@ -1257,6 +1278,7 @@ async fn build_resume_config_from_snapshot(
     let mut agent = Agent::with_config(
         client.clone(),
         AgentConfig {
+            command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Orchestrator,
             store_path: store_path.clone(),
             session_id: Some(snapshot.session_id.clone()),
@@ -2165,6 +2187,33 @@ mod tests {
     }
 
     #[test]
+    fn worker_command_output_limits_validate_config() {
+        let mut config = NacConfig::default();
+        let defaults = worker_command_output_limits(&config).unwrap();
+        assert_eq!(
+            defaults.per_command_bytes,
+            crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES
+        );
+        assert_eq!(
+            defaults.per_session_bytes,
+            crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES
+        );
+
+        config.worker.command_output_max_bytes = Some(1_024);
+        config.worker.command_output_session_max_bytes = Some(4_096);
+        assert_eq!(
+            worker_command_output_limits(&config).unwrap(),
+            crate::terminal::CommandOutputLimits {
+                per_command_bytes: 1_024,
+                per_session_bytes: 4_096,
+            }
+        );
+
+        config.worker.command_output_session_max_bytes = Some(512);
+        assert!(worker_command_output_limits(&config).is_err());
+    }
+
+    #[test]
     fn nac_config_loads_new_sections_alongside_existing_mcp() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original_nac_home = std::env::var_os("NAC_HOME");
@@ -2191,6 +2240,8 @@ image = "config-image"
 
 [worker]
 thread_timeout_secs = 7200
+command_output_max_bytes = 8388608
+command_output_session_max_bytes = 67108864
 
 [mcp_servers.context7]
 enabled = true
@@ -2212,6 +2263,11 @@ url = "https://mcp.context7.com/mcp"
         assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+        assert_eq!(config.worker.command_output_max_bytes, Some(8_388_608));
+        assert_eq!(
+            config.worker.command_output_session_max_bytes,
+            Some(67_108_864)
+        );
 
         restore_env("NAC_HOME", original_nac_home);
         let _ = std::fs::remove_dir_all(root);

@@ -90,13 +90,12 @@ async fn spawn_and_collect_non_thread(
     while let Some(join_result) = join_set.join_next().await {
         match join_result {
             Ok((index, _, tool_call_id, tool_name, result)) => {
-                event_sink.emit(AgentEvent::ToolCallFinished {
-                    thread_name: thread_name.clone(),
-                    call_id: tool_call_id.clone(),
-                    name: tool_name.clone(),
-                    content_preview: preview_tool_result(&tool_name, &result),
-                    is_error: result.is_error,
-                });
+                event_sink.emit(AgentEvent::tool_call_finished(
+                    thread_name.clone(),
+                    tool_call_id.clone(),
+                    tool_name.clone(),
+                    &result,
+                ));
                 results.push((index, tool_call_id, tool_name, result));
             }
             Err(error) => {
@@ -195,13 +194,12 @@ async fn execute_with_dag_error(
             key_arg_preview: None,
             args_detail: Some(tool_args_detail(&dispatch.args_str)),
         });
-        event_sink.emit(AgentEvent::ToolCallFinished {
-            thread_name: thread_name.clone(),
-            call_id: dispatch.tool_call_id.clone(),
-            name: "thread".to_string(),
-            content_preview: preview_tool_result("thread", &result),
-            is_error: true,
-        });
+        event_sink.emit(AgentEvent::tool_call_finished(
+            thread_name.clone(),
+            dispatch.tool_call_id.clone(),
+            "thread".to_string(),
+            &result,
+        ));
         all_results.push((
             dispatch.original_index,
             dispatch.tool_call_id.clone(),

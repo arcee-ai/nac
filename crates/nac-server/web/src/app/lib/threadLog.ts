@@ -28,21 +28,18 @@ export interface ThreadLogLine {
   isError: boolean;
 }
 
-/** Opening of the preview a command killed by its own timeout comes back with. */
+/** Opening of the legacy preview a command killed by its own timeout returned. */
 const TIMED_OUT_PREVIEW = "Command timed out after";
 
-/**
- * Whether a finished tool call should read as a failure.
- *
- * A command killed by its own timeout leaves no exit code behind, so the call
- * that ran it reports no error however little of the work got done — the
- * preview line is the only thing that says the command never finished. Reading
- * it here is what keeps a timeout out of the log with a ✓ in front of it.
- */
+/** Whether a finished tool call should read as a failure. */
 export function toolCallFailed(event: {
   is_error: boolean;
   content_preview: string;
+  command_status?: "completed" | "timed_out" | "cancelled" | "spawn_error";
 }): boolean {
+  if (event.command_status !== undefined) {
+    return event.is_error || event.command_status !== "completed";
+  }
   return event.is_error || event.content_preview.startsWith(TIMED_OUT_PREVIEW);
 }
 

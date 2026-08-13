@@ -23,6 +23,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
     let mut agent = Agent::with_config(
         client,
         AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
             store_path: crate::store::default_store_path(),
             session_id: None,
@@ -70,14 +71,15 @@ fn restore_messages_refreshes_leading_system_prompt() {
 }
 
 #[test]
-fn exec_command_result_preview_uses_output_field() {
+fn exec_command_result_preview_uses_structured_previews() {
     let result = ToolResult {
         content: serde_json::json!({
-            "output": "line one\nline two\n",
+            "status": "completed",
+            "stdout_preview": "line one\nline two\n",
+            "stderr_preview": "",
             "exit_code": 0,
-            "session_name": null,
             "wall_time_ms": 1,
-            "output_truncated": false,
+            "truncated": false,
         })
         .to_string(),
         is_error: false,
@@ -90,11 +92,12 @@ fn exec_command_result_preview_uses_output_field() {
 fn exec_command_result_preview_includes_nonzero_exit() {
     let result = ToolResult {
         content: serde_json::json!({
-            "output": "failure\n",
+            "status": "completed",
+            "stdout_preview": "",
+            "stderr_preview": "failure\n",
             "exit_code": 7,
-            "session_name": null,
             "wall_time_ms": 1,
-            "output_truncated": false,
+            "truncated": false,
         })
         .to_string(),
         is_error: false,
@@ -104,6 +107,91 @@ fn exec_command_result_preview_includes_nonzero_exit() {
         preview_tool_result("exec_command", &result),
         "exit 7: failure"
     );
+}
+
+#[test]
+fn exec_command_finished_event_carries_structured_outcome() {
+    let result = ToolResult {
+        content: serde_json::json!({
+            "status": "completed",
+            "stdout_preview": "",
+            "stderr_preview": "failure",
+            "exit_code": 7,
+        })
+        .to_string(),
+        is_error: false,
+    };
+    let event = AgentEvent::tool_call_finished(
+        Some("worker".to_string()),
+        "call-1".to_string(),
+        "exec_command".to_string(),
+        &result,
+    );
+    assert!(matches!(
+        event,
+        AgentEvent::ToolCallFinished {
+            command_status: Some(crate::terminal::CommandStatus::Completed),
+            exit_code: Some(7),
+            is_error: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn finished_pty_result_preview_keeps_terminal_output() {
+    let result = ToolResult {
+        content: serde_json::json!({
+            "session_name": null,
+            "output_id": "termout-1",
+            "start_cursor": 0,
+            "end_cursor": 14,
+            "content_preview": "line one\nline two\n",
+            "truncated": false,
+            "overflowed": false,
+            "exit_code": 0,
+            "wall_time_ms": 1,
+        })
+        .to_string(),
+        is_error: false,
+    };
+
+    assert_eq!(preview_tool_result("exec_command", &result), "line two");
+}
+
+#[test]
+fn exec_command_finished_events_distinguish_terminal_statuses() {
+    for (serialized, expected) in [
+        ("completed", crate::terminal::CommandStatus::Completed),
+        ("timed_out", crate::terminal::CommandStatus::TimedOut),
+        ("cancelled", crate::terminal::CommandStatus::Cancelled),
+        ("spawn_error", crate::terminal::CommandStatus::SpawnError),
+    ] {
+        let result = ToolResult {
+            content: serde_json::json!({
+                "status": serialized,
+                "stdout_preview": "",
+                "stderr_preview": "",
+                "exit_code": null,
+            })
+            .to_string(),
+            is_error: serialized == "spawn_error",
+        };
+        let event = AgentEvent::tool_call_finished(
+            Some("worker".to_string()),
+            format!("call-{serialized}"),
+            "exec_command".to_string(),
+            &result,
+        );
+        assert!(matches!(
+            event,
+            AgentEvent::ToolCallFinished {
+                command_status: Some(status),
+                exit_code: None,
+                ..
+            } if status == expected
+        ));
+    }
 }
 
 #[test]
@@ -123,6 +211,7 @@ fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
         Agent::with_config(
             client.clone(),
             AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
@@ -228,6 +317,7 @@ async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
     let mut agent = Agent::with_config(
         ModelClient::new_for_test(),
         AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
             store_path: store_path.clone(),
             session_id: Some("session".to_string()),
@@ -345,6 +435,7 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
     let mut agent = Agent::with_config(
         ModelClient::new_for_test(),
         AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
             store_path: store_path.clone(),
             session_id: Some("session".to_string()),

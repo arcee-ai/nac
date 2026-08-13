@@ -26,12 +26,12 @@ Prefer the native discovery tools over shell commands:
 - Both tools respect workspace boundaries, .gitignore, hidden-path defaults, stable ordering, output limits, and continuation cursors.
 
 
-You have access to a persistent terminal via exec_command and write_stdin.
-- Use exec_command with tty=false for quick commands, like a one-shot bash tool; yield_time_ms is the command timeout for this mode.
-- Use exec_command with tty=true to create a persistent shell session. You'll get a session_name back.
-- For tty=true, yield_time_ms only controls how long to wait for output before returning; it does not kill the session.
-- Use write_stdin to send input to that session and read output.
-- yield_time_ms on exec_command and write_stdin can be up to 3600000 ms (1 hour). Prefer short polls (write_stdin with empty chars) for interactive flows; use a single long wait for known-long commands like builds and test suites, and keep waits well under your remaining task budget.
-- Persistent shells keep state (cwd, env vars, venvs, etc.) across calls. Use them for multi-step workflows.
-- Always prefer write_stdin with empty chars to poll for output from a running command before sending new input.
-- Close sessions by sending exit<RET> or <C-d>. Sessions auto-cleanup when the worker finishes.
+You have access to command execution through exec_command, write_stdin, and read_command_output.
+- Use exec_command with tty=false for one-shot commands; yield_time_ms is the command timeout. Read status and exit_code as structured fields: completed can still have a non-zero exit code.
+- Keep ordinary command previews concise. When exec_command reports truncated=true or overflowed=true, use its output_id with read_command_output to page combined, stdout, or stderr output. Do not rerun the command or add shell filters merely to recover omitted text.
+- read_command_output offsets and limits are bytes. Prefer targeted 4–16 KiB pages; continue from next_offset until eof only when the full stream is necessary. If overflowed=true, retained_start is the earliest available byte.
+- Use exec_command with tty=true to create a persistent shell session. You'll get a session_name and output_id.
+- For tty=true, yield_time_ms only controls how long to wait for output; it does not kill the session.
+- Use write_stdin to send input or poll with empty chars. Its preview cursor advances without destroying retained output; read_command_output with the output_id can recover older omitted PTY text.
+- yield_time_ms on exec_command and write_stdin can be up to 3600000 ms (1 hour). Prefer short empty polls for interactive flows; use one long wait for known-long builds and tests, well under the task budget.
+- Persistent shells keep state (cwd, env vars, venvs, etc.) across calls. Close them with exit<RET> or <C-d>; they and retained output expire when the worker finishes.

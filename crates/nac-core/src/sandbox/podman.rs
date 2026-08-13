@@ -52,11 +52,6 @@ if [ -n "$pid" ]; then
   }
   pids=$(descendants "$pid")
   for child in $pids; do
-    kill -TERM "$child" 2>/dev/null || true
-  done
-  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-  sleep 0.5
-  for child in $pids; do
     kill -KILL "$child" 2>/dev/null || true
   done
   kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
@@ -694,8 +689,7 @@ mod tests {
         assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidfile\""));
         assert!(SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
-        assert!(SANDBOX_KILL_WRAPPER.contains("kill -TERM \"$child\""));
-        assert!(SANDBOX_KILL_WRAPPER.contains("kill -TERM \"-$pid\""));
+        assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
     }
