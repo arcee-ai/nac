@@ -31,7 +31,7 @@ import {
   PanelRow,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
-import { TaskButton } from "@/app/components/inspector/TaskPreview";
+import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
 import {
@@ -523,18 +523,24 @@ const VIEW_LABEL: Record<ThreadDetailView, string> = {
 const THREAD_DETAIL_VIEWS: ThreadDetailView[] = ["log", "overview"];
 
 /**
- * Phone form of the switch: two pills floating over the view they change, since
- * the box header at that width is already full.
+ * Phone form of the switch: pills floating over the view they change, since the
+ * box header at that width is already full. The phone's dialog title has no
+ * room for the task the wider headers carry beside the thread name, so it rides
+ * along here as a third pill — one that opens a sheet instead of swapping the
+ * view, and so takes only the width of its own word rather than an equal share.
  */
 function ViewPills({
   view,
+  action,
   onChange,
 }: {
   view: ThreadDetailView;
+  /** What the open thread was asked to do, if the dispatch is known. */
+  action: string;
   onChange: (view: ThreadDetailView) => void;
 }) {
   return (
-    <div className="absolute inset-x-0 top-0 flex items-center gap-4 p-2">
+    <div className="absolute inset-x-0 top-0 flex items-center gap-2 p-2">
       {THREAD_DETAIL_VIEWS.map((name) => (
         <div
           key={name}
@@ -553,6 +559,11 @@ function ViewPills({
           </Button>
         </div>
       ))}
+      {action ? (
+        <div className="flex shrink-0 rounded-full bg-elevation-level-3 shadow-2xl overflow-hidden">
+          <TaskPill action={action} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -677,7 +688,9 @@ function Detail({
     return (
       <div className="relative flex flex-col flex-1 min-h-0 min-w-0">
         {body}
-        {isMobile ? <ViewPills view={view} onChange={onViewChange} /> : null}
+        {isMobile ? (
+          <ViewPills view={view} action={action} onChange={onViewChange} />
+        ) : null}
       </div>
     );
   }
