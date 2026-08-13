@@ -9,17 +9,12 @@ import {
   IconName,
   Input,
   InputSize,
-  InputWrapper,
   Modal,
   ModalSize,
-  Select,
-  type SelectItem,
   Separator,
   StickyButton,
   TextArea,
   TextAreaSize,
-  Tooltip,
-  TooltipPosition,
 } from "@/app/atoms";
 import { SshBadge } from "@/app/components/SshBadge";
 import {
@@ -27,18 +22,12 @@ import {
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
-import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useCompactionThreshold } from "@/app/hooks/useCompactionThreshold";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
-import {
-  isGeneratedCredentialName,
-  MASKED_KEY,
-  type Validation,
-} from "@/app/lib/apiKey";
 import {
   buildSettingsPatch,
   type SettingsInitialValues,
@@ -577,155 +566,3 @@ function SettingsForm({
     </SettingsShell>
   );
 }
-
-/**
- * The key a key-authenticated session runs on. A stored key never comes back
- * from the server, so it can only be replaced, not read: the row shows a
- * stand-in until the user starts typing a new one, and reports how the key
- * checked out through the glyph in the leading slot.
- */
-function ApiKeyField({
-  editing,
-  draft,
-  stored,
-  validation,
-  onDraft,
-  onClear,
-  onRestore,
-}: {
-  editing: boolean;
-  draft: string;
-  /** The selector the session currently authenticates through, if any. */
-  stored: string;
-  validation: Validation;
-  onDraft: (value: string) => void;
-  /**
-   * Empties the field. Replacing a key and removing one arrive at the same
-   * place — a key that cannot be read back can only be overwritten — so the two
-   * buttons differ in what they say rather than in what they leave behind.
-   */
-  onClear: () => void;
-  onRestore: () => void;
-}) {
-  const isMobile = useIsMobile();
-  const invalid = validation.status === "error";
-  const hint = editing
-    ? "Paste the provider key. NAC keeps it and hands the session a selector, never the secret."
-    : isGeneratedCredentialName(stored)
-      ? "Kept by NAC for this session. Replacing it files a new key and leaves the old one where it is."
-      : `Read from ${stored}: the environment variable, or a key of that name kept by NAC.`;
-
-  return (
-    <InputWrapper
-      label="API key"
-      required
-      validation={invalid}
-      validationText={invalid ? validation.message : undefined}
-      hintText={hint}
-    >
-      <div className="flex items-center gap-2">
-        <Input
-          className="flex-1 min-w-0"
-          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-          type="password"
-          autoComplete="off"
-          placeholder="Paste the provider key"
-          value={editing ? draft : MASKED_KEY}
-          readOnly={!editing}
-          validation={invalid}
-          leadingSlot={<KeyStatus status={validation.status} />}
-          onChange={(event) => onDraft(event.target.value)}
-        />
-        <Tooltip
-          title={editing ? "Keep the current key" : "Replace the key"}
-          position={TooltipPosition.TopCenter}
-        >
-          <Button
-            variant={ButtonVariant.Secondary}
-            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            aria-label={editing ? "Keep the current key" : "Replace the key"}
-            disabled={editing && !stored}
-            onClick={editing ? onRestore : onClear}
-          >
-            <Icon iconName={editing ? IconName.Close : IconName.Edit} />
-          </Button>
-        </Tooltip>
-        <Tooltip
-          title="Remove the key from this session"
-          position={TooltipPosition.TopCenter}
-        >
-          <Button
-            variant={ButtonVariant.SecondaryDestructive}
-            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            aria-label="Remove the key from this session"
-            disabled={editing && !draft}
-            onClick={onClear}
-          >
-            <Icon iconName={IconName.Trash} />
-          </Button>
-        </Tooltip>
-      </div>
-    </InputWrapper>
-  );
-}
-
-/**
- * The model the session runs. A provider that answers with a model index picks
- * from that list; a hand-written gateway that has none is typed in, and a
- * credential that is not working yet has nothing to offer either way.
- */
-function ModelField({
-  value,
-  models,
-  available,
-  onChange,
-}: {
-  value: string;
-  models: SelectItem[];
-  /** Whether the credential is in a state that can reach a model at all. */
-  available: boolean;
-  onChange: (model: string) => void;
-}) {
-  const isMobile = useIsMobile();
-  if (models.length === 0 && available) {
-    return (
-      <Input
-        label="Model"
-        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    );
-  }
-
-  // A model configured earlier may no longer be listed — a renamed or retired
-  // one still has to show as what the session runs today.
-  const items = models.some((item) => item.id === value)
-    ? models
-    : value
-      ? [...models, { id: value, label: value }]
-      : models;
-
-  return (
-    <InputWrapper label="Model">
-      <Select
-        items={items}
-        value={value}
-        onValueChange={onChange}
-        disabled={!available}
-        placeholder="–"
-        className="w-full"
-        triggerClassName="w-full"
-        panelClassName="max-h-64 overflow-auto"
-        size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-      />
-    </InputWrapper>
-  );
-}
-
-// Kept temporarily as implementation references while the shared configuration
-// panel owns the active settings UI.
-void ApiKeyField;
-void ModelField;
