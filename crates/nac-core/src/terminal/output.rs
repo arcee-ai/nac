@@ -416,6 +416,42 @@ impl OutputRegistry {
         Ok(render_preview(artifact, stream, start, end, max_chars))
     }
 
+    pub(crate) fn command_previews(
+        &self,
+        output_id: &str,
+        max_chars: usize,
+    ) -> Result<((String, bool), (String, bool))> {
+        let inner = self.inner.lock().expect("command output registry poisoned");
+        let artifact = inner
+            .artifacts
+            .get(output_id)
+            .ok_or_else(|| anyhow!("command output '{output_id}' not found or expired"))?;
+        validate_stream(artifact, OutputStream::Stdout)?;
+        let (stdout_start, stdout_end) = artifact.retained_range(OutputStream::Stdout);
+        let (stderr_start, stderr_end) = artifact.retained_range(OutputStream::Stderr);
+        let (stdout_budget, stderr_budget) = preview_budgets(
+            max_chars,
+            stdout_end.saturating_sub(stdout_start) as usize,
+            stderr_end.saturating_sub(stderr_start) as usize,
+        );
+        Ok((
+            render_preview(
+                artifact,
+                OutputStream::Stdout,
+                stdout_start,
+                stdout_end,
+                stdout_budget,
+            ),
+            render_preview(
+                artifact,
+                OutputStream::Stderr,
+                stderr_start,
+                stderr_end,
+                stderr_budget,
+            ),
+        ))
+    }
+
     pub(crate) fn preview_since(
         &self,
         output_id: &str,
@@ -526,6 +562,26 @@ fn validate_stream(artifact: &Artifact, stream: OutputStream) -> Result<()> {
         return Err(anyhow!("PTY output only supports stream=combined"));
     }
     Ok(())
+}
+
+fn preview_budgets(total: usize, stdout_bytes: usize, stderr_bytes: usize) -> (usize, usize) {
+    if stdout_bytes == 0 {
+        return (0, total);
+    }
+    if stderr_bytes == 0 {
+        return (total, 0);
+    }
+    let mut stdout_budget = total / 2;
+    let mut stderr_budget = total - stdout_budget;
+    if stdout_bytes < stdout_budget {
+        stderr_budget += stdout_budget - stdout_bytes;
+        stdout_budget = stdout_bytes;
+    }
+    if stderr_bytes < stderr_budget {
+        stdout_budget += stderr_budget - stderr_bytes;
+        stderr_budget = stderr_bytes;
+    }
+    (stdout_budget, stderr_budget)
 }
 
 fn render_preview(
@@ -713,6 +769,42 @@ fn clip_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_budget_is_shared() {
+        assert_eq!(preview_budgets(8_000, 10_000, 10_000), (4_000, 4_000));
+        assert_eq!(preview_budgets(8_000, 100, 10_000), (100, 7_900));
+        assert_eq!(preview_budgets(8_000, 10_000, 0), (8_000, 0));
+    }
+
+    #[test]
+    fn command_previews_budget_retained_streams_atomically() {
+        let registry = OutputRegistry::new(CommandOutputLimits {
+            per_command_bytes: 1024,
+            per_session_bytes: 1024,
+        })
+        .unwrap();
+        let id = registry.create(ArtifactKind::Command);
+        registry
+            .append(&id, OutputStream::Stdout, vec![b'x'; 2048])
+            .unwrap();
+        registry
+            .append(&id, OutputStream::Stderr, vec![b'e'; 1024])
+            .unwrap();
+
+        let ((stdout, stdout_truncated), (stderr, stderr_truncated)) =
+            registry.command_previews(&id, 100).unwrap();
+        assert_eq!((stdout, stdout_truncated), (String::new(), false));
+        assert!(stderr_truncated);
+        assert_eq!(
+            stderr,
+            format!(
+                "{}...\n...[preview truncated from 1024 retained bytes]...\n{}",
+                "e".repeat(50),
+                "e".repeat(50)
+            )
+        );
+    }
 
     #[test]
     fn pages_streams_and_combined_in_observed_order() {

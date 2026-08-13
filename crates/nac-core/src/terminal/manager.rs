@@ -399,18 +399,9 @@ impl TerminalManager {
                     retained_bytes: 0,
                     overflowed: false,
                 });
-        let (stdout_budget, stderr_budget) = preview_budgets(
-            max_output,
-            stats.stdout_bytes as usize,
-            stats.stderr_bytes as usize,
-        );
-        let (stdout_preview, stdout_truncated) = self
+        let ((stdout_preview, stdout_truncated), (mut stderr_preview, stderr_truncated)) = self
             .output_registry
-            .preview(&output_id, OutputStream::Stdout, stdout_budget)
-            .unwrap_or_default();
-        let (mut stderr_preview, stderr_truncated) = self
-            .output_registry
-            .preview(&output_id, OutputStream::Stderr, stderr_budget)
+            .command_previews(&output_id, max_output)
             .unwrap_or_default();
         if let Some(error) = runtime_error {
             if !stderr_preview.is_empty() {
@@ -553,26 +544,6 @@ where
     }
 }
 
-fn preview_budgets(total: usize, stdout_bytes: usize, stderr_bytes: usize) -> (usize, usize) {
-    if stdout_bytes == 0 {
-        return (0, total);
-    }
-    if stderr_bytes == 0 {
-        return (total, 0);
-    }
-    let mut stdout_budget = total / 2;
-    let mut stderr_budget = total - stdout_budget;
-    if stdout_bytes < stdout_budget {
-        stderr_budget += stdout_budget - stdout_bytes;
-        stdout_budget = stdout_bytes;
-    }
-    if stderr_bytes < stderr_budget {
-        stdout_budget += stderr_budget - stderr_bytes;
-        stderr_budget = stderr_bytes;
-    }
-    (stdout_budget, stderr_budget)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,13 +558,6 @@ mod tests {
             None,
             &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
         )
-    }
-
-    #[test]
-    fn preview_budget_is_shared() {
-        assert_eq!(preview_budgets(8_000, 10_000, 10_000), (4_000, 4_000));
-        assert_eq!(preview_budgets(8_000, 100, 10_000), (100, 7_900));
-        assert_eq!(preview_budgets(8_000, 10_000, 0), (8_000, 0));
     }
 
     #[cfg(unix)]
