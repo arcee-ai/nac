@@ -11,8 +11,8 @@ use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
-    managed_backend_base_url, BackendKind, EffectiveModelSettings, ModelClient,
-    ModelConfigurationError, ReasoningEffort,
+    managed_backend_base_url, resolve_model_metadata, BackendKind, EffectiveModelSettings,
+    ModelClient, ModelConfigurationError, ModelMetadata, ReasoningEffort,
 };
 use crate::paths::PathContext;
 /// Public because callers outside this crate build the connections that sessions
@@ -93,6 +93,8 @@ pub struct SandboxConfig {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct WorkerConfig {
     pub thread_timeout_secs: Option<u64>,
+    pub command_output_max_bytes: Option<usize>,
+    pub command_output_session_max_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -755,6 +757,22 @@ pub(crate) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
         .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
 }
 
+pub(crate) fn worker_command_output_limits(
+    config: &NacConfig,
+) -> Result<crate::terminal::CommandOutputLimits> {
+    crate::terminal::CommandOutputLimits {
+        per_command_bytes: config
+            .worker
+            .command_output_max_bytes
+            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES),
+        per_session_bytes: config
+            .worker
+            .command_output_session_max_bytes
+            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES),
+    }
+    .validate()
+}
+
 fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
     let is_ssh = ssh_host
         .map(str::trim)
@@ -817,6 +835,7 @@ pub async fn build_run_config(
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
+                command_output_limits: worker_command_output_limits(config)?,
                 mode: AgentMode::Orchestrator,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
@@ -901,6 +920,7 @@ pub async fn build_run_config(
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
+            command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Orchestrator,
             store_path: store_path.clone(),
             session_id: Some(session_id.clone()),
@@ -1030,6 +1050,7 @@ pub async fn build_managed_worker_config(
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
+            command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Worker,
             store_path: store_path.clone(),
             session_id: Some(options.dispatch.session_id.clone()),
@@ -1104,6 +1125,8 @@ pub async fn build_resume_config(
         lookup_cwd,
         options.worker_executable,
         None,
+        true,
+        None,
     )
     .await
 }
@@ -1123,8 +1146,75 @@ pub async fn build_resume_config_for_session(
         resume_base_cwd,
         worker_executable,
         None,
+        true,
+        None,
     )
     .await
+}
+
+pub async fn build_resume_config_for_session_attachment(
+    store_path: PathBuf,
+    session_id: &str,
+    config: &NacConfig,
+    resume_base_cwd: PathBuf,
+    worker_executable: Option<PathBuf>,
+) -> Result<(
+    OrchestratorRunConfig,
+    bool,
+    Option<sessions::SessionOperationLease>,
+)> {
+    let snapshot = sessions::load_session(&store_path, session_id)?;
+    let metadata = resolve_model_metadata(snapshot.backend, &snapshot.model);
+    let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
+        metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
+    });
+    if !requires_migration {
+        let run_config = build_resume_config_from_snapshot(
+            snapshot,
+            store_path,
+            config,
+            resume_base_cwd,
+            worker_executable,
+            None,
+            true,
+            Some(metadata),
+        )
+        .await?;
+        return Ok((run_config, true, None));
+    }
+
+    match sessions::SessionOperationLease::try_acquire(&store_path, session_id) {
+        Ok(lease) => {
+            let snapshot = sessions::load_session(&store_path, session_id)?;
+            let run_config = build_resume_config_from_snapshot(
+                snapshot,
+                store_path,
+                config,
+                resume_base_cwd,
+                worker_executable,
+                Some(&lease),
+                true,
+                None,
+            )
+            .await?;
+            Ok((run_config, true, Some(lease)))
+        }
+        Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+            let run_config = build_resume_config_from_snapshot(
+                snapshot,
+                store_path,
+                config,
+                resume_base_cwd,
+                worker_executable,
+                None,
+                false,
+                Some(metadata),
+            )
+            .await?;
+            Ok((run_config, false, None))
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub async fn build_resume_config_for_session_with_lease(
@@ -1135,6 +1225,7 @@ pub async fn build_resume_config_for_session_with_lease(
     worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
 ) -> Result<OrchestratorRunConfig> {
+    operation_lease.validate(&store_path, session_id)?;
     let snapshot = sessions::load_session(&store_path, session_id)?;
     build_resume_config_from_snapshot(
         snapshot,
@@ -1143,6 +1234,8 @@ pub async fn build_resume_config_for_session_with_lease(
         resume_base_cwd,
         worker_executable,
         Some(operation_lease),
+        true,
+        None,
     )
     .await
 }
@@ -1154,6 +1247,8 @@ async fn build_resume_config_from_snapshot(
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
     operation_lease: Option<&sessions::SessionOperationLease>,
+    persist_recovery: bool,
+    resolved_metadata: Option<ModelMetadata>,
 ) -> Result<OrchestratorRunConfig> {
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     // Resume reaches the host with the connection the session recorded, not with
@@ -1174,13 +1269,24 @@ async fn build_resume_config_from_snapshot(
     let paths = PathContext::new(&workspace_cwd);
     let stored_model = snapshot.model.clone();
     let stored_base_url = snapshot.base_url.clone();
-    let snapshot_settings = EffectiveModelSettings::new(
+    let stored_reasoning_effort = snapshot.reasoning_effort;
+    let metadata = resolved_metadata
+        .unwrap_or_else(|| resolve_model_metadata(snapshot.backend, &stored_model));
+    if let Some(effort) = stored_reasoning_effort {
+        if !metadata.thinking_level_map.is_supported(effort) {
+            snapshot.reasoning_effort =
+                metadata.thinking_level_map.closest_supported_effort(effort);
+        }
+    }
+    let authoritative = metadata.source.is_authoritative();
+    let snapshot_settings = EffectiveModelSettings::new_with_resolved(
         snapshot.backend,
         stored_model.clone(),
         stored_base_url.clone(),
         snapshot.reasoning_effort,
         snapshot.api_key_env.clone(),
         snapshot.extra_headers.clone(),
+        metadata,
     )
     .map_err(|error| {
         anyhow::anyhow!(
@@ -1192,6 +1298,17 @@ async fn build_resume_config_from_snapshot(
         anyhow::bail!(
             "stored session model settings are invalid; settings repair required: model and base_url must be stored in normalized nonblank form"
         );
+    }
+    if persist_recovery && snapshot.reasoning_effort != stored_reasoning_effort && authoritative {
+        let migration_lease;
+        if let Some(lease) = operation_lease {
+            lease.validate(&store_path, &snapshot.session_id)?;
+        } else {
+            migration_lease =
+                sessions::SessionOperationLease::try_acquire(&store_path, &snapshot.session_id)?;
+            migration_lease.validate(&store_path, &snapshot.session_id)?;
+        }
+        snapshot.config_version = sessions::update_session_config(&store_path, &snapshot)?;
     }
     let client = ModelClient::from_effective_settings(snapshot_settings)
         .map_err(|error| {
@@ -1257,6 +1374,7 @@ async fn build_resume_config_from_snapshot(
     let mut agent = Agent::with_config(
         client.clone(),
         AgentConfig {
+            command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Orchestrator,
             store_path: store_path.clone(),
             session_id: Some(snapshot.session_id.clone()),
@@ -1495,6 +1613,49 @@ mod tests {
             Some(value) => unsafe { std::env::set_var(name, value) },
             None => unsafe { std::env::remove_var(name) },
         }
+    }
+
+    async fn create_and_resume_effort_snapshot(
+        store_path: &Path,
+        root: &Path,
+        key_name: &str,
+        session_id: &str,
+        backend: BackendKind,
+        model: &str,
+        stored_effort: ReasoningEffort,
+    ) -> SessionSnapshot {
+        let base_url = match backend {
+            BackendKind::TogetherChat => "https://api.together.xyz/v1",
+            BackendKind::AnthropicMessages => "https://api.anthropic.com/v1",
+            BackendKind::ArceeApi => "https://api.arcee.ai/api/v1",
+            _ => unreachable!(),
+        };
+        let snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            model.to_string(),
+            base_url.to_string(),
+            backend,
+            Some(stored_effort),
+            None,
+            None,
+            Vec::new(),
+            Some(key_name.to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(store_path, &snapshot).unwrap();
+        build_resume_config_for_session(
+            store_path.to_path_buf(),
+            session_id,
+            &NacConfig::default(),
+            root.to_path_buf(),
+            None,
+        )
+        .await
+        .unwrap()
+        .session
+        .into_snapshot()
+        .unwrap()
     }
 
     /// A config whose `[model]` section resolves through the catalog:
@@ -2166,6 +2327,33 @@ mod tests {
     }
 
     #[test]
+    fn worker_command_output_limits_validate_config() {
+        let mut config = NacConfig::default();
+        let defaults = worker_command_output_limits(&config).unwrap();
+        assert_eq!(
+            defaults.per_command_bytes,
+            crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES
+        );
+        assert_eq!(
+            defaults.per_session_bytes,
+            crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES
+        );
+
+        config.worker.command_output_max_bytes = Some(1_024);
+        config.worker.command_output_session_max_bytes = Some(4_096);
+        assert_eq!(
+            worker_command_output_limits(&config).unwrap(),
+            crate::terminal::CommandOutputLimits {
+                per_command_bytes: 1_024,
+                per_session_bytes: 4_096,
+            }
+        );
+
+        config.worker.command_output_session_max_bytes = Some(512);
+        assert!(worker_command_output_limits(&config).is_err());
+    }
+
+    #[test]
     fn nac_config_loads_new_sections_alongside_existing_mcp() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original_nac_home = std::env::var_os("NAC_HOME");
@@ -2192,6 +2380,8 @@ image = "config-image"
 
 [worker]
 thread_timeout_secs = 7200
+command_output_max_bytes = 8388608
+command_output_session_max_bytes = 67108864
 
 [mcp_servers.context7]
 enabled = true
@@ -2213,6 +2403,11 @@ url = "https://mcp.context7.com/mcp"
         assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+        assert_eq!(config.worker.command_output_max_bytes, Some(8_388_608));
+        assert_eq!(
+            config.worker.command_output_session_max_bytes,
+            Some(67_108_864)
+        );
 
         restore_env("NAC_HOME", original_nac_home);
         let _ = std::fs::remove_dir_all(root);
@@ -2541,6 +2736,8 @@ X-Config = "yes"
             root.clone(),
             None,
             None,
+            true,
+            None,
         )
         .await
         {
@@ -2699,6 +2896,137 @@ X-Config = "yes"
             normalize_gpu_device("nvidia.com/gpu=mig1:0"),
             "nvidia.com/gpu=mig1:0"
         );
+    }
+
+    #[tokio::test]
+    async fn resume_recovers_effort_and_only_persists_authoritative_changes() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_RESUME_EFFORT_MIGRATION_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("resume_effort_migration")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
+
+        for (session_id, model, stored_effort, effective_effort, stored_after, version) in [
+            (
+                "dated-family",
+                "claude-sonnet-4-6-20251001",
+                ReasoningEffort::Xhigh,
+                Some(ReasoningEffort::High),
+                Some(ReasoningEffort::High),
+                1,
+            ),
+            (
+                "supported",
+                "claude-sonnet-4-6-20251001",
+                ReasoningEffort::High,
+                Some(ReasoningEffort::High),
+                Some(ReasoningEffort::High),
+                0,
+            ),
+            (
+                "provider-default",
+                "unknown-model",
+                ReasoningEffort::Medium,
+                Some(ReasoningEffort::None),
+                Some(ReasoningEffort::Medium),
+                0,
+            ),
+        ] {
+            let active = create_and_resume_effort_snapshot(
+                &store_path,
+                &root,
+                key_name,
+                session_id,
+                BackendKind::AnthropicMessages,
+                model,
+                stored_effort,
+            )
+            .await;
+            assert_eq!(active.reasoning_effort, effective_effort);
+            assert_eq!(active.config_version, version);
+            let stored = sessions::load_session(&store_path, session_id).unwrap();
+            assert_eq!(stored.reasoning_effort, stored_after);
+            assert_eq!(stored.config_version, version);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
+    }
+
+    #[tokio::test]
+    async fn resume_effort_migration_requires_operation_lease() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let key_name = "NAC_RESUME_EFFORT_LEASE_KEY";
+        let original_key = std::env::var_os(key_name);
+        unsafe { std::env::set_var(key_name, "test-key") };
+
+        let root = temp_store_path("resume_effort_lease")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
+        let snapshot = sessions::new_snapshot(
+            "session".to_string(),
+            root.clone(),
+            "deepseek-ai/DeepSeek-V4-Pro".to_string(),
+            "https://api.together.xyz/v1".to_string(),
+            BackendKind::TogetherChat,
+            Some(ReasoningEffort::Medium),
+            None,
+            None,
+            Vec::new(),
+            Some(key_name.to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+
+        let lease = sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+        assert!(build_resume_config_for_session(
+            store_path.clone(),
+            "session",
+            &NacConfig::default(),
+            root.clone(),
+            None,
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            sessions::load_session(&store_path, "session")
+                .unwrap()
+                .reasoning_effort,
+            Some(ReasoningEffort::Medium)
+        );
+
+        let resumed = build_resume_config_for_session_with_lease(
+            store_path.clone(),
+            "session",
+            &NacConfig::default(),
+            root.clone(),
+            None,
+            &lease,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resumed.client.reasoning_effort(),
+            Some(ReasoningEffort::High)
+        );
+        let stored = sessions::load_session(&store_path, "session").unwrap();
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(stored.config_version, 1);
+
+        drop(lease);
+        let _ = std::fs::remove_dir_all(root);
+        restore_env(key_name, original_key);
     }
 
     #[tokio::test]
@@ -3037,6 +3365,8 @@ X-Config = "yes"
             PathBuf::from("/local/resume/base"),
             None,
             None,
+            true,
+            None,
         )
         .await
         {
@@ -3073,6 +3403,8 @@ X-Config = "yes"
             &complete_model_config(),
             PathBuf::from("/local/resume/base"),
             None,
+            None,
+            true,
             None,
         )
         .await

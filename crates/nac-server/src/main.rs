@@ -21,8 +21,17 @@ use nac_core::{
 };
 use nac_server::{serve_with, ServerOptions, SessionManager};
 
+/// Build identity for `--version`: package version plus the source revision,
+/// so two builds of the mutable `edge` release can be told apart.
+const BUILD_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("NAC_BUILD_REVISION"),
+    ")"
+);
+
 #[derive(Parser)]
-#[command(name = "nac-web", about = "web dashboard for managing nac sessions")]
+#[command(name = "nac-web", about = "web dashboard for managing nac sessions", version, long_version = BUILD_VERSION)]
 struct ServerCli {
     /// Address to bind (default: localhost only).
     #[arg(long, default_value = "127.0.0.1:3210")]
@@ -82,7 +91,7 @@ impl ServerCli {
 }
 
 #[derive(Parser)]
-#[command(name = "nac-web codex-auth", about = "manage ChatGPT Codex auth")]
+#[command(name = "nac-web codex-auth", about = "manage ChatGPT Codex auth", version, long_version = BUILD_VERSION)]
 struct CodexAuthCli {
     #[command(subcommand)]
     command: Option<CodexAuthCommand>,
@@ -99,7 +108,7 @@ enum CodexAuthCommand {
 }
 
 #[derive(Parser)]
-#[command(name = "nac-web arcee-auth", about = "manage Arcee auth")]
+#[command(name = "nac-web arcee-auth", about = "manage Arcee auth", version, long_version = BUILD_VERSION)]
 struct ArceeAuthCli {
     #[command(subcommand)]
     command: Option<ArceeAuthCommand>,
@@ -118,7 +127,9 @@ enum ArceeAuthCommand {
 #[derive(Parser)]
 #[command(
     name = "nac-web upgrade",
-    about = "reinstall the latest nac-web release"
+    about = "reinstall the latest nac-web release",
+    version,
+    long_version = BUILD_VERSION
 )]
 struct UpgradeCli {
     /// Install directory to replace (default: current nac-web executable directory)
@@ -886,6 +897,29 @@ thread_timeout_secs = 7200
                 .expect("out-of-range port must be rejected");
             assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
         }
+    }
+
+    #[test]
+    fn server_cli_version_reports_build_identity() {
+        let error = ServerCli::try_parse_from(["nac-web", "--version"])
+            .err()
+            .expect("--version must short-circuit parsing");
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+        let rendered = error.to_string();
+        assert!(rendered.contains(env!("CARGO_PKG_VERSION")), "{rendered}");
+        assert!(rendered.contains(env!("NAC_BUILD_REVISION")), "{rendered}");
+
+        // Rust CLI convention: the short flag prints the bare package version.
+        let short = ServerCli::try_parse_from(["nac-web", "-V"])
+            .err()
+            .expect("-V must short-circuit parsing");
+        assert_eq!(short.kind(), clap::error::ErrorKind::DisplayVersion);
+        let short_rendered = short.to_string();
+        assert!(
+            short_rendered.contains(env!("CARGO_PKG_VERSION")),
+            "{short_rendered}"
+        );
+        assert!(!short_rendered.contains('('), "{short_rendered}");
     }
 
     #[test]

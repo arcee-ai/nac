@@ -230,13 +230,12 @@ pub(crate) fn collect_parse_errors(
             key_arg_preview: None,
             args_detail: Some(tool_args_detail(&args_str)),
         });
-        event_sink.emit(AgentEvent::ToolCallFinished {
-            thread_name: thread_name.clone(),
-            call_id: tool_call_id.clone(),
-            name: "thread".to_string(),
-            content_preview: preview_tool_result("thread", &error_result),
-            is_error: error_result.is_error,
-        });
+        event_sink.emit(AgentEvent::tool_call_finished(
+            thread_name.clone(),
+            tool_call_id.clone(),
+            "thread".to_string(),
+            &error_result,
+        ));
         results.push((index, tool_call_id, "thread".to_string(), error_result));
     }
     results
@@ -375,13 +374,12 @@ pub(crate) async fn execute_with_dag(
                 key_arg_preview: None,
                 args_detail: Some(tool_args_detail(&dispatch.args_str)),
             });
-            event_sink.emit(AgentEvent::ToolCallFinished {
-                thread_name: agent_thread_name.clone(),
-                call_id: dispatch.tool_call_id.clone(),
-                name: "thread".to_string(),
-                content_preview: preview_tool_result("thread", &result),
-                is_error: true,
-            });
+            event_sink.emit(AgentEvent::tool_call_finished(
+                agent_thread_name.clone(),
+                dispatch.tool_call_id.clone(),
+                "thread".to_string(),
+                &result,
+            ));
             all_results.push((
                 dispatch.original_index,
                 dispatch.tool_call_id.clone(),
@@ -461,13 +459,12 @@ pub(crate) async fn execute_with_dag(
                     key_arg_preview: None,
                     args_detail: Some(tool_args_detail(&dispatch.args_str)),
                 });
-                event_sink.emit(AgentEvent::ToolCallFinished {
-                    thread_name: agent_thread_name.clone(),
-                    call_id: dispatch.tool_call_id.clone(),
-                    name: "thread".to_string(),
-                    content_preview: preview_tool_result("thread", &result),
-                    is_error: true,
-                });
+                event_sink.emit(AgentEvent::tool_call_finished(
+                    agent_thread_name.clone(),
+                    dispatch.tool_call_id.clone(),
+                    "thread".to_string(),
+                    &result,
+                ));
 
                 all_results.push((
                     dispatch.original_index,
@@ -533,13 +530,12 @@ pub(crate) async fn execute_with_dag(
                     nt_res = non_thread_join_set.join_next() => {
                         match nt_res {
                             Some(Ok((index, _, tool_call_id, tool_name, result))) => {
-                                event_sink.emit(AgentEvent::ToolCallFinished {
-                                    thread_name: agent_thread_name.clone(),
-                                    call_id: tool_call_id.clone(),
-                                    name: tool_name.clone(),
-                                    content_preview: preview_tool_result(&tool_name, &result),
-                                    is_error: result.is_error,
-                                });
+                                event_sink.emit(AgentEvent::tool_call_finished(
+                                    agent_thread_name.clone(),
+                                    tool_call_id.clone(),
+                                    tool_name.clone(),
+                                    &result,
+                                ));
                                 all_results.push((index, tool_call_id, tool_name, result));
                             }
                             Some(Err(error)) => {
@@ -578,13 +574,12 @@ pub(crate) async fn execute_with_dag(
                         }
                     }
 
-                    event_sink.emit(AgentEvent::ToolCallFinished {
-                        thread_name: agent_thread_name.clone(),
-                        call_id: tool_call_id.clone(),
-                        name: tool_name.clone(),
-                        content_preview: preview_tool_result(&tool_name, &result),
-                        is_error: result.is_error,
-                    });
+                    event_sink.emit(AgentEvent::tool_call_finished(
+                        agent_thread_name.clone(),
+                        tool_call_id.clone(),
+                        tool_name.clone(),
+                        &result,
+                    ));
 
                     all_results.push((index, tool_call_id, tool_name, result));
                 }
@@ -617,13 +612,12 @@ pub(crate) async fn execute_with_dag(
     while let Some(join_result) = non_thread_join_set.join_next().await {
         match join_result {
             Ok((index, _, tool_call_id, tool_name, result)) => {
-                event_sink.emit(AgentEvent::ToolCallFinished {
-                    thread_name: agent_thread_name.clone(),
-                    call_id: tool_call_id.clone(),
-                    name: tool_name.clone(),
-                    content_preview: preview_tool_result(&tool_name, &result),
-                    is_error: result.is_error,
-                });
+                event_sink.emit(AgentEvent::tool_call_finished(
+                    agent_thread_name.clone(),
+                    tool_call_id.clone(),
+                    tool_name.clone(),
+                    &result,
+                ));
                 all_results.push((index, tool_call_id, tool_name, result));
             }
             Err(error) => {

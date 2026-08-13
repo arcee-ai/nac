@@ -427,6 +427,8 @@ export type AgentEvent =
       name: string;
       content_preview: string;
       is_error: boolean;
+      command_status?: "completed" | "timed_out" | "cancelled" | "spawn_error";
+      exit_code?: number;
     }
   | {
       type: "thread_started";

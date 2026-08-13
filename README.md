@@ -199,6 +199,8 @@ image = "python:3.13-bookworm"
 
 [worker]
 thread_timeout_secs = 3600
+command_output_max_bytes = 8388608
+command_output_session_max_bytes = 67108864
 
 [mcp_servers.exa_web_search]
 enabled = true
@@ -217,6 +219,8 @@ url = "https://mcp.grep.app"
 ```
 
 Supported MCP transports right now are `stdio` and `streamable_http`. Stdio servers can provide `command`, `args`, and `env`; streamable HTTP servers provide `url` and optional `headers`. MCP string values support `${ENV_VAR}` expansion.
+
+Worker command output is retained in memory for the dispatch that produced it. `exec_command` keeps stdout and stderr separate, returns structured `status`/`exit_code` fields and concise previews, and supplies an `output_id` when the process started. A worker can page retained `combined`, `stdout`, or `stderr` bytes with `read_command_output`; combined output follows observed emission order. PTY output is combined-only, and `write_stdin` advances a preview cursor without deleting retained bytes. `command_output_max_bytes` caps one command or PTY (1 byte through 1 GiB); `command_output_session_max_bytes` caps the worker dispatch (at least the per-command cap, at most 4 GiB). Oldest retained bytes roll over deterministically and reads report `overflowed` plus the exact retained range. Output IDs expire when the dispatch ends, including error or cancellation cleanup. Short commands remain complete in their previews and need no follow-up read.
 
 ## Model catalog, overrides, and cost
 

@@ -11,6 +11,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
     let mut worker = Agent::with_config(
         ModelClient::new_for_test_server(server.base_url.clone()),
         AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
             store_path: PathBuf::from("unused.db"),
             session_id: None,

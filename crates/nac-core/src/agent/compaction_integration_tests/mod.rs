@@ -33,6 +33,7 @@ fn compaction_test_agent(
     Agent::with_config(
         client,
         AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
             store_path,
             session_id: session_id.map(str::to_string),

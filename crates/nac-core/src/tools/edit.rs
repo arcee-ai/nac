@@ -262,6 +262,7 @@ mod tests {
     fn local_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
         let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
         ToolRuntime {
+            command_cancellation: crate::tools::ThreadCancellation::default(),
             config_cwd: workspace_cwd.clone(),
             workspace_cwd,
             store_path: PathBuf::new(),

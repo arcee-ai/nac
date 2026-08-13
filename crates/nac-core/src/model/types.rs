@@ -199,13 +199,14 @@ pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) ->
 }
 
 impl EffectiveModelSettings {
-    pub fn from_optional(
+    fn from_optional_with_resolved(
         backend: Option<BackendKind>,
         model: Option<String>,
         base_url: Option<String>,
         reasoning_effort: Option<ReasoningEffort>,
         api_key_env: Option<String>,
         extra_headers: std::collections::BTreeMap<String, String>,
+        resolved: Option<catalog::ModelMetadata>,
     ) -> Result<Self> {
         let backend = backend.ok_or_else(|| {
             model_configuration_error(
@@ -220,21 +221,7 @@ impl EffectiveModelSettings {
         // client construction; the selected NAME is persisted into the
         // session). Managed backends never auto-select.
         let api_key_env = api_key_env.or_else(|| backend::auto_select_api_key_env(backend));
-        let resolved = catalog::resolve(backend, &model);
-        // Migration: old sessions may have xhigh on Anthropic models that now
-        // expose max directly (opus-4-6, sonnet-4-6). Route xhigh to max when
-        // xhigh is unsupported but max is. This is a one-time migration — the
-        // session stores "max" on next save.
-        let reasoning_effort = reasoning_effort.map(|effort| {
-            if effort == ReasoningEffort::Xhigh
-                && !resolved.thinking_level_map.is_supported(ReasoningEffort::Xhigh)
-                && resolved.thinking_level_map.is_supported(ReasoningEffort::Max)
-            {
-                ReasoningEffort::Max
-            } else {
-                effort
-            }
-        });
+        let resolved = resolved.unwrap_or_else(|| catalog::resolve(backend, &model));
         super::backend::validate_model_reasoning_effort_with_map(
             backend,
             &model,
@@ -251,6 +238,45 @@ impl EffectiveModelSettings {
             extra_headers,
             resolved,
         })
+    }
+
+    pub fn from_optional(
+        backend: Option<BackendKind>,
+        model: Option<String>,
+        base_url: Option<String>,
+        reasoning_effort: Option<ReasoningEffort>,
+        api_key_env: Option<String>,
+        extra_headers: std::collections::BTreeMap<String, String>,
+    ) -> Result<Self> {
+        Self::from_optional_with_resolved(
+            backend,
+            model,
+            base_url,
+            reasoning_effort,
+            api_key_env,
+            extra_headers,
+            None,
+        )
+    }
+
+    pub(crate) fn new_with_resolved(
+        backend: BackendKind,
+        model: String,
+        base_url: String,
+        reasoning_effort: Option<ReasoningEffort>,
+        api_key_env: Option<String>,
+        extra_headers: std::collections::BTreeMap<String, String>,
+        resolved: catalog::ModelMetadata,
+    ) -> Result<Self> {
+        Self::from_optional_with_resolved(
+            Some(backend),
+            Some(model),
+            Some(base_url),
+            reasoning_effort,
+            api_key_env,
+            extra_headers,
+            Some(resolved),
+        )
     }
 
     pub fn new(
