@@ -558,6 +558,13 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
     .unwrap();
     reset_for_test();
 
+    let serialized_map = serde_json::to_value(
+        resolve(BackendKind::AnthropicMessages, "claude-haiku-4-5").thinking_level_map,
+    )
+    .expect("thinking map serializes");
+    assert_eq!(serialized_map.get("low"), Some(&serde_json::Value::Null));
+    assert!(serialized_map.get("xhigh").is_none());
+
     validate_model_reasoning_effort(
         BackendKind::AnthropicMessages,
         "claude-haiku-4-5",
