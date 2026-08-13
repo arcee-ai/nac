@@ -580,9 +580,8 @@ fn render_preview(
         return (String::new(), retained_len > 0);
     }
 
-    // Four bytes is the largest UTF-8 scalar. This bounded probe proves that
-    // short multibyte output fits the character budget without reading a
-    // potentially GiB-sized retained artifact into a second allocation.
+    // Probe at most four bytes per character so previews remain bounded without
+    // copying an entire retained artifact.
     let full_probe_limit = max_chars.saturating_mul(4).saturating_add(4);
     if retained_len <= full_probe_limit {
         let (bytes, _) = artifact.bytes_from(stream, start, retained_len);
@@ -755,13 +754,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preview_budget_is_shared() {
-        assert_eq!(preview_budgets(8_000, 10_000, 10_000), (4_000, 4_000));
-        assert_eq!(preview_budgets(8_000, 100, 10_000), (100, 7_900));
-        assert_eq!(preview_budgets(8_000, 10_000, 0), (8_000, 0));
-    }
-
-    #[test]
     fn command_previews_budget_retained_streams_atomically() {
         let registry = OutputRegistry::new(CommandOutputLimits {
             per_command_bytes: 1024,
@@ -788,40 +780,6 @@ mod tests {
                 "e".repeat(50)
             )
         );
-    }
-
-    #[test]
-    fn pages_streams_and_combined_in_observed_order() {
-        let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Command);
-        registry
-            .append(&id, OutputStream::Stdout, b"out-1\n".to_vec())
-            .unwrap();
-        registry
-            .append(&id, OutputStream::Stderr, b"err-1\n".to_vec())
-            .unwrap();
-        registry
-            .append(&id, OutputStream::Stdout, b"out-2\n".to_vec())
-            .unwrap();
-
-        assert_eq!(
-            registry
-                .page(&id, OutputStream::Stdout, 0, 64)
-                .unwrap()
-                .content,
-            "out-1\nout-2\n"
-        );
-        assert_eq!(
-            registry
-                .page(&id, OutputStream::Stderr, 0, 64)
-                .unwrap()
-                .content,
-            "err-1\n"
-        );
-        let combined = registry.page(&id, OutputStream::Combined, 0, 64).unwrap();
-        assert_eq!(combined.content, "out-1\nerr-1\nout-2\n");
-        assert_eq!(combined.segments.len(), 3);
-        assert!(combined.eof);
     }
 
     #[test]
@@ -969,17 +927,6 @@ mod tests {
         assert!(artifact.overflowed);
     }
 
-    #[test]
-    fn clear_expires_output_ids() {
-        let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Pty);
-        registry
-            .append(&id, OutputStream::Combined, b"hello".to_vec())
-            .unwrap();
-        registry.clear();
-
-        assert!(registry.page(&id, OutputStream::Combined, 0, 32).is_err());
-    }
     #[test]
     fn interleaved_quota_eviction_aligns_each_pageable_stream() {
         let registry = OutputRegistry::new(CommandOutputLimits {

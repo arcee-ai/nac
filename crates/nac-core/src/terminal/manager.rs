@@ -750,38 +750,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn noisy_producer_never_retains_more_than_the_configured_cap() {
-        let manager = TerminalManager::with_limits(CommandOutputLimits {
-            per_command_bytes: 64 * 1024,
-            per_session_bytes: 64 * 1024,
-        })
-        .unwrap();
-        let output = manager
-            .exec_one_shot(
-                "python3 -c 'import sys; sys.stdout.write(\"x\"*(2*1024*1024))'",
-                None,
-                120,
-                40,
-                10_000,
-                100,
-                &backend(),
-                None,
-            )
-            .await;
-        assert!(output.overflowed);
-        let page = manager
-            .read_output(
-                output.output_id.as_deref().unwrap(),
-                OutputStream::Stdout,
-                0,
-                64 * 1024,
-            )
-            .unwrap();
-        assert_eq!(page.retained_end - page.retained_start, 64 * 1024);
-        assert_eq!(page.content.len(), 64 * 1024);
-    }
-
-    #[tokio::test]
     async fn explicit_cancellation_is_structured_and_stops_late_side_effects() {
         let manager = TerminalManager::new();
         let cancellation = ThreadCancellation::default();

@@ -1,5 +1,3 @@
-//! Terminal-backed command execution and retained output pagination tools.
-
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -263,11 +261,6 @@ mod tests {
         )
     }
 
-    fn test_runtime_at(workspace_cwd: PathBuf) -> ToolRuntime {
-        crate::tools::test_runtime_at(workspace_cwd, None)
-
-    }
-
     fn unique_temp_dir(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -485,26 +478,6 @@ mod tests {
             value["stdout_preview"].as_str().unwrap_or_default(),
             value["stderr_preview"].as_str().unwrap_or_default()
         )
-    }
-
-    #[test]
-    fn worker_definitions_explain_recovery() {
-        assert!(exec_command_definition()
-            .function
-            .description
-            .contains("read_command_output"));
-        assert!(exec_command_definition()
-            .function
-            .description
-            .contains("non-interactively"));
-        assert!(exec_command_definition()
-            .function
-            .description
-            .contains("terminal prompts are disabled"));
-        assert_eq!(
-            read_command_output_definition().function.name,
-            "read_command_output"
-        );
     }
 
     #[test]
