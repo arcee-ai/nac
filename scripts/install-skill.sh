@@ -63,10 +63,14 @@ fetch_file() {
   path=$1
   output=$2
 
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    gh api -H 'Accept: application/vnd.github.raw+json' \
-      "repos/arcee-ai/nac/contents/$path?ref=$ref" > "$output"
-  elif [ -n "${GITHUB_TOKEN:-}" ]; then
+  if command -v gh >/dev/null 2>&1 \
+    && gh auth status >/dev/null 2>&1 \
+    && gh api -H 'Accept: application/vnd.github.raw+json' \
+      "repos/arcee-ai/nac/contents/$path?ref=$ref" > "$output" 2>/dev/null; then
+    return
+  fi
+
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
     curl -fsSL \
       -H 'Accept: application/vnd.github.raw+json' \
       -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -79,8 +83,8 @@ fetch_file() {
   fi
 }
 
-fetch_file plugins/nac-agent-skills/skills/nac-onboarding/SKILL.md "$skill_file"
-fetch_file plugins/nac-agent-skills/skills/nac-onboarding/agents/openai.yaml "$metadata_file"
+fetch_file skills/nac-onboarding/SKILL.md "$skill_file"
+fetch_file skills/nac-onboarding/agents/openai.yaml "$metadata_file"
 
 mkdir -p "$skill_dir/agents"
 mv "$skill_file" "$skill_dir/SKILL.md"
