@@ -11,20 +11,25 @@ fn main() {
     println!("cargo:rustc-env=NAC_BUILD_REVISION={revision}");
 
     // Re-run this script when the revision moves, otherwise incremental
-    // rebuilds keep a stale embedded revision. Watch HEAD plus the ref it
-    // points at (branch commits rewrite only the ref) and packed-refs (fresh
-    // clones may not have a loose ref file yet). Missing paths simply make
-    // Cargo re-run the script, which is cheap when nothing changed.
-    if let Some(git_dir) = git(&["rev-parse", "--git-dir"]) {
-        let git_dir = std::path::PathBuf::from(git_dir);
-        let head = git_dir.join("HEAD");
+    // rebuilds keep a stale embedded revision. `--git-path` resolves HEAD in
+    // the per-worktree git directory while resolving refs and packed-refs in
+    // the common git directory shared by all worktrees.
+    if let Some(head) = git(&["rev-parse", "--git-path", "HEAD"]) {
+        let head = std::path::PathBuf::from(head);
         println!("cargo:rerun-if-changed={}", head.display());
-        println!("cargo:rerun-if-changed={}", git_dir.join("packed-refs").display());
+        watch_git_path("packed-refs");
         if let Ok(contents) = std::fs::read_to_string(&head) {
             if let Some(reference) = contents.trim().strip_prefix("ref: ") {
-                println!("cargo:rerun-if-changed={}", git_dir.join(reference).display());
+                watch_git_path(reference);
             }
         }
+    }
+}
+
+/// Tells Cargo to watch a path after Git resolves its worktree-aware location.
+fn watch_git_path(path: &str) {
+    if let Some(path) = git(&["rev-parse", "--git-path", path]) {
+        println!("cargo:rerun-if-changed={path}");
     }
 }
 
