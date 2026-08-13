@@ -17,19 +17,36 @@ The installer places one binary in `$HOME/.local/bin` by default:
 
 ### Set up nac from another coding agent
 
-This repository includes a portable onboarding skill for Codex, Claude Code, OpenCode, and compatible agents. Install it into the agent runtime you use:
+This repository packages a portable onboarding skill for Codex, Claude Code, and compatible agents, following the [Cross-Harness Skills](https://github.com/eric-tramel/cross-harness-skills) marketplace layout. Install it through a marketplace when your agent supports one.
+
+**Claude Code**
+
+```sh
+claude plugin marketplace add arcee-ai/nac
+claude plugin install nac-agent-skills@arcee-nac
+```
+
+**Codex**
+
+```sh
+codex plugin marketplace add arcee-ai/nac
+```
+
+Then open Codex's plugin UI, find **NAC Agent Skills** in the **Arcee NAC** marketplace, and enable it. Start a new thread after installing or updating so the skill metadata is refreshed.
+
+For OpenCode and other compatible agents, install the skill into the agent's skill directory:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target codex
 ```
 
-Replace `codex` with `claude`, `opencode`, `nac`, `agents` (the cross-agent default), or `project`. Run the command with `--help` to see every destination. Then ask the agent to use `nac-onboarding`.
+Replace `codex` with `claude`, `opencode`, `nac`, `agents` (the cross-agent default), or `project`. For an agent with a different skill location, use `--path /path/to/skills`. Run the command with `--help` to see every option. Then ask the agent to use `nac-onboarding`.
 
 Or paste this into your agent:
 
 > Install the nac onboarding skill with `curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
 
-The skill lives in [`skills/nac-onboarding`](skills/nac-onboarding) and covers the complete setup, including nac's built-in MCP endpoint.
+The canonical skill lives in [`plugins/nac-agent-skills/skills/nac-onboarding`](plugins/nac-agent-skills/skills/nac-onboarding) and covers the complete setup, including nac's built-in MCP endpoint.
 
 ### Choose auth
 

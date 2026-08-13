@@ -1,0 +1,28 @@
+{
+  "name": "arcee-nac",
+  "owner": {
+    "name": "Arcee AI"
+  },
+  "description": "Portable nac onboarding skills for coding agents and MCP clients.",
+  "plugins": [
+    {
+      "name": "nac-agent-skills",
+      "displayName": "NAC Agent Skills",
+      "source": "./plugins/nac-agent-skills",
+      "description": "Portable onboarding for nac authentication, MCP servers, and agent integrations.",
+      "author": {
+        "name": "Arcee AI"
+      },
+      "homepage": "https://github.com/arcee-ai/nac",
+      "repository": "https://github.com/arcee-ai/nac",
+      "category": "Productivity",
+      "tags": [
+        "nac",
+        "agents",
+        "codex",
+        "claude-code",
+        "mcp"
+      ]
+    }
+  ]
+}
