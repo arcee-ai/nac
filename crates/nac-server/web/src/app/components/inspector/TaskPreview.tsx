@@ -1,6 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
-import { Icon, IconName, Popover, PopoverPlacement } from "@/app/atoms";
+import {
+  Button,
+  ButtonSize,
+  ButtonVariant,
+  Icon,
+  IconName,
+  Popover,
+  PopoverPlacement,
+} from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
 
@@ -11,11 +25,13 @@ import { Markdown } from "@/app/lib/markdown";
  */
 const HOVER_CLOSE_DELAY_MS = 160;
 
-/** The "Task" affordance itself: an info glyph and an underlined label. */
+/** The task affordance itself: an info glyph and an underlined label. */
 function TaskLabel({
+  text,
   active,
   large = false,
 }: {
+  text: string;
   active: boolean;
   large?: boolean;
 }) {
@@ -36,9 +52,47 @@ function TaskLabel({
           active ? "text-basic-primary" : "text-btn-secondary",
         )}
       >
-        Task
+        {text}
       </span>
     </>
+  );
+}
+
+/**
+ * The panel every deliberate task affordance opens: the dispatch as prose, wide
+ * enough to read and scrolled rather than allowed to grow, since a task can run
+ * to several paragraphs that nothing it hangs off has room for.
+ */
+function TaskPopover({
+  action,
+  open,
+  onClose,
+  children,
+}: {
+  action: string;
+  open: boolean;
+  onClose: () => void;
+  /** The trigger the panel hangs off. */
+  children: ReactNode;
+}) {
+  return (
+    <Popover
+      open={open}
+      onClose={onClose}
+      placement={PopoverPlacement.BottomRight}
+      sticky
+      size="w-[430px] max-w-[calc(100vw-16px)]"
+      panelClassName="p-4 max-h-[260px] overflow-auto"
+      sheetClassName="max-h-[70vh] overflow-auto"
+      className="shrink-0"
+      content={
+        <Markdown className="text-basic-primary px-4 md:px-0">
+          {action}
+        </Markdown>
+      }
+    >
+      {children}
+    </Popover>
   );
 }
 
@@ -47,9 +101,7 @@ function TaskLabel({
  *
  * The dispatch carries this from the moment the thread starts, so it is the one
  * thing about a running thread that can be read before it has produced
- * anything. It opens as a panel rather than an expander because the header is
- * the only place all three layouts share, and a task can run to several
- * paragraphs that nothing above the log has room for.
+ * anything.
  */
 export function TaskButton({
   action,
@@ -61,26 +113,39 @@ export function TaskButton({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <Popover
-      open={open}
-      onClose={() => setOpen(false)}
-      placement={PopoverPlacement.BottomRight}
-      sticky
-      size="w-[430px] max-w-[calc(100vw-16px)]"
-      panelClassName="p-4 max-h-[260px] overflow-auto"
-      sheetClassName="max-h-[70vh] overflow-auto"
-      className="shrink-0"
-      content={<Markdown className="text-basic-secondary">{action}</Markdown>}
-    >
+    <TaskPopover action={action} open={open} onClose={() => setOpen(false)}>
       <button
         type="button"
         className="flex items-center gap-1 shrink-0"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <TaskLabel active={open} large={large} />
+        {/* Unlike the hover hint, nothing here happens on its own, so the
+            label has to say what the click will do. */}
+        <TaskLabel text="See task" active={open} large={large} />
       </button>
-    </Popover>
+    </TaskPopover>
+  );
+}
+
+/**
+ * The same panel from a pill, for the phone's floating view switch — where an
+ * underlined label beside two solid pills would read as a stray link rather
+ * than as the third control of the set.
+ */
+export function TaskPill({ action }: { action: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <TaskPopover action={action} open={open} onClose={() => setOpen(false)}>
+      <Button
+        size={ButtonSize.Medium}
+        variant={open ? ButtonVariant.Primary : ButtonVariant.Secondary}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        Task
+      </Button>
+    </TaskPopover>
   );
 }
 
@@ -156,7 +221,7 @@ export function TaskPreviewHoverHint({
         onMouseEnter={show}
         onMouseLeave={scheduleHide}
       >
-        <TaskLabel active={open} />
+        <TaskLabel text="Task" active={open} />
       </span>
     </Popover>
   );

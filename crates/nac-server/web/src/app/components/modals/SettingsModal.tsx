@@ -48,6 +48,7 @@ import {
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
+import { managedAuthLabel } from "@/app/lib/providers";
 import { humanErrorText } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
@@ -714,7 +715,9 @@ function ApiKeyField({
 /**
  * What a managed provider shows in place of a key: the credential is a browser
  * login shared by every session on that provider, so this row signs in and out
- * rather than editing anything the session owns.
+ * rather than editing anything the session owns. It is named after the account
+ * being signed into rather than after authentication in the abstract, so the
+ * button never leaves the destination to guesswork.
  */
 function AuthenticationField({ backend }: { backend: BackendKind }) {
   const isMobile = useIsMobile();
@@ -731,6 +734,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
 
   if (!provider) return null;
 
+  const label = managedAuthLabel(provider);
   const failed = state.status === "failed";
   const expired = signedIn && reach.isError;
   const control =
@@ -802,14 +806,14 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
         loading={state.status === "starting"}
         onClick={() => void start(provider)}
       >
-        <span>Sign in</span>
+        <span>Sign in with {label}</span>
         <Icon iconName={IconName.External} />
       </Button>
     );
 
   return (
     <InputWrapper
-      label="Authentication"
+      label={`${label} sign-in`}
       validation={failed || expired}
       validationText={
         failed || expired
@@ -818,8 +822,8 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
       }
       hintText={
         signedIn
-          ? "Sign in through your model provider to stay authenticated across sessions."
-          : "Sign in through your model provider to stay authenticated across sessions. The session cannot run until you do."
+          ? `This provider authenticates with ${label} in your browser; the login is shared by every session on it.`
+          : `This provider authenticates with ${label} in your browser instead of with an API key. The session cannot run until you sign in.`
       }
     >
       <div className="flex items-center">{control}</div>

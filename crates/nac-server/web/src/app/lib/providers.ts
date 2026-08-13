@@ -11,7 +11,7 @@ const PROVIDER_LABELS: Record<BackendKind, string> = {
   "deepseek-chat": "DeepSeek Chat",
   "fireworks-chat": "Fireworks Chat",
   "together-chat": "Together Chat",
-  "arcee-auth": "Arcee API (Auth)",
+  "arcee-auth": "Arcee API (Sign in)",
   "arcee-api": "Arcee API (Key)",
 };
 
@@ -67,6 +67,19 @@ export function managedAuthProvider(
   backend: string,
 ): ManagedAuthProvider | null {
   return MANAGED_AUTH_PROVIDERS[backend as BackendKind] ?? null;
+}
+
+/**
+ * The account a browser login signs into, named the way the provider's own
+ * sign-in page names it rather than after the backend it unlocks.
+ */
+const MANAGED_AUTH_LABELS: Record<ManagedAuthProvider, string> = {
+  arcee: "Arcee",
+  codex: "ChatGPT",
+};
+
+export function managedAuthLabel(provider: ManagedAuthProvider): string {
+  return MANAGED_AUTH_LABELS[provider];
 }
 
 function isBackendKind(backend: string): backend is BackendKind {
