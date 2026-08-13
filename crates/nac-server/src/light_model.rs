@@ -58,3 +58,73 @@ pub(crate) fn rotate_inherited_credential(
         light.api_key_env = Some(credential.name.to_string());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn light_settings(backend: Option<BackendKind>, api_key_env: Option<&str>) -> LightModelSettings {
+        LightModelSettings {
+            model: "deepseek/deepseek-v4-flash-latest".to_string(),
+            backend,
+            base_url: None,
+            api_key_env: api_key_env.map(str::to_string),
+            reasoning_effort: None,
+        }
+    }
+
+    #[test]
+    fn rotates_inherited_selector_on_primary_key_change() {
+        // The key-only PATCH case: the light model references the previous
+        // primary selector and must follow it to the new one.
+        let mut light = light_settings(Some(BackendKind::ArceeAuth), Some("OLD_KEY"));
+        rotate_inherited_credential(
+            &mut light,
+            InheritedCredential {
+                backend: BackendKind::ArceeAuth,
+                name: "NEW_KEY",
+                previous: Some("OLD_KEY"),
+            },
+        );
+        assert_eq!(light.api_key_env.as_deref(), Some("NEW_KEY"));
+
+        // A light model with no selector inherits too.
+        let mut light = light_settings(Some(BackendKind::ArceeAuth), None);
+        rotate_inherited_credential(
+            &mut light,
+            InheritedCredential {
+                backend: BackendKind::ArceeAuth,
+                name: "NEW_KEY",
+                previous: Some("OLD_KEY"),
+            },
+        );
+        assert_eq!(light.api_key_env.as_deref(), Some("NEW_KEY"));
+    }
+
+    #[test]
+    fn keeps_unrelated_or_cross_backend_selectors() {
+        // An explicit unrelated selector is not clobbered.
+        let mut light = light_settings(Some(BackendKind::ArceeAuth), Some("OTHER_KEY"));
+        rotate_inherited_credential(
+            &mut light,
+            InheritedCredential {
+                backend: BackendKind::ArceeAuth,
+                name: "NEW_KEY",
+                previous: Some("OLD_KEY"),
+            },
+        );
+        assert_eq!(light.api_key_env.as_deref(), Some("OTHER_KEY"));
+
+        // A different backend never follows the primary key.
+        let mut light = light_settings(Some(BackendKind::DeepSeekChat), Some("OLD_KEY"));
+        rotate_inherited_credential(
+            &mut light,
+            InheritedCredential {
+                backend: BackendKind::ArceeAuth,
+                name: "NEW_KEY",
+                previous: Some("OLD_KEY"),
+            },
+        );
+        assert_eq!(light.api_key_env.as_deref(), Some("OLD_KEY"));
+    }
+}

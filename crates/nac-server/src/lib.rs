@@ -1946,6 +1946,11 @@ impl SessionManager {
         // plain field patch does not, so it is settled here instead.
         let light_field = std::mem::take(&mut request.light_model);
         apply_raw_config_patch(&mut prospective, request)?;
+        let inherited_backend = prospective
+            .backend
+            .as_deref()
+            .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
+            .or_else(|| provider_for_model(&prospective.model));
         match light_field {
             RequestField::Omitted => {
                 // An unrelated patch must not persist the parse failure as a
@@ -1957,6 +1962,22 @@ impl SessionManager {
                         "stored light-model settings are malformed; include light_model in the update to repair them, or null to return to single-model mode",
                     ));
                 }
+                // A key-only patch still moves an inherited light selector
+                // along to the new primary selector.
+                if let (Some(light), Some(name), Some(backend)) = (
+                    prospective.light_model.as_mut(),
+                    prospective.api_key_env.as_deref(),
+                    inherited_backend,
+                ) {
+                    light_model::rotate_inherited_credential(
+                        light,
+                        light_model::InheritedCredential {
+                            backend,
+                            name,
+                            previous: current.api_key_env.as_deref(),
+                        },
+                    );
+                }
             }
             RequestField::Null => prospective.light_model = None,
             RequestField::Value(light) => {
@@ -1964,11 +1985,7 @@ impl SessionManager {
                 // inherits the session's primary one, following it when the
                 // primary selector changes.
                 let inherited = prospective.api_key_env.as_deref().and_then(|name| {
-                    let backend = prospective
-                        .backend
-                        .as_deref()
-                        .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
-                        .or_else(|| provider_for_model(&prospective.model))?;
+                    let backend = inherited_backend?;
                     Some(light_model::InheritedCredential {
                         backend,
                         name,
