@@ -19,7 +19,7 @@ The installer places one binary in `$HOME/.local/bin` by default:
 
 Simplify nac setup by letting your existing coding agent handle it. Nac provides a portable onboarding skill and MCP integration; paste this into your chosen agent harness to install nac, configure it, and connect the MCP:
 
-> Install the nac onboarding skill with `gh api -H 'Accept: application/vnd.github.raw+json' repos/arcee-ai/nac/contents/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
+> Install the nac onboarding skill with `curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/install-skill.sh | sh -s -- --target agents`, load `nac-onboarding`, and walk me through installing nac, selecting Arcee login, ChatGPT Codex login, or an OpenAI-compatible API key, adding MCP servers, and connecting your MCP client to nac.
 
 ### Choose auth
 
