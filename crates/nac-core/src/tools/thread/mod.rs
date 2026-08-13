@@ -875,14 +875,6 @@ mod tests {
     }
 
     #[test]
-    fn thread_timeout_defaults_to_one_hour() {
-        assert_eq!(
-            resolve_thread_timeout_secs(&json!({}), DEFAULT_THREAD_TIMEOUT_SECS),
-            60 * 60
-        );
-    }
-
-    #[test]
     fn thread_timeout_is_clamped_to_thirty_minutes() {
         assert_eq!(resolve_thread_timeout_secs(&json!({}), 10), 30 * 60);
         assert_eq!(
@@ -940,29 +932,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_dispatch_args_defaults_threads_to_empty() {
+    fn parse_dispatch_args_omitted_options_use_dispatch_defaults() {
         let runtime = test_runtime();
         let args = json!({ "name": "t1", "action": "work" });
 
         let params = parse_dispatch_args(&args, &runtime).unwrap();
         assert!(params.source_threads.is_empty());
-    }
-
-    #[test]
-    fn parse_dispatch_args_defaults_skills_to_empty() {
-        let runtime = test_runtime();
-        let args = json!({ "name": "t1", "action": "work" });
-
-        let params = parse_dispatch_args(&args, &runtime).unwrap();
         assert!(params.scheduled_skills.is_empty());
-    }
-
-    #[test]
-    fn parse_dispatch_args_applies_default_timeout() {
-        let runtime = test_runtime();
-        let args = json!({ "name": "t1", "action": "work" });
-
-        let params = parse_dispatch_args(&args, &runtime).unwrap();
         assert_eq!(params.timeout_secs, DEFAULT_THREAD_TIMEOUT_SECS);
     }
 

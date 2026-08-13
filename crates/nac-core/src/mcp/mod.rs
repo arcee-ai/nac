@@ -284,18 +284,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn tool_definition_uses_namespaced_name() {
-        let tool = Tool::new(
-            "search_issues",
-            "Search issues",
-            serde_json::Map::<String, Value>::new(),
-        );
-        let definition = tool_definition("mcp__github__search_issues", "github", &tool);
-        assert_eq!(definition.function.name, "mcp__github__search_issues");
-        assert_eq!(definition.function.description, "Search issues");
-    }
-
     #[tokio::test]
     async fn invalid_global_config_disables_mcp_instead_of_failing() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();

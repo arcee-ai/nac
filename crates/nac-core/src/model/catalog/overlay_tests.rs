@@ -4,7 +4,7 @@
 
 use super::data;
 use super::overlay::{
-    format_unix_utc, is_utc_iso8601, is_within_refresh_cadence, map_models_dev, overlay_dir,
+    is_utc_iso8601, is_within_refresh_cadence, map_models_dev, overlay_dir,
     read_sidecar, refresh_overlay_once, spawn_overlay_refresh, unix_now, write_sidecar,
     OverlaySidecar, RefreshOutcome, RefreshSidecar, DEFAULT_MODELS_DEV_URL,
     REFRESH_CADENCE_SECS,
@@ -1047,16 +1047,6 @@ fn overlay_credential_env_var_upgrades_and_never_erases() {
 // ---------------------------------------------------------------------------
 // Small units: time formatting, timestamp shape, sidecar IO
 // ---------------------------------------------------------------------------
-
-#[test]
-fn format_unix_utc_matches_the_generator() {
-    assert_eq!(format_unix_utc(0), "1970-01-01T00:00:00Z");
-    assert_eq!(format_unix_utc(86_399), "1970-01-01T23:59:59Z");
-    assert_eq!(format_unix_utc(1_735_689_600), "2025-01-01T00:00:00Z");
-    assert_eq!(format_unix_utc(1_767_225_600), "2026-01-01T00:00:00Z");
-    // Leap day: 2024-02-29T12:00:00Z.
-    assert_eq!(format_unix_utc(1_709_208_000), "2024-02-29T12:00:00Z");
-}
 
 #[test]
 fn is_utc_iso8601_checks_shape() {

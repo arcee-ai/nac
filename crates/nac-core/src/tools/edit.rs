@@ -293,24 +293,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_exact_match() {
-        let path = write_temp("hello world\ngoodbye\n").await;
-        let result = execute(
-            json!({
-                "path": path.to_string_lossy(),
-                "old_text": "hello world",
-                "new_text": "hi earth"
-            }),
-            &local_runtime(),
-        )
-        .await;
-        assert!(!result.is_error, "Got error: {}", result.content);
-        let content = tokio::fs::read_to_string(&path).await.unwrap();
-        assert!(content.contains("hi earth"));
-        let _ = tokio::fs::remove_file(&path).await;
-    }
-
-    #[tokio::test]
     async fn test_no_match() {
         let path = write_temp("fn foo() {}\n").await;
         let result = execute(

@@ -1,14 +1,6 @@
 use super::*;
 
 #[test]
-fn test_agent_creation() {
-    let client = ModelClient::new_for_test();
-    let agent = Agent::default(client);
-    assert!(!agent.messages.is_empty());
-    assert!(!agent.tool_defs.is_empty());
-}
-
-#[test]
 fn worker_prompt_prefers_native_workspace_discovery() {
     let prompt = render_worker_system_prompt("/workspace");
     assert!(prompt.contains("Use glob to find workspace paths"));

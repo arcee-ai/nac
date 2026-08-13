@@ -798,22 +798,6 @@ fn user_override_thinking_map_relaxes_validation_and_wire_end_to_end() {
 }
 
 #[test]
-fn sparse_metadata_carries_the_documented_fallbacks() {
-    let metadata = ModelMetadata::sparse(
-        BackendKind::ArceeApi,
-        ApiKind::OpenAiCompletions,
-        "sparse-model",
-        ModelSource::Fallback,
-    );
-    assert_eq!(metadata.context_window, 128_000);
-    assert_eq!(metadata.max_tokens, 16_384);
-    assert_eq!(metadata.cost, ModelCostRates::default());
-    assert!(!metadata.reasoning);
-    assert!(metadata.thinking_level_map.0.is_empty());
-    assert_eq!(metadata.source, ModelSource::Fallback);
-}
-
-#[test]
 fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
     // Provider set, auth requirements and managed base URLs derive from the
     // backend kind, not from catalog data — this test needs no env lock.

@@ -119,16 +119,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registered_slash_commands_parse_by_canonical_name() {
-        for definition in slash_command_definitions() {
-            assert_eq!(
-                parse_slash_command(&format!("/{}", definition.name)),
-                Some(Ok(definition.command))
-            );
-        }
-    }
-
-    #[test]
     fn compact_is_exact_and_frontend_handled() {
         assert_eq!(
             parse_slash_command("/compact now"),

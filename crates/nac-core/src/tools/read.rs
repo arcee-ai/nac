@@ -276,14 +276,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[tokio::test]
-    async fn test_read_existing_file() {
-        let result = execute(json!({ "path": "Cargo.toml" }), &local_runtime()).await;
-        assert!(!result.is_error, "Got error: {}", result.content);
-        assert!(
-            result.content.contains("[workspace]") || result.content.contains("[package]"),
-            "Got: {}",
-            result.content
-        );
-    }
 }

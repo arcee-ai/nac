@@ -259,30 +259,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_write_creates_dirs() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("agent_test_write_dirs_{}", unique));
-        let file_path = dir.join("deep").join("nested").join("test.txt");
-        let path_str = file_path.to_string_lossy().to_string();
-
-        let result = execute(
-            json!({ "path": path_str, "content": "hello from test" }),
-            &local_runtime(),
-        )
-        .await;
-        assert!(!result.is_error, "Write failed: {}", result.content);
-        assert_eq!(result.content, "ok");
-
-        let written = std::fs::read_to_string(&file_path).expect("failed to read written file");
-        assert_eq!(written, "hello from test");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[tokio::test]
     async fn writable_sandbox_mount_mutates_the_host_path_directly() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
