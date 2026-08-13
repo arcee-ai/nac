@@ -1,0 +1,4 @@
+interface:
+  display_name: "NAC Onboarding"
+  short_description: "Install and configure NAC for coding agents"
+  default_prompt: "Use $nac-onboarding to install and configure nac for me."

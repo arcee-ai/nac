@@ -1,0 +1,42 @@
+[package]
+name = "nac-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nac_core"
+
+[features]
+default = []
+test-support = []
+openapi = ["dep:utoipa"]
+
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls", "stream"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+libc = "0.2"
+portable-pty = "0.8"
+rmcp = { version = "1.3.0", default-features = false, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+toml = "0.8"
+toml_edit = "0.22"
+url = "2"
+serde_yaml_ng = "0.10"
+diffy = { version = "0.5.0", default-features = false }
+fs2 = "0.4"
+sha2 = "0.10"
+rand = "0.9"
+base64 = "0.22"
+cap-std = "4"
+globset = { version = "0.4", default-features = false }
+grep-matcher = "0.1"
+grep-regex = "0.1"
+ignore = "0.4"
+openssh-sftp-client = { version = "0.15", default-features = false }
+utoipa = { version = "5.5", optional = true, features = ["uuid"] }

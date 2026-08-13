@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/nac-core", "crates/nac-server", "crates/nac-catalog-gen"]
+resolver = "2"

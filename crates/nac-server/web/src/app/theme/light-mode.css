@@ -1,0 +1,386 @@
+.light {
+  /* Background / Scrollbars */
+  --color-bg-scrollbar: var(--dark-trans-200);
+  /* Background / Accent */
+  --color-bg-accent-primary: var(--brand-trans-50);
+  --color-bg-accent-secondary: var(--brand-trans-100);
+  --color-bg-accent-tertiary: var(--brand-trans-200);
+  --color-bg-accent-inverse: var(--brand-450);
+
+  /* Background / Buttons */
+  --color-bg-btn-primary: var(--gray-900);
+  --color-bg-btn-primary-hovered: var(--gray-800);
+  --color-bg-btn-primary-pressed: var(--gray-750);
+  --color-bg-btn-primary-disabled: var(--gray-300);
+
+  --color-bg-btn-secondary: var(--white-trans-700);
+  --color-bg-btn-secondary-hovered: var(--dark-trans-25);
+  --color-bg-btn-secondary-pressed: var(--dark-trans-50);
+  --color-bg-btn-secondary-disabled: var(--dark-trans-25);
+
+  --color-bg-btn-secondary-highlighted: var(--dark-trans-25);
+  --color-bg-btn-secondary-highlighted-hovered: var(--dark-trans-50);
+  --color-bg-btn-secondary-highlighted-pressed: var(--dark-trans-100);
+  --color-bg-btn-secondary-highlighted-disabled: var(--dark-trans-25);
+
+  --color-bg-btn-ghost: var(--transparent);
+  --color-bg-btn-ghost-hovered: var(--dark-trans-50);
+  --color-bg-btn-ghost-pressed: var(--dark-trans-100);
+  --color-bg-btn-ghost-disabled: var(--transparent);
+
+  --color-bg-btn-ghost-highlighted: var(--dark-trans-25);
+  --color-bg-btn-ghost-highlighted-hovered: var(--dark-trans-50);
+  --color-bg-btn-ghost-highlighted-pressed: var(--dark-trans-100);
+  --color-bg-btn-ghost-highlighted-disabled: var(--dark-trans-25);
+
+  --color-bg-btn-secondary-destructive: var(--red-trans-50);
+  --color-bg-btn-secondary-destructive-hovered: var(--red-trans-100);
+  --color-bg-btn-secondary-destructive-pressed: var(--red-trans-200);
+  --color-bg-btn-secondary-destructive-disabled: var(--red-trans-50);
+
+  --color-bg-btn-ghost-destructive: var(--transparent);
+  --color-bg-btn-ghost-destructive-hovered: var(--red-trans-50);
+  --color-bg-btn-ghost-destructive-pressed: var(--red-trans-100);
+  --color-bg-btn-ghost-destructive-disabled: var(--transparent);
+
+  --color-bg-btn-secondary-accent: var(--brand-trans-100);
+  --color-bg-btn-secondary-accent-hovered: var(--brand-trans-200);
+  --color-bg-btn-secondary-accent-pressed: var(--brand-trans-300);
+  --color-bg-btn-secondary-accent-disabled: var(--brand-trans-100);
+
+  --color-bg-btn-secondary-accent-highlighted: var(--brand-trans-200);
+  --color-bg-btn-secondary-accent-highlighted-hovered: var(--brand-trans-300);
+  --color-bg-btn-secondary-accent-highlighted-pressed: var(--brand-trans-400);
+  --color-bg-btn-secondary-accent-highlighted-disabled: var(--brand-trans-200);
+
+  --color-bg-btn-ghost-accent: var(--transparent);
+  --color-bg-btn-ghost-accent-hovered: var(--brand-trans-100);
+  --color-bg-btn-ghost-accent-pressed: var(--brand-trans-200);
+  --color-bg-btn-ghost-accent-disabled: var(--transparent);
+
+  --color-bg-btn-ghost-accent-highlighted: var(--brand-trans-100);
+  --color-bg-btn-ghost-accent-highlighted-hovered: var(--brand-trans-200);
+  --color-bg-btn-ghost-accent-highlighted-pressed: var(--brand-trans-300);
+  --color-bg-btn-ghost-accent-highlighted-disabled: var(--brand-trans-50);
+
+  /* Background / Danger */
+  --color-bg-danger-primary: var(--yellow-trans-50);
+  --color-bg-danger-secondary: var(--yellow-trans-100);
+  --color-bg-danger-tertiary: var(--yellow-trans-200);
+  --color-bg-danger-inverse: var(--yellow-500);
+
+  /* Background / Divider */
+  --color-bg-divider-primary: var(--dark-trans-300);
+  --color-bg-divider-secondary: var(--dark-trans-100);
+  --color-bg-divider-tertiary: var(--dark-trans-50);
+  --color-bg-divider-muted: var(--dark-trans-25);
+
+  /* Background / Elevation */
+  --color-bg-elevation-ground: var(--gray-50);
+  --color-bg-elevation-ground-transparent: var(--transparent);
+
+  --color-bg-elevation-ground-inverse: var(--black);
+
+  --color-bg-elevation-level-0-5: var(--gray-25);
+  --color-bg-elevation-level-1: var(--white);
+  --color-bg-elevation-level-2: var(--white);
+  --color-bg-elevation-level-3: var(--white);
+
+  --color-bg-elevation-sublevel-variant-A: var(--dark-trans-25);
+  --color-bg-elevation-sublevel-variant-B: var(--dark-trans-50);
+
+  /* Background / Code-input */
+  --color-bg-code-input-content: var(--gray-25);
+  --color-bg-code-input-content-integration: var(--gray-50);
+  --color-bg-code-input-line-numbers: var(--gray-25);
+  --color-bg-code-input-header: var(--white);
+
+  /* Background / Error */
+  --color-bg-error-primary: var(--red-trans-50);
+  --color-bg-error-secondary: var(--red-trans-100);
+  --color-bg-error-tertiary: var(--red-trans-200);
+  --color-bg-error-inverse: var(--red-400);
+
+  /* Background / Info */
+  --color-bg-info-primary: var(--blue-trans-50);
+  --color-bg-info-secondary: var(--blue-trans-100);
+  --color-bg-info-tertiary: var(--blue-trans-200);
+  --color-bg-info-inverse: var(--blue-500);
+
+  /* Background / Input */
+  --color-bg-input-switcher: var(--dark-trans-200);
+  --color-bg-input-switcher-disabled: var(--dark-trans-100);
+  --color-bg-input-knob: var(--white);
+  --color-bg-input-knob-disabled: var(--gray-50);
+  --color-bg-input-switcher-active: var(--brand-500);
+  --color-bg-input-switcher-active-disabled: var(--brand-trans-200);
+  --color-bg-input-knob-active: var(--white);
+  --color-bg-input-knob-active-disabled: var(--brand-50);
+  --color-bg-input-progress: var(--brand-500);
+  --color-bg-input-progress-bar: var(--brand-trans-300);
+  --color-bg-input-progress-disabled: var(--dark-trans-200);
+  --color-bg-input-progress-bar-disabled: var(--dark-trans-100);
+  --color-bg-input: var(--dark-trans-25);
+  --color-bg-input-disabled: var(--dark-trans-25);
+
+  /* Background / Success */
+  --color-bg-success-primary: var(--green-trans-50);
+  --color-bg-success-secondary: var(--green-trans-100);
+  --color-bg-success-tertiary: var(--green-trans-200);
+  --color-bg-success-inverse: var(--green-500);
+
+  /* Border / Accent */
+  --color-border-accent-primary: var(--brand-trans-800);
+  --color-border-accent-secondary: var(--brand-trans-500);
+  --color-border-accent-tertiary: var(--brand-trans-100);
+  --color-border-accent-muted: var(--brand-trans-50);
+
+  /* Border / Basic */
+  --color-border-primary: var(--black);
+  --color-border-secondary: var(--dark-trans-600);
+  --color-border-tertiary: var(--dark-trans-100);
+  --color-border-muted: var(--dark-trans-25);
+
+  /* Border / Code-Input */
+  --color-border-code-input: var(--dark-trans-100);
+  --color-border-code-input-hovered: var(--dark-trans-200);
+
+  /* Border / Danger */
+  --color-border-danger-primary: var(--yellow-trans-800);
+  --color-border-danger-secondary: var(--yellow-trans-500);
+  --color-border-danger-tertiary: var(--yellow-trans-100);
+  --color-border-danger-muted: var(--yellow-trans-50);
+
+  /* Border / Error */
+  --color-border-error-primary: var(--red-trans-800);
+  --color-border-error-secondary: var(--red-trans-500);
+  --color-border-error-tertiary: var(--red-trans-100);
+  --color-border-error-muted: var(--red-trans-50);
+
+  /* Border / Info */
+  --color-border-info-primary: var(--blue-trans-800);
+  --color-border-info-secondary: var(--blue-trans-500);
+  --color-border-info-tertiary: var(--blue-trans-100);
+  --color-border-info-muted: var(--blue-trans-50);
+
+  /* Border / Inversed */
+  --color-border-primary-inversed: var(--white);
+  --color-border-secondary-inversed: var(--white-trans-600);
+  --color-border-tertiary-inversed: var(--white-trans-100);
+  --color-border-muted-inversed: var(--white-trans-50);
+
+  /* Border / Success */
+  --color-border-success-primary: var(--green-trans-800);
+  --color-border-success-secondary: var(--green-trans-500);
+  --color-border-success-tertiary: var(--green-trans-100);
+  --color-border-success-muted: var(--green-trans-50);
+
+  /* fill / Accent */
+  --color-fill-accent-primary: var(--brand-550);
+  --color-fill-accent-secondary: var(--brand-trans-900);
+  --color-fill-accent-tertiary: var(--brand-trans-700);
+  --color-fill-accent-muted: var(--brand-trans-300);
+
+  /* fill / Basic */
+  --color-fill-basic-primary: var(--gray-900);
+  --color-fill-basic-secondary: var(--dark-trans-700);
+  --color-fill-basic-tertiary: var(--dark-trans-500);
+  --color-fill-basic-muted: var(--dark-trans-400);
+
+  /* fill / Buttons */
+  --color-fill-btn-primary: var(--gray-50);
+  --color-fill-btn-primary-disabled: var(--gray-50);
+  --color-fill-btn-accent: var(--brand-550);
+  --color-fill-btn-accent-hovered: var(--brand-600);
+  --color-fill-btn-accent-pressed: var(--brand-800);
+  --color-fill-btn-accent-muted: var(--brand-trans-300);
+
+  --color-fill-btn-secondary: var(--dark-trans-600);
+  --color-fill-btn-secondary-hovered: var(--dark-trans-700);
+  --color-fill-btn-secondary-pressed: var(--dark-trans-800);
+  --color-fill-btn-secondary-disabled: var(--dark-trans-200);
+
+  --color-fill-btn-ghost: var(--dark-trans-600);
+  --color-fill-btn-ghost-hovered: var(--dark-trans-700);
+  --color-fill-btn-ghost-pressed: var(--dark-trans-800);
+  --color-fill-btn-ghost-disabled: var(--dark-trans-200);
+
+  --color-fill-btn-secondary-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-highlighted-hovered: var(--gray-900);
+  --color-fill-btn-secondary-highlighted-pressed: var(--gray-900);
+  --color-fill-btn-secondary-highlighted-disabled: var(--dark-trans-300);
+
+  --color-fill-btn-ghost-highlighted: var(--gray-900);
+  --color-fill-btn-ghost-highlighted-hovered: var(--gray-900);
+  --color-fill-btn-ghost-highlighted-pressed: var(--gray-900);
+  --color-fill-btn-ghost-highlighted-disabled: var(--dark-trans-300);
+
+  --color-fill-btn-destructive: var(--red-600);
+  --color-fill-btn-destructive-hovered: var(--red-trans-900);
+  --color-fill-btn-destructive-pressed: var(--red-trans-700);
+  --color-fill-btn-destructive-disabled: var(--red-trans-300);
+
+  /* fill / Danger */
+  --color-fill-danger-primary: var(--yellow-600);
+  --color-fill-danger-secondary: var(--yellow-trans-900);
+  --color-fill-danger-tertiary: var(--yellow-trans-700);
+  --color-fill-danger-muted: var(--yellow-trans-400);
+
+  /* fill / Error */
+  --color-fill-error-primary: var(--red-600);
+  --color-fill-error-secondary: var(--red-trans-900);
+  --color-fill-error-tertiary: var(--red-trans-700);
+  --color-fill-error-muted: var(--red-trans-400);
+
+  /* fill / Info */
+  --color-fill-info-primary: var(--blue-600);
+  --color-fill-info-secondary: var(--blue-trans-900);
+  --color-fill-info-tertiary: var(--blue-trans-700);
+  --color-fill-info-muted: var(--blue-trans-400);
+
+  /* fill / Inversed */
+  --color-fill-primary-inversed: var(--gray-50);
+  --color-fill-secondary-inversed: var(--white-trans-600);
+  --color-fill-tertiary-inversed: var(--white-trans-500);
+  --color-fill-muted-inversed: var(--white-trans-300);
+
+  /* fill / Notification */
+  --color-fill-notification: var(--white);
+
+  /* fill / Success */
+  --color-fill-success-primary: var(--green-600);
+  --color-fill-success-secondary: var(--green-trans-900);
+  --color-fill-success-tertiary: var(--green-trans-700);
+  --color-fill-success-muted: var(--green-trans-400);
+
+  /* Text / Accent */
+  --color-text-accent-primary: var(--brand-600);
+  --color-text-accent-secondary: var(--brand-trans-900);
+  --color-text-accent-tertiary: var(--brand-trans-700);
+  --color-text-accent-muted: var(--brand-trans-400);
+
+  /* Text / Basic */
+  --color-text-basic-primary: var(--black);
+  --color-text-basic-secondary: var(--dark-trans-800);
+  --color-text-basic-tertiary: var(--dark-trans-600);
+  --color-text-basic-muted: var(--dark-trans-500);
+
+  --color-text-basic-primary-inverse: var(--white);
+  --color-text-basic-secondary-inverse: var(--white-trans-700);
+  --color-text-basic-tertiary-inverse: var(--white-trans-600);
+  --color-text-basic-muted-inverse: var(--white-trans-400);
+
+  /* Text / Buttons */
+  --color-text-btn-primary: var(--white);
+  --color-text-btn-primary-disabled: var(--white);
+  --color-text-btn-accent: var(--brand-600);
+  --color-text-btn-accent-hovered: var(--brand-700);
+  --color-text-btn-accent-pressed: var(--brand-800);
+  --color-text-btn-accent-disabled: var(--brand-200);
+
+  --color-text-btn-secondary: var(--dark-trans-700);
+  --color-text-btn-secondary-hovered: var(--dark-trans-800);
+  --color-text-btn-secondary-pressed: var(--dark-trans-900);
+  --color-text-btn-secondary-disabled: var(--dark-trans-300);
+
+  --color-text-btn-ghost: var(--dark-trans-700);
+  --color-text-btn-ghost-hovered: var(--dark-trans-800);
+  --color-text-btn-ghost-pressed: var(--dark-trans-900);
+  --color-text-btn-ghost-disabled: var(--dark-trans-300);
+
+  --color-text-btn-secondary-highlighted: var(--gray-900);
+  --color-text-btn-secondary-highlighted-hovered: var(--gray-900);
+  --color-text-btn-secondary-highlighted-pressed: var(--gray-900);
+  --color-text-btn-secondary-highlighted-disabled: var(--dark-trans-300);
+
+  --color-text-btn-ghost-highlighted: var(--gray-900);
+  --color-text-btn-ghost-highlighted-hovered: var(--gray-900);
+  --color-text-btn-ghost-highlighted-pressed: var(--gray-900);
+  --color-text-btn-ghost-highlighted-disabled: var(--dark-trans-300);
+
+  --color-text-btn-destructive: var(--red-600);
+  --color-text-btn-destructive-hovered: var(--red-700);
+  --color-text-btn-destructive-pressed: var(--red-800);
+  --color-text-btn-destructive-disabled: var(--red-trans-200);
+
+  /* Text / Danger */
+  --color-text-danger-primary: var(--yellow-600);
+  --color-text-danger-secondary: var(--yellow-trans-900);
+  --color-text-danger-tertiary: var(--yellow-trans-700);
+  --color-text-danger-muted: var(--yellow-trans-400);
+
+  /* Text / Error */
+  --color-text-error-primary: var(--red-600);
+  --color-text-error-secondary: var(--red-trans-900);
+  --color-text-error-tertiary: var(--red-trans-700);
+  --color-text-error-muted: var(--red-trans-400);
+
+  /* Text / Info */
+  --color-text-info-primary: var(--blue-600);
+  --color-text-info-secondary: var(--blue-trans-900);
+  --color-text-info-tertiary: var(--blue-trans-600);
+  --color-text-info-muted: var(--blue-trans-400);
+
+  /* Text / Input */
+  --color-text-input: var(--black);
+  --color-text-input-disabled: var(--dark-trans-300);
+  --color-text-input-placeholder: var(--dark-trans-500);
+  --color-text-input-placeholder-disabled: var(--dark-trans-200);
+
+  /* Text / Inversed */
+  --color-text-primary-inverse: var(--white);
+  --color-text-secondary-inverse: var(--white-trans-700);
+  --color-text-tertiary-inverse: var(--white-trans-600);
+  --color-text-muted-inverse: var(--white-trans-400);
+
+  /* Text / Notification. A toast sits on a saturated surface in both themes,
+     so its label does not follow the mode the way the rest of the text does. */
+  --color-text-notification: var(--white);
+
+  /* Text / Success */
+  --color-text-success-primary: var(--green-600);
+  --color-text-success-secondary: var(--green-trans-900);
+  --color-text-success-tertiary: var(--green-trans-700);
+  --color-text-success-muted: var(--green-trans-400);
+
+  /* Shadows */
+  --shadow-xs:
+    0 0 4px 0 rgba(1, 80, 80, 0.08), -1px -1px 0 0 rgba(71, 104, 104, 0.05),
+    1px 1px 0 0 rgba(71, 104, 104, 0.05),
+    0 0 0 1px rgba(71, 104, 104, 0.1) inset;
+  --shadow-sm:
+    -1px -1px 0 0 rgba(89, 71, 104, 0.04), 0 1px 6px 0 rgba(43, 1, 80, 0.1),
+    0 0 1px 0 rgba(43, 1, 80, 0.06), 1px 1px 0 0 rgba(89, 71, 104, 0.04),
+    0 0 0 1px rgba(91, 71, 104, 0.1) inset;
+  --shadow-md:
+    0 0 1px 0 rgba(9, 37, 61, 0.15), 0 3px 8px 0 rgba(5, 23, 37, 0.12),
+    0 0 0 1px rgba(71, 104, 104, 0.1) inset;
+  --shadow-lg:
+    0 1px 6px 0 rgba(9, 37, 61, 0.05), 0 0 1px 0 rgba(9, 37, 61, 0.1),
+    0 4px 13px 0 rgba(5, 23, 37, 0.12), 0 0 0 1px rgba(71, 104, 104, 0.08) inset;
+  --shadow-xl:
+    -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 7px 32px 0 rgba(1, 80, 80, 0.14),
+    0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02),
+    0 -1px 0 0 rgba(71, 104, 104, 0.08) inset;
+
+  --shadow-2xl:
+    -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 8px 40px 0 rgba(1, 80, 80, 0.16),
+    0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02),
+    0 0 0 1px rgba(71, 104, 104, 0.08);
+
+  --shadow-3xl:
+    -1px -1px 0 0 rgba(71, 104, 104, 0.02), 0 10px 48px 0 rgba(1, 80, 80, 0.2),
+    0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02),
+    0 -1px 0 0 rgba(71, 104, 104, 0.08) inset;
+  --shadow-convex:
+    0 0 1px 0 rgba(71, 104, 104, 0.15),
+    0 0 0 1px rgba(71, 104, 104, 0.15) inset,
+    0 -1px 0 0 rgba(71, 104, 104, 0.1) inset;
+  --shadow-concave:
+    0 0 0 1px rgba(71, 104, 104, 0.08) inset,
+    0 1px 0 0 rgba(71, 104, 104, 0.04) inset;
+  --left-sidebar-closed:
+    2px 0 4px 0 rgba(1, 80, 80, 0.03), 1px 0 0 0 rgba(71, 104, 104, 0.06);
+  --left-sidebar-open:
+    2px 0 16px 0 rgba(1, 80, 80, 0.08), 1px 0 0 0 rgba(71, 104, 104, 0.06);
+}

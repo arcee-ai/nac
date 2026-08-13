@@ -1,0 +1,260 @@
+use super::*;
+
+pub(super) fn is_valid_env_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+pub(crate) fn api_key_backend(backend: BackendKind) -> bool {
+    matches!(
+        backend,
+        BackendKind::DeepSeekChat
+            | BackendKind::FireworksChat
+            | BackendKind::TogetherChat
+            | BackendKind::OpenAiResponses
+            | BackendKind::AnthropicMessages
+            | BackendKind::ArceeApi
+    )
+}
+
+/// Whether `name` exists in the process environment with a usable value.
+/// Empty or whitespace-only values do not count, matching the
+/// `api_key_for_backend` launch-time semantics.
+pub(crate) fn env_var_is_set(name: &str) -> bool {
+    std::env::var_os(name)
+        .and_then(|value| value.into_string().ok())
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+/// Conventional-var auto-selection: an API-key backend with no explicit
+/// `api_key_env` selector adopts the provider's conventional credential
+/// variable (catalog `credential_env_var`) when it exists in the
+/// environment with a usable value. Managed backends and providers with an
+/// unset conventional variable return `None` — validation then fails with
+/// the guided missing-credential error.
+pub(crate) fn auto_select_api_key_env(backend: BackendKind) -> Option<String> {
+    if !api_key_backend(backend) {
+        return None;
+    }
+    let name = catalog::credential_env_var(backend)?;
+    env_var_is_set(&name).then_some(name)
+}
+
+/// Human-readable supported-effort list for validation errors, derived from
+/// the model's catalog thinking map ("none, high, or xhigh"; "none only";
+/// "no explicit effort levels" for an empty map).
+fn supported_effort_values(map: &ThinkingLevelMap) -> String {
+    let supported = map
+        .supported_efforts()
+        .iter()
+        .map(|effort| effort.as_str())
+        .collect::<Vec<_>>();
+    match supported.as_slice() {
+        [] => "no explicit effort levels".to_string(),
+        [only] => format!("{only} only"),
+        [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
+    }
+}
+
+/// Validate effort values against the model's catalog thinking map (S4).
+///
+/// Known models resolve to their catalog entry (dated snapshots resolve
+/// through their family entry); unknown models resolve to the provider's
+/// `_default` entry, which encodes the conservative pre-S4 validation
+/// matrix, so unknown models keep the historical conservative rejection.
+/// No backend receives an application-selected default, and an explicitly
+/// configured effort is rejected — never clamped — when the map does not
+/// support it.
+pub fn validate_model_reasoning_effort(
+    backend: BackendKind,
+    model: &str,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> Result<()> {
+    let resolved = catalog::resolve(backend, model);
+    validate_model_reasoning_effort_with_map(
+        backend,
+        model,
+        reasoning_effort,
+        &resolved.thinking_level_map,
+    )
+}
+
+pub(crate) fn validate_model_reasoning_effort_with_map(
+    backend: BackendKind,
+    model: &str,
+    reasoning_effort: Option<ReasoningEffort>,
+    map: &catalog::ThinkingLevelMap,
+) -> Result<()> {
+    let Some(effort) = reasoning_effort else {
+        return Ok(());
+    };
+    if map.is_supported(effort) {
+        return Ok(());
+    }
+
+    let allowed = supported_effort_values(map);
+    if backend == BackendKind::AnthropicMessages {
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: reasoning effort '{}' is not supported by backend '{}' for Anthropic model '{}'; supported values: {}",
+            effort.as_str(), backend, model, allowed
+        )));
+    }
+    Err(model_configuration_error(format!(
+        "invalid model configuration: reasoning effort '{}' is not supported by backend '{}'; supported values: {}",
+        effort.as_str(), backend, allowed
+    )))
+}
+
+/// Provider origins NAC will send an API key to without an operator opt-in.
+///
+/// Arcee and Codex are absent because they enforce their own origin policies
+/// before a credential is attached.
+fn builtin_provider_hosts(backend: BackendKind) -> &'static [&'static str] {
+    match backend {
+        BackendKind::OpenAiResponses => &["api.openai.com"],
+        BackendKind::AnthropicMessages => &["api.anthropic.com"],
+        BackendKind::DeepSeekChat => &["api.deepseek.com"],
+        BackendKind::TogetherChat => &["api.together.xyz"],
+        BackendKind::FireworksChat => &["api.fireworks.ai"],
+        BackendKind::ArceeApi | BackendKind::ArceeAuth | BackendKind::ChatGptCodexResponses => &[],
+    }
+}
+
+fn normalized_host(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// Reject a base URL that would send an API key to an origin the operator
+/// never approved.
+///
+/// This is the trust boundary for values arriving over the unauthenticated
+/// loopback HTTP API: `config.toml` is edited by hand and is therefore
+/// authoritative, while a request body is not. Loopback and private-network
+/// hosts stay usable without an opt-in so local proxies keep working.
+pub fn validate_caller_supplied_base_url(
+    backend: BackendKind,
+    base_url: &str,
+    trusted_hosts: &[String],
+) -> Result<()> {
+    let approved_hosts = builtin_provider_hosts(backend);
+    if approved_hosts.is_empty() {
+        return Ok(());
+    }
+
+    let parsed = Url::parse(base_url).map_err(|error| {
+        model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
+            base_url, error
+        ))
+    })?;
+    let host = parsed.host().ok_or_else(|| {
+        model_configuration_error(format!(
+            "invalid model configuration: base_url '{}' must include a host",
+            base_url
+        ))
+    })?;
+    if types::allows_plaintext_transport(&host) {
+        return Ok(());
+    }
+
+    let host = normalized_host(parsed.host_str().unwrap_or_default());
+    if approved_hosts.contains(&host.as_str())
+        || trusted_hosts
+            .iter()
+            .any(|trusted| normalized_host(trusted.trim()) == host)
+    {
+        return Ok(());
+    }
+
+    Err(model_configuration_error(format!(
+        "invalid model configuration: base_url host '{}' is not approved for backend '{}'; approved hosts are {}, and any other host must be listed under [security] trusted_base_url_hosts in config.toml before NAC sends credentials to it",
+        host,
+        backend,
+        approved_hosts.join(", ")
+    )))
+}
+
+pub fn validate_backend_api_key_env(backend: BackendKind, api_key_env: Option<&str>) -> Result<()> {
+    if api_key_backend(backend) {
+        let Some(name) = api_key_env else {
+            // Guided error: name the provider's conventional credential
+            // variable (auto-selection would have adopted it had it been
+            // set) so the fix is one env var away.
+            return Err(model_configuration_error(
+                match catalog::credential_env_var(backend) {
+                    Some(var) => format!(
+                        "invalid model configuration: required setting 'api_key_env' is missing; set the {var} environment variable or provide an API key variable in overrides"
+                    ),
+                    None => format!(
+                        "invalid model configuration: required setting 'api_key_env' is missing; provide an API key variable in overrides for backend '{backend}'"
+                    ),
+                },
+            ));
+        };
+        if name.trim().is_empty() {
+            return Err(model_configuration_error(format!(
+                "invalid model configuration: backend '{}' requires a nonblank api_key_env naming the environment variable containing its API key",
+                backend
+            )));
+        }
+        if !is_valid_env_name(name) {
+            return Err(model_configuration_error(format!(
+                "invalid model configuration: api_key_env '{}' is not a valid environment variable name for backend '{}'; expected [A-Za-z_][A-Za-z0-9_]*",
+                name, backend
+            )));
+        }
+        return Ok(());
+    }
+
+    if let Some(name) = api_key_env {
+        let credential_source = match backend {
+            BackendKind::ArceeAuth => "managed Arcee auth uses arcee_auth.json",
+            BackendKind::ChatGptCodexResponses => "Codex uses stored OAuth from auth.json",
+            _ => unreachable!("all API-key backends handled above"),
+        };
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: api_key_env '{}' is not supported for backend '{}'; {}",
+            name, backend, credential_source
+        )));
+    }
+
+    Ok(())
+}
+
+pub(super) fn api_key_for_backend(
+    backend: BackendKind,
+    configured_env: Option<&str>,
+) -> Result<String> {
+    validate_backend_api_key_env(backend, configured_env)?;
+    if !api_key_backend(backend) {
+        return Ok(String::new());
+    }
+
+    let env_name = configured_env.expect("validated API-key backend selector");
+    // The environment wins so that servers, CI, and managed workers keep the
+    // credential they were started with; storage is the desktop fallback.
+    let value = match std::env::var_os(env_name) {
+        Some(value) => value.into_string().map_err(|_| {
+            model_configuration_error(format!(
+                "invalid model configuration: configured api_key_env '{}' contains a non-Unicode value for backend '{}'",
+                env_name, backend
+            ))
+        })?,
+        None => api_key_store::read_stored_api_key(env_name)
+            .map_err(|error| model_configuration_error(error.to_string()))?
+            .ok_or_else(|| {
+                model_configuration_error(format!(
+                    "invalid model configuration: configured api_key_env '{}' is not set for backend '{}' and no key is stored under that name",
+                    env_name, backend
+                ))
+            })?,
+    };
+    if value.trim().is_empty() {
+        return Err(model_configuration_error(format!(
+            "invalid model configuration: configured api_key_env '{}' is empty or whitespace-only for backend '{}'",
+            env_name, backend
+        )));
+    }
+    Ok(value)
+}

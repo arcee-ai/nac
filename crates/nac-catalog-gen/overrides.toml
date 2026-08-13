@@ -1,0 +1,183 @@
+# Curated overrides for the models.dev → catalog.json pipeline.
+#
+# Effort validation reads these maps through the catalog: this table
+# transcribes the pre-S4 `backend.rs::validate_model_reasoning_effort`
+# matrix exactly, so validation behavior is unchanged for every model the
+# matrix covered. The authoritative historical reference is the hand-written
+# `pre_s4_matrix_accepts` / `pre_s4_anthropic_family` transcription in
+# nac-core's `model/catalog/tests.rs`; the guard tests assert the catalog
+# data and validation each equal that transcription:
+#
+#   deepseek-chat:            none, low, high, xhigh (wire "max")
+#   fireworks-chat:           none, low, medium, high (per-model extensions below)
+#   together-chat:            none, low, medium, high (per-model extensions below)
+#   openai-responses:         all six levels, verbatim (GPT-5.6 adds `max`)
+#   anthropic-messages:       per-family (below); unknown → none only
+#
+# `default_thinking_levels` replaces the models.dev-derived seed map of
+# EVERY model of the provider, so matrix behavior is preserved for current
+# and future catalog entries alike. Model entries additionally match dated
+# snapshots (`name-YYYYMMDD`, the catalog's generic dated-snapshot family
+# rule).
+#
+# Relaxing a default here to let models.dev `reasoning_options` through for
+# specific models is the intended unlock — do it deliberately, per model,
+# after checking provider docs (the generator prints how many seed maps
+# each provider default replaced at regen time). Per-deployment relaxations
+# can also ride `$NAC_HOME/models.json` without regenerating the baseline.
+#
+# Keys are nac BackendKind ids; effort keys are ReasoningEffort lowercase
+# serde names; values are provider wire values.
+#
+# Endpoint defaults: models.dev carries a provider `api` only for deepseek
+# and fireworks-ai, so their `default_base_url` comes from the snapshot.
+# The three SDK-default providers are hand-seeded below (a value here would
+# also win over models.dev `api` — the curated table stays authoritative).
+# nac's adapters append their own paths: the anthropic adapter appends
+# "/v1/messages", so its default is the API ROOT (no /v1 suffix); the
+# responses/completions adapters append "/responses" and "/chat/completions"
+# to the values below as-is.
+
+# deepseek: none/low/high/max for every model — the V4 API's real effort
+# levels (official docs: medium→high and xhigh→high are compatibility
+# aliases, not offered as distinct tiers).
+[providers."deepseek-chat"]
+default_thinking_levels = { none = "none", low = "low", high = "high", max = "max" }
+
+# fireworks: none through high, sent verbatim.
+[providers."fireworks-chat"]
+default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
+
+# Model-specific tiers below supersede provider defaults; dated snapshots
+# inherit their family override.
+
+# GPT-OSS models: reasoning-only, `none` is rejected by the API.
+[providers."fireworks-chat".models."accounts/fireworks/models/gpt-oss-120b"]
+thinking_levels = { low = "low", medium = "medium", high = "high" }
+
+[providers."fireworks-chat".models."accounts/fireworks/models/gpt-oss-20b"]
+thinking_levels = { low = "low", medium = "medium", high = "high" }
+
+# MiniMax M2P7: reasoning-only, `none` is rejected by the API.
+[providers."fireworks-chat".models."accounts/fireworks/models/minimax-m2p7"]
+thinking_levels = { low = "low", medium = "medium", high = "high" }
+
+# MiniMax M3: uses a 3-mode thinking toggle (enabled/adaptive/disabled),
+# mapped as `none` (disabled) and `max` (enabled).
+[providers."fireworks-chat".models."accounts/fireworks/models/minimax-m3"]
+thinking_levels = { none = "none", max = "max" }
+
+# DeepSeek V4 models: 4 real effort levels (none/low/high/max); official
+# docs confirm medium→high and xhigh→high are compatibility aliases.
+[providers."fireworks-chat".models."accounts/fireworks/models/deepseek-v4-flash"]
+thinking_levels = { none = "none", low = "low", high = "high", max = "max" }
+
+[providers."fireworks-chat".models."accounts/fireworks/models/deepseek-v4-flash-0731"]
+thinking_levels = { none = "none", low = "low", high = "high", max = "max" }
+
+[providers."fireworks-chat".models."accounts/fireworks/models/deepseek-v4-pro"]
+thinking_levels = { none = "none", low = "low", high = "high", max = "max" }
+
+# GLM 5.2 models (incl. fast router): native levels are `high` and `max`
+# (the chat template maps anything other than `high` to `max`); `none`
+# disables thinking via `enable_thinking=false`.
+[providers."fireworks-chat".models."accounts/fireworks/models/glm-5p2"]
+thinking_levels = { none = "none", high = "high", max = "max" }
+
+[providers."fireworks-chat".models."accounts/fireworks/routers/glm-5p2-fast"]
+thinking_levels = { none = "none", high = "high", max = "max" }
+
+# Kimi K3 models: thinking is always enabled (no `none`, no `medium`);
+# supports `low`, `high`, and `max` effort tiers.
+[providers."fireworks-chat".models."accounts/fireworks/models/kimi-k3"]
+thinking_levels = { low = "low", high = "high", max = "max" }
+
+[providers."fireworks-chat".models."accounts/fireworks/routers/kimi-k3-fast"]
+thinking_levels = { low = "low", high = "high", max = "max" }
+
+# together: none through high, sent verbatim. Endpoint default hand-seeded
+# (models.dev carries no `api`): the adapter appends "/chat/completions".
+[providers."together-chat"]
+default_thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }
+default_base_url = "https://api.together.xyz/v1"
+
+# Model-specific tiers below supersede provider defaults; dated snapshots
+# inherit their family override.
+
+# GLM-5.2: fix context window to 512K (models.dev underreports);
+# native levels are `high` and `max`; `none` disables thinking.
+[providers."together-chat".models."zai-org/GLM-5.2"]
+context_window = 524288
+thinking_levels = { none = "none", high = "high", max = "max" }
+
+# DeepSeek V4 Pro: 4 real effort levels (none/low/high/max).
+[providers."together-chat".models."deepseek-ai/DeepSeek-V4-Pro"]
+thinking_levels = { none = "none", low = "low", high = "high", max = "max" }
+
+# DeepSeek V4 Flash-0731: 4 real effort levels (none/low/high/max).
+[providers."together-chat".models."deepseek-ai/DeepSeek-V4-Flash-0731"]
+thinking_levels = { none = "none", low = "low", high = "high", max = "max" }
+
+# MiniMax M3: uses a 3-mode thinking toggle (enabled/adaptive/disabled),
+# mapped as `none` (disabled) and `max` (enabled).
+[providers."together-chat".models."MiniMaxAI/MiniMax-M3"]
+thinking_levels = { none = "none", max = "max" }
+
+# Kimi K3: thinking is always enabled (no `none`, no `medium`);
+# supports `low`, `high`, and `max` effort tiers.
+[providers."together-chat".models."moonshotai/Kimi-K3"]
+thinking_levels = { low = "low", high = "high", max = "max" }
+
+# Non-reasoning models: no explicit effort levels accepted.
+[providers."together-chat".models."Qwen/Qwen2.5-7B-Instruct-Turbo"]
+thinking_levels = {}
+
+[providers."together-chat".models."Qwen/Qwen3.7-Max"]
+thinking_levels = {}
+
+[providers."together-chat".models."meta-llama/Llama-3.3-70B-Instruct-Turbo"]
+thinking_levels = {}
+
+# openai-responses: every level, sent verbatim (the pre-S4 matrix accepted
+# all six for any model). Endpoint default hand-seeded (models.dev carries
+# no `api`): the adapter appends "/responses".
+[providers."openai-responses"]
+default_thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh" }
+default_base_url = "https://api.openai.com/v1"
+
+# GPT-5.6 family (incl. dated snapshots): supports the `max` effort tier
+# above xhigh (models.dev lists it; OpenAI docs confirm GPT-5.6-only).
+[providers."openai-responses".models."gpt-5.6"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-sol"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-terra"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+[providers."openai-responses".models."gpt-5.6-luna"]
+thinking_levels = { none = "none", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "xhigh", max = "max" }
+
+# anthropic: conservative none-only for every model (including families
+# newer than the matrix — opus-4-7/4-8, sonnet-5, fable-5 — whose thinking
+# schemas nac has not reviewed), except the two documented adaptive
+# families below. `none` means omission on Anthropic and is safe for every
+# family, including always-thinking models.
+[providers."anthropic-messages"]
+default_thinking_levels = { none = "none" }
+# Endpoint default hand-seeded (models.dev carries no `api`): the API ROOT,
+# because nac's anthropic adapter appends "/v1/messages" itself — a "/v1"
+# suffix here would produce "/v1/v1/messages" on the wire.
+default_base_url = "https://api.anthropic.com"
+
+# claude-opus-4-6 family (incl. dated snapshots): adaptive with the
+# wire-level "max" tier (the pre-S4 matrix's AdaptiveWithMax family).
+[providers."anthropic-messages".models."claude-opus-4-6"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high", xhigh = "max" }
+
+# claude-sonnet-4-6 family (incl. dated snapshots): adaptive, no "max"
+# (the pre-S4 matrix's Adaptive family). models.dev lists a "max" effort
+# for sonnet-4-6; the curated matrix stays authoritative.
+[providers."anthropic-messages".models."claude-sonnet-4-6"]
+thinking_levels = { none = "none", low = "low", medium = "medium", high = "high" }

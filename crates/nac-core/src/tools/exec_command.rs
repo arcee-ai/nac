@@ -1,0 +1,614 @@
+//! Terminal-backed command execution and retained output pagination tools.
+
+use anyhow::{anyhow, Result};
+use serde_json::Value;
+use std::path::PathBuf;
+
+use crate::terminal::{
+    CommandStatus, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
+};
+use crate::tools::{ToolResult, ToolRuntime};
+use crate::types::{FunctionDef, ToolDefinition};
+
+pub fn exec_command_definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "exec_command".to_string(),
+            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for an interactive or persistent terminal; continue it with write_stdin."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "cmd": { "type": "string", "description": "Shell command to execute" },
+                    "workdir": { "type": "string", "description": "Working directory (default: project root)" },
+                    "tty": { "type": "boolean", "description": "Use a persistent PTY session (default: false)" },
+                    "yield_time_ms": { "type": "number", "description": "One-shot timeout or PTY poll duration in milliseconds (max: 3600000)" },
+                    "max_output_chars": { "type": "number", "description": "Shared concise preview budget (default: 8000); omitted bytes remain pageable" }
+                },
+                "required": ["cmd"]
+            }),
+        },
+    }
+}
+
+pub fn write_stdin_definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "write_stdin".to_string(),
+            description: "Send input to a persistent terminal from exec_command tty=true, or poll with empty chars. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text. Supports <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, and arrow-key notation."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
+                    "chars": { "type": "string", "description": "Input or key notation; empty polls output" },
+                    "yield_time_ms": { "type": "number", "description": "Maximum poll duration in milliseconds (default: 500, max: 3600000)" },
+                    "max_output_chars": { "type": "number", "description": "Concise preview budget (default: 8000)" }
+                },
+                "required": ["session_id"]
+            }),
+        },
+    }
+}
+
+pub fn read_command_output_definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "read_command_output".to_string(),
+            description: "Read retained command or PTY output without rerunning the command. Offsets and limits are raw bytes. Page combined (observed emission order), stdout, or stderr; PTYs support combined only. Continue with next_offset until eof. If overflowed=true, offset may advance to the earliest retained byte. Output remains available for the producing worker dispatch."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "output_id": { "type": "string", "description": "Output ID returned by exec_command or write_stdin" },
+                    "stream": { "type": "string", "enum": ["combined", "stdout", "stderr"], "default": "combined" },
+                    "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "Absolute byte offset" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": MAX_OUTPUT_PAGE_BYTES, "default": DEFAULT_OUTPUT_PAGE_BYTES }
+                },
+                "required": ["output_id"]
+            }),
+        },
+    }
+}
+
+pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> ToolResult {
+    match execute_exec_command_inner(args, runtime).await {
+        Ok((content, is_error)) => ToolResult { content, is_error },
+        Err(error) => ToolResult {
+            content: format!("Error: {error:#}"),
+            is_error: true,
+        },
+    }
+}
+
+async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Result<(String, bool)> {
+    let manager = &runtime.terminal_manager;
+    let cmd = require_str(args, "cmd")?;
+    let tty = args.get("tty").and_then(Value::as_bool).unwrap_or(false);
+    let default_yield_ms = if tty { 500 } else { 30_000 };
+    let yield_ms = clamp_yield(
+        args.get("yield_time_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(default_yield_ms),
+    );
+    let max_output = args
+        .get("max_output_chars")
+        .and_then(Value::as_u64)
+        .unwrap_or(8_000) as usize;
+    let cwd = resolve_command_cwd(args, runtime)?;
+
+    if !tty {
+        let output = manager
+            .exec_one_shot(
+                &cmd,
+                cwd,
+                120,
+                40,
+                yield_ms,
+                max_output,
+                runtime.backend.as_ref(),
+                Some(&runtime.command_cancellation),
+            )
+            .await;
+        let is_error = output.status == CommandStatus::SpawnError;
+        return Ok((serde_json::to_string_pretty(&output)?, is_error));
+    }
+
+    let session_name = make_session_name();
+    manager
+        .create(session_name.clone(), cwd, 120, 40, &runtime.backend)
+        .await?;
+    let output = if cmd.trim().is_empty() {
+        manager
+            .write_stdin(
+                &session_name,
+                "",
+                200,
+                max_output,
+                Some(&runtime.command_cancellation),
+            )
+            .await?
+    } else {
+        manager
+            .write_stdin(
+                &session_name,
+                &format!("{cmd}\r"),
+                yield_ms,
+                max_output,
+                Some(&runtime.command_cancellation),
+            )
+            .await?
+    };
+    Ok((serde_json::to_string_pretty(&output)?, false))
+}
+
+pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolResult {
+    let result = async {
+        let session_id = require_str(args, "session_id")?;
+        let chars = args.get("chars").and_then(Value::as_str).unwrap_or("");
+        let yield_ms = clamp_yield(
+            args.get("yield_time_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(500),
+        );
+        let max_output = args
+            .get("max_output_chars")
+            .and_then(Value::as_u64)
+            .unwrap_or(8_000) as usize;
+        if runtime.terminal_manager.get(&session_id).await.is_none() {
+            return Err(anyhow!(
+                "terminal session '{session_id}' not found - it may have been closed or expired"
+            ));
+        }
+        runtime
+            .terminal_manager
+            .write_stdin(
+                &session_id,
+                chars,
+                yield_ms,
+                max_output,
+                Some(&runtime.command_cancellation),
+            )
+            .await
+    }
+    .await;
+
+    match result {
+        Ok(output) => ToolResult {
+            content: serde_json::to_string_pretty(&output)
+                .unwrap_or_else(|error| format!("Error serializing terminal output: {error}")),
+            is_error: false,
+        },
+        Err(error) => ToolResult {
+            content: format!("Error: {error:#}"),
+            is_error: true,
+        },
+    }
+}
+
+pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolResult {
+    let result = (|| -> Result<String> {
+        let output_id = require_str(args, "output_id")?;
+        let stream = OutputStream::parse(args.get("stream").and_then(Value::as_str))?;
+        let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_OUTPUT_PAGE_BYTES as u64) as usize;
+        let page = runtime
+            .terminal_manager
+            .read_output(&output_id, stream, offset, limit)?;
+        Ok(serde_json::to_string_pretty(&page)?)
+    })();
+
+    match result {
+        Ok(content) => ToolResult {
+            content,
+            is_error: false,
+        },
+        Err(error) => ToolResult {
+            content: format!("Error: {error:#}"),
+            is_error: true,
+        },
+    }
+}
+
+fn resolve_command_cwd(args: &Value, runtime: &ToolRuntime) -> Result<Option<PathBuf>> {
+    let requested = args.get("workdir").and_then(Value::as_str);
+    runtime.backend.resolve_terminal_cwd(requested)
+}
+
+fn require_str(args: &Value, key: &str) -> Result<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("missing required argument '{key}'"))
+}
+
+const MAX_YIELD_MS: u64 = 3_600_000;
+
+fn clamp_yield(ms: u64) -> u64 {
+    ms.min(MAX_YIELD_MS)
+}
+
+fn make_session_name() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    format!("shell-{}", COUNTER.fetch_add(1, Ordering::SeqCst))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::EventSink;
+    use serde_json::json;
+    use std::process::Command;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[cfg(unix)]
+    use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+    #[cfg(unix)]
+    use std::io::{Read, Write};
+    #[cfg(unix)]
+    use std::net::TcpListener;
+    #[cfg(unix)]
+    use std::time::{Duration, Instant};
+
+    fn test_runtime() -> ToolRuntime {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        ToolRuntime {
+            config_cwd: cwd.clone(),
+            workspace_cwd: cwd.clone(),
+            store_path: PathBuf::new(),
+            session_id: None,
+            worker_executable: None,
+            active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
+            event_sink: EventSink::none(),
+            backend: crate::sandbox::execution_backend_from_sandbox(None, &cwd),
+            mcp: None,
+            skills: None,
+            terminal_manager: crate::terminal::TerminalManager::new(),
+            command_cancellation: crate::tools::ThreadCancellation::default(),
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
+            light_client: None,
+        }
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nac_exec_{label}_{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    const PROMPT_POLICY_COMMAND: &str =
+        "printf '%s|%s|%s\n' \"$GIT_TERMINAL_PROMPT\" \"$GCM_INTERACTIVE\" \"$GH_PROMPT_DISABLED\"";
+
+    #[tokio::test]
+    async fn prompt_policy_process_helper() {
+        let Some(result_path) = std::env::var_os("NAC_PROMPT_POLICY_RESULT") else {
+            return;
+        };
+
+        let runtime = test_runtime();
+        let one_shot = execute_exec_command(
+            &json!({
+                "cmd": PROMPT_POLICY_COMMAND,
+                "tty": false,
+                "yield_time_ms": 2000
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!one_shot.is_error, "{}", one_shot.content);
+        let pty = execute_exec_command(
+            &json!({
+                "cmd": PROMPT_POLICY_COMMAND,
+                "tty": true,
+                "yield_time_ms": 2000
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!pty.is_error, "{}", pty.content);
+
+        let one_shot: Value = serde_json::from_str(&one_shot.content).unwrap();
+        let pty: Value = serde_json::from_str(&pty.content).unwrap();
+        runtime.terminal_manager.remove_all().await;
+        std::fs::write(
+            result_path,
+            serde_json::to_vec(&json!({ "one_shot": one_shot, "pty": pty })).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn run_prompt_policy_process_helper() -> Value {
+        let dir = unique_temp_dir("prompt_policy");
+        let result_path = dir.join("result.json");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::exec_command::tests::prompt_policy_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_PROMPT_POLICY_RESULT", &result_path)
+            .env("GIT_TERMINAL_PROMPT", "sentinel-git")
+            .env("GCM_INTERACTIVE", "sentinel-gcm")
+            .env("GH_PROMPT_DISABLED", "sentinel-gh")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "prompt-policy helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let result = serde_json::from_slice(&std::fs::read(&result_path).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        result
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn git_prompt_process_helper() {
+        let Some(result_path) = std::env::var_os("NAC_GIT_PROMPT_RESULT") else {
+            return;
+        };
+        let prompt_override = if std::env::var_os("NAC_GIT_PROMPT_ENABLE").is_some() {
+            "GIT_TERMINAL_PROMPT=1 "
+        } else {
+            ""
+        };
+        let cmd = format!(
+            "unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy GIT_PROXY_COMMAND; \
+             export NO_PROXY='*' no_proxy='*' GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+             GIT_CONFIG_COUNT=0 GIT_ASKPASS='' SSH_ASKPASS='' LANG=C LC_ALL=C LANGUAGE=''; \
+             {prompt_override}git -c credential.helper= -c core.askPass= -c http.proxy= \
+             ls-remote \"$NAC_GIT_PROMPT_URL\""
+        );
+        let result = execute_exec_command(
+            &json!({ "cmd": cmd, "tty": false, "yield_time_ms": 1000 }),
+            &test_runtime(),
+        )
+        .await;
+        std::fs::write(result_path, result.content).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn run_git_prompt_case(enable_prompt: bool) -> (Value, String) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/repo", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .unwrap();
+                        let mut request = [0u8; 4096];
+                        let _ = stream.read(&mut request);
+                        stream
+                            .write_all(
+                                b"HTTP/1.1 401 Unauthorized\r\n\
+                                  WWW-Authenticate: Basic realm=\"nac-test\"\r\n\
+                                  Content-Length: 0\r\n\
+                                  Connection: close\r\n\r\n",
+                            )
+                            .unwrap();
+                        return true;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return false;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return false,
+                }
+            }
+        });
+
+        let dir = unique_temp_dir(if enable_prompt {
+            "git_prompt_enabled"
+        } else {
+            "git_prompt_disabled"
+        });
+        let result_path = dir.join("result.json");
+        let pty_pair = NativePtySystem::default()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut reader = pty_pair.master.try_clone_reader().unwrap();
+        let capture = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(read) => bytes.extend_from_slice(&buffer[..read]),
+                    Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
+                    Err(error) => panic!("failed to read helper PTY: {error}"),
+                }
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        });
+
+        let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "tools::exec_command::tests::git_prompt_process_helper",
+            "--nocapture",
+        ]);
+        command.env("NAC_GIT_PROMPT_RESULT", &result_path);
+        command.env("NAC_GIT_PROMPT_URL", &url);
+        if enable_prompt {
+            command.env("NAC_GIT_PROMPT_ENABLE", "1");
+        }
+        let mut child = pty_pair.slave.spawn_command(command).unwrap();
+        drop(pty_pair.slave);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        drop(pty_pair.master);
+        let terminal_output = capture.join().unwrap();
+        assert!(server.join().unwrap(), "Git never reached the HTTP fixture");
+        let status = status
+            .unwrap_or_else(|| panic!("Git prompt helper hung; PTY output={terminal_output}"));
+        assert!(
+            status.success(),
+            "Git prompt helper failed with {}; PTY output={terminal_output}",
+            status.exit_code()
+        );
+
+        let result = serde_json::from_slice(&std::fs::read(&result_path).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        (result, terminal_output)
+    }
+
+    fn command_preview(value: &Value) -> String {
+        format!(
+            "{}{}",
+            value["stdout_preview"].as_str().unwrap_or_default(),
+            value["stderr_preview"].as_str().unwrap_or_default()
+        )
+    }
+
+    #[test]
+    fn worker_definitions_explain_recovery() {
+        assert!(exec_command_definition()
+            .function
+            .description
+            .contains("read_command_output"));
+        assert!(exec_command_definition()
+            .function
+            .description
+            .contains("non-interactively"));
+        assert!(exec_command_definition()
+            .function
+            .description
+            .contains("terminal prompts are disabled"));
+        assert_eq!(
+            read_command_output_definition().function.name,
+            "read_command_output"
+        );
+    }
+
+    #[test]
+    fn one_shot_overrides_inherited_prompt_policy() {
+        let result = run_prompt_policy_process_helper();
+        assert_eq!(result["one_shot"]["stdout_preview"], "0|0|1\n");
+    }
+
+    #[test]
+    fn pty_preserves_inherited_prompt_policy() {
+        let result = run_prompt_policy_process_helper();
+        let output = result["pty"]["content_preview"].as_str().unwrap();
+        assert!(
+            output.contains("sentinel-git|sentinel-gcm|sentinel-gh"),
+            "got: {output}"
+        );
+        assert!(result["pty"]["session_name"].is_string());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_http_auth_prompt_fails_fast_off_server_tty() {
+        let (prompted, prompted_terminal) = run_git_prompt_case(true);
+        assert!(
+            prompted_terminal.contains("Username for"),
+            "negative control did not prompt on the controlling terminal: {prompted_terminal}"
+        );
+        assert_eq!(prompted["status"], "timed_out");
+        assert!(prompted["exit_code"].is_null());
+
+        let (blocked, blocked_terminal) = run_git_prompt_case(false);
+        assert!(
+            !blocked_terminal.contains("Username for"),
+            "prompt leaked to the controlling terminal: {blocked_terminal}"
+        );
+        let output = command_preview(&blocked);
+        assert!(
+            output.contains("terminal prompts disabled"),
+            "Git did not report prompt suppression: {blocked}"
+        );
+        assert_eq!(blocked["status"], "completed");
+        assert!(blocked["exit_code"].as_i64().is_some_and(|code| code != 0));
+    }
+
+    #[tokio::test]
+    async fn short_command_is_complete_without_followup() {
+        let result = execute_exec_command(&json!({"cmd": "printf hello"}), &test_runtime()).await;
+        assert!(!result.is_error, "{}", result.content);
+        let value: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(value["status"], "completed");
+        assert_eq!(value["stdout_preview"], "hello");
+        assert_eq!(value["truncated"], false);
+        assert!(value["output_id"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn nonzero_exit_is_completed_not_tool_error() {
+        let result =
+            execute_exec_command(&json!({"cmd": "printf fail >&2; exit 7"}), &test_runtime()).await;
+        assert!(!result.is_error);
+        let value: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(value["status"], "completed");
+        assert_eq!(value["exit_code"], 7);
+        assert_eq!(value["stderr_preview"], "fail");
+    }
+
+    #[tokio::test]
+    async fn retained_output_is_pageable() {
+        let runtime = test_runtime();
+        let result = execute_exec_command(
+            &json!({"cmd": "python3 -c 'print(\"x\"*20000)'", "max_output_chars": 100}),
+            &runtime,
+        )
+        .await;
+        let value: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(value["truncated"], true);
+        let output_id = value["output_id"].as_str().unwrap();
+        let page = execute_read_command_output(
+            &json!({"output_id": output_id, "stream": "stdout", "offset": 10_000, "limit": 64}),
+            &runtime,
+        );
+        assert!(!page.is_error, "{}", page.content);
+        let page_value: Value = serde_json::from_str(&page.content).unwrap();
+        assert_eq!(page_value["content"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn invalid_stream_is_a_tool_error() {
+        let result = execute_read_command_output(
+            &json!({"output_id": "missing", "stream": "wat"}),
+            &test_runtime(),
+        );
+        assert!(result.is_error);
+        assert!(result.content.contains("invalid stream"));
+    }
+}
