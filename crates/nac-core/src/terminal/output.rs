@@ -400,23 +400,6 @@ impl OutputRegistry {
         })
     }
 
-    #[cfg(test)]
-    pub fn preview(
-        &self,
-        output_id: &str,
-        stream: OutputStream,
-        max_chars: usize,
-    ) -> Result<(String, bool)> {
-        let inner = self.inner.lock().expect("command output registry poisoned");
-        let artifact = inner
-            .artifacts
-            .get(output_id)
-            .ok_or_else(|| anyhow!("command output '{output_id}' not found or expired"))?;
-        validate_stream(artifact, stream)?;
-        let (start, end) = artifact.retained_range(stream);
-        Ok(render_preview(artifact, stream, start, end, max_chars))
-    }
-
     pub(crate) fn command_previews(
         &self,
         output_id: &str,
@@ -942,10 +925,11 @@ mod tests {
         registry
             .append(&id, OutputStream::Stdout, "éé".as_bytes().to_vec())
             .unwrap();
-        assert_eq!(
-            registry.preview(&id, OutputStream::Stdout, 2).unwrap(),
-            ("éé".to_string(), false)
-        );
+        let snapshot = registry
+            .preview_since(&id, OutputStream::Stdout, 0, 2)
+            .unwrap();
+        assert_eq!(snapshot.content, "éé");
+        assert!(!snapshot.truncated);
     }
 
     #[test]
