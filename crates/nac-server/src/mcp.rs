@@ -160,6 +160,21 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<CreateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let extra_headers = match params.extra_headers {
+            None => RequestField::Omitted,
+            Some(v) => {
+                let map: std::collections::BTreeMap<String, String> =
+                    match serde_json::from_value(v) {
+                        Ok(map) => map,
+                        Err(e) => {
+                            return Ok(CallToolResult::error(vec![Content::text(
+                                format!("Invalid extra_headers: {e}"),
+                            )]));
+                        }
+                    };
+                RequestField::Value(HeadersRequest(map))
+            }
+        };
         let request = CreateSessionRequest {
             cwd: params.cwd.map(std::path::PathBuf::from),
             model: field(params.model),
@@ -167,14 +182,7 @@ impl NacMcpService {
             backend: field(params.backend),
             reasoning_effort: field(params.reasoning_effort),
             api_key_env: field(params.api_key_env),
-            extra_headers: params
-                .extra_headers
-                .map(|v| {
-                    let map: std::collections::BTreeMap<String, String> =
-                        serde_json::from_value(v).unwrap_or_default();
-                    RequestField::Value(HeadersRequest(map))
-                })
-                .unwrap_or(RequestField::Omitted),
+            extra_headers,
             orchestrator_compaction_threshold: params
                 .compaction_threshold
                 .map(RequestField::Value)
