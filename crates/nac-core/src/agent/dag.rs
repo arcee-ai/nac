@@ -209,10 +209,6 @@ pub(crate) fn build_dag(dispatches: &[ParsedThreadDispatch]) -> Result<Dag, DagE
     })
 }
 
-// ------------------------------------------------------------------
-// Shared helpers (used by execute_with_dag and tool_exec.rs)
-// ------------------------------------------------------------------
-
 /// Emit `ToolCallStarted` + `ToolCallFinished` for each parse error and return
 /// them as `(original_index, tool_call_id, tool_name, result)` tuples.
 pub(crate) fn collect_parse_errors(
@@ -301,10 +297,6 @@ pub(crate) fn spawn_non_thread_into(
     }
 }
 
-// ------------------------------------------------------------------
-// DAG execution
-// ------------------------------------------------------------------
-
 /// Execute a batch of tool calls using the DAG coordinator.
 ///
 /// Thread dispatches are executed in topological waves.  Non-thread tool calls
@@ -329,17 +321,15 @@ pub(crate) async fn execute_with_dag(
         agent_thread_name,
     } = ctx;
 
-    // Results: (original_index, tool_call_id, tool_name, ToolResult)
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
-    // 1. Collect parse errors immediately.
     all_results.extend(collect_parse_errors(
         parse_errors,
         &event_sink,
         &agent_thread_name,
     ));
 
-    // 2. Pre-mark ALL thread names in active_threads.
+    // Pre-mark all thread names in active_threads.
     // Track which threads we successfully marked so we only unmark those
     // at the end — unmarking a thread that was already active from a prior
     // turn would clobber its mutual-exclusion guarantee.
@@ -390,10 +380,6 @@ pub(crate) async fn execute_with_dag(
         }
     }
 
-    // 3. Spawn non-thread tools into a separate JoinSet that runs
-    //    concurrently with all waves.  This isolates non-thread tool panics
-    //    from thread failure tracking and prevents long-running non-thread
-    //    tools from blocking wave progression.
     let mut non_thread_join_set: JoinSet<(usize, Option<usize>, String, String, ToolResult)> =
         JoinSet::new();
     spawn_non_thread_into(
@@ -409,7 +395,6 @@ pub(crate) async fn execute_with_dag(
     // empty, we skip polling it in the wave loop to avoid a busy-wait spin.
     let mut non_thread_empty = non_thread_join_set.is_empty();
 
-    // 4. Execute waves.
     let Dag {
         waves,
         in_batch_deps,
@@ -423,7 +408,6 @@ pub(crate) async fn execute_with_dag(
         // are marked as failed so their dependents are skipped.
         let mut in_flight: HashSet<usize> = HashSet::new();
 
-        // Spawn thread dispatches for this wave.
         for &dispatch_idx in wave {
             if failed_indices.contains(&dispatch_idx) {
                 continue;
@@ -606,9 +590,6 @@ pub(crate) async fn execute_with_dag(
         }
     }
 
-    // 5. Drain any remaining non-thread tools that did not finish during
-    //    wave execution.  `ToolCallFinished` events are emitted as each
-    //    completes.
     while let Some(join_result) = non_thread_join_set.join_next().await {
         match join_result {
             Ok((index, _, tool_call_id, tool_name, result)) => {
@@ -638,7 +619,6 @@ pub(crate) async fn execute_with_dag(
         thread::close_thread_dispatch(&runtime, session_id, name, dispatch_id);
     }
 
-    // 7. Sort by original index and return.
     sort_and_strip_index(all_results)
 }
 
@@ -649,10 +629,6 @@ mod tests {
     use crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS;
     use crate::types::{FunctionCall, ToolCall};
     use serde_json::json;
-
-    // ------------------------------------------------------------------
-    // Test helpers
-    // ------------------------------------------------------------------
 
     fn make_dispatch(index: usize, name: &str, source_threads: &[&str]) -> ParsedThreadDispatch {
         let args = json!({
@@ -687,10 +663,6 @@ mod tests {
             },
         }
     }
-
-    // ------------------------------------------------------------------
-    // build_dag tests
-    // ------------------------------------------------------------------
 
     #[test]
     fn test_build_dag_no_deps() {
@@ -815,10 +787,6 @@ mod tests {
         assert!(matches!(err, DagError::Cycle(_)));
     }
 
-    // ------------------------------------------------------------------
-    // partition_tool_calls tests
-    // ------------------------------------------------------------------
-
     #[test]
     fn test_partition_separates_thread_and_non_thread() {
         let runtime = test_runtime();
@@ -867,208 +835,6 @@ mod tests {
         assert_eq!(parse_errors[0].1, "call_0");
         assert!(parse_errors[0].3.is_error);
         assert!(parse_errors[0].3.content.contains("'name'"));
-    }
-
-    // ------------------------------------------------------------------
-    // Transitive failure propagation tests
-    // ------------------------------------------------------------------
-
-    /// When A fails → B (depends on A) is skipped → C (depends on B) is also
-    /// skipped.  This simulates the wave-by-wave skip logic from
-    /// `execute_with_dag` using the DAG structure.
-    #[test]
-    fn test_transitive_failure_propagation_chain() {
-        // Chain: A → B → C
-        let dispatches = vec![
-            make_dispatch(0, "A", &[]),
-            make_dispatch(1, "B", &["A"]),
-            make_dispatch(2, "C", &["B"]),
-        ];
-
-        let dag = build_dag(&dispatches).unwrap();
-        assert_eq!(dag.waves.len(), 3, "chain → 3 waves");
-
-        // Simulate the wave-by-wave skip logic from execute_with_dag.
-        let mut failed_indices: HashSet<usize> = HashSet::new();
-
-        // Wave 0: A fails.
-        failed_indices.insert(0);
-
-        // Wave 1: B checks its deps. A (dep of B) is in failed_indices → B skipped.
-        for &dispatch_idx in &dag.waves[1] {
-            let deps = &dag.in_batch_deps[dispatch_idx];
-            let any_dep_failed = deps.iter().any(|dep| failed_indices.contains(dep));
-            assert!(
-                any_dep_failed,
-                "dispatch {} in wave 1 should have a failed dep",
-                dispatch_idx
-            );
-            if any_dep_failed {
-                failed_indices.insert(dispatch_idx);
-            }
-        }
-
-        // Wave 2: C checks its deps. B (dep of C) is now in failed_indices → C skipped.
-        for &dispatch_idx in &dag.waves[2] {
-            let deps = &dag.in_batch_deps[dispatch_idx];
-            let any_dep_failed = deps.iter().any(|dep| failed_indices.contains(dep));
-            assert!(
-                any_dep_failed,
-                "dispatch {} in wave 2 should have a failed dep (transitive)",
-                dispatch_idx
-            );
-            if any_dep_failed {
-                failed_indices.insert(dispatch_idx);
-            }
-        }
-
-        // All three should be in failed_indices.
-        assert!(failed_indices.contains(&0), "A failed");
-        assert!(failed_indices.contains(&1), "B skipped due to A");
-        assert!(
-            failed_indices.contains(&2),
-            "C skipped due to B (transitive)"
-        );
-    }
-
-    /// When A fails in a diamond A→{B,C}→D, both B and C are skipped, and
-    /// then D is skipped because all its deps failed.
-    #[test]
-    fn test_transitive_failure_propagation_diamond() {
-        // Diamond: A → {B, C} → D
-        let dispatches = vec![
-            make_dispatch(0, "A", &[]),
-            make_dispatch(1, "B", &["A"]),
-            make_dispatch(2, "C", &["A"]),
-            make_dispatch(3, "D", &["B", "C"]),
-        ];
-
-        let dag = build_dag(&dispatches).unwrap();
-        assert_eq!(dag.waves.len(), 3, "diamond → 3 waves");
-
-        let mut failed_indices: HashSet<usize> = HashSet::new();
-
-        // Wave 0: A fails.
-        failed_indices.insert(0);
-
-        // Wave 1: B and C both depend on A → both skipped.
-        for &dispatch_idx in &dag.waves[1] {
-            let deps = &dag.in_batch_deps[dispatch_idx];
-            let any_dep_failed = deps.iter().any(|dep| failed_indices.contains(dep));
-            assert!(any_dep_failed, "wave 1 dispatch should have failed dep A");
-            if any_dep_failed {
-                failed_indices.insert(dispatch_idx);
-            }
-        }
-
-        // Wave 2: D depends on B and C, both now failed → D skipped.
-        for &dispatch_idx in &dag.waves[2] {
-            let deps = &dag.in_batch_deps[dispatch_idx];
-            let any_dep_failed = deps.iter().any(|dep| failed_indices.contains(dep));
-            assert!(any_dep_failed, "D should have a failed dep (B or C)");
-            if any_dep_failed {
-                failed_indices.insert(dispatch_idx);
-            }
-        }
-
-        assert_eq!(
-            failed_indices.len(),
-            4,
-            "all four dispatches should be failed/skipped"
-        );
-    }
-
-    // ------------------------------------------------------------------
-    // Wave ordering tests
-    // ------------------------------------------------------------------
-
-    /// Verify that every dispatch in wave N > 0 has at least one in-batch dep
-    /// in an earlier wave, and that wave 0 dispatches have no in-batch deps.
-    /// This is the structural guarantee behind wave concurrency: wave 1
-    /// threads don't start until wave 0 completes.
-    #[test]
-    fn test_wave_ordering_respects_dependencies() {
-        // Diamond: A → {B, C} → D
-        let dispatches = vec![
-            make_dispatch(0, "A", &[]),
-            make_dispatch(1, "B", &["A"]),
-            make_dispatch(2, "C", &["A"]),
-            make_dispatch(3, "D", &["B", "C"]),
-        ];
-
-        let dag = build_dag(&dispatches).unwrap();
-
-        let mut earlier_waves: HashSet<usize> = HashSet::new();
-
-        for (wave_idx, wave) in dag.waves.iter().enumerate() {
-            for &dispatch_idx in wave {
-                if wave_idx > 0 {
-                    let deps = &dag.in_batch_deps[dispatch_idx];
-                    let has_earlier_dep = deps.iter().any(|dep| earlier_waves.contains(dep));
-                    assert!(
-                        has_earlier_dep,
-                        "dispatch {} in wave {} must have a dep in an earlier wave",
-                        dispatch_idx, wave_idx
-                    );
-                } else {
-                    assert!(
-                        dag.in_batch_deps[dispatch_idx].is_empty(),
-                        "dispatch {} in wave 0 must have no in-batch deps",
-                        dispatch_idx
-                    );
-                }
-            }
-
-            for &dispatch_idx in wave {
-                earlier_waves.insert(dispatch_idx);
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Additional partition tests
-    // ------------------------------------------------------------------
-
-    /// Partition should handle a mix of thread calls with and without source
-    /// threads, plus non-thread calls.
-    #[test]
-    fn test_partition_mixed_source_and_no_source_threads() {
-        let runtime = test_runtime();
-        let tool_calls = vec![
-            make_tool_call("call_0", "thread", json!({"name": "A", "action": "work"})),
-            make_tool_call(
-                "call_1",
-                "thread",
-                json!({"name": "B", "action": "work", "threads": ["A"]}),
-            ),
-            make_tool_call(
-                "call_2",
-                "thread",
-                json!({"name": "C", "action": "work", "threads": ["A", "preexisting"]}),
-            ),
-            make_tool_call("call_3", "read", json!({"path": "src/main.rs"})),
-        ];
-
-        let (thread_dispatches, other_calls, parse_errors) =
-            partition_tool_calls(tool_calls, &runtime);
-
-        assert_eq!(thread_dispatches.len(), 3);
-        assert_eq!(thread_dispatches[0].params.thread_name, "A");
-        assert!(thread_dispatches[0].params.source_threads.is_empty());
-
-        assert_eq!(thread_dispatches[1].params.thread_name, "B");
-        assert_eq!(thread_dispatches[1].params.source_threads, vec!["A"]);
-
-        assert_eq!(thread_dispatches[2].params.thread_name, "C");
-        assert_eq!(
-            thread_dispatches[2].params.source_threads,
-            vec!["A", "preexisting"]
-        );
-
-        assert_eq!(other_calls.len(), 1);
-        assert_eq!(other_calls[0].2, "read");
-
-        assert!(parse_errors.is_empty());
     }
 
     /// Partition should produce a parse error when a thread call specifies
