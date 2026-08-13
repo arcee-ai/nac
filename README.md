@@ -243,7 +243,7 @@ To use a different key variable, set a per-session `api_key_env = "MY_ARCEE_KEY"
 
 Managed credentials live in the NAC home directory: `$NAC_HOME` when set, otherwise `$XDG_CONFIG_HOME/nac` when set, otherwise `~/.config/nac`. Arcee uses only `arcee_auth.json`; ChatGPT Codex uses only `auth.json`.
 
-Credential files reject symlinks and non-regular files and are written atomically under a lock. On Unix they must be owner-only (mode `0600`); group or other permission bits are rejected. Each logout command removes only its own credential path.
+Credential files reject symlinks and non-regular files and are written atomically under a lock. On Unix, reads accept any mode with no group or other permission bits (for example, `0400`, `0600`, or `0700`, depending on the owner bits), while writes normalize the mode to `0600`. Each logout command removes only its own credential path.
 
 ## Model request security
 
