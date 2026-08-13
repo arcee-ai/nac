@@ -282,11 +282,14 @@ async fn together_reasoning_round_trips_under_the_reasoning_field() {
         ),
         s5_completions_response(),
     ]);
-    let client = test_model_client(
+    let mut client = test_model_client(
         BackendKind::TogetherChat,
         server.base_url.clone(),
         std::collections::BTreeMap::new(),
     );
+    // max_tokens is only sent for authoritative catalog values; pretend the
+    // unknown test model is catalog-known so the contract keeps covering it.
+    client.resolved_model.source = catalog::ModelSource::Baseline;
 
     let first = client
         .send_turn(

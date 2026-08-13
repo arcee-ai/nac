@@ -277,28 +277,31 @@ pub(super) struct ThirdPartySeedModel {
 /// tests read it (including the pre-S4 validation-matrix exemption).
 ///
 /// To release a new model or drop an old one, add or remove a row here —
-/// that one edit is complete. Limits follow the underlying models' published
-/// values (max output capped at 256k); pricing is unpublished (zero =
-/// unknown) and arrives with the live overlay.
+/// that one edit is complete. Context windows are the arcee API's advertised
+/// values (`/v1/models` `context_length`, verified 2026-08-13); the API
+/// leaves `max_output_length` null for these models, so max output follows
+/// the underlying models' published values, capped at 256k. Pricing is
+/// unpublished in the seed (zero = unknown) and arrives with the live
+/// overlay.
 pub(super) const ARCEE_THIRD_PARTY_SEED_MODELS: &[ThirdPartySeedModel] = &[
     ThirdPartySeedModel {
         id: "deepseek/deepseek-v4-flash-latest",
         display_name: "DeepSeek-V4-Flash",
-        context_window: 1_000_000,
+        context_window: 1_048_576,
         max_tokens: 262_144,
         efforts: THIRD_PARTY_NONE_HIGH_MAX_LEVELS,
     },
     ThirdPartySeedModel {
         id: "deepseek-ai/deepseek-v4-pro",
         display_name: "DeepSeek-V4-Pro",
-        context_window: 1_000_000,
+        context_window: 512_000,
         max_tokens: 262_144,
         efforts: THIRD_PARTY_NONE_HIGH_MAX_LEVELS,
     },
     ThirdPartySeedModel {
         id: "zai-org/glm-5.2",
         display_name: "GLM-5.2",
-        context_window: 524_288,
+        context_window: 262_144,
         max_tokens: 164_000,
         efforts: THIRD_PARTY_NONE_HIGH_MAX_LEVELS,
     },
@@ -312,7 +315,7 @@ pub(super) const ARCEE_THIRD_PARTY_SEED_MODELS: &[ThirdPartySeedModel] = &[
     ThirdPartySeedModel {
         id: "minimaxai/minimax-m3",
         display_name: "MiniMax-M3",
-        context_window: 524_288,
+        context_window: 512_000,
         max_tokens: 250_000,
         efforts: THIRD_PARTY_NONE_MAX_LEVELS,
     },
