@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
@@ -51,7 +51,10 @@ pub(crate) fn resolve_light_client(
         session_headers.clone(),
     )
     .and_then(ModelClient::from_effective_settings)
-    .context("invalid light model settings")
+    .map_err(|error| {
+        let message = format!("invalid light model settings: {error:#}");
+        error.context(message)
+    })
 }
 
 /// Validate a light-model configuration through the same resolution path
@@ -114,5 +117,37 @@ mod tests {
         assert!(error.contains("invalid light model settings"));
 
         restore_env("OPENAI_API_KEY", original_openai);
+    }
+
+    #[test]
+    fn missing_light_model_api_key_names_the_required_credential() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_arcee = std::env::var_os("ARCEE_API_KEY");
+        unsafe {
+            std::env::remove_var("ARCEE_API_KEY");
+        }
+
+        let light = LightModelSettings {
+            model: "deepseek/deepseek-v4-flash-latest".to_string(),
+            backend: Some(BackendKind::ArceeApi),
+            base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+            api_key_env: None,
+            reasoning_effort: None,
+        };
+        let error = resolve_light_client(&light, &BTreeMap::new())
+            .map(|_| ())
+            .unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            error
+                .downcast_ref::<crate::model::ModelConfigurationError>()
+                .is_some()
+        );
+        assert!(message.contains("invalid light model settings"), "{message}");
+        assert!(message.contains("api_key_env"), "{message}");
+        assert!(message.contains("ARCEE_API_KEY"), "{message}");
+
+        restore_env("ARCEE_API_KEY", original_arcee);
     }
 }

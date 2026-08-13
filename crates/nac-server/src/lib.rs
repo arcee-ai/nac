@@ -8284,6 +8284,55 @@ model = "gpt-5.2"
     }
 
     #[tokio::test]
+    async fn create_reports_the_missing_light_model_credential() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("create_missing_light_credential");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        write_arcee_auth(&nac_home, "https://api.arcee.ai");
+        let manager = test_manager(&root);
+
+        let error = manager
+            .create_session(CreateSessionRequest {
+                model: RequestField::Value("moonshotai/kimi-k3".to_string()),
+                base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
+                backend: RequestField::Value("arcee-auth".to_string()),
+                api_key_env: RequestField::Null,
+                light_model: RequestField::Value(LightModelSettings {
+                    model: "deepseek/deepseek-v4-flash-latest".to_string(),
+                    backend: Some(BackendKind::ArceeApi),
+                    base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+                    api_key_env: None,
+                    reasoning_effort: None,
+                }),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect_err("an API-key light model without a key must fail creation");
+        let response = ApiError::from(error);
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(
+            response.message.contains("invalid light model settings"),
+            "{}",
+            response.message
+        );
+        assert!(
+            response.message.contains("api_key_env"),
+            "{}",
+            response.message
+        );
+        assert!(
+            response.message.contains("ARCEE_API_KEY"),
+            "{}",
+            response.message
+        );
+        assert!(manager.list_sessions(false).await.unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn codex_create_preflights_endpoint_and_managed_credentials_before_persistence() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
 
