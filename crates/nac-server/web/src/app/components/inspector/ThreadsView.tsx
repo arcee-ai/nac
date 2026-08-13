@@ -262,7 +262,7 @@ function EpisodeTab({
       <DropdownContent isOpen={expanded} className="w-full">
         <div className="flex flex-col pl-1 pr-1 md:pl-3 md:pr-2 pt-2 pb-6">
           {episode.content.trim() ? (
-            <Markdown className="text-basic-secondary">
+            <Markdown className="text-basic-primary">
               {episode.content}
             </Markdown>
           ) : (
