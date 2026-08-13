@@ -15,7 +15,6 @@ export { AnchorPlacement as PopoverPlacement };
 
 export enum PopoverSize {
   Medium = "w-[320px]",
-  /** As wide as the content, useful together with `min-w-full` on the panel. */
   Fit = "w-max",
 }
 
@@ -25,9 +24,7 @@ const PANEL_BASE =
 interface PopoverProps {
   open: boolean;
   onClose: () => void;
-  /** The panel body. Rendered into a bottom sheet on narrow screens. */
   content: React.ReactNode;
-  /** The trigger the panel is anchored to. */
   children: React.ReactNode;
   placement?: AnchorPlacement;
   size?: PopoverSize | string;
@@ -38,7 +35,6 @@ interface PopoverProps {
   sticky?: boolean;
   closeOnOutsideClick?: boolean;
   closeOnEscape?: boolean;
-  /** Below the mobile breakpoint, swap the panel for a bottom sheet. */
   sheetOnMobile?: boolean;
   className?: string;
   panelClassName?: string;

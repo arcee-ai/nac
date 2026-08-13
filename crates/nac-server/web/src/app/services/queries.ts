@@ -169,9 +169,6 @@ export function useManagedLogout() {
     mutationFn: (provider: ManagedAuthProvider) => api.managedLogout(provider),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: queryKeys.managedAuth });
-      // The model index was only readable through the login that just went
-      // away, so what is cached from it is no longer true — including the copy a
-      // resolved configuration carries.
       client.removeQueries({ queryKey: queryKeys.managedProviderModelsAll });
       await client.invalidateQueries({
         queryKey: queryKeys.resolvedModelConfigsAll,

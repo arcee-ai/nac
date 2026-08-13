@@ -25,7 +25,6 @@ import { Markdown } from "@/app/lib/markdown";
  */
 const HOVER_CLOSE_DELAY_MS = 160;
 
-/** The task affordance itself: an info glyph and an underlined label. */
 function TaskLabel({
   text,
   active,
@@ -58,11 +57,6 @@ function TaskLabel({
   );
 }
 
-/**
- * The panel every deliberate task affordance opens: the dispatch as prose, wide
- * enough to read and scrolled rather than allowed to grow, since a task can run
- * to several paragraphs that nothing it hangs off has room for.
- */
 function TaskPopover({
   action,
   open,
@@ -72,7 +66,6 @@ function TaskPopover({
   action: string;
   open: boolean;
   onClose: () => void;
-  /** The trigger the panel hangs off. */
   children: ReactNode;
 }) {
   return (
@@ -96,19 +89,11 @@ function TaskPopover({
   );
 }
 
-/**
- * What the thread was asked to do, on demand from the panel header.
- *
- * The dispatch carries this from the moment the thread starts, so it is the one
- * thing about a running thread that can be read before it has produced
- * anything.
- */
 export function TaskButton({
   action,
   large = false,
 }: {
   action: string;
-  /** The phone header, where the touch target and its label are a size up. */
   large?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -128,11 +113,6 @@ export function TaskButton({
   );
 }
 
-/**
- * The same panel from a pill, for the phone's floating view switch — where an
- * underlined label beside two solid pills would read as a stray link rather
- * than as the third control of the set.
- */
 export function TaskPill({ action }: { action: string }) {
   const [open, setOpen] = useState(false);
   return (

@@ -90,15 +90,9 @@ export function useDeviceLogin(onSuccess?: () => void) {
           active.current = null;
           setState({ status: "idle" });
           void client.invalidateQueries({ queryKey: queryKeys.managedAuth });
-          // The model index is only readable once signed in, so the picker
-          // stays empty until this refetch lands.
           void client.invalidateQueries({
             queryKey: queryKeys.managedProviderModelsAll,
           });
-          // A resolved configuration carries the same index, read on the server
-          // with the login that has just been replaced. Without this it keeps
-          // answering with whatever the broken login managed to return, which is
-          // what makes a form look stuck until it is reopened.
           void client.invalidateQueries({
             queryKey: queryKeys.resolvedModelConfigsAll,
           });
