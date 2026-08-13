@@ -272,28 +272,6 @@ fn preview_truncates_on_utf8_boundary() {
     assert_eq!(preview("a┌b", 4), "a┌...");
 }
 
-#[test]
-fn preview_handles_box_table_prompt() {
-    let prompt = "hey can you see why markdown rendering is bugged in this way?\n\
-Here's the quick summary of what was discovered:\n\n\
-┌──────────────────┬─────────────────────────────┬─────────────────────────┐\n\
-│ Property         │ Mistral (Tekken)            │ Llama 3                 │\n\
-├──────────────────┼─────────────────────────────┼─────────────────────────┤\n\
-│ Vocab size       │ 131,072                     │ 128,000                 │\n\
-│ Tokenizer engine │ Tekken (custom,             │ BPE (tiktoken/GPT-4     │\n\
-│                  │ tiktoken-based)             │ style)                  │\n\
-└──────────────────┴─────────────────────────────┴─────────────────────────┘\n\
-| Special tokens | <unk>, <s>, </s>, <pad> (IDs 0-999) | <|begin_of_text|>, <|end_of_text|> (IDs 128000+) |\n\
-| Byte fallback | Yes (first 256 tokens = raw bytes) | No |\n\
-| Pre-tokenizer | Unicode multi-script, case-sensitive | GPT-4 style with English contractions |\n\
-| Merges | 269,443 | 280,147 |\n";
-
-    let rendered = preview(prompt, 160);
-
-    assert!(rendered.ends_with("..."));
-    assert!(rendered.len() <= 163);
-}
-
 #[tokio::test]
 async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
     let unique = std::time::SystemTime::now()

@@ -9,27 +9,16 @@ use crate::store::orchestrator_compaction::{
 use crate::types::{FunctionCall, Message, ToolCall};
 
 #[test]
-fn nac_prompt_matches_approved_bytes_hash_and_text() {
+fn nac_prompt_matches_approved_bytes_hash() {
     const EXPECTED_SHA256: [u8; 32] = [
         0xdf, 0x7d, 0xa7, 0xf9, 0xa9, 0xff, 0xa5, 0x8a, 0x6d, 0x3d, 0xb5, 0xf9, 0xac, 0xc7, 0xa1,
         0x22, 0x25, 0xc6, 0x6f, 0x51, 0xce, 0xe9, 0x86, 0x17, 0xbf, 0xab, 0x62, 0x32, 0x38, 0x4c,
         0x37, 0x25,
     ];
-    assert_eq!(NAC_COMPACTION_PROMPT.len(), 2_817);
-    assert!(NAC_COMPACTION_PROMPT.ends_with('\n'));
-    assert!(!NAC_COMPACTION_PROMPT.ends_with("\n\n"));
     assert_eq!(
         Sha256::digest(NAC_COMPACTION_PROMPT.as_bytes())[..],
         EXPECTED_SHA256
     );
-    assert!(NAC_COMPACTION_PROMPT.starts_with(
-        "Internal NAC context-compaction request.\n\nReturn one concise, standalone historical checkpoint"
-    ));
-    assert!(NAC_COMPACTION_PROMPT.contains("## Orchestration history\n"));
-    assert!(NAC_COMPACTION_PROMPT.contains("## State at the end of the supplied history\n"));
-    assert!(NAC_COMPACTION_PROMPT.ends_with(
-        "Omit empty sections, routine operations, raw logs, hidden reasoning, low-value IDs, repeated chronology, and unsupported claims.\n"
-    ));
 }
 #[test]
 fn installed_historical_wrapper_is_unchanged() {
