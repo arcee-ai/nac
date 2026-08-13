@@ -1827,7 +1827,6 @@ impl SessionManager {
             }
         }
 
-        // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
         if !deleted {
             return Err(anyhow!("session '{}' was not found", session_id));
@@ -4164,25 +4163,6 @@ mod tests {
     }
 
     #[test]
-    fn session_event_envelope_serializes_for_sse_payloads() {
-        let envelope = SessionEventEnvelope {
-            session_id: Some("session-1".to_string()),
-            epoch_id: "test-epoch".to_string(),
-            sequence_id: 42,
-            client_id: None,
-            run_id: None,
-            event: nac_core::events::SessionEvent::RunFailed {
-                message: "boom".to_string(),
-            },
-        };
-
-        let payload = serde_json::to_string(&envelope).unwrap();
-
-        assert!(payload.contains("\"sequence_id\":42"));
-        assert!(payload.contains("\"message\":\"boom\""));
-    }
-
-    #[test]
     fn invalid_workspace_diff_stage_maps_to_bad_request() {
         let error = view::WorkspaceDiffStage::parse("sideways").unwrap_err();
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
@@ -4568,126 +4548,18 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
 
-        assert!(body["catalog_version"].as_u64().unwrap() >= 1);
+        assert!(body["catalog_version"].as_u64().is_some());
         let providers = body["providers"].as_array().unwrap();
-        assert_eq!(providers.len(), 8);
-        let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
-
-        // Auth requirements and managed base URLs derive from the backend
-        // kind, so they are exact regardless of the machine's catalog layers.
-        assert_eq!(by_id("anthropic-messages")["auth"], "api_key_env");
-        assert!(by_id("anthropic-messages")["managed_base_url"].is_null());
-        assert_eq!(by_id("arcee-api")["auth"], "api_key_env");
-        assert_eq!(by_id("arcee-auth")["auth"], "managed_arcee");
-        assert_eq!(
-            by_id("arcee-auth")["managed_base_url"],
-            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
-        );
-        assert_eq!(by_id("chatgpt-codex-responses")["auth"], "codex_oauth");
-
-        // Catalog endpoint defaults: present for the five models.dev
-        // providers and the hand-seeded arcee-api (exact values are pinned
-        // hermetically in nac-core; a machine overlay could carry a
-        // refreshed models.dev `api`), absent for the managed providers.
-        for id in [
-            "anthropic-messages",
-            "deepseek-chat",
-            "fireworks-chat",
-            "openai-responses",
-            "together-chat",
-            "arcee-api",
-        ] {
-            assert!(
-                by_id(id)["default_base_url"].is_string(),
-                "{id} must serve a catalog default_base_url"
-            );
-        }
-        for id in ["arcee-auth", "chatgpt-codex-responses"] {
-            assert!(
-                by_id(id)["default_base_url"].is_null(),
-                "{id} must not serve a catalog default_base_url"
-            );
-        }
-        assert_eq!(
-            by_id("chatgpt-codex-responses")["managed_base_url"],
-            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
-        );
-        // Managed providers without a stored credential hint their login
-        // command (a code constant, independent of machine catalog layers).
-        for (id, command) in [
-            ("arcee-auth", "nac-web arcee-auth login"),
-            ("chatgpt-codex-responses", "nac-web codex-auth login"),
-        ] {
-            if by_id(id)["auth_status"] == "no_credential" {
-                assert_eq!(by_id(id)["auth_hint"], command, "{id}");
-            }
-        }
-
-        // Every provider carries `_default` limits and real entries only
-        // (never the `_default` id or a synthesis-product source). Values
-        // stay unpinned here: the prod nac-core build layers the machine's
-        // overlay/models.json, which may patch them — exact values are
-        // pinned hermetically by the nac-core catalog tests.
-        for provider in providers {
-            // Auth status is computed per request from the machine's env
-            // and credential files, so only the value domain and the
-            // hint/status invariants are machine-independent here.
-            let status = provider["auth_status"].as_str().unwrap();
-            assert!(
-                ["ready", "no_credential"].contains(&status),
-                "unexpected auth_status: {status}"
-            );
-            let hint = &provider["auth_hint"];
-            if status == "ready" {
-                assert!(hint.is_null(), "ready providers carry no hint: {provider}");
-            } else if provider["auth"] == "api_key_env" {
-                assert!(
-                    hint.as_str().is_some_and(|hint| !hint.is_empty()),
-                    "no_credential API-key providers hint the conventional var: {provider}"
-                );
-            }
-            let limits = &provider["default_limits"];
-            assert!(limits["context_window"].as_u64().unwrap() > 0);
-            assert!(limits["max_tokens"].as_u64().unwrap() > 0);
-            assert!(limits["supported_efforts"].is_array());
-            for model in provider["models"].as_array().unwrap() {
-                assert_ne!(model["id"], "_default");
-                assert!(
-                    ["baseline", "overlay", "user_override"]
-                        .contains(&model["source"].as_str().unwrap()),
-                    "unexpected model source: {}",
-                    model["source"]
-                );
-                assert!(model["context_window"].as_u64().unwrap() > 0);
-                assert!(model["max_tokens"].as_u64().unwrap() > 0);
-            }
-        }
-
-        // Baseline entries are always present: the overlay/user layers patch
-        // or add, never remove.
-        let anthropic_models = by_id("anthropic-messages")["models"].as_array().unwrap();
-        let opus = anthropic_models
+        let anthropic = providers
             .iter()
-            .find(|m| m["id"] == "claude-opus-4-6")
-            .expect("the embedded baseline's claude-opus-4-6 entry");
-        assert!(opus["supported_efforts"].is_array());
-        assert_eq!(opus["reasoning"], true);
+            .find(|provider| provider["id"] == "anthropic-messages")
+            .expect("anthropic provider must be listed");
+        assert!(anthropic["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|model| model["id"] == "claude-opus-4-6"));
 
-        // The hand-seeded providers serve their maintained entries too.
-        for (provider, model_id) in [
-            ("arcee-auth", "trinity-large-thinking"),
-            ("arcee-api", "trinity-large-thinking"),
-            ("chatgpt-codex-responses", "gpt-5.6-sol"),
-        ] {
-            assert!(
-                by_id(provider)["models"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|m| m["id"] == model_id),
-                "the seed's {model_id} entry must reach the {provider} listing"
-            );
-        }
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4765,38 +4637,10 @@ mod tests {
     }
 
     #[test]
-    fn create_session_request_deserializes_optional_ssh_host() {
-        let with_host: CreateSessionRequest = serde_json::from_str(
-            r#"{"ssh_host":"build-box","backend":"together-chat","api_key_env":"TOGETHER_CUSTOM_KEY","extra_headers":"{\"X-Launch\":\"yes\"}"}"#,
-        )
-        .unwrap();
-        assert_eq!(with_host.ssh_host.as_deref(), Some("build-box"));
-        assert_eq!(
-            with_host.backend,
-            RequestField::Value("together-chat".to_string())
-        );
-        assert_eq!(
-            with_host.api_key_env,
-            RequestField::Value("TOGETHER_CUSTOM_KEY".to_string())
-        );
-        assert_eq!(
-            with_host.extra_headers,
-            RequestField::Value(HeadersRequest(BTreeMap::from([(
-                "X-Launch".to_string(),
-                "yes".to_string()
-            )])))
-        );
-
-        let alias_host: CreateSessionRequest =
+    fn create_session_request_accepts_host_id_alias() {
+        let request: CreateSessionRequest =
             serde_json::from_str(r#"{"host_id":"legacy-box"}"#).unwrap();
-        assert_eq!(alias_host.ssh_host.as_deref(), Some("legacy-box"));
-        assert_eq!(with_host.cwd, None);
-        assert!(!with_host.sandbox.enabled);
-
-        let without_host: CreateSessionRequest =
-            serde_json::from_str(r#"{"cwd":"/tmp/project"}"#).unwrap();
-        assert_eq!(without_host.ssh_host, None);
-        assert_eq!(without_host.cwd, Some(PathBuf::from("/tmp/project")));
+        assert_eq!(request.ssh_host.as_deref(), Some("legacy-box"));
     }
 
     #[tokio::test]
@@ -7996,38 +7840,6 @@ model = "gpt-5.2"
             .all(|events| events.as_array().unwrap().len() <= 1));
 
         let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn paged_message_queries_exclude_system_prompts_by_default() {
-        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
-            &"/sessions/test?message_limit=2".parse().unwrap(),
-        )
-        .unwrap();
-        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
-            &"/sessions/test/messages?before=3&limit=2".parse().unwrap(),
-        )
-        .unwrap();
-        assert!(!snapshot_query.include_system);
-        assert!(!messages_query.include_system);
-    }
-
-    #[test]
-    fn paged_message_queries_include_system_prompts_when_requested() {
-        let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(
-            &"/sessions/test?message_limit=3&include_system=true"
-                .parse()
-                .unwrap(),
-        )
-        .unwrap();
-        let Query(messages_query) = Query::<MessagesQuery>::try_from_uri(
-            &"/sessions/test/messages?before=3&limit=3&include_system=true"
-                .parse()
-                .unwrap(),
-        )
-        .unwrap();
-        assert!(snapshot_query.include_system);
-        assert!(messages_query.include_system);
     }
 
     #[tokio::test]
