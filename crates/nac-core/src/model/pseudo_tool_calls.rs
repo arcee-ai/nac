@@ -256,9 +256,25 @@ fn tool_parameters<'tools>(tools: &'tools [ToolDefinition], name: &str) -> Optio
 /// out of it; a value that will not read that way fails the whole recovery
 /// rather than reaching the tool as the wrong type.
 fn coerce_argument(raw: &str, schema: Option<&Value>) -> Option<Value> {
-    let declared = schema
-        .and_then(|schema| schema.get("type"))
-        .and_then(Value::as_str);
+    let declared_types = schema.and_then(|schema| schema.get("type"));
+    let accepts_null = declared_types.is_some_and(|declared| {
+        declared == "null"
+            || declared
+                .as_array()
+                .is_some_and(|types| types.iter().any(|kind| kind == "null"))
+    });
+    if accepts_null && raw == "null" {
+        return Some(Value::Null);
+    }
+    let declared = declared_types.and_then(|declared| {
+        declared.as_str().or_else(|| {
+            declared
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .find(|kind| *kind != "null")
+        })
+    });
     match declared {
         Some("integer") => raw.parse::<i64>().ok().map(Value::from),
         Some("number") => raw.parse::<f64>().ok().map(Value::from),
@@ -435,7 +451,19 @@ impl<'text> Cursor<'text> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+
+    #[test]
+    fn nullable_schema_preserves_null_and_coerces_the_non_null_type() {
+        let schema = json!({"type": ["string", "null"]});
+        assert_eq!(coerce_argument("null", Some(&schema)), Some(Value::Null));
+        assert_eq!(
+            coerce_argument("sha256:abc", Some(&schema)),
+            Some(Value::String("sha256:abc".to_string()))
+        );
+    }
 
     #[test]
     fn strip_tags_survives_multibyte_characters_after_an_angle_bracket() {

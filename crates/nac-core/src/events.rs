@@ -937,10 +937,7 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
         }
         "edit" => {
             copy_safe_string(object, &mut safe, "path");
-            copy_string_length(object, &mut safe, "old_text", "old_text_chars");
-            copy_string_length(object, &mut safe, "new_text", "new_text_chars");
-            copy_safe_u64(object, &mut safe, "old_text_chars");
-            copy_safe_u64(object, &mut safe, "new_text_chars");
+            copy_edit_lengths(object, &mut safe);
         }
         "exec_command" => {
             copy_safe_string(object, &mut safe, "workdir");
@@ -1033,6 +1030,39 @@ fn copy_string_length(
             serde_json::Value::from(value.chars().count() as u64),
         );
     }
+}
+fn copy_edit_lengths(
+    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    target: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let Some(edits) = source
+        .and_then(|source| source.get("edits"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    let old_chars = edits
+        .iter()
+        .filter_map(|edit| edit.get("old_text").and_then(serde_json::Value::as_str))
+        .map(|text| text.chars().count() as u64)
+        .sum::<u64>();
+    let new_chars = edits
+        .iter()
+        .filter_map(|edit| edit.get("new_text").and_then(serde_json::Value::as_str))
+        .map(|text| text.chars().count() as u64)
+        .sum::<u64>();
+    target.insert(
+        "edit_count".to_string(),
+        serde_json::Value::from(edits.len() as u64),
+    );
+    target.insert(
+        "old_text_chars".to_string(),
+        serde_json::Value::from(old_chars),
+    );
+    target.insert(
+        "new_text_chars".to_string(),
+        serde_json::Value::from(new_chars),
+    );
 }
 
 fn copy_array_length(
@@ -1962,6 +1992,27 @@ mod tests {
         assert!(receiver.try_recv().is_err());
         assert!(bus_receiver.try_recv().is_err());
         assert!(bus.recent_events(None, 10).is_empty());
+    }
+
+    #[test]
+    fn batched_edit_telemetry_counts_without_leaking_content_or_revision() {
+        let detail = serde_json::json!({
+            "path": "/safe/file.txt",
+            "expected_revision": "CANARY_REVISION",
+            "edits": [
+                {"old_text": "CANARY_OLD", "new_text": "new"},
+                {"old_text": "x", "new_text": "CANARY_NEW"}
+            ]
+        })
+        .to_string();
+        let safe = safe_tool_arguments("edit", Some(&detail), "");
+        let value: serde_json::Value = serde_json::from_str(&safe).unwrap();
+        assert_eq!(value["path"], "/safe/file.txt");
+        assert_eq!(value["edit_count"], 2);
+        assert_eq!(value["old_text_chars"], 11);
+        assert_eq!(value["new_text_chars"], 13);
+        assert!(!safe.contains("CANARY"));
+        assert!(value.get("expected_revision").is_none());
     }
 
     #[test]

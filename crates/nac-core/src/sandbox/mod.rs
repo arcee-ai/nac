@@ -70,6 +70,13 @@ pub(crate) struct HostMountPath {
     pub read_only: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HostPathResolution {
+    Mapped(HostMountPath),
+    UnsafeMounted { read_only: bool },
+    Unmounted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HostWorkspaceMount {
     pub relative: PathBuf,
     pub source: HostMountPath,
@@ -181,9 +188,11 @@ impl SandboxSession {
         Ok(requested)
     }
 
-    pub(crate) fn host_path_for_guest(&self, guest_path: &Path) -> Option<HostMountPath> {
-        let guest_path = normalize_guest_path(guest_path)?;
-        let (mount, mount_guest) = self
+    pub(crate) fn host_path_resolution_for_guest(&self, guest_path: &Path) -> HostPathResolution {
+        let Some(guest_path) = normalize_guest_path(guest_path) else {
+            return HostPathResolution::Unmounted;
+        };
+        let Some((mount, mount_guest)) = self
             .spec()
             .mounts
             .iter()
@@ -193,14 +202,21 @@ impl SandboxSession {
                     .starts_with(&normalized)
                     .then_some((mount, normalized))
             })
-            .max_by_key(|(_, guest)| guest.components().count())?;
-        let relative = guest_path.strip_prefix(&mount_guest).ok()?.to_path_buf();
-        if host_path_contains_symlink(&mount.host, &relative) {
-            return None;
+            .max_by_key(|(_, guest)| guest.components().count())
+        else {
+            return HostPathResolution::Unmounted;
+        };
+        let Ok(relative) = guest_path.strip_prefix(&mount_guest) else {
+            return HostPathResolution::Unmounted;
+        };
+        if host_path_contains_symlink(&mount.host, relative) {
+            return HostPathResolution::UnsafeMounted {
+                read_only: mount.read_only,
+            };
         }
-        Some(HostMountPath {
+        HostPathResolution::Mapped(HostMountPath {
             root: mount.host.clone(),
-            relative,
+            relative: relative.to_path_buf(),
             read_only: mount.read_only,
         })
     }
@@ -506,20 +522,20 @@ mod tests {
             PathBuf::from("/workspace/Cargo.toml")
         );
         assert_eq!(
-            session.host_path_for_guest(Path::new("/workspace/src/lib.rs")),
-            Some(HostMountPath {
+            session.host_path_resolution_for_guest(Path::new("/workspace/src/lib.rs")),
+            HostPathResolution::Mapped(HostMountPath {
                 root: cwd.clone(),
                 relative: PathBuf::from("src/lib.rs"),
                 read_only: false,
             })
         );
         assert_eq!(
-            session.host_path_for_guest(Path::new("/tmp/unmounted")),
-            None
+            session.host_path_resolution_for_guest(Path::new("/tmp/unmounted")),
+            HostPathResolution::Unmounted
         );
         assert_eq!(
-            session.host_path_for_guest(Path::new("/workspace/../workspace/src/lib.rs")),
-            Some(HostMountPath {
+            session.host_path_resolution_for_guest(Path::new("/workspace/../workspace/src/lib.rs")),
+            HostPathResolution::Mapped(HostMountPath {
                 root: cwd,
                 relative: PathBuf::from("src/lib.rs"),
                 read_only: false,
@@ -552,8 +568,8 @@ mod tests {
         });
 
         assert_eq!(
-            session.host_path_for_guest(Path::new("/workspace/vendor/lib.rs")),
-            Some(HostMountPath {
+            session.host_path_resolution_for_guest(Path::new("/workspace/vendor/lib.rs")),
+            HostPathResolution::Mapped(HostMountPath {
                 root: PathBuf::from("/host/vendor"),
                 relative: PathBuf::from("lib.rs"),
                 read_only: true,
@@ -647,8 +663,12 @@ mod tests {
             memory_mib: 2048,
         });
 
-        let mapped = session.host_path_for_guest(Path::new("/workspace/escape/file.txt"));
-        assert_eq!(mapped, None);
+        let mapped =
+            session.host_path_resolution_for_guest(Path::new("/workspace/escape/file.txt"));
+        assert_eq!(
+            mapped,
+            HostPathResolution::UnsafeMounted { read_only: false }
+        );
 
         let workdir_session = SandboxSession::new_for_test(SandboxSpec {
             backend: SandboxBackendType::Podman,
