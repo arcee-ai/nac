@@ -1,6 +1,6 @@
 # HTTP API
 
-The HTTP contract is generated from the Rust handlers and types in the running `nac-web` process, so a checked-in endpoint list would go stale. Start the server, then use the live docs:
+The HTTP contract is generated from the Rust handlers and types in the running `nac-web` process. To review the current state of the aPI, start the server, then use the live docs:
 
 ```sh
 nac-web
