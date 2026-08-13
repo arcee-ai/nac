@@ -339,9 +339,14 @@ export default function SessionPage() {
                           : SESSION_PANEL_LABEL.history}
                   </span>
                 </div>
+                {threadTask ? (
+                  <div className="shrink-0 pt-1">
+                    <TaskButton action={threadTask} />
+                  </div>
+                ) : null}
                 {panel === "files" ? fileBadge : null}
               </div>
-              {threadTask ? <TaskButton action={threadTask} large /> : null}
+
               {snapshot?.workspace?.branch ? (
                 <BranchPicker
                   sessionId={id}

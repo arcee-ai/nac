@@ -11,11 +11,13 @@ import { Markdown } from "@/app/lib/markdown";
  */
 const HOVER_CLOSE_DELAY_MS = 160;
 
-/** The "Task" affordance itself: an info glyph and an underlined label. */
+/** The task affordance itself: an info glyph and an underlined label. */
 function TaskLabel({
+  text,
   active,
   large = false,
 }: {
+  text: string;
   active: boolean;
   large?: boolean;
 }) {
@@ -36,7 +38,7 @@ function TaskLabel({
           active ? "text-basic-primary" : "text-btn-secondary",
         )}
       >
-        Task
+        {text}
       </span>
     </>
   );
@@ -70,7 +72,11 @@ export function TaskButton({
       panelClassName="p-4 max-h-[260px] overflow-auto"
       sheetClassName="max-h-[70vh] overflow-auto"
       className="shrink-0"
-      content={<Markdown className="text-basic-secondary">{action}</Markdown>}
+      content={
+        <Markdown className="text-basic-secondary px-4 md:px-0">
+          {action}
+        </Markdown>
+      }
     >
       <button
         type="button"
@@ -78,7 +84,9 @@ export function TaskButton({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <TaskLabel active={open} large={large} />
+        {/* Unlike the hover hint, nothing here happens on its own, so the
+            label has to say what the click will do. */}
+        <TaskLabel text="See task" active={open} large={large} />
       </button>
     </Popover>
   );
@@ -156,7 +164,7 @@ export function TaskPreviewHoverHint({
         onMouseEnter={show}
         onMouseLeave={scheduleHide}
       >
-        <TaskLabel active={open} />
+        <TaskLabel text="Task" active={open} />
       </span>
     </Popover>
   );

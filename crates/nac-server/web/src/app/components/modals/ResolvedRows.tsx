@@ -1,5 +1,4 @@
 import { Input, InputSize, Loader, LoaderSize, Separator } from "@/app/atoms";
-import { AuthenticationRow } from "@/app/components/modals/AuthenticationRow";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { PROTOCOL_ITEMS } from "@/app/components/modals/options";
@@ -13,6 +12,9 @@ import type { BackendKind, ResolvedModelConfiguration } from "@/app/types/api";
  * resolved. Everything stays editable — an edit rides along with the session
  * being created and leaves the stored configuration alone — except the key,
  * which never leaves the server and so can only be shown as a stand-in.
+ *
+ * A provider that signs in through the browser has no credential row here: its
+ * sign-in is an action rather than a field, and lives below the box.
  */
 export function ResolvedRows({
   resolving,
@@ -100,12 +102,7 @@ export function ResolvedRows({
             }
           />
         </>
-      ) : (
-        <>
-          <Separator />
-          <AuthenticationRow backend={backend} />
-        </>
-      )}
+      ) : null}
       <Separator />
       {listed || failedListing ? (
         <ConfigRow

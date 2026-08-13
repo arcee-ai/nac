@@ -142,6 +142,7 @@ export enum IconName {
   Pin = "pin",
   Unpin = "unpin",
   OpenMobileModal = "openMobileModal",
+  ChatGpt = "chatGpt",
 }
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
