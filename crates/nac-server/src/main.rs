@@ -19,7 +19,7 @@ use nac_core::{
     },
     upgrade::{run_upgrade, UpgradeRequest},
 };
-use nac_server::{serve_with, ServerOptions, SessionManager};
+use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
 
 /// Build identity for `--version`: package version plus the source revision,
 /// so two builds of the mutable `edge` release can be told apart.
@@ -36,6 +36,13 @@ struct ServerCli {
     /// Address to bind (default: localhost only).
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
+
+    /// Permit a non-loopback bind after network access has been restricted.
+    ///
+    /// Every client that can connect receives control equivalent to the local
+    /// user. Use only behind an authenticated, encrypted network boundary.
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    allow_remote: bool,
 
     /// Port to listen on at 127.0.0.1 (1-65535; default: 3210).
     ///
@@ -87,6 +94,14 @@ impl ServerCli {
             bind.set_port(port);
         }
         bind
+    }
+
+    fn bind_policy(&self) -> BindPolicy {
+        if self.allow_remote {
+            BindPolicy::AllowRemote
+        } else {
+            BindPolicy::LoopbackOnly
+        }
     }
 }
 
@@ -434,6 +449,11 @@ async fn run() -> Result<()> {
 
 async fn run_server(cli: ServerCli) -> Result<()> {
     let bind = cli.bind_addr();
+    let bind_policy = cli.bind_policy();
+    bind_policy.validate(bind)?;
+    if !bind.ip().is_loopback() {
+        eprintln!("warning: every client that can reach {bind} receives full control of nac-web");
+    }
     let launch_cwd = std::env::current_dir()?;
     let root_cwd = resolve_project_directory(&launch_cwd, cli.directory.as_deref(), cli.yes)?;
     eprintln!("project: {}", root_cwd.display());
@@ -460,7 +480,7 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     // Open the browser only after bind succeeds — otherwise the first load can
     // hit connection-refused while the socket is still closed. Post-login
     // dashboard launch goes through this same path.
-    serve_with(bind, manager, |bound| {
+    serve_with_policy(bind, bind_policy, manager, |bound| {
         let url = dashboard_url(bound);
         eprintln!("nac-web listening on {url}");
         eprintln!("store: {store_path}");
@@ -877,6 +897,17 @@ thread_timeout_secs = 7200
     }
 
     #[test]
+    fn remote_binding_requires_explicit_acknowledgement() {
+        let guarded = ServerCli::try_parse_from(["nac-web", "--bind", "0.0.0.0:3210"]).unwrap();
+        assert_eq!(guarded.bind_policy(), BindPolicy::LoopbackOnly);
+
+        let allowed =
+            ServerCli::try_parse_from(["nac-web", "--bind", "192.168.1.20:3210", "--allow-remote"])
+                .unwrap();
+        assert_eq!(allowed.bind_policy(), BindPolicy::AllowRemote);
+    }
+
+    #[test]
     fn server_cli_rejects_bind_with_port() {
         let error =
             ServerCli::try_parse_from(["nac-web", "--bind", "127.0.0.1:4321", "--port", "4322"])
@@ -926,5 +957,7 @@ thread_timeout_secs = 7200
         assert!(help.contains("1-65535"), "{help}");
         assert!(help.contains("default: 3210"), "{help}");
         assert!(help.contains("Cannot be used with --bind"), "{help}");
+        assert!(help.contains("--allow-remote"), "{help}");
+        assert!(help.contains("equivalent to the local user"), "{help}");
     }
 }
