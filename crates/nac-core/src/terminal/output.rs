@@ -400,6 +400,7 @@ impl OutputRegistry {
         })
     }
 
+    #[cfg(test)]
     pub fn preview(
         &self,
         output_id: &str,
