@@ -661,7 +661,7 @@ fn create_ssh_configurations_table(conn: &Connection) -> Result<()> {
 }
 /// One content-free recovery obligation per session. The submitted transcript
 /// row remains the unique source for the prompt; this table only says which
-/// run owns it and whether a restart interrupted that run.
+/// run owns it and whether that run is active, interrupted, or failed.
 fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_run_recovery (
@@ -670,7 +670,7 @@ fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
              run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
              submitted_message_id INTEGER NOT NULL
                  REFERENCES thread_events(id) ON DELETE CASCADE,
-             status TEXT NOT NULL CHECK (status IN ('active', 'interrupted'))
+             status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed'))
          );",
     )?;
     Ok(())

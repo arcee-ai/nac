@@ -150,6 +150,11 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         &update.run_state.token_usages,
         update.run_state.unattributed_token_usage.as_ref(),
     )?;
+    if update.finished_run_id.is_some() && update.failed_run_id.is_some() {
+        return Err(anyhow!(
+            "run-state update cannot both clear and retain the durable recovery row"
+        ));
+    }
 
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -186,6 +191,8 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
     }
     if let Some(run_id) = update.finished_run_id.as_deref() {
         crate::store::clear_active_run(&tx, &update.session_id, run_id)?;
+    } else if let Some(run_id) = update.failed_run_id.as_deref() {
+        crate::store::mark_active_run_failed(&tx, &update.session_id, run_id)?;
     }
     tx.commit()?;
     Ok(())

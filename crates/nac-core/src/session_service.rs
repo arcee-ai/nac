@@ -312,6 +312,8 @@ pub struct ThreadEventDecodeDiagnostic {
 const MAX_THREAD_EVENT_DIAGNOSTICS: usize = 64;
 const INTERRUPTED_RUN_WARNING: &str =
     "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue.";
+const FAILED_RUN_WARNING: &str =
+    "The previous run failed before producing a complete response. Resubmit the prompt to continue.";
 const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
 
 struct DecodedThreadEvents {
@@ -327,7 +329,7 @@ struct FrontendSnapshotBlockingLoad {
     thread_event_boundary: SessionEventBoundary,
     thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     worksets: WorksetsSnapshot,
-    interrupted_run: bool,
+    run_recovery_warning: Option<String>,
     workspace: WorkspaceSnapshot,
 }
 
@@ -501,7 +503,11 @@ pub struct SessionService {
     workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
-    transcript_recovery_warning: Arc<Option<String>>,
+    transcript_recovery_warning: Arc<StdMutex<Option<String>>>,
+    /// Durable recovery row already merged into this cached service. The store
+    /// remains authoritative; this only avoids re-reading the same transcript
+    /// on every snapshot while an interrupted/failed warning remains visible.
+    reconciled_recovery_run_id: Arc<StdMutex<Option<String>>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
     /// go through the same connection as the agent's appends, so store-backed
     /// transcript reads serialize against commit points (step 3).
@@ -575,6 +581,12 @@ struct CancellingRun {
 enum RunOutcome {
     Completed(String, Option<crate::model::TokenUsage>),
     Failed(String, Option<crate::model::TokenUsage>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurableRunTerminal {
+    Canonical,
+    Failed,
 }
 
 enum OperationAdmissionPreparationError {
@@ -711,7 +723,8 @@ impl SessionService {
             workspace_git,
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
-            transcript_recovery_warning: Arc::new(transcript_recovery_warning),
+            transcript_recovery_warning: Arc::new(StdMutex::new(transcript_recovery_warning)),
+            reconciled_recovery_run_id: Arc::new(StdMutex::new(None)),
             transcript_log,
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
@@ -1012,7 +1025,7 @@ impl SessionService {
             thread_events,
             thread_event_boundary,
             thread_steering,
-            interrupted_run,
+            run_recovery_warning,
             worksets,
         ) = {
             let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
@@ -1039,14 +1052,18 @@ impl SessionService {
                 })
                 .transpose()?
                 .unwrap_or_default();
-            let interrupted_run = session_id
+            let run_recovery_warning = session_id
                 .map(|session_id| {
                     crate::store::load_run_recovery_with_connection(&conn, session_id)
                 })
                 .transpose()?
                 .flatten()
-                .is_some_and(|record| {
-                    record.status == crate::store::RunRecoveryStatus::Interrupted
+                .and_then(|record| match record.status {
+                    crate::store::RunRecoveryStatus::Active => None,
+                    crate::store::RunRecoveryStatus::Interrupted => {
+                        Some(INTERRUPTED_RUN_WARNING.to_string())
+                    }
+                    crate::store::RunRecoveryStatus::Failed => Some(FAILED_RUN_WARNING.to_string()),
                 });
             (
                 sessions,
@@ -1055,7 +1072,7 @@ impl SessionService {
                 thread_events,
                 thread_event_boundary,
                 thread_steering,
-                interrupted_run,
+                run_recovery_warning,
                 worksets,
             )
         };
@@ -1066,7 +1083,7 @@ impl SessionService {
             thread_events,
             thread_event_boundary,
             thread_steering,
-            interrupted_run,
+            run_recovery_warning,
             worksets,
             workspace,
         })
@@ -1244,15 +1261,19 @@ impl SessionService {
         };
         let mut metadata = self.metadata();
         metadata.extra_headers.clear();
+        let transcript_warning = self
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let transcript_recovery_warning = match (
-            blocking.interrupted_run,
-            self.transcript_recovery_warning.as_deref(),
+            blocking.run_recovery_warning.as_deref(),
+            transcript_warning.as_deref(),
         ) {
-            (true, Some(transcript_warning)) => {
-                Some(format!("{INTERRUPTED_RUN_WARNING}\n\n{transcript_warning}"))
+            (Some(run_warning), Some(transcript_warning)) => {
+                Some(format!("{run_warning}\n\n{transcript_warning}"))
             }
-            (true, None) => Some(INTERRUPTED_RUN_WARNING.to_string()),
-            (false, warning) => warning.map(str::to_owned),
+            (Some(run_warning), None) => Some(run_warning.to_string()),
+            (None, warning) => warning.map(str::to_owned),
         };
         let snapshot = SessionFrontendSnapshot {
             metadata,
@@ -1792,6 +1813,86 @@ impl SessionService {
         self.store_backed_transcript().await
     }
 
+    pub fn has_unreconciled_durable_run_recovery(&self) -> Result<bool> {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(false);
+        };
+        let record = crate::store::load_run_recovery(&self.metadata.store_path, session_id)?;
+        let reconciled = self
+            .reconciled_recovery_run_id
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str())))
+    }
+
+    /// Reconcile a durable run left by another process and refresh this cached
+    /// service's transcript while the caller holds the session operation lease.
+    /// This preserves the existing event bus/subscribers instead of replacing
+    /// the service after a cross-process handoff.
+    pub async fn reconcile_durable_run_recovery(
+        &self,
+        operation_lease: &sessions::SessionOperationLease,
+    ) -> Result<crate::store::ActiveRunReconciliation> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("run recovery requires a persisted session"))?;
+        if self.has_active_operation() {
+            return Err(anyhow::anyhow!(
+                "cannot reconcile durable run recovery while a local operation is active"
+            ));
+        }
+        operation_lease
+            .validate(&self.metadata.store_path, session_id)
+            .map_err(anyhow::Error::new)?;
+        let recovery = crate::store::reconcile_active_run(&self.metadata.store_path, session_id)?;
+        let mut snapshot = sessions::load_session(&self.metadata.store_path, session_id)?;
+        if Some(snapshot.config_version) != self.config_version {
+            return Err(anyhow::anyhow!(
+                "session '{session_id}' configuration changed before run recovery"
+            ));
+        }
+
+        let (transcript_scan, transcript_warning) = {
+            let mut agent = self.agent.lock().await;
+            if let Some(refreshed_blob) = agent
+                .restore_messages_merging_log_tail(snapshot.messages.clone(), Some(operation_lease))
+                .await?
+            {
+                snapshot.messages = refreshed_blob;
+            }
+            (
+                TranscriptScanCache::from_transcript(&agent.messages),
+                agent.transcript_recovery_warning().map(str::to_owned),
+            )
+        };
+        *self.session_snapshot.lock().await = Some(snapshot);
+        *self.lock_transcript_scan() = transcript_scan;
+        *self
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = transcript_warning;
+        let reconciled_run_id =
+            crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
+                .map(|record| record.run_id);
+        *self
+            .reconciled_recovery_run_id
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = reconciled_run_id;
+
+        if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = &recovery {
+            self.event_bus.emit_with_context(
+                SessionEvent::RunFailed {
+                    message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                },
+                Some(SessionRunId::from_stored(run_id.clone())),
+                None,
+            );
+        }
+        Ok(recovery)
+    }
+
     /// Pages the merged store transcript without cloning or decoding
     /// messages outside the requested visible window. Callers remain
     /// responsible for any transport-specific maximum; a zero limit retains
@@ -1993,6 +2094,7 @@ impl SessionService {
                 transcript_baseline,
                 None,
                 cancel_usage,
+                DurableRunTerminal::Canonical,
             )
             .await
         {
@@ -2271,12 +2373,18 @@ impl SessionService {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
         };
+        let durable_terminal = if matches!(outcome, RunOutcome::Failed(..)) {
+            DurableRunTerminal::Failed
+        } else {
+            DurableRunTerminal::Canonical
+        };
         let persistence_error = match self
             .persist_run_snapshot(
                 &finishing_run.snapshot,
                 finishing_run.transcript_baseline,
                 completed_duration_ms,
                 completed_usage,
+                durable_terminal,
             )
             .await
         {
@@ -2537,6 +2645,7 @@ impl SessionService {
         transcript_baseline: Option<usize>,
         completed_duration_ms: Option<u64>,
         completed_usage: Option<crate::model::TokenUsage>,
+        durable_terminal: DurableRunTerminal,
     ) -> Result<()> {
         {
             let snapshot = self.session_snapshot.lock().await;
@@ -2581,8 +2690,14 @@ impl SessionService {
                 unattributed_token_usage,
             })
         };
-        update.finished_run_id = Some(active_run.run_id.to_string());
-
+        match durable_terminal {
+            DurableRunTerminal::Canonical => {
+                update.finished_run_id = Some(active_run.run_id.to_string());
+            }
+            DurableRunTerminal::Failed => {
+                update.failed_run_id = Some(active_run.run_id.to_string());
+            }
+        }
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
         tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
@@ -5272,9 +5387,12 @@ pub(super) mod tests {
         {
             let mut agent = parts.service.agent.lock().await;
             agent
-                .push_and_log_for_test(Message::User {
-                    content: "prompt".to_string(),
-                })
+                .push_and_log_run_prompt_for_test(
+                    Message::User {
+                        content: "prompt".to_string(),
+                    },
+                    &active.run_id,
+                )
                 .await
                 .unwrap();
         }
@@ -5999,6 +6117,7 @@ pub(super) mod tests {
                 finishing.transcript_baseline,
                 Some(42),
                 None,
+                DurableRunTerminal::Canonical,
             )
             .await
             .unwrap();
@@ -6235,9 +6354,12 @@ pub(super) mod tests {
         {
             let mut agent = parts.service.agent.lock().await;
             agent
-                .push_and_log_for_test(Message::User {
-                    content: "failed prompt".to_string(),
-                })
+                .push_and_log_run_prompt_for_test(
+                    Message::User {
+                        content: "failed prompt".to_string(),
+                    },
+                    &active.run_id,
+                )
                 .await
                 .unwrap();
         }
@@ -6284,6 +6406,21 @@ pub(super) mod tests {
             transcript.last(),
             Some(Message::User { content }) if content == "failed prompt"
         ));
+        let recovery = crate::store::load_run_recovery(&store_path, &session_id)
+            .unwrap()
+            .expect("failed run must retain a durable terminal outcome");
+        assert_eq!(recovery.run_id, active.run_id.as_str());
+        assert_eq!(recovery.status, crate::store::RunRecoveryStatus::Failed);
+        assert_eq!(
+            parts
+                .service
+                .frontend_snapshot()
+                .await
+                .unwrap()
+                .transcript_recovery_warning
+                .as_deref(),
+            Some(FAILED_RUN_WARNING)
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

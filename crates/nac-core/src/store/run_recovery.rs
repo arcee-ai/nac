@@ -6,6 +6,7 @@ use crate::types::Message;
 pub enum RunRecoveryStatus {
     Active,
     Interrupted,
+    Failed,
 }
 
 impl RunRecoveryStatus {
@@ -13,6 +14,7 @@ impl RunRecoveryStatus {
         match self {
             Self::Active => "active",
             Self::Interrupted => "interrupted",
+            Self::Failed => "failed",
         }
     }
 
@@ -20,6 +22,7 @@ impl RunRecoveryStatus {
         match value {
             "active" => Ok(Self::Active),
             "interrupted" => Ok(Self::Interrupted),
+            "failed" => Ok(Self::Failed),
             other => Err(anyhow!("unsupported run recovery status '{other}'")),
         }
     }
@@ -53,7 +56,7 @@ pub(crate) fn replace_with_active_run(
              run_id = excluded.run_id,
              submitted_message_id = excluded.submitted_message_id,
              status = 'active'
-         WHERE session_run_recovery.status = 'interrupted'",
+         WHERE session_run_recovery.status IN ('interrupted', 'failed')",
         params![session_id, run_id, submitted_message_id],
     )?;
     if changed != 1 {
@@ -74,6 +77,25 @@ pub(crate) fn clear_active_run(
          WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
         params![session_id, run_id],
     )?;
+    Ok(())
+}
+
+pub(crate) fn mark_active_run_failed(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    run_id: &str,
+) -> Result<()> {
+    let changed = transaction.execute(
+        "UPDATE session_run_recovery
+         SET status = 'failed'
+         WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
+        params![session_id, run_id],
+    )?;
+    if changed != 1 {
+        return Err(anyhow!(
+            "session '{session_id}' has no matching active durable run '{run_id}' to mark failed"
+        ));
+    }
     Ok(())
 }
 
@@ -119,7 +141,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::None);
     };
-    if record.status == RunRecoveryStatus::Interrupted {
+    if record.status != RunRecoveryStatus::Active {
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::None);
     }
@@ -280,12 +302,29 @@ mod tests {
             .collect()
     }
 
+    fn run_state_update(session_id: &str) -> crate::sessions::SessionRunStateUpdate {
+        crate::sessions::SessionRunStateUpdate {
+            session_id: session_id.to_string(),
+            ssh: None,
+            sandbox_spec: None,
+            run_state: crate::sessions::SessionRunState::default(),
+            finished_run_id: None,
+            failed_run_id: None,
+            updated_at: now_utc(),
+        }
+    }
+
     #[test]
     fn interrupted_run_process_helper() {
         let Some(store_path) = std::env::var_os("NAC_TEST_RUN_RECOVERY_STORE") else {
             return;
         };
         let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_RUN_RECOVERY_READY").unwrap());
+        let _operation_lease = crate::sessions::SessionOperationLease::try_acquire(
+            Path::new(&store_path),
+            "session-a",
+        )
+        .unwrap();
         TranscriptLogWriter::new(Path::new(&store_path))
             .unwrap()
             .append_run_prompt(
@@ -342,9 +381,16 @@ mod tests {
                 .status,
             RunRecoveryStatus::Active
         );
+        assert!(matches!(
+            crate::sessions::SessionOperationLease::try_acquire(&path, "session-a"),
+            Err(crate::sessions::SessionOperationLeaseError::Busy(_))
+        ));
 
         child.kill().unwrap();
         child.wait().unwrap();
+        let operation_lease =
+            crate::sessions::SessionOperationLease::try_acquire(&path, "session-a").unwrap();
+        operation_lease.validate(&path, "session-a").unwrap();
 
         assert_eq!(
             reconcile_active_run(&path, "session-a").unwrap(),
@@ -544,26 +590,45 @@ mod tests {
             .append_run_prompt("session-a", 0, &user("prompt"), "run-1")
             .unwrap();
 
-        let mut update = crate::sessions::SessionRunStateUpdate {
-            session_id: "session-a".to_string(),
-            ssh: None,
-            sandbox_spec: None,
-            run_state: crate::sessions::SessionRunState {
-                last_response_duration_ms: None,
-                previous_response_duration_ms: None,
-                response_durations_ms: None,
-                token_usages: Vec::new(),
-                unattributed_token_usage: None,
-            },
-            finished_run_id: Some("different-run".to_string()),
-            updated_at: now_utc(),
-        };
+        let mut update = run_state_update("session-a");
+        update.finished_run_id = Some("different-run".to_string());
         crate::sessions::save_session_run_state(&path, &update).unwrap();
         assert!(load_run_recovery(&path, "session-a").unwrap().is_some());
 
         update.finished_run_id = Some("run-1".to_string());
         crate::sessions::save_session_run_state(&path, &update).unwrap();
         assert!(load_run_recovery(&path, "session-a").unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_terminal_is_durable_and_next_prompt_supersedes_it() {
+        let path = temp_store_path("failed_terminal");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session-a");
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_run_prompt("session-a", 0, &user("failed prompt"), "run-1")
+            .unwrap();
+
+        let mut update = run_state_update("session-a");
+        update.failed_run_id = Some("run-1".to_string());
+        crate::sessions::save_session_run_state(&path, &update).unwrap();
+        assert_eq!(
+            load_run_recovery(&path, "session-a")
+                .unwrap()
+                .unwrap()
+                .status,
+            RunRecoveryStatus::Failed
+        );
+
+        writer
+            .append_run_prompt("session-a", 1, &user("replacement"), "run-2")
+            .unwrap();
+        let replacement = load_run_recovery(&path, "session-a").unwrap().unwrap();
+        assert_eq!(replacement.run_id, "run-2");
+        assert_eq!(replacement.status, RunRecoveryStatus::Active);
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

@@ -1489,7 +1489,23 @@ impl SessionManager {
             {
                 let version = self.session_config(session_id)?.config_version;
                 if service.config_version() == Some(version) {
-                    return Ok(service);
+                    let has_recovery = service.has_unreconciled_durable_run_recovery()?;
+                    if !has_recovery || service.has_active_operation() {
+                        return Ok(service);
+                    }
+                    match sessions::SessionOperationLease::try_acquire(
+                        &self.inner.store_path,
+                        session_id,
+                    ) {
+                        Ok(lease) => {
+                            service.reconcile_durable_run_recovery(&lease).await?;
+                            return Ok(service);
+                        }
+                        Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                            return Ok(service);
+                        }
+                        Err(error) => return Err(anyhow::Error::new(error)),
+                    }
                 }
                 let mut active = self.inner.active_sessions.write().await;
                 if active
@@ -1583,6 +1599,11 @@ impl SessionManager {
             self.attach_session_locked(session_id, Some(operation_lease))
                 .await?
         };
+        if service.has_unreconciled_durable_run_recovery()? && !service.has_active_operation() {
+            service
+                .reconcile_durable_run_recovery(operation_lease)
+                .await?;
+        }
         Ok(service)
     }
 
@@ -7038,6 +7059,173 @@ thread_timeout_secs = 7200
             "idempotent rebuild must not synthesize another terminal event"
         );
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn cached_manager_snapshot_reconciles_peer_interruption_once() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cached_peer_snapshot");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("cached-snapshot-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+        let cached = manager.attach_session("session").await.unwrap();
+
+        let peer_lease =
+            sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                "session",
+                0,
+                &nac_core::types::Message::User {
+                    content: "committed by peer".to_string(),
+                },
+                "peer-run",
+            )
+            .unwrap();
+        drop(peer_lease);
+
+        let recovered = manager.snapshot("session").await.unwrap();
+        assert_eq!(
+            recovered.transcript_recovery_warning.as_deref(),
+            Some(
+                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
+            )
+        );
+        assert!(matches!(
+            recovered.messages.last(),
+            Some(nac_core::types::Message::User { content }) if content == "committed by peer"
+        ));
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&mapped, &cached));
+        assert!(
+            !cached
+                .has_unreconciled_durable_run_recovery()
+                .expect("recovery lookup should succeed"),
+            "the cached service must not rehydrate the same recovery row again"
+        );
+
+        let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+        assert_eq!(
+            recovery_events
+                .iter()
+                .filter(|envelope| {
+                    envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("peer-run")
+                        && matches!(
+                            envelope.event,
+                            nac_core::events::SessionEvent::RunFailed { .. }
+                        )
+                })
+                .count(),
+            1
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn cached_manager_reconciles_peer_interruption_before_resubmission() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cached_peer_interruption");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("cached-recovery-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+        let cached = manager.attach_session("session").await.unwrap();
+
+        let peer_lease =
+            sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                "session",
+                0,
+                &nac_core::types::Message::User {
+                    content: "committed by peer".to_string(),
+                },
+                "peer-run",
+            )
+            .unwrap();
+        drop(peer_lease);
+
+        let submitted = manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "continue after peer".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let mut continued = false;
+        for _ in 0..100 {
+            let messages = cached.messages_snapshot().await.unwrap();
+            if messages.iter().any(|message| {
+                matches!(
+                    message,
+                    nac_core::types::Message::User { content }
+                        if content == "continue after peer"
+                )
+            }) {
+                continued = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(continued, "replacement prompt never committed");
+        assert_eq!(
+            cached.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(
+            Arc::ptr_eq(&mapped, &cached),
+            "recovery must preserve the cached service's event bus and subscribers"
+        );
+        let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+        assert_eq!(
+            recovery_events
+                .iter()
+                .filter(|envelope| {
+                    envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("peer-run")
+                        && matches!(
+                            envelope.event,
+                            nac_core::events::SessionEvent::RunFailed { .. }
+                        )
+                })
+                .count(),
+            1
+        );
+        assert!(
+            cached
+                .has_unreconciled_durable_run_recovery()
+                .expect("recovery lookup should succeed"),
+            "the replacement run must own a new durable recovery row"
+        );
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
         let _ = std::fs::remove_dir_all(root);
     }
 
