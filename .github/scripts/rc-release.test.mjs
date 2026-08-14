@@ -177,6 +177,17 @@ test("prepare resumes only a matching same-run draft on a rerun", async () => {
   assert.equal(result.resume, true);
 });
 
+test("prepare defers a matching hidden draft to the write-scoped rerun", async () => {
+  const api = new FakeApi({
+    releases: [stable("v0.1.1")],
+    refs: { "v0.1.2-rc.42": SHA_B },
+  });
+  await assert.rejects(prepareCandidate(input(), api), /standalone tag/);
+  const result = await prepareCandidate(input({ runAttempt: 2 }), api);
+  assert.equal(result.run, true);
+  assert.equal(result.resume, true);
+});
+
 test("prepare rejects a conflicting occupied target tag", async () => {
   const api = new FakeApi({ releases: [stable("v0.1.1")], refs: { "v0.1.2-rc.42": SHA_A } });
   await assert.rejects(prepareCandidate(input(), api), /standalone tag/);
@@ -274,6 +285,16 @@ test("a partial matching draft resumes without clobbering its asset", async () =
   assert.equal(api.created, 0);
   assert.equal(api.published, 1);
   assert.equal(api.releases[0].assets.length, 2);
+});
+
+test("publication rejects a matching standalone tag without a draft", async () => {
+  const api = new FakeApi({ refs: { "v0.1.2-rc.42": SHA_B } });
+  await assert.rejects(
+    publishCandidate(publishInput(await assetDirectory(), { runAttempt: 2 }), api),
+    /standalone tag blocks publication/,
+  );
+  assert.equal(api.created, 0);
+  assert.equal(api.published, 0);
 });
 
 test("a published rerun exits without modifying assets", async () => {

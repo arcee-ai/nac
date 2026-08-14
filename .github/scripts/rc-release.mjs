@@ -129,7 +129,15 @@ export async function prepareCandidate(input, api) {
     return { run: true, resume: true, sha, base: input.base, version, tag };
   }
 
-  if (tagSha) throw new Error(`${tag} is occupied by a standalone tag`);
+  if (tagSha) {
+    // A read-only workflow token cannot see draft releases. On a rerun, defer
+    // the draft-versus-standalone decision to the write-scoped publish job,
+    // which revalidates both the release and the tag before modifying either.
+    if (runAttempt > 1 && tagSha === sha) {
+      return { run: true, resume: true, sha, base: input.base, version, tag };
+    }
+    throw new Error(`${tag} is occupied by a standalone tag`);
+  }
   return { run: true, resume: false, sha, base: input.base, version, tag };
 }
 
