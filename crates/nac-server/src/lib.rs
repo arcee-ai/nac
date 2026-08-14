@@ -1298,10 +1298,55 @@ impl SessionManager {
         probed
     }
 
+    /// Releases the SQLite handles of sessions that are not currently in use.
+    ///
+    /// Every retained session holds two long-lived SQLite connections (the
+    /// transcript log writer and the thread event writer), which in WAL mode
+    /// keep roughly six file descriptors open. Sessions are never removed from
+    /// `active_sessions` on their own, so under a low descriptor limit enough
+    /// session creations exhaust the process's FDs and new sessions start
+    /// failing with HTTP 500s. Evicting an idle session drops the last strong
+    /// reference to its `SessionService`, closing both connections; the next
+    /// attach rebuilds the service from the durable store via `resume_session`.
+    ///
+    /// A session is evicted only when all of these hold:
+    /// - it has no active run or compaction,
+    /// - nothing outside the map holds a strong reference to it (no in-flight
+    ///   request is using it),
+    /// - no client holds a live event-stream subscription (an open SSE
+    ///   connection, which the eviction would close), and
+    /// - it does not execute inside a sandbox container: dropping the service
+    ///   would drop the `SandboxSession`, an owned container's `Drop` runs
+    ///   `podman rm -f`, and the next resume builds a fresh container under a
+    ///   new session key, so eviction would destroy container-local state.
+    ///
+    /// `except` names the session the caller is attaching or creating, which
+    /// is skipped so the caller does not evict the very service it is about to
+    /// use.
+    async fn sweep_idle_sessions(&self, except: Option<&str>) {
+        let mut active = self.inner.active_sessions.write().await;
+        let idle: Vec<String> = active
+            .iter()
+            .filter(|(session_id, service)| {
+                Some(session_id.as_str()) != except
+                    && !service.has_active_operation()
+                    && Arc::strong_count(service) == 1
+                    && !service.has_event_subscribers()
+                    && !service.has_sandbox()
+            })
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        for session_id in idle {
+            active.remove(&session_id);
+            eprintln!("nac: evicted idle session {session_id} to release its SQLite handles");
+        }
+    }
+
     pub async fn create_session(
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
+        self.sweep_idle_sessions(None).await;
         let location = self.resolve_launch_location(
             request.cwd,
             SshRequest {
@@ -1427,6 +1472,7 @@ impl SessionManager {
     async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
         const MAX_ATTEMPTS: usize = 2;
 
+        self.sweep_idle_sessions(Some(session_id)).await;
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         for _ in 0..MAX_ATTEMPTS {
@@ -1482,6 +1528,7 @@ impl SessionManager {
         session_id: &str,
         operation_lease: Option<&sessions::SessionOperationLease>,
     ) -> Result<Arc<SessionService>> {
+        self.sweep_idle_sessions(Some(session_id)).await;
         if let Some(service) = self.inner.active_sessions.read().await.get(session_id) {
             return Ok(Arc::clone(service));
         }

@@ -535,6 +535,14 @@ impl SessionEventBus {
         self.delta_sender.receiver_count() > 0
     }
 
+    /// True while any client holds a live subscription to this session's event
+    /// stream (an open SSE connection). The server uses this to decide whether
+    /// a session is safe to evict from its in-memory cache: dropping the
+    /// service would drop the broadcast senders and close every live stream.
+    pub fn has_subscribers(&self) -> bool {
+        self.sender.receiver_count() > 0 || self.delta_sender.receiver_count() > 0
+    }
+
     pub fn subscribe_for_client(&self, client_id: SessionClientId) -> SessionEventSubscription {
         SessionEventSubscription {
             client_id,
