@@ -469,9 +469,9 @@ struct ThreadEventStore {
 /// Durable per-session event log persistence (issue #148). Every published
 /// envelope is appended to `session_events` before it is broadcast, so a
 /// restarted process continues the sequence and replays pre-restart history.
-/// `Unavailable` (writer could not be opened) fails closed: an event that
-/// cannot be made durable is not published, keeping `published_sequence_id`
-/// equal to the last persisted event.
+/// `Unavailable` (writer could not be opened) fails open for delivery: the
+/// event is still broadcast to live subscribers, but `published_sequence_id`
+/// does not advance, keeping it equal to the last persisted event.
 #[derive(Clone)]
 enum SessionEventPersistence {
     Disabled,
@@ -495,6 +495,10 @@ struct SessionEventBusState {
 struct RecentSessionEvent {
     envelope: SessionEventEnvelope,
     serialized_bytes: usize,
+    /// `false` only when a persistable event could not be made durable. Such
+    /// entries are broadcast and visible via `recent_events`, but excluded
+    /// from replay subscriptions so replay reflects the durable log.
+    durable: bool,
 }
 
 impl SessionEventBus {
@@ -567,6 +571,7 @@ impl SessionEventBus {
                 Ok(envelope) => push_recent(
                     &mut locked,
                     envelope,
+                    true,
                     self.recent_capacity,
                     self.recent_byte_capacity,
                 ),
@@ -648,6 +653,7 @@ impl SessionEventBus {
             &state,
             after_sequence_id,
             Some(replay_boundary_sequence_id),
+            true,
             limit,
         );
         let replay_gap = replay_gap_for(
@@ -720,20 +726,23 @@ impl SessionEventBus {
             run_id,
             event,
         };
-        // The durable log is the sequence's source of truth: an event that
-        // cannot be persisted is not published, so `published_sequence_id`
-        // always equals the last durable event and a restart never reuses a
-        // sequence id a client already saw.
-        if !self.persist_session_event(&envelope) {
-            return envelope;
+        // The durable log is the sequence's source of truth:
+        // `published_sequence_id` only advances when the event is persisted,
+        // so it always equals the last durable event and a restart never
+        // reuses a sequence id a client already saw. Delivery is fail-open:
+        // an event that cannot be persisted is still broadcast and retained
+        // in the recent ring so subscribers observe run lifecycle events even
+        // when the event store is unavailable, but it is marked non-durable
+        // so replay subscriptions never serve events a restart would lose.
+        let persisted =
+            self.persist_session_event(&envelope) && self.persist_thread_event(&envelope);
+        if persisted {
+            state.published_sequence_id = envelope.sequence_id;
         }
-        if !self.persist_thread_event(&envelope) {
-            return envelope;
-        }
-        state.published_sequence_id = envelope.sequence_id;
         push_recent(
             &mut state,
             envelope.clone(),
+            persisted,
             self.recent_capacity,
             self.recent_byte_capacity,
         );
@@ -776,7 +785,7 @@ impl SessionEventBus {
         limit: usize,
     ) -> Vec<SessionEventEnvelope> {
         let state = self.lock_state();
-        recent_events_from_state(&state, after_sequence_id, None, limit)
+        recent_events_from_state(&state, after_sequence_id, None, false, limit)
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -1241,6 +1250,7 @@ fn recent_events_from_state(
     state: &SessionEventBusState,
     after_sequence_id: Option<u64>,
     up_to_sequence_id: Option<u64>,
+    durable_only: bool,
     limit: usize,
 ) -> Vec<SessionEventEnvelope> {
     if limit == 0 {
@@ -1251,7 +1261,9 @@ fn recent_events_from_state(
         .recent
         .iter()
         .filter(|entry| {
-            after_sequence_id.is_none_or(|sequence_id| entry.envelope.sequence_id > sequence_id)
+            (!durable_only || entry.durable)
+                && after_sequence_id
+                    .is_none_or(|sequence_id| entry.envelope.sequence_id > sequence_id)
                 && up_to_sequence_id
                     .is_none_or(|sequence_id| entry.envelope.sequence_id <= sequence_id)
         })
@@ -1340,6 +1352,7 @@ fn pop_recent_front(state: &mut SessionEventBusState) -> bool {
 fn push_recent(
     state: &mut SessionEventBusState,
     envelope: SessionEventEnvelope,
+    durable: bool,
     capacity: usize,
     byte_capacity: usize,
 ) {
@@ -1358,6 +1371,7 @@ fn push_recent(
     state.recent.push_back(RecentSessionEvent {
         envelope,
         serialized_bytes,
+        durable,
     });
 }
 
@@ -2482,7 +2496,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
+    fn failed_thread_event_append_still_broadcasts_but_does_not_advance_boundary() {
         let path = std::env::temp_dir()
             .join(format!("nac_event_writer_failure_{}", Uuid::new_v4()))
             .join("store.db");
@@ -2501,8 +2515,11 @@ mod tests {
             })
             .unwrap();
         assert_eq!(failed.sequence_id, 1);
-        assert!(receiver.try_recv().is_err());
-        assert!(bus.recent_events(None, 10).is_empty());
+        // Delivery is fail-open: live subscribers still see the event and it
+        // stays in the in-process recent ring, even though it could not be
+        // persisted.
+        assert_eq!(receiver.try_recv().unwrap(), failed);
+        assert_eq!(bus.recent_events(None, 10), vec![failed.clone()]);
         let (boundary, records) = bus
             .thread_event_boundary(|| {
                 crate::store::load_all_thread_events(&path, "session-writer-failure", 10)
