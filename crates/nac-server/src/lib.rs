@@ -2288,7 +2288,18 @@ fn is_non_rebindable_host(host: &str) -> bool {
     let Some(bare) = bare_host(host) else {
         return false;
     };
-    bare.eq_ignore_ascii_case("localhost") || bare.parse::<std::net::IpAddr>().is_ok()
+    // Only loopback hosts bypass the DNS-name allowlist. Previously every
+    // IP-literal Host (including public IPs and 0.0.0.0) was treated as
+    // non-rebindable, which weakened the Host-allowlist defense under
+    // --allow-remote. Non-loopback IP literals now require an explicit entry
+    // in NAC_ALLOWED_HOSTS. See #172.
+    if bare.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match bare.parse::<std::net::IpAddr>() {
+        Ok(address) => address.is_loopback(),
+        Err(_) => false,
+    }
 }
 
 fn host_is_allowed(host: &str, allowed: &[String]) -> bool {
@@ -5677,8 +5688,8 @@ mod tests {
 
         for host in ["10.0.0.1", "192.168.1.10:3210", "[fd00::1]:3210"] {
             assert!(
-                is_non_rebindable_host(host),
-                "{host} is an IP literal and cannot be rebound"
+                !is_non_rebindable_host(host),
+                "{host} is a non-loopback IP literal and must require an allowlist entry"
             );
         }
     }
