@@ -2426,13 +2426,20 @@ impl SessionService {
 
     /// Finalizes a run that was interrupted by a process restart (issue #148).
     ///
-    /// Called on resume/attach while the session operation lease is held (or
-    /// after acquiring it here): a surviving durable active-run marker means
+    /// Called on resume/attach. A surviving durable active-run marker means
     /// the previous process died mid-run. Emit exactly one durable terminal
-    /// event for the original run id, clear the marker, and surface a recovery
-    /// warning in the frontend snapshot. Idempotent: a cleared marker (or an
-    /// already-written terminal event for the run) means nothing to do, so
-    /// repeated restarts never duplicate the terminal outcome.
+    /// event for the original run id, clear the marker, and surface a
+    /// recovery warning in the frontend snapshot. Idempotent: a cleared
+    /// marker (or an already-written terminal event for the run) means
+    /// nothing to do, so repeated restarts never duplicate the terminal
+    /// outcome.
+    ///
+    /// The marker check is lock-free and happens FIRST: an ordinary attach
+    /// with no interrupted run must never touch the operation-lease sidecar
+    /// (which may be unavailable on this filesystem). The lease is only
+    /// acquired when a marker actually exists, and recovery is best-effort —
+    /// lease/store errors are logged, never propagated, so a corrupt sidecar
+    /// can never block attachment.
     pub async fn recover_interrupted_run(
         &self,
         operation_lease: Option<&sessions::SessionOperationLease>,
@@ -2441,6 +2448,18 @@ impl SessionService {
             return Ok(());
         };
         let store_path = self.metadata.store_path.clone();
+
+        // Lock-free pre-check: no durable active-run marker means there is
+        // nothing to recover, so return before opening the lease sidecar.
+        match crate::store::load_active_run(&store_path, session_id) {
+            Ok(Some(_)) => {}
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                eprintln!("nac: failed to load active run marker during recovery: {error:#}");
+                return Ok(());
+            }
+        }
+
         let acquired_lease;
         let lease = match operation_lease {
             Some(lease) => {
@@ -2457,32 +2476,58 @@ impl SessionService {
                 // Another process is live and owns this session's operations;
                 // its run is not stale, so there is nothing to recover.
                 Err(sessions::SessionOperationLeaseError::Busy(_)) => return Ok(()),
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    eprintln!(
+                        "nac: failed to acquire operation lease for interrupted-run recovery: \
+                         {error:#}"
+                    );
+                    return Ok(());
+                }
             },
         };
         let _lease = lease;
 
-        let Some(marker) = crate::store::load_active_run(&store_path, session_id)? else {
-            return Ok(());
+        // Re-check under the lease: the marker may have been finalized by
+        // another holder between the pre-check and lease acquisition.
+        let marker = match crate::store::load_active_run(&store_path, session_id) {
+            Ok(Some(marker)) => marker,
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                eprintln!("nac: failed to reload active run marker during recovery: {error:#}");
+                return Ok(());
+            }
         };
         let run_id = SessionRunId::from_string(marker.run_id.clone());
         let client_id = marker
             .client_id
             .as_ref()
             .map(|client_id| SessionClientId::from_string(client_id.clone()));
-        if !crate::store::has_terminal_event_for_run(&store_path, session_id, &marker.run_id)? {
-            // Internal emit: the fixed recovery message must survive the
-            // external sanitization pass (which rewrites RunFailed messages)
-            // so the durable log records why the run ended.
-            self.event_bus.emit_internal(
-                SessionEvent::RunFailed {
-                    message: "run interrupted by process restart".to_string(),
-                },
-                Some(run_id),
-                client_id,
-            );
+        match crate::store::has_terminal_event_for_run(&store_path, session_id, &marker.run_id) {
+            Ok(true) => {}
+            Ok(false) => {
+                // Internal emit: the fixed recovery message must survive the
+                // external sanitization pass (which rewrites RunFailed messages)
+                // so the durable log records why the run ended.
+                self.event_bus.emit_internal(
+                    SessionEvent::RunFailed {
+                        message: "run interrupted by process restart".to_string(),
+                    },
+                    Some(run_id),
+                    client_id,
+                );
+            }
+            Err(error) => {
+                // Without the terminal-event check we cannot guarantee an
+                // exactly-once emit, so skip and let the next attach retry.
+                eprintln!("nac: failed to check terminal event during recovery: {error:#}");
+                return Ok(());
+            }
         }
-        crate::store::delete_active_run(&store_path, session_id)?;
+        if let Err(error) = crate::store::delete_active_run(&store_path, session_id) {
+            // The marker survives and the next attach retries; the
+            // terminal-event check above keeps the retry idempotent.
+            eprintln!("nac: failed to clear active run marker during recovery: {error:#}");
+        }
         *self
             .transcript_recovery_warning
             .lock()
