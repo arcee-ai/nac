@@ -127,9 +127,13 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn restore_env(name: &str, value: Option<OsString>) {
+        // `std::env::set_var`/`remove_var` have been safe functions since
+        // Rust 1.72, so the previous `unsafe` blocks were redundant (and
+        // triggered `unused_unsafe` warnings). Global env mutation is still
+        // serialized by `TEST_ENV_LOCK` at every call site.
         match value {
-            Some(value) => unsafe { env::set_var(name, value) },
-            None => unsafe { env::remove_var(name) },
+            Some(value) => env::set_var(name, value),
+            None => env::remove_var(name),
         }
     }
 
@@ -328,21 +332,15 @@ mod tests {
     fn env_expansion_replaces_placeholders() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original = env::var("NAC_MCP_TEST").ok();
-        unsafe {
-            env::set_var("NAC_MCP_TEST", "expanded");
-        }
+        env::set_var("NAC_MCP_TEST", "expanded");
 
         let expanded = expand_env("Bearer ${NAC_MCP_TEST}").unwrap();
         assert_eq!(expanded, "Bearer expanded");
 
         if let Some(value) = original {
-            unsafe {
-                env::set_var("NAC_MCP_TEST", value);
-            }
+            env::set_var("NAC_MCP_TEST", value);
         } else {
-            unsafe {
-                env::remove_var("NAC_MCP_TEST");
-            }
+            env::remove_var("NAC_MCP_TEST");
         }
     }
 
@@ -380,9 +378,7 @@ mod tests {
         fs::create_dir_all(&nac_home).unwrap();
         fs::write(nac_home.join("config.toml"), "=\n").unwrap();
 
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        env::set_var("NAC_HOME", &nac_home);
 
         let cwd = std::env::current_dir().unwrap();
         let registry = McpRegistry::load(&cwd, None, &PathContext::new(&cwd))
@@ -417,9 +413,7 @@ args = ["-c", {}]
             ),
         )
         .unwrap();
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        env::set_var("NAC_HOME", &nac_home);
 
         let cwd = std::env::current_dir().unwrap();
         let registry = McpRegistry::load_with_policy(
@@ -470,9 +464,7 @@ url = {}
             ),
         )
         .unwrap();
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        env::set_var("NAC_HOME", &nac_home);
 
         let cwd = std::env::current_dir().unwrap();
         let registry = McpRegistry::load_with_policy(
@@ -532,9 +524,7 @@ url = {}
             ),
         )
         .unwrap();
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        env::set_var("NAC_HOME", &nac_home);
 
         let cwd = std::env::current_dir().unwrap();
         let strict_registry = McpRegistry::load_with_policy(
@@ -597,9 +587,7 @@ url = {}
             },
         )
         .unwrap();
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        env::set_var("NAC_HOME", &nac_home);
 
         let cwd = std::env::current_dir().unwrap();
         let registry = McpRegistry::load_with_policy(
@@ -647,9 +635,7 @@ url = {url}
             ),
         )
         .unwrap();
-        unsafe {
-            env::set_var("NAC_HOME", &nac_home);
-        }
+        env::set_var("NAC_HOME", &nac_home);
 
         let cwd = std::env::current_dir().unwrap();
         let registry = McpRegistry::load_with_policy(
