@@ -2415,6 +2415,7 @@ mod tests {
             sandbox_backend: SandboxBackendType::Podman,
             sandbox_cpus: 0,
             sandbox_mem: 0,
+            sandbox_activity_key: None,
             explicit_sandbox_config_flags_present: false,
         };
         let result = build_sandbox_session(&options, &repo.root).await;
