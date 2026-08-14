@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{mpsc, Mutex},
@@ -2437,9 +2437,18 @@ impl SessionService {
     /// The marker check is lock-free and happens FIRST: an ordinary attach
     /// with no interrupted run must never touch the operation-lease sidecar
     /// (which may be unavailable on this filesystem). The lease is only
-    /// acquired when a marker actually exists, and recovery is best-effort —
-    /// lease/store errors are logged, never propagated, so a corrupt sidecar
-    /// can never block attachment.
+    /// acquired when a marker actually exists.
+    ///
+    /// Lease and store failures PROPAGATE: attach callers build and cache the
+    /// service around this call, so swallowing an error would cache a service
+    /// that never finalized the interrupted run, and no later attach would
+    /// retry recovery. Failing the attach instead leaves the marker in place
+    /// so the next attach rebuilds the service and retries. The only clean
+    /// skip is a `Busy` lease: another live process owns the session, so its
+    /// in-flight run is not stale. The marker is cleared only after the
+    /// terminal event is verified durable — the event bus is fail-open (it
+    /// broadcasts events whose durable append failed), so the emit alone is
+    /// not proof the terminal outcome survived a restart.
     pub async fn recover_interrupted_run(
         &self,
         operation_lease: Option<&sessions::SessionOperationLease>,
@@ -2455,8 +2464,8 @@ impl SessionService {
             Ok(Some(_)) => {}
             Ok(None) => return Ok(()),
             Err(error) => {
-                eprintln!("nac: failed to load active run marker during recovery: {error:#}");
-                return Ok(());
+                return Err(error)
+                    .context("failed to load active run marker during interrupted-run recovery");
             }
         }
 
@@ -2477,11 +2486,9 @@ impl SessionService {
                 // its run is not stale, so there is nothing to recover.
                 Err(sessions::SessionOperationLeaseError::Busy(_)) => return Ok(()),
                 Err(error) => {
-                    eprintln!(
-                        "nac: failed to acquire operation lease for interrupted-run recovery: \
-                         {error:#}"
+                    return Err(anyhow::Error::new(error)).context(
+                        "failed to acquire operation lease for interrupted-run recovery",
                     );
-                    return Ok(());
                 }
             },
         };
@@ -2493,8 +2500,8 @@ impl SessionService {
             Ok(Some(marker)) => marker,
             Ok(None) => return Ok(()),
             Err(error) => {
-                eprintln!("nac: failed to reload active run marker during recovery: {error:#}");
-                return Ok(());
+                return Err(error)
+                    .context("failed to reload active run marker during interrupted-run recovery");
             }
         };
         let run_id = SessionRunId::from_string(marker.run_id.clone());
@@ -2515,27 +2522,54 @@ impl SessionService {
                     Some(run_id),
                     client_id,
                 );
+                // The bus is fail-open: the event above was broadcast even if
+                // its durable append failed. Verify the terminal event
+                // actually landed before clearing the marker — clearing it
+                // after a failed append would permanently drop restart
+                // recovery of the interrupted run.
+                let persisted = crate::store::has_terminal_event_for_run(
+                    &store_path,
+                    session_id,
+                    &marker.run_id,
+                )
+                .context("failed to verify terminal event during interrupted-run recovery")?;
+                if !persisted {
+                    anyhow::bail!(
+                        "terminal event for the interrupted run could not be persisted; \
+                         keeping the active-run marker so a later attach retries recovery"
+                    );
+                }
             }
             Err(error) => {
                 // Without the terminal-event check we cannot guarantee an
-                // exactly-once emit, so skip and let the next attach retry.
-                eprintln!("nac: failed to check terminal event during recovery: {error:#}");
-                return Ok(());
+                // exactly-once emit, so fail and let the next attach retry.
+                return Err(error)
+                    .context("failed to check terminal event during interrupted-run recovery");
             }
         }
+        // Merge with any restore-time transcript gap warning instead of
+        // overwriting it: a session can need both recoveries, and both
+        // messages must survive.
+        const RESTART_WARNING: &str = "The previous run was interrupted by a process restart \
+             before it completed. Its submitted prompt is preserved in the transcript; \
+             resubmit it to continue.";
+        {
+            let mut warning = self
+                .transcript_recovery_warning
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *warning = Some(match warning.take() {
+                Some(existing) if !existing.is_empty() => format!("{existing}\n{RESTART_WARNING}"),
+                _ => RESTART_WARNING.to_string(),
+            });
+        }
         if let Err(error) = crate::store::delete_active_run(&store_path, session_id) {
-            // The marker survives and the next attach retries; the
-            // terminal-event check above keeps the retry idempotent.
+            // The terminal event is already durable, so the run IS finalized;
+            // a surviving marker only means the next process restart runs
+            // recovery once more, which the terminal-event check above keeps
+            // idempotent. Not worth failing the attach over.
             eprintln!("nac: failed to clear active run marker during recovery: {error:#}");
         }
-        *self
-            .transcript_recovery_warning
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(
-            "The previous run was interrupted by a process restart before it completed. \
-             Its submitted prompt is preserved in the transcript; resubmit it to continue."
-                .to_string(),
-        );
         Ok(())
     }
 
@@ -4585,6 +4619,119 @@ pub(super) mod tests {
             &marker.run_id
         )
         .unwrap());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn recover_interrupted_run_merges_existing_transcript_warning() {
+        let (mut parts, store_path) =
+            test_active_service("interrupted_recovery_merge", "recovery-merge-session");
+        let service = parts.service.clone();
+        // A restore-time transcript gap warning is already present (copied
+        // from the agent at construction); recovery must merge, not overwrite.
+        *service
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some("restore-time transcript gap warning".to_string());
+        let run_id = SessionRunId::new();
+        let marker = crate::store::ActiveRunRecord {
+            run_id: run_id.to_string(),
+            client_id: None,
+            prompt_preview: "interrupted prompt".to_string(),
+            submitted_user_message: None,
+            started_at_epoch_ms: 42,
+        };
+        crate::store::upsert_active_run(&store_path, "recovery-merge-session", &marker).unwrap();
+
+        service.recover_interrupted_run(None).await.unwrap();
+
+        let _ = parts.events.try_recv();
+        let warning = service
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .expect("recovery warning must be set");
+        // Both the restore-time gap warning and the restart warning survive.
+        assert!(warning.contains("restore-time transcript gap warning"));
+        assert!(warning.contains("interrupted by a process restart"));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn recover_interrupted_run_keeps_marker_when_terminal_event_not_durable() {
+        let (mut parts, store_path) = test_active_service(
+            "interrupted_recovery_emit_fail",
+            "recovery-emit-fail-session",
+        );
+        let service = parts.service.clone();
+        let run_id = SessionRunId::new();
+        let marker = crate::store::ActiveRunRecord {
+            run_id: run_id.to_string(),
+            client_id: None,
+            prompt_preview: "interrupted prompt".to_string(),
+            submitted_user_message: None,
+            started_at_epoch_ms: 42,
+        };
+        crate::store::upsert_active_run(&store_path, "recovery-emit-fail-session", &marker)
+            .unwrap();
+
+        // Force durable event appends to fail while keeping the
+        // terminal-event SELECT readable: the bus is fail-open, so the
+        // terminal event is broadcast but never persisted.
+        {
+            let connection = rusqlite::Connection::open(&store_path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TRIGGER fail_session_events_insert BEFORE INSERT ON session_events \
+                     BEGIN SELECT RAISE(FAIL, 'forced session_events insert failure'); END;",
+                )
+                .unwrap();
+        }
+
+        // Recovery must fail and keep the marker so a later attach retries.
+        let error = service.recover_interrupted_run(None).await.unwrap_err();
+        assert!(error.to_string().contains("could not be persisted"));
+        // The fail-open broadcast still happened...
+        let broadcast = parts.events.try_recv().unwrap();
+        assert!(matches!(broadcast.event, SessionEvent::RunFailed { .. }));
+        // ...but nothing is durable and the marker survives.
+        assert!(!crate::store::has_terminal_event_for_run(
+            &store_path,
+            "recovery-emit-fail-session",
+            &marker.run_id
+        )
+        .unwrap());
+        assert!(
+            crate::store::load_active_run(&store_path, "recovery-emit-fail-session")
+                .unwrap()
+                .is_some()
+        );
+
+        // Once the store accepts appends again, the retry finalizes the run.
+        {
+            let connection = rusqlite::Connection::open(&store_path).unwrap();
+            connection
+                .execute_batch("DROP TRIGGER fail_session_events_insert;")
+                .unwrap();
+        }
+        service.recover_interrupted_run(None).await.unwrap();
+        assert!(crate::store::has_terminal_event_for_run(
+            &store_path,
+            "recovery-emit-fail-session",
+            &marker.run_id
+        )
+        .unwrap());
+        assert!(
+            crate::store::load_active_run(&store_path, "recovery-emit-fail-session")
+                .unwrap()
+                .is_none()
+        );
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert!(snapshot.transcript_recovery_warning.is_some());
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
