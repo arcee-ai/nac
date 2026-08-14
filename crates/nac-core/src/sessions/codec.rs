@@ -17,6 +17,10 @@ struct PersistedSandboxSpec {
     cpus: u8,
     #[serde(default = "default_memory_mib")]
     memory_mib: u32,
+    // Sessions written before sandbox worktrees existed carry no cleanup
+    // metadata; they mounted the live checkout and have nothing to remove.
+    #[serde(default)]
+    worktree: Option<crate::sandbox::SandboxWorktree>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,6 +65,7 @@ pub(super) fn serialize_sandbox(spec: &SandboxSpec) -> Result<String> {
         shm_size: spec.shm_size.clone(),
         cpus: spec.cpus,
         memory_mib: spec.memory_mib,
+        worktree: spec.worktree.clone(),
     };
     serde_json::to_string(&persisted).context("failed to serialize sandbox spec")
 }
@@ -102,5 +107,6 @@ pub(super) fn deserialize_sandbox(raw: Option<String>) -> Result<Option<SandboxS
         shm_size: persisted.shm_size,
         cpus: persisted.cpus,
         memory_mib: persisted.memory_mib,
+        worktree: persisted.worktree,
     }))
 }

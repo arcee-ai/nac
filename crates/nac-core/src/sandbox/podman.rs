@@ -465,24 +465,19 @@ fn should_enable_gpu_access_options() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::{SandboxBackendType, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use crate::sandbox::DEFAULT_SANDBOX_WORKDIR;
     use std::path::PathBuf;
 
     fn sample_session() -> PodmanSession {
         PodmanSession::new(
             SandboxSpec {
-                backend: SandboxBackendType::Podman,
-                image: DEFAULT_SANDBOX_IMAGE.to_string(),
                 mounts: vec![MountSpec {
                     host: PathBuf::from("/tmp/project"),
                     guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                     read_only: false,
                 }],
-                workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
-                cpus: 2,
-                memory_mib: 2048,
+                ..Default::default()
             },
             "abc123".to_string(),
             false,
@@ -533,14 +528,8 @@ mod tests {
     fn create_container_args_skip_user_without_rw_mounts() {
         let session = PodmanSession::new(
             SandboxSpec {
-                backend: SandboxBackendType::Podman,
-                image: DEFAULT_SANDBOX_IMAGE.to_string(),
-                mounts: Vec::new(),
-                workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
-                cpus: 2,
-                memory_mib: 2048,
+                ..Default::default()
             },
             "empty".to_string(),
             false,
@@ -557,17 +546,12 @@ mod tests {
     fn create_container_args_include_gpu_devices() {
         let session = PodmanSession::new(
             SandboxSpec {
-                backend: SandboxBackendType::Podman,
-                image: DEFAULT_SANDBOX_IMAGE.to_string(),
-                mounts: Vec::new(),
-                workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 gpu_devices: vec![
                     "nvidia.com/gpu=all".to_string(),
                     "nvidia.com/gpu=mig1:0".to_string(),
                 ],
                 shm_size: Some("8g".to_string()),
-                cpus: 2,
-                memory_mib: 2048,
+                ..Default::default()
             },
             "gpu".to_string(),
             false,

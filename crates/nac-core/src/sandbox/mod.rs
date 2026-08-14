@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 mod backend;
 mod podman;
+pub(crate) mod session_worktree;
 mod ssh;
 mod ssh_browse;
 pub(crate) mod ssh_command;
@@ -92,6 +93,89 @@ pub struct SandboxSpec {
     pub shm_size: Option<String>,
     pub cpus: u8,
     pub memory_mib: u32,
+    pub worktree: Option<SandboxWorktree>,
+}
+
+impl Default for SandboxSpec {
+    /// The out-of-the-box sandbox: podman running the default image with the
+    /// default workdir and no extra mounts. Exists so tests and fixtures can
+    /// override only the fields they care about.
+    fn default() -> Self {
+        Self {
+            backend: SandboxBackendType::default(),
+            image: DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: Vec::new(),
+            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: None,
+            cpus: 2,
+            memory_mib: 2048,
+            worktree: None,
+        }
+    }
+}
+
+/// The per-session worktree a sandboxed session runs in, when its working
+/// directory was forked from a git repository instead of mounting the user's
+/// live checkout. Recorded so a resumed session can re-attach the worktree and
+/// a deleted session can clean it up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxWorktree {
+    /// The repository's working-tree root, used for git cleanup commands.
+    pub repo_root: PathBuf,
+    /// The worktree root on the host.
+    pub path: PathBuf,
+    /// The session branch (`nac/<key-prefix>`) the worktree has checked out.
+    pub branch: String,
+    /// The commit the branch forked from; compared against at cleanup to tell
+    /// an untouched branch (deleted) from one holding session work (kept).
+    pub fork_point: String,
+}
+
+impl SandboxWorktree {
+    /// Whether the recorded path sits inside nac's worktree scratch dir. The
+    /// path comes from the session record — potentially attacker- or
+    /// bug-controlled — so it is checked against the scratch root resolved
+    /// fresh from the environment and canonicalized, never against the
+    /// record itself. Anything that cannot be resolved cleanly (a missing
+    /// scratch dir, a `..` component, a symlink escaping the root) fails
+    /// closed: no deletion.
+    pub(crate) fn path_in_scratch_dir(&self) -> bool {
+        let Some(scratch_root) = crate::paths::nac_home_dir().map(|dir| dir.join("worktrees"))
+        else {
+            return false;
+        };
+        let Ok(scratch_root) = scratch_root.canonicalize() else {
+            // No scratch dir means nac never forked a worktree here, so the
+            // recorded path cannot be nac's to delete.
+            return false;
+        };
+        canonicalize_existing(&self.path)
+            .is_some_and(|path| path != scratch_root && path.starts_with(&scratch_root))
+    }
+}
+
+/// Canonicalizes the deepest existing ancestor of `path` and re-appends the
+/// remaining components lexically, so a path that may already be deleted can
+/// still be compared against a canonicalized root. A `..` or prefix
+/// component bails out instead of being resolved.
+fn canonicalize_existing(path: &Path) -> Option<PathBuf> {
+    let mut missing = Vec::new();
+    let mut current = path;
+    loop {
+        match current.canonicalize() {
+            Ok(mut canonical) => {
+                for component in missing.iter().rev() {
+                    canonical.push(component);
+                }
+                return Some(canonical);
+            }
+            Err(_) => {
+                missing.push(current.file_name()?);
+                current = current.parent()?;
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -394,6 +478,7 @@ pub fn build_sandbox_spec(
         shm_size,
         cpus,
         memory_mib,
+        worktree: None,
     })
 }
 
@@ -470,6 +555,98 @@ fn host_path_contains_symlink(root: &Path, relative: &Path) -> bool {
 mod tests {
     use super::*;
 
+    /// Sets NAC_HOME to a fresh temp dir for the duration of a guard test.
+    /// Returns the dir and the prior value so the test can restore it.
+    fn scratch_nac_home(label: &str) -> (PathBuf, Option<std::ffi::OsString>) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let nac_home = std::env::temp_dir().join(format!(
+            "nac-scratch-guard-{label}-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(nac_home.join("worktrees")).unwrap();
+        let original = std::env::var_os("NAC_HOME");
+        unsafe { std::env::set_var("NAC_HOME", &nac_home) };
+        (nac_home, original)
+    }
+
+    fn restore_nac_home(original: Option<std::ffi::OsString>) {
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("NAC_HOME", value),
+                None => std::env::remove_var("NAC_HOME"),
+            }
+        }
+    }
+
+    fn worktree_at(path: PathBuf) -> SandboxWorktree {
+        SandboxWorktree {
+            repo_root: PathBuf::from("/repo"),
+            path,
+            branch: "nac/key".to_string(),
+            fork_point: "abc123".to_string(),
+        }
+    }
+
+    #[test]
+    fn scratch_guard_approves_only_paths_under_the_real_nac_home() {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let (nac_home, original) = scratch_nac_home("anchor");
+        let scratch = nac_home.join("worktrees");
+
+        // A real session worktree path is approved, existing or not.
+        let session_dir = scratch.join("session-key");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        assert!(worktree_at(session_dir.clone()).path_in_scratch_dir());
+        std::fs::remove_dir_all(&session_dir).unwrap();
+        assert!(worktree_at(session_dir).path_in_scratch_dir());
+
+        // A path whose parent is merely NAMED worktrees is rejected: the
+        // guard is anchored to the resolved nac home, not to the name.
+        let impostor = std::env::temp_dir().join("nac-scratch-guard-impostor/worktrees/key");
+        std::fs::create_dir_all(&impostor).unwrap();
+        assert!(!worktree_at(impostor).path_in_scratch_dir());
+
+        // The scratch root itself and paths outside it are rejected.
+        assert!(!worktree_at(scratch.clone()).path_in_scratch_dir());
+        assert!(!worktree_at(nac_home.join("other/key")).path_in_scratch_dir());
+
+        // A `..` escape that lexically sits under the scratch dir is rejected.
+        assert!(!worktree_at(scratch.join("../worktrees/../nac.toml")).path_in_scratch_dir());
+
+        // A symlink inside the scratch dir pointing outside it is rejected.
+        #[cfg(unix)]
+        {
+            let outside = nac_home.join("outside");
+            std::fs::create_dir_all(&outside).unwrap();
+            let link = scratch.join("link");
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+            assert!(!worktree_at(link).path_in_scratch_dir());
+        }
+
+        restore_nac_home(original);
+        let _ = std::fs::remove_dir_all(&nac_home);
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join("nac-scratch-guard-impostor"));
+    }
+
+    #[test]
+    fn scratch_guard_follows_a_symlinked_nac_home() {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let (nac_home, original) = scratch_nac_home("symlinked");
+        let scratch = nac_home.join("worktrees");
+        // Resolve through a symlinked NAC_HOME: the recorded path may carry
+        // the unresolved prefix while the guard canonicalizes both sides.
+        let canonical_scratch = scratch.canonicalize().unwrap();
+        let session_dir = canonical_scratch.join("session-key");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        assert!(worktree_at(session_dir).path_in_scratch_dir());
+
+        restore_nac_home(original);
+        let _ = std::fs::remove_dir_all(&nac_home);
+    }
+
     #[test]
     fn parse_mount_spec_normalizes_relative_host_path() {
         let cwd = std::env::current_dir().unwrap();
@@ -488,14 +665,9 @@ mod tests {
             read_only: false,
         };
         let session = SandboxSession::new_for_test(SandboxSpec {
-            backend: SandboxBackendType::Podman,
-            image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![mount],
-            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
 
         assert_eq!(session.host_workdir().unwrap(), cwd);
@@ -535,8 +707,6 @@ mod tests {
     #[test]
     fn host_mapping_prefers_the_most_specific_mount_and_preserves_read_only() {
         let session = SandboxSession::new_for_test(SandboxSpec {
-            backend: SandboxBackendType::Podman,
-            image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![
                 MountSpec {
                     host: PathBuf::from("/host/workspace"),
@@ -549,11 +719,8 @@ mod tests {
                     read_only: true,
                 },
             ],
-            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
 
         assert_eq!(
@@ -594,8 +761,6 @@ mod tests {
     #[test]
     fn host_workdir_uses_the_deepest_mount_that_contains_it() {
         let session = SandboxSession::new_for_test(SandboxSpec {
-            backend: SandboxBackendType::Podman,
-            image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![
                 MountSpec {
                     host: PathBuf::from("/host/workspace"),
@@ -609,10 +774,8 @@ mod tests {
                 },
             ],
             workdir: PathBuf::from("/workspace/vendor"),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
 
         assert_eq!(session.host_workdir(), Some(PathBuf::from("/host/vendor")));
@@ -638,18 +801,13 @@ mod tests {
         symlink(&outside, mount_root.join("escape")).unwrap();
 
         let session = SandboxSession::new_for_test(SandboxSpec {
-            backend: SandboxBackendType::Podman,
-            image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![MountSpec {
                 host: mount_root.clone(),
                 guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 read_only: false,
             }],
-            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
 
         let mapped =
@@ -660,18 +818,14 @@ mod tests {
         );
 
         let workdir_session = SandboxSession::new_for_test(SandboxSpec {
-            backend: SandboxBackendType::Podman,
-            image: DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![MountSpec {
                 host: mount_root,
                 guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
                 read_only: false,
             }],
             workdir: PathBuf::from("/workspace/escape"),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
         assert_eq!(workdir_session.host_workdir(), None);
         let _ = std::fs::remove_dir_all(root);

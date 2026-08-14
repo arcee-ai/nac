@@ -876,6 +876,9 @@ impl SessionService {
             if let Err(error) = sandbox.destroy().await {
                 eprintln!("nac: failed to destroy sandbox during deletion: {error:#}");
             }
+            if let Some(worktree) = &sandbox.spec().worktree {
+                crate::sandbox::session_worktree::cleanup_session_worktree(worktree);
+            }
         }
     }
 

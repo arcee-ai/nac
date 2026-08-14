@@ -20,9 +20,10 @@ use crate::paths::PathContext;
 /// and git targets are created from.
 pub use crate::sandbox::SshConnection;
 use crate::sandbox::{
-    browse_remote_directory, build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType,
-    SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+    browse_remote_directory, build_sandbox_spec, parse_mount_spec, session_worktree, MountSpec,
+    SandboxBackendType, SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
+pub use crate::sandbox::session_worktree::cleanup_session_worktree;
 pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
@@ -1405,6 +1406,9 @@ async fn build_resume_config_from_snapshot(
     } else {
         match snapshot.sandbox_spec.clone() {
             Some(spec) => {
+                if let Some(worktree) = &spec.worktree {
+                    session_worktree::restore(worktree)?;
+                }
                 Some(SandboxSession::create(spec, Uuid::new_v4().to_string(), true).await?)
             }
             None => None,
@@ -1550,10 +1554,20 @@ pub async fn build_sandbox_session(
         return Ok(None);
     }
 
+    let owner = options.sandbox_session_key.is_none();
+    let session_key = options
+        .sandbox_session_key
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
     let mut mounts = Vec::new();
+    let mut forked_worktree = None;
     if !options.no_mount_cwd {
+        let cwd_mount = session_worktree::cwd_mount(cwd, &session_key, owner);
+        mounts.extend(cwd_mount.git_dir_mount);
+        forked_worktree = cwd_mount.worktree;
         mounts.push(parse_mount_spec(
-            &format!("{}:{}", cwd.display(), DEFAULT_SANDBOX_WORKDIR),
+            &format!("{}:{}", cwd_mount.host.display(), DEFAULT_SANDBOX_WORKDIR),
             false,
             cwd,
         )?);
@@ -1577,7 +1591,7 @@ pub async fn build_sandbox_session(
         &PathContext::new(cwd),
     )?);
 
-    let spec = build_sandbox_spec(
+    let mut spec = build_sandbox_spec(
         options.sandbox_backend,
         options
             .sandbox_image
@@ -1600,12 +1614,8 @@ pub async fn build_sandbox_session(
         options.sandbox_cpus,
         options.sandbox_mem,
     )?;
-    let owner = options.sandbox_session_key.is_none();
-    let session_key = options
-        .sandbox_session_key
-        .clone()
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let session = SandboxSession::create(spec, session_key, owner).await?;
+    spec.worktree = forked_worktree;
+    let session = session_worktree::launch_session(spec, session_key, owner).await?;
     Ok(Some(session))
 }
 
@@ -3422,16 +3432,7 @@ X-Config = "yes"
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
             None,
-            Some(SandboxSpec {
-                backend: crate::sandbox::SandboxBackendType::Podman,
-                image: DEFAULT_SANDBOX_IMAGE.to_string(),
-                mounts: Vec::new(),
-                workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                gpu_devices: Vec::new(),
-                shm_size: None,
-                cpus: 2,
-                memory_mib: 2048,
-            }),
+            Some(SandboxSpec::default()),
             Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
