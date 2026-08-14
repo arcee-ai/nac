@@ -791,6 +791,14 @@ impl SessionService {
         self.lock_active_operation().is_some()
     }
 
+    /// True while any client holds a live subscription to this session's event
+    /// stream (an open SSE connection). A session with live subscribers must
+    /// not be evicted from the server's in-memory cache: dropping the service
+    /// would drop the event bus's broadcast senders and close their stream.
+    pub fn has_event_subscribers(&self) -> bool {
+        self.event_bus.has_subscribers()
+    }
+
     pub fn active_run(&self) -> Option<ActiveRunSnapshot> {
         match self.lock_active_operation().as_ref() {
             Some(ActiveSessionOperation::Run(active_run)) => Some(active_run.snapshot.clone()),
