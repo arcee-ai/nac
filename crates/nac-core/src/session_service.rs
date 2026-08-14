@@ -1990,7 +1990,7 @@ impl SessionService {
                     message: SessionCoordinationError::local_agent_busy(),
                 }
             })?;
-            let repaired_blob = agent
+            let durable_blob = agent
                 .refresh_transcript_under_lease(lease)
                 .map_err(|error| OperationAdmissionPreparationError::Coordination {
                     message: SessionCoordinationError::store(format!(
@@ -2005,18 +2005,27 @@ impl SessionService {
                 }
             })?;
             drop(agent);
-            if let Some(repaired_blob) = repaired_blob {
-                // Dangling-turn normalization rewrote the blob itself:
-                // install the repaired blob so store-backed transcript reads
-                // do not serve the discarded turn from the stale pre-repair
-                // snapshot (mirrors the resume path in runtime.rs).
+            if let Some(durable_blob) = durable_blob {
+                // Reconcile the cached snapshot with the durable blob after
+                // every refresh, not only when this admission rewrote the
+                // blob itself: a prior admission may have repaired the blob
+                // and then failed before patching this copy (e.g. snapshot
+                // lock contention), and the retry sees nothing left to
+                // repair. Without the reconcile, store-backed transcript
+                // reads would serve the discarded dangling turn from the
+                // stale pre-repair snapshot for the rest of the process
+                // lifetime (mirrors the resume path in runtime.rs).
                 let mut snapshot = self.session_snapshot.try_lock().map_err(|_| {
                     OperationAdmissionPreparationError::Coordination {
                         message: SessionCoordinationError::local_agent_busy(),
                     }
                 })?;
                 if let Some(snapshot) = snapshot.as_mut() {
-                    snapshot.messages = repaired_blob;
+                    // The blob is write-once and repairs only truncate it,
+                    // so an equal length means this copy is already current.
+                    if snapshot.messages.len() != durable_blob.len() {
+                        snapshot.messages = durable_blob;
+                    }
                 }
             }
         }
@@ -6001,6 +6010,77 @@ pub(super) mod tests {
             );
         }
         drop(agent);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    /// Regression test for the stale-snapshot Bugbot finding: an admission
+    /// that repairs the snapshot blob but fails before patching the cached
+    /// snapshot (e.g. snapshot lock contention) must not leave the stale
+    /// pre-repair blob cached for the process lifetime. The next admission
+    /// sees nothing left to repair, so it reconciles the cached snapshot
+    /// with the durable blob the refresh returns on every admission.
+    #[tokio::test]
+    async fn admission_reconciles_a_snapshot_left_stale_by_a_prior_repair() {
+        let (parts, store_path) =
+            test_active_service("admission_stale_snapshot", "stale-snapshot-session");
+
+        // The durable blob was already repaired by a prior admission
+        // attempt: it holds only the complete turn.
+        let repaired_blob = vec![
+            Message::System {
+                content: "system".to_string(),
+            },
+            Message::User {
+                content: "prompt".to_string(),
+            },
+        ];
+        seed_store_transcript(&parts, repaired_blob.clone()).await;
+
+        // ...but that attempt failed before patching the cached snapshot,
+        // which still serves the discarded dangling tool-call turn.
+        let mut stale_blob = repaired_blob.clone();
+        stale_blob.push(Message::Assistant {
+            content: None,
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: Some(vec![crate::types::ToolCall {
+                id: "call-1".to_string(),
+                call_type: "function".to_string(),
+                function: crate::types::FunctionCall {
+                    name: "read".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }]),
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
+        });
+        parts
+            .service
+            .session_snapshot
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .messages = stale_blob;
+
+        // The retry finds nothing left to repair in the durable store, yet
+        // must still heal the cached snapshot from the durable blob.
+        let lease = match parts.service.prepare_operation_admission(None) {
+            Ok(lease) => lease,
+            Err(_) => panic!("admission must succeed for the fresh session"),
+        };
+        drop(lease);
+
+        let snapshot = parts.service.session_snapshot.lock().await;
+        let messages = &snapshot.as_ref().unwrap().messages;
+        assert_eq!(
+            messages.len(),
+            repaired_blob.len(),
+            "the cached snapshot no longer serves the discarded dangling turn"
+        );
+        assert!(matches!(messages[1], Message::User { .. }));
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

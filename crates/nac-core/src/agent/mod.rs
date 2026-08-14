@@ -1041,9 +1041,13 @@ impl Agent {
     ///
     /// Synchronous counterpart of the async restore: admission is a sync
     /// path that already performs blocking store reads (config revision,
-    /// compaction checkpoint). Returns the rewritten snapshot blob when
-    /// dangling-turn normalization had to repair the blob itself, so the
-    /// caller can refresh its own snapshot copy; `None` otherwise.
+    /// compaction checkpoint). Returns the post-refresh durable snapshot
+    /// blob — the rewritten blob when dangling-turn normalization repaired
+    /// it, the unchanged blob otherwise — so the caller can reconcile its
+    /// cached snapshot copy on every admission: a prior admission may have
+    /// repaired the blob and then failed before patching that copy, and the
+    /// retry sees nothing left to repair. `None` only when the session has
+    /// no transcript log.
     pub fn refresh_transcript_under_lease(
         &mut self,
         operation_lease: &crate::sessions::SessionOperationLease,
@@ -1110,7 +1114,6 @@ impl Agent {
                 .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
         }
 
-        let mut refreshed_blob = None;
         if let Some(incomplete_turn) = incomplete_tool_turn_index(&merged) {
             merged.truncate(incomplete_turn);
             // Trimming below the blob length means the dangling turn lives
@@ -1118,18 +1121,22 @@ impl Agent {
             // and tail together while the operation lease is held.
             if merged.len() < blob_len_usize {
                 writer.replace_snapshot_and_delete_from(&session_id, &merged)?;
-                refreshed_blob = Some(merged.clone());
             } else {
                 writer.delete_from(&session_id, merged.len() as u64)?;
             }
         }
+
+        // The durable snapshot blob after the refresh: the rewritten blob
+        // when normalization repaired it, otherwise the unchanged prefix of
+        // the merged transcript.
+        let durable_blob = merged[..merged.len().min(blob_len_usize)].to_vec();
 
         // The durable transcript is now exactly `merged`.
         self.committed_log_len = merged.len() as u64;
         if !transcripts_match(&self.messages, &merged)? {
             self.restore_messages(merged);
         }
-        Ok(refreshed_blob)
+        Ok(Some(durable_blob))
     }
 
     /// Stale-transcript guard for the terminal normalization paths (shared
@@ -1205,8 +1212,10 @@ impl Agent {
     /// once started, so the log can hold a straggler row at `messages.len()`
     /// that the vec never saw — without the delete, the next append would
     /// reuse that idx and leave duplicate-idx rows for the restore merge.
-    /// The straggler is within this process's own commits
-    /// (`committed_log_len`), so the delete stays below that boundary.
+    /// The straggler stays within this process's own commits because
+    /// appends claim their rows in `committed_log_len` at submission time
+    /// (before the `spawn_blocking` await), so the delete stays below that
+    /// boundary.
     /// Durable rows BEYOND it belong to a peer (shared store, issue #146):
     /// the in-memory transcript is stale, so the durable state is adopted
     /// instead of deleting the peer's committed rows from the stale length.
@@ -1317,15 +1326,38 @@ impl Agent {
         let session_id = sink.session_id.clone();
         let messages = messages.to_vec();
         let batch_len = messages.len() as u64;
-        tokio::task::spawn_blocking(move || writer.append_batch(&session_id, start_idx, &messages))
-            .await
-            .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
+        // Claim the rows at submission, before the await: a run task
+        // dropped while the blocking append is in flight cannot interrupt
+        // it, so the append still completes without this function ever
+        // resuming. The up-front claim keeps that straggler row within this
+        // process's own commits, so terminal normalization trims it instead
+        // of mistaking it for a peer's committed row (issue #146).
+        let pre_submission_committed = self.committed_log_len;
         self.committed_log_len = self.committed_log_len.max(start_idx + batch_len);
-        // Live trigger (step 3): emitted after the log commit, before the
-        // vec push — the store-backed read path sees the rows immediately.
-        self.event_sink
-            .emit_transcript_appended(start_idx + batch_len);
-        Ok(())
+        let appended = tokio::task::spawn_blocking(move || {
+            writer.append_batch(&session_id, start_idx, &messages)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        match appended {
+            Ok(()) => {
+                // Live trigger (step 3): emitted after the log commit,
+                // before the vec push — the store-backed read path sees the
+                // rows immediately.
+                self.event_sink
+                    .emit_transcript_appended(start_idx + batch_len);
+                Ok(())
+            }
+            Err(error) => {
+                // The batch commits in one transaction, so a failed append
+                // left no rows behind: release the optimistic claim to keep
+                // the own-commits bound exact. A dropped task never reaches
+                // this rollback — which is exactly the straggler case the
+                // claim exists for.
+                self.committed_log_len = pre_submission_committed;
+                Err(error)
+            }
+        }
     }
 
     /// Append one message to the transcript log at absolute position `idx`
@@ -1337,13 +1369,26 @@ impl Agent {
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
         let message = message.clone();
-        tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
-            .await
-            .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
+        // Claim the row at submission, before the await — see
+        // log_transcript_batch for why the straggler from a dropped run
+        // task must stay within this process's own commits.
+        let pre_submission_committed = self.committed_log_len;
         self.committed_log_len = self.committed_log_len.max(idx + 1);
-        // Live trigger (step 3): see log_transcript_batch.
-        self.event_sink.emit_transcript_appended(idx + 1);
-        Ok(())
+        let appended = tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
+            .await
+            .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        match appended {
+            Ok(()) => {
+                // Live trigger (step 3): see log_transcript_batch.
+                self.event_sink.emit_transcript_appended(idx + 1);
+                Ok(())
+            }
+            Err(error) => {
+                // Nothing was committed: release the optimistic claim.
+                self.committed_log_len = pre_submission_committed;
+                Err(error)
+            }
+        }
     }
 
     /// Push one message into the transcript, appending it to the log first
