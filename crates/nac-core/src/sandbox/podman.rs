@@ -214,8 +214,20 @@ impl PodmanSession {
             .output()
             .await
             .with_context(|| "failed to execute 'podman image exists'")?;
-        if exists.status.success() {
-            return Ok(());
+        match classify_image_exists(exists.status.code(), &exists.stderr) {
+            ImageCheck::Present => return Ok(()),
+            ImageCheck::Missing => {}
+            // A runtime failure (125 while the engine is down, connection
+            // errors, ...) must not fall through to a pull: that would
+            // disguise an availability problem as a slow first-run pull.
+            ImageCheck::Failed(detail) => {
+                return Err(explain_runtime_failure(anyhow!(
+                    "failed to check for sandbox image '{}': {}",
+                    self.spec.image,
+                    detail
+                ))
+                .await);
+            }
         }
         super::report_activity(
             &self.activity_key,
@@ -224,19 +236,25 @@ impl PodmanSession {
                 self.spec.image
             ),
         );
-        let status = Command::new("podman")
+        // Stdout stays inherited so pull progress is still streamed; stderr
+        // is captured so registry, auth, and network failures reach the
+        // caller instead of only the terminal.
+        let output = Command::new("podman")
             .arg("pull")
             .arg(&self.spec.image)
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("failed to execute 'podman pull {}'", self.spec.image))?
+            .wait_with_output()
             .await
-            .with_context(|| format!("failed to execute 'podman pull {}'", self.spec.image))?;
-        if !status.success() {
+            .with_context(|| format!("failed to wait for 'podman pull {}'", self.spec.image))?;
+        if !output.status.success() {
             return Err(explain_runtime_failure(anyhow!(
-                "failed to pull sandbox image '{}'",
-                self.spec.image
+                "failed to pull sandbox image '{}': {}",
+                self.spec.image,
+                first_stderr_line(&output.stderr)
             ))
             .await);
         }
@@ -569,6 +587,23 @@ impl Drop for PodmanSession {
     }
 }
 
+/// `podman image exists` exit codes: 0 = present, 1 = missing, anything
+/// else (125 while the engine is down, connection failures, being killed by
+/// a signal) = the check itself failed.
+enum ImageCheck {
+    Present,
+    Missing,
+    Failed(String),
+}
+
+fn classify_image_exists(code: Option<i32>, stderr: &[u8]) -> ImageCheck {
+    match code {
+        Some(0) => ImageCheck::Present,
+        Some(1) => ImageCheck::Missing,
+        _ => ImageCheck::Failed(first_stderr_line(stderr)),
+    }
+}
+
 pub(crate) fn make_sandbox_pidfile() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
@@ -642,6 +677,31 @@ mod tests {
             false,
             "abc123".to_string(),
         )
+    }
+
+    #[test]
+    fn image_exists_exit_codes_are_classified() {
+        assert!(matches!(
+            classify_image_exists(Some(0), b""),
+            ImageCheck::Present
+        ));
+        assert!(matches!(
+            classify_image_exists(Some(1), b""),
+            ImageCheck::Missing
+        ));
+        // Engine-down style failure (podman exits 125) surfaces its stderr.
+        match classify_image_exists(Some(125), b"Error: unable to connect to Podman socket\n") {
+            ImageCheck::Failed(detail) => {
+                assert!(detail.contains("unable to connect to Podman socket"));
+            }
+            _ => panic!("exit 125 must be a check failure, not a missing image"),
+        }
+        // Signal termination (no exit code) is also a failure, and empty
+        // stderr still yields a usable message.
+        match classify_image_exists(None, b"") {
+            ImageCheck::Failed(detail) => assert_eq!(detail, "no details reported"),
+            _ => panic!("signal termination must be a check failure"),
+        }
     }
 
     #[test]
