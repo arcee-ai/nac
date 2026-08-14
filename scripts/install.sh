@@ -63,6 +63,27 @@ trap 'rm -rf "$tmpdir"' EXIT INT TERM
 archive="$tmpdir/$asset"
 download "$url" "$archive"
 
+# Optional integrity check. Set NAC_CHECKSUM to the expected SHA-256 (hex) of
+# the release asset to verify it before extraction. This is opt-in, so existing
+# installs are unaffected; when set, a mismatch aborts the install instead of
+# executing a substituted binary. Publishing a SHA256SUMS alongside releases
+# would let operators pin this by default in a follow-up.
+if [ -n "${NAC_CHECKSUM:-}" ]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$archive" | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
+  else
+    echo "NAC_CHECKSUM set but neither sha256sum nor shasum is available; refusing to skip verification" >&2
+    exit 1
+  fi
+  if [ "$actual" != "$NAC_CHECKSUM" ]; then
+    echo "checksum mismatch: expected $NAC_CHECKSUM, got $actual" >&2
+    exit 1
+  fi
+  echo "verified $asset checksum"
+fi
+
 mkdir -p "$INSTALL_DIR"
 tar -xzf "$archive" -C "$tmpdir"
 install -m 755 "$tmpdir/nac-web" "$INSTALL_DIR/nac-web"

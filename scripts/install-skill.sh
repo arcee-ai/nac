@@ -86,6 +86,26 @@ fetch_file() {
 fetch_file skills/nac-onboarding/SKILL.md "$skill_file"
 fetch_file skills/nac-onboarding/agents/openai.yaml "$metadata_file"
 
+# Optional integrity check for the agent skill that will be loaded and run.
+# Set NAC_SKILL_CHECKSUM to the expected SHA-256 (hex) of SKILL.md. Opt-in, so
+# existing installs are unaffected; a mismatch aborts before the file is moved
+# into the skills directory.
+if [ -n "${NAC_SKILL_CHECKSUM:-}" ]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$skill_file" | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$skill_file" | cut -d' ' -f1)"
+  else
+    echo "NAC_SKILL_CHECKSUM set but neither sha256sum nor shasum is available; refusing to skip verification" >&2
+    exit 1
+  fi
+  if [ "$actual" != "$NAC_SKILL_CHECKSUM" ]; then
+    echo "skill checksum mismatch: expected $NAC_SKILL_CHECKSUM, got $actual" >&2
+    exit 1
+  fi
+  echo "verified nac-onboarding SKILL.md checksum"
+fi
+
 mkdir -p "$skill_dir/agents"
 mv "$skill_file" "$skill_dir/SKILL.md"
 mv "$metadata_file" "$skill_dir/agents/openai.yaml"
