@@ -648,10 +648,10 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
 async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
     match cli.command {
         Some(command) => {
-            let start_dashboard = matches!(command, CodexAuthCommand::Login);
+            let is_login = matches!(command, CodexAuthCommand::Login);
             run_codex_auth_action(codex_auth_action(command)).await?;
-            if start_dashboard {
-                start_dashboard_after_login().await?;
+            if is_login {
+                println!("Login complete. Run `nac-web` to start the dashboard.");
             }
             Ok(())
         }
@@ -675,10 +675,10 @@ fn codex_auth_action(command: CodexAuthCommand) -> CodexAuthAction {
 async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
     match cli.command {
         Some(command) => {
-            let start_dashboard = matches!(command, ArceeAuthCommand::Login);
+            let is_login = matches!(command, ArceeAuthCommand::Login);
             run_arcee_auth_action(arcee_auth_action(command)).await?;
-            if start_dashboard {
-                start_dashboard_after_login().await?;
+            if is_login {
+                println!("Login complete. Run `nac-web` to start the dashboard.");
             }
             Ok(())
         }
@@ -689,20 +689,6 @@ async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
             Ok(())
         }
     }
-}
-
-/// After a successful browser login, continue into the same flow as a plain
-/// `nac-web`: confirm the project folder and open the dashboard. Non-interactive
-/// shells only print the next command so CI / scripts are not blocked.
-async fn start_dashboard_after_login() -> Result<()> {
-    println!();
-    if !nac_core::browser::should_open_browser() {
-        println!("Next: run `nac-web` from your project directory to open the dashboard.");
-        return Ok(());
-    }
-    println!("Login complete. Starting the dashboard…");
-    println!();
-    run_server(ServerCli::parse_from(["nac-web"])).await
 }
 
 fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
