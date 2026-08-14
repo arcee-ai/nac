@@ -513,6 +513,13 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    /// True when this session executes inside a sandbox container. Dropping
+    /// the last service reference drops the `SandboxSession`, and an owned
+    /// container's `Drop` runs `podman rm -f`; the next resume builds a fresh
+    /// container under a new session key, so container-local state would be
+    /// lost. The server's idle-session eviction uses this to leave sandboxed
+    /// sessions cached.
+    has_sandbox: bool,
     #[cfg(test)]
     frontend_snapshot_after_workspace_gate: Option<Arc<FrontendSnapshotAfterWorkspaceGate>>,
 }
@@ -678,6 +685,7 @@ impl SessionService {
         let session_snapshot = run_config.session.into_snapshot();
         let active_threads = run_config.agent.active_threads_handle();
         let transcript_log = run_config.agent.transcript_log_writer();
+        let has_sandbox = run_config.agent.sandbox_session().is_some();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
         // pass; later scans read only the newly appended tail rows.
@@ -698,6 +706,7 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            has_sandbox,
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
         };
@@ -797,6 +806,16 @@ impl SessionService {
     /// would drop the event bus's broadcast senders and close their stream.
     pub fn has_event_subscribers(&self) -> bool {
         self.event_bus.has_subscribers()
+    }
+
+    /// True when this session executes inside a sandbox container. Evicting
+    /// such a session from the server's in-memory cache would drop its
+    /// `SandboxSession`: an owned container's `Drop` runs `podman rm -f`,
+    /// and the next resume builds a fresh container under a new session key,
+    /// so container-local state is lost either way. Idle eviction must skip
+    /// these sessions.
+    pub fn has_sandbox(&self) -> bool {
+        self.has_sandbox
     }
 
     pub fn active_run(&self) -> Option<ActiveRunSnapshot> {
@@ -3162,6 +3181,85 @@ pub(super) mod tests {
             resume_base_cwd: PathBuf::from("/repo"),
         });
         (parts, store_path)
+    }
+
+    #[test]
+    fn has_sandbox_reflects_the_agent_execution_backend() {
+        let (local_parts, local_store) =
+            test_active_service("has_sandbox_local", "has-sandbox-local");
+        assert!(!local_parts.service.has_sandbox());
+        let _ = std::fs::remove_dir_all(local_store.parent().unwrap());
+
+        let store_path = test_store_path("has_sandbox_sandboxed");
+        let client = ModelClient::new_for_test();
+        let agent = Agent::with_config(
+            client.clone(),
+            AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
+                mode: AgentMode::Orchestrator,
+                store_path: store_path.clone(),
+                session_id: Some("has-sandbox-sandboxed".to_string()),
+                orchestrator_compaction_threshold: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                dispatch_id: None,
+                event_sink: EventSink::none(),
+                workspace_cwd: PathBuf::from("/repo"),
+                config_cwd: PathBuf::from("/repo"),
+                working_directory: "/repo".to_string(),
+                worker_executable: None,
+                sandbox: Some(crate::sandbox::SandboxSession::new_for_test(
+                    crate::sandbox::SandboxSpec {
+                        backend: crate::sandbox::SandboxBackendType::Podman,
+                        image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
+                        mounts: Vec::new(),
+                        workdir: PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
+                        gpu_devices: Vec::new(),
+                        shm_size: None,
+                        cpus: 2,
+                        memory_mib: 2048,
+                    },
+                )),
+                ssh: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
+            },
+        )
+        .expect("agent config must be valid");
+        let snapshot = sessions::new_snapshot(
+            "has-sandbox-sandboxed".to_string(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: "has-sandbox-sandboxed".to_string(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "on".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_git: Some(GitTarget::local("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        assert!(parts.service.has_sandbox());
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
     /// Seed the store transcript's legacy prefix: the snapshot blob (what the

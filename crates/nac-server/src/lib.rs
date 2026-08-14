@@ -1312,9 +1312,13 @@ impl SessionManager {
     /// A session is evicted only when all of these hold:
     /// - it has no active run or compaction,
     /// - nothing outside the map holds a strong reference to it (no in-flight
-    ///   request is using it), and
+    ///   request is using it),
     /// - no client holds a live event-stream subscription (an open SSE
-    ///   connection, which the eviction would close).
+    ///   connection, which the eviction would close), and
+    /// - it does not execute inside a sandbox container: dropping the service
+    ///   would drop the `SandboxSession`, an owned container's `Drop` runs
+    ///   `podman rm -f`, and the next resume builds a fresh container under a
+    ///   new session key, so eviction would destroy container-local state.
     ///
     /// `except` names the session the caller is attaching or creating, which
     /// is skipped so the caller does not evict the very service it is about to
@@ -1328,6 +1332,7 @@ impl SessionManager {
                     && !service.has_active_operation()
                     && Arc::strong_count(service) == 1
                     && !service.has_event_subscribers()
+                    && !service.has_sandbox()
             })
             .map(|(session_id, _)| session_id.clone())
             .collect();
