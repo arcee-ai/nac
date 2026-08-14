@@ -747,6 +747,7 @@ async fn request_token_refresh(
             status,
             redirect_location.as_deref(),
             &body,
+            &[refresh_token],
         ));
     }
 
@@ -768,7 +769,7 @@ async fn request_token_refresh(
         _ => Err(anyhow!(
             "Arcee token refresh failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate(&redact_credentials(&body, &[refresh_token]))
         )),
     }
 }
@@ -887,13 +888,14 @@ async fn request_device_code(client: &Client, service: &ArceeAuthService) -> Res
             status,
             redirect_location.as_deref(),
             &body,
+            &[],
         ));
     }
     if !status.is_success() {
         return Err(anyhow!(
             "Arcee device-code request failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate(&redact_credentials(&body, &[]))
         ));
     }
 
@@ -978,6 +980,7 @@ where
                 status,
                 redirect_location.as_deref(),
                 &body,
+                &[device.device_code.as_str()],
             ));
         }
 
@@ -1009,7 +1012,7 @@ where
                 return Err(anyhow!(
                     "Arcee device authorization failed with HTTP {}: {}",
                     status.as_u16(),
-                    truncate(&body)
+                    truncate(&redact_credentials(&body, &[device.device_code.as_str()]))
                 ))
             }
         }
@@ -1066,15 +1069,21 @@ fn arcee_redirect_error(
     status: reqwest::StatusCode,
     location: Option<&str>,
     body: &str,
+    secrets: &[&str],
 ) -> anyhow::Error {
     let location = location
-        .map(|value| format!(" Location: {}.", truncate(value)))
+        .map(|value| {
+            format!(
+                " Location: {}.",
+                truncate(&redact_credentials(value, secrets))
+            )
+        })
         .unwrap_or_default();
     anyhow!(
         "Arcee {action} received HTTP {} redirect from {url}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
         status.as_u16(),
         location,
-        truncate(body)
+        truncate(&redact_credentials(body, secrets))
     )
 }
 

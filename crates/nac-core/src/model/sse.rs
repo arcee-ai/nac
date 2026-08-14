@@ -12,6 +12,7 @@
 use std::fmt;
 use std::pin::Pin;
 
+use super::redact_credentials;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -84,6 +85,9 @@ pub(super) fn provider_stream_error(code: Option<&str>, message: &str) -> Stream
                 | "server_error"
         )
     });
+    // The message is provider-controlled text and can echo request credentials
+    // back; the exact secret is not known here, so mask recognizable shapes.
+    let message = redact_credentials(message, &[]);
     if retryable {
         StreamFoldError::retryable(message)
     } else {
@@ -116,8 +120,12 @@ impl SseError {
     }
 
     fn fold(url: &str, error: StreamFoldError, observable_delta: bool) -> Self {
+        // The fold error text is provider-controlled and can echo request
+        // credentials back; the exact secret is not known here, so mask
+        // recognizable shapes before the message is persisted.
+        let message = redact_credentials(&error.message, &[]);
         Self {
-            message: format!("model stream from {url} failed: {error}"),
+            message: format!("model stream from {url} failed: {message}"),
             retryable: error.retryable,
             observable_delta,
         }
@@ -193,7 +201,11 @@ pub(super) async fn read_sse_response<F: StreamFold>(
         }
         let event: Value = serde_json::from_str(&frame.data).map_err(|error| {
             SseError::permanent(
-                format!("invalid SSE event from {url}: {}\n{error}", frame.data),
+                format!(
+                    "invalid SSE event from {url}: {}\n{}",
+                    redact_credentials(&frame.data, &[]),
+                    error
+                ),
                 fold.has_observable_delta(),
             )
         })?;

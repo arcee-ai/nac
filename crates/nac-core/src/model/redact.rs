@@ -1,0 +1,296 @@
+//! Credential redaction for provider error text.
+//!
+//! Provider HTTP error bodies and stream error events are surfaced to the user
+//! and persisted into session events and server logs. A provider that echoes
+//! request headers or bodies back in an error can therefore leak API keys and
+//! bearer tokens. This module strips known secrets and recognizable credential
+//! shapes out of that text before it is embedded in an error message.
+//!
+//! Redaction is deliberately conservative: exact secret values are replaced
+//! wherever they appear, and header-shaped credential lines (`Authorization`,
+//! `x-api-key`, ...) are masked even when the exact value is not known. Ordinary
+//! error prose is left intact so the actionable part of a provider message
+//! ("no credits", "bad key", "rate limit") survives.
+
+use regex::Regex;
+use serde_json::Value;
+use std::sync::OnceLock;
+
+/// Marker substituted for any credential material found in provider text.
+pub(crate) const REDACTED: &str = "[REDACTED]";
+
+/// JSON object keys whose values are always treated as credentials, matched
+/// case-insensitively.
+const SENSITIVE_JSON_KEYS: [&str; 13] = [
+    "authorization",
+    "x-api-key",
+    "api_key",
+    "apikey",
+    "api-key",
+    "access_token",
+    "refresh_token",
+    "token",
+    "secret",
+    "password",
+    "key",
+    "cookie",
+    "set-cookie",
+];
+
+/// Secrets shorter than this are not replaced verbatim: a one- or two-character
+/// "secret" would otherwise rewrite ordinary words. Header-shape patterns still
+/// catch short credentials when they appear in a recognizable form.
+const MIN_EXACT_SECRET_LEN: usize = 4;
+
+/// `Authorization: Bearer <token>` / `Authorization: Basic <b64>`, with or
+/// without the surrounding quotes JSON would add.
+fn header_with_scheme_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)(authorization|proxy-authorization)\s*"?\s*[:=]\s*"?\s*(?:bearer|basic)\s+[^\s,;"]+"#,
+        )
+        .expect("valid credential header regex")
+    })
+}
+
+/// Any other credential header value, bare or quoted.
+fn header_value_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)(authorization|proxy-authorization|x-api-key|api-key|apikey)\s*"?\s*[:=]\s*"?\s*[^\s,;"]+"#)
+            .expect("valid credential header regex")
+    })
+}
+
+/// A `Bearer`/`Basic` token standing alone in prose, without a header name.
+fn bearer_token_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=:-]{4,}")
+            .expect("valid bearer token regex")
+    })
+}
+
+/// `https://user:pass@host` userinfo embedded in a URL.
+fn url_userinfo_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@").expect("valid URL userinfo regex")
+    })
+}
+
+/// Redact credentials from provider-controlled text.
+///
+/// Exact secret values are replaced first (longest first, so a secret that is a
+/// prefix of another cannot leave a tail behind), then recognizable credential
+/// shapes — `Authorization`/`x-api-key` header lines, `Bearer`/`Basic` tokens,
+/// and URL userinfo — are masked even when the exact value is not known.
+pub(crate) fn redact_credentials(text: &str, secrets: &[&str]) -> String {
+    let mut redacted = text.to_string();
+    let mut known: Vec<&str> = secrets
+        .iter()
+        .copied()
+        .filter(|secret| !secret.is_empty() && secret.len() >= MIN_EXACT_SECRET_LEN)
+        .collect();
+    known.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+    for secret in known {
+        redacted = redacted.replace(secret, REDACTED);
+    }
+    redact_patterns(&redacted)
+}
+
+fn redact_patterns(text: &str) -> String {
+    let mut redacted = header_with_scheme_re()
+        .replace_all(text, "$1: [REDACTED]")
+        .into_owned();
+    redacted = header_value_re()
+        .replace_all(&redacted, "$1: [REDACTED]")
+        .into_owned();
+    redacted = bearer_token_re()
+        .replace_all(&redacted, "$1 [REDACTED]")
+        .into_owned();
+    redacted = url_userinfo_re()
+        .replace_all(&redacted, "$1[REDACTED]@")
+        .into_owned();
+    redacted
+}
+
+/// Redact credentials from a provider response body.
+///
+/// When the body parses as JSON, sensitive keys are masked and every string
+/// value is passed through [`redact_credentials`]; otherwise the whole body is
+/// treated as plain text. The result is always a `String`, so callers can
+/// truncate it afterwards without ever truncating a secret first.
+pub(crate) fn redact_json_body(body: &str, secrets: &[&str]) -> String {
+    match serde_json::from_str::<Value>(body) {
+        Ok(value) => serde_json::to_string(&redact_json_value(value, secrets))
+            .unwrap_or_else(|_| redact_credentials(body, secrets)),
+        Err(_) => redact_credentials(body, secrets),
+    }
+}
+
+fn redact_json_value(value: Value, secrets: &[&str]) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut redacted = serde_json::Map::with_capacity(map.len());
+            for (key, value) in map {
+                if SENSITIVE_JSON_KEYS
+                    .iter()
+                    .any(|sensitive| key.eq_ignore_ascii_case(sensitive))
+                {
+                    redacted.insert(key, Value::String(REDACTED.to_string()));
+                } else {
+                    redacted.insert(key, redact_json_value(value, secrets));
+                }
+            }
+            Value::Object(redacted)
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_json_value(item, secrets))
+                .collect(),
+        ),
+        Value::String(text) => Value::String(redact_credentials(&text, secrets)),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CANARY: &str = "sk-canary-0123456789";
+
+    #[test]
+    fn replaces_exact_secret_values_anywhere() {
+        let redacted = redact_credentials(
+            &format!("invalid key {CANARY} in request body {CANARY} again"),
+            &[CANARY],
+        );
+        assert!(!redacted.contains(CANARY));
+        assert_eq!(redacted.matches(REDACTED).count(), 2);
+        assert!(redacted.contains("invalid key"));
+    }
+
+    #[test]
+    fn replaces_longest_secret_first() {
+        let redacted = redact_credentials(
+            "prefix-secret and prefix-secret-suffix",
+            &["prefix-secret", "prefix-secret-suffix"],
+        );
+        assert!(!redacted.contains("prefix-secret"));
+        assert_eq!(redacted.matches(REDACTED).count(), 2);
+    }
+
+    #[test]
+    fn ignores_empty_and_short_secrets_for_verbatim_replacement() {
+        assert_eq!(redact_credentials("abc", &["abc"]), "abc");
+        assert_eq!(redact_credentials("plain", &["", "x"]), "plain");
+    }
+
+    #[test]
+    fn redacts_authorization_header_with_scheme() {
+        for text in [
+            "Authorization: Bearer sk-live-abcdef",
+            "authorization: basic dXNlcjpwYXNz",
+            r#""authorization": "Bearer sk-live-abcdef""#,
+            "Proxy-Authorization: Bearer sk-live-abcdef",
+        ] {
+            let redacted = redact_credentials(text, &[]);
+            assert!(!redacted.contains("sk-live-abcdef"), "{text} -> {redacted}");
+            assert!(!redacted.contains("dXNlcjpwYXNz"), "{text} -> {redacted}");
+            assert!(redacted.contains(REDACTED), "{text} -> {redacted}");
+        }
+    }
+
+    #[test]
+    fn redacts_bare_credential_headers() {
+        for text in [
+            "x-api-key: sk-live-abcdef",
+            "X-API-KEY: sk-live-abcdef",
+            "api-key: sk-live-abcdef",
+            "apikey: sk-live-abcdef",
+            "Authorization: sk-live-abcdef",
+        ] {
+            let redacted = redact_credentials(text, &[]);
+            assert!(!redacted.contains("sk-live-abcdef"), "{text} -> {redacted}");
+            assert!(redacted.contains(REDACTED), "{text} -> {redacted}");
+        }
+    }
+
+    #[test]
+    fn redacts_standalone_bearer_tokens_in_prose() {
+        let redacted = redact_credentials("the token Bearer sk-live-abcdef was rejected", &[]);
+        assert!(!redacted.contains("sk-live-abcdef"));
+        assert!(redacted.contains("Bearer [REDACTED]"));
+        assert!(redacted.contains("was rejected"));
+    }
+
+    #[test]
+    fn redacts_url_userinfo() {
+        let redacted =
+            redact_credentials("endpoint https://user:pass@api.example.com/v1 refused", &[]);
+        assert!(!redacted.contains("user:pass"));
+        assert!(redacted.contains("https://[REDACTED]@api.example.com"));
+        // Ports are not userinfo and must survive.
+        assert_eq!(
+            redact_credentials("http://host:8080/path", &[]),
+            "http://host:8080/path"
+        );
+    }
+
+    #[test]
+    fn preserves_ordinary_error_prose() {
+        let text = "no credits remaining; rate limit exceeded; context too long";
+        assert_eq!(redact_credentials(text, &[]), text);
+    }
+
+    #[test]
+    fn redacts_sensitive_json_keys_case_insensitively() {
+        let body = r#"{"error":{"message":"bad request","API_KEY":"sk-json-1","Authorization":"Bearer sk-json-2","access_token":"tok-json-3","refresh_token":"tok-json-4","token":"tok-json-5","secret":"s-json-6","password":"p-json-7","key":"k-json-8","cookie":"c-json-9","set-cookie":"sc-json-10","api_key":"ak-json-11","apikey":"ak-json-12","api-key":"ak-json-13","x-api-key":"xk-json-14"}}"#;
+        let redacted = redact_json_body(body, &[]);
+        assert!(!redacted.contains("sk-json-1"));
+        assert!(!redacted.contains("sk-json-2"));
+        assert!(!redacted.contains("tok-json-3"));
+        assert!(!redacted.contains("tok-json-4"));
+        assert!(!redacted.contains("tok-json-5"));
+        assert!(!redacted.contains("s-json-6"));
+        assert!(!redacted.contains("p-json-7"));
+        assert!(!redacted.contains("k-json-8"));
+        assert!(!redacted.contains("c-json-9"));
+        assert!(!redacted.contains("sc-json-10"));
+        assert!(!redacted.contains("ak-json-11"));
+        assert!(!redacted.contains("ak-json-12"));
+        assert!(!redacted.contains("ak-json-13"));
+        assert!(!redacted.contains("xk-json-14"));
+        assert!(redacted.contains("\"message\":\"bad request\""));
+        assert_eq!(redacted.matches(REDACTED).count(), 14);
+    }
+
+    #[test]
+    fn redacts_secret_values_inside_json_strings() {
+        let body = format!(r#"{{"error":"invalid key {CANARY} supplied"}}"#);
+        let redacted = redact_json_body(&body, &[CANARY]);
+        assert!(!redacted.contains(CANARY));
+        assert!(redacted.contains("invalid key [REDACTED] supplied"));
+    }
+
+    #[test]
+    fn falls_back_to_text_redaction_for_non_json_bodies() {
+        let body = format!("plain text with {CANARY} inside");
+        let redacted = redact_json_body(&body, &[CANARY]);
+        assert!(!redacted.contains(CANARY));
+        assert!(redacted.contains("plain text with [REDACTED] inside"));
+    }
+
+    #[test]
+    fn redacts_nested_arrays_and_objects() {
+        let body = r#"{"errors":[{"key":"sk-nested-1"},{"detail":{"token":"tok-nested-2"}}]}"#;
+        let redacted = redact_json_body(body, &[]);
+        assert!(!redacted.contains("sk-nested-1"));
+        assert!(!redacted.contains("tok-nested-2"));
+        assert_eq!(redacted.matches(REDACTED).count(), 2);
+    }
+}

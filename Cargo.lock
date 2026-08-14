@@ -1569,6 +1569,7 @@ dependencies = [
  "openssh-sftp-client",
  "portable-pty",
  "rand 0.9.4",
+ "regex",
  "reqwest",
  "rmcp",
  "rusqlite",

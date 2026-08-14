@@ -604,6 +604,46 @@ async fn arcee_multibyte_error_body_does_not_panic() {
     );
 }
 
+#[tokio::test]
+async fn provider_error_body_echoing_credentials_is_redacted() {
+    let secret = "sk-canary-echo-0123456789";
+    let body = format!(
+        "{{\"error\":{{\"message\":\"invalid request\",\"authorization\":\"Bearer {secret}\",\"x-api-key\":\"{secret}\"}}}}"
+    );
+    let server = ScriptedServer::start(vec![ScriptedResponse::json("400 Bad Request", body)]);
+    let mut client = test_model_client(
+        BackendKind::OpenAiResponses,
+        server.base_url.clone(),
+        std::collections::BTreeMap::new(),
+    );
+    client.api_key = secret.to_string();
+
+    let error = send_provider_test_request(&client, &format!("{}/v1/responses", server.base_url))
+        .await
+        .expect_err("HTTP 400 should return an error")
+        .to_string();
+    let requests = server.finish();
+
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].headers.get("authorization").map(String::as_str),
+        Some(format!("Bearer {secret}")).as_deref()
+    );
+    assert!(
+        !error.contains(secret),
+        "error leaked the echoed credential: {error}"
+    );
+    assert!(
+        error.contains("[REDACTED]"),
+        "error did not mark redaction: {error}"
+    );
+    assert!(error.contains("HTTP 400"), "unexpected error: {error}");
+    assert!(
+        error.contains("invalid request"),
+        "non-secret body content must survive: {error}"
+    );
+}
+
 // --- S6: api-axis dispatch + catalog-driven max_tokens -------------------
 
 #[tokio::test]

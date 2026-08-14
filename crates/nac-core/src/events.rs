@@ -10,6 +10,7 @@ use tokio::sync::{broadcast, mpsc::UnboundedSender};
 use uuid::Uuid;
 
 use crate::agent::key_arg_preview;
+use crate::model::redact_credentials;
 
 pub const STDERR_EVENT_PREFIX: &str = "__NAC_EVENT__";
 pub const SESSION_EVENT_BUS_CAPACITY: usize = 1024;
@@ -235,14 +236,16 @@ pub enum AgentEvent {
         thread_name: Option<String>,
         message: String,
     },
-    /// A model call the provider itself refused, reported verbatim.
+    /// A model call the provider itself refused, reported with credentials
+    /// redacted.
     ///
     /// Ordinary errors are reduced to a constant before they leave the process,
     /// because their text can carry paths and tool output. What a provider says
     /// about its own API — no credits, bad key, rate limit, context too long —
     /// carries none of that and is the one thing the user has to see to act, so
-    /// it travels intact. Live-only, like the other events whose absence keeps
-    /// the persisted stream readable by older builds.
+    /// it travels intact apart from credential material, which is masked before
+    /// the event leaves the process. Live-only, like the other events whose
+    /// absence keeps the persisted stream readable by older builds.
     ModelError {
         thread_name: Option<String>,
         message: String,
@@ -878,7 +881,10 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
         } => AgentEvent::ModelError {
             thread_name,
             // Provider bodies can be long; the actionable part is at the front.
-            message: bounded_provider_message(&message),
+            // Credential shapes are masked first as defense in depth: the exact
+            // secret is not known here, but header-shaped credential lines and
+            // bearer tokens are still caught if they reached the event.
+            message: bounded_provider_message(&redact_credentials(&message, &[])),
         },
         event @ (AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::AssistantMessage { .. }
@@ -2322,5 +2328,24 @@ mod tests {
         assert_eq!(boundary.sequence_id, 0);
         assert_eq!(emitted.sequence_id, 1);
         assert_eq!(boundary.epoch_id, emitted.epoch_id);
+    }
+
+    #[test]
+    fn model_error_sanitization_redacts_credential_shapes_and_bounds_length() {
+        let event = AgentEvent::ModelError {
+            thread_name: Some("impl".to_string()),
+            message: "HTTP 400 from https://api.test: Authorization: Bearer sk-canary-event-12345; x-api-key: sk-canary-event-12345; no credits".to_string(),
+        };
+        let sanitized = sanitize_external_agent_event(event).unwrap();
+        let AgentEvent::ModelError { message, .. } = sanitized else {
+            panic!("expected ModelError");
+        };
+        assert!(
+            !message.contains("sk-canary-event-12345"),
+            "credential leaked through sanitization: {message}"
+        );
+        assert!(message.contains("[REDACTED]"), "{message}");
+        assert!(message.contains("no credits"), "{message}");
+        assert!(message.contains("HTTP 400"), "{message}");
     }
 }

@@ -675,12 +675,16 @@ impl ModelClient {
                     body,
                     |request| request.header("Authorization", format!("Bearer {token}")),
                     || ChatStreamFold::new(Some(on_delta), reasoning_field),
+                    &[token],
                 )
                 .await;
         }
-        self.try_post_json_with_retry_headers(url, body, |request| {
-            request.header("Authorization", format!("Bearer {token}"))
-        })
+        self.try_post_json_with_retry_headers(
+            url,
+            body,
+            |request| request.header("Authorization", format!("Bearer {token}")),
+            &[token],
+        )
         .await
     }
 
@@ -707,7 +711,7 @@ impl ModelClient {
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
-        self.try_post_json_with_retry_headers(url, body, apply_headers)
+        self.try_post_json_with_retry_headers(url, body, apply_headers, &[self.api_key.as_str()])
             .await
             .map_err(|error| anyhow!(error.message))
     }
@@ -717,22 +721,26 @@ impl ModelClient {
         url: &str,
         body: &Value,
         apply_headers: F,
+        secrets: &[&str],
     ) -> std::result::Result<Value, ModelHttpError>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
         let response = self
-            .send_with_retry_headers(url, body, apply_headers)
+            .send_with_retry_headers(url, body, apply_headers, secrets)
             .await?;
         let status = response.status();
         let body_text = read_response_body(response).await?;
         serde_json::from_str::<Value>(&body_text).map_err(|e| ModelHttpError {
             status: Some(status.as_u16()),
-            message: format!(
-                "Failed to parse response from {}: {}\nBody: {}",
-                url,
-                e,
-                truncate_utf8(&body_text, 500)
+            message: redact_credentials(
+                &format!(
+                    "Failed to parse response from {}: {}\nBody: {}",
+                    url,
+                    e,
+                    truncate_utf8(&redact_credentials(&body_text, secrets), 500)
+                ),
+                secrets,
             ),
         })
     }
@@ -745,6 +753,7 @@ impl ModelClient {
         url: &str,
         body: &Value,
         apply_headers: F,
+        secrets: &[&str],
     ) -> std::result::Result<reqwest::Response, ModelHttpError>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
@@ -800,30 +809,39 @@ impl ModelClient {
             let body = read_response_body(response).await?;
 
             if status.is_redirection() {
-                let location = redirect_location
-                    .as_deref()
-                    .map(|value| format!(" Location: {}.", truncate_utf8(value, 500)))
-                    .unwrap_or_default();
+                let location = redirect_location.as_deref().map(|value| {
+                    format!(
+                        " Location: {}.",
+                        truncate_utf8(&redact_credentials(value, secrets), 500)
+                    )
+                });
+                let location = location.unwrap_or_default();
                 return Err(ModelHttpError {
                     status: Some(status.as_u16()),
-                    message: format!(
-                        "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
-                        self.backend,
-                        status.as_u16(),
-                        url,
-                        location,
-                        truncate_utf8(&body, 500)
+                    message: redact_credentials(
+                        &format!(
+                            "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
+                            self.backend,
+                            status.as_u16(),
+                            url,
+                            location,
+                            truncate_utf8(&redact_json_body(&body, secrets), 500)
+                        ),
+                        secrets,
                     ),
                 });
             }
 
             let error = ModelHttpError {
                 status: Some(status.as_u16()),
-                message: format!(
-                    "HTTP {} from {}: {}",
-                    status.as_u16(),
-                    url,
-                    truncate_utf8(&body, 500)
+                message: redact_credentials(
+                    &format!(
+                        "HTTP {} from {}: {}",
+                        status.as_u16(),
+                        url,
+                        truncate_utf8(&redact_json_body(&body, secrets), 500)
+                    ),
+                    secrets,
                 ),
             };
 
@@ -856,9 +874,15 @@ impl ModelClient {
         MakeFold: Fn() -> Fold,
         Fold: StreamFold,
     {
-        self.try_post_sse_with_retry_headers(url, body, apply_headers, make_fold)
-            .await
-            .map_err(|error| anyhow!(error.message))
+        self.try_post_sse_with_retry_headers(
+            url,
+            body,
+            apply_headers,
+            make_fold,
+            &[self.api_key.as_str()],
+        )
+        .await
+        .map_err(|error| anyhow!(error.message))
     }
 
     async fn try_post_sse_with_retry_headers<F, MakeFold, Fold>(
@@ -867,6 +891,7 @@ impl ModelClient {
         body: &Value,
         apply_headers: F,
         make_fold: MakeFold,
+        secrets: &[&str],
     ) -> std::result::Result<Value, ModelHttpError>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
@@ -876,7 +901,7 @@ impl ModelClient {
         let mut last_error = None;
         for attempt in 0..10 {
             let response = self
-                .send_with_retry_headers(url, body, apply_headers)
+                .send_with_retry_headers(url, body, apply_headers, secrets)
                 .await?;
             match read_sse_response(url, response, make_fold()).await {
                 Ok(value) => return Ok(value),
