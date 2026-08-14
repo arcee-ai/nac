@@ -374,20 +374,29 @@ fn classify_dispatch_failure(
     timeout_secs: u64,
 ) -> Option<DispatchFailure> {
     if run.cancelled {
+        let mut message = format!("Thread '{thread_name}' was cancelled.");
+        if let Some(cleanup_error) = &run.cleanup_error {
+            message.push('\n');
+            message.push_str(cleanup_error);
+        }
         return Some(DispatchFailure {
             status: store::EpisodeStatus::Cancelled,
-            message: format!("Thread '{thread_name}' was cancelled."),
+            message,
         });
     }
 
     if run.timed_out {
-        let message = match run.timeout_reason.as_deref() {
+        let mut message = match run.timeout_reason.as_deref() {
             Some(reason) => format!(
                 "Thread '{}' timed out after {}s.\n{}",
                 thread_name, timeout_secs, reason
             ),
             None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
         };
+        if let Some(cleanup_error) = &run.cleanup_error {
+            message.push('\n');
+            message.push_str(cleanup_error);
+        }
         return Some(DispatchFailure {
             status: store::EpisodeStatus::TimedOut,
             message,
@@ -771,6 +780,35 @@ mod tests {
     use crate::tools::test_runtime;
     use serde_json::json;
     use std::sync::Arc;
+
+    #[test]
+    fn cleanup_diagnostic_preserves_timeout_and_cancellation_classification() {
+        let mut run = WorkerRun {
+            stdout: "partial stdout".to_string(),
+            stderr: "partial stderr".to_string(),
+            exit_code: -1,
+            timed_out: true,
+            cancelled: false,
+            timeout_reason: None,
+            usage: None,
+            model_error: None,
+            cleanup_error: Some("worker cleanup incomplete: pidfd_open denied".to_string()),
+        };
+
+        let timed_out = classify_dispatch_failure(&run, "worker-a", 30).unwrap();
+        assert_eq!(timed_out.status, store::EpisodeStatus::TimedOut);
+        assert!(timed_out.message.contains("timed out after 30s"));
+        assert!(timed_out.message.contains("worker cleanup incomplete"));
+        assert!(!timed_out.message.contains("Failed to spawn"));
+
+        run.timed_out = false;
+        run.cancelled = true;
+        let cancelled = classify_dispatch_failure(&run, "worker-a", 30).unwrap();
+        assert_eq!(cancelled.status, store::EpisodeStatus::Cancelled);
+        assert!(cancelled.message.contains("was cancelled"));
+        assert!(cancelled.message.contains("worker cleanup incomplete"));
+        assert!(!cancelled.message.contains("Failed to spawn"));
+    }
 
     fn skill_record(
         name: &str,

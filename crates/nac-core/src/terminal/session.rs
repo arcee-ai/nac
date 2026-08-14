@@ -4,13 +4,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
+use anyhow::anyhow;
 use anyhow::{Context, Result};
 use portable_pty::{NativePtySystem, PtySize, PtySystem};
 use tokio::sync::Notify;
 
 use super::{ArtifactKind, OutputRegistry, OutputStream};
-#[cfg(unix)]
-use crate::process::{descendant_pids, signal_pids};
+#[cfg(all(unix, not(target_os = "linux")))]
+use crate::process::signal_descendants;
+#[cfg(target_os = "linux")]
+use crate::process::{process_identity_matches, process_start_time, signal_descendants};
 use crate::sandbox::ExecutionBackend;
 
 pub struct TerminalSession {
@@ -20,6 +24,8 @@ pub struct TerminalSession {
     preview_cursor: u64,
     output_notify: Arc<Notify>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    #[cfg(target_os = "linux")]
+    root_start_time: u64,
     _pty_pair: portable_pty::PtyPair,
     _reader_thread: std::thread::JoinHandle<()>,
     pub created_at: Instant,
@@ -65,6 +71,19 @@ impl TerminalSession {
             .slave
             .spawn_command(cmd)
             .context("Failed to spawn bash in PTY")?;
+        #[cfg(target_os = "linux")]
+        let mut child = child;
+        #[cfg(target_os = "linux")]
+        let root_start_time = {
+            let start_time = child
+                .process_id()
+                .and_then(|pid| process_start_time(pid as libc::pid_t));
+            let Some(start_time) = start_time else {
+                let _ = child.kill();
+                return Err(anyhow!("Failed to capture PTY root process identity"));
+            };
+            start_time
+        };
 
         let reader = pty_pair
             .master
@@ -112,6 +131,8 @@ impl TerminalSession {
             preview_cursor: 0,
             output_notify: notify,
             child,
+            #[cfg(target_os = "linux")]
+            root_start_time,
             _pty_pair: pty_pair,
             _reader_thread: reader_thread,
             created_at: Instant::now(),
@@ -184,14 +205,20 @@ impl TerminalSession {
             let _ = backend.terminal_pipe_kill(pidfile).await;
         }
 
+        self.refresh_status();
         #[cfg(unix)]
-        {
-            self.signal_descendants(libc::SIGKILL);
+        let descendant_result = if self.exit_code.is_none() {
+            let descendant_result = self.signal_descendants(libc::SIGKILL);
             self.signal_process_group(libc::SIGKILL);
-        }
+            descendant_result
+        } else {
+            Ok(())
+        };
 
         self.reap_child().await;
         self.alive.store(false, Ordering::SeqCst);
+        #[cfg(unix)]
+        descendant_result?;
         Ok(())
     }
 
@@ -206,23 +233,46 @@ impl TerminalSession {
         self.exit_code
     }
 
-    #[cfg(unix)]
-    fn child_descendant_pids(&self) -> Vec<libc::pid_t> {
-        let Some(pid) = self.child.process_id() else {
-            return Vec::new();
-        };
-        descendant_pids(pid as libc::pid_t)
+    #[cfg(target_os = "linux")]
+    fn signal_descendants(&self, signal: libc::c_int) -> std::io::Result<()> {
+        if let Some(pid) = self.child.process_id() {
+            signal_descendants(pid as libc::pid_t, self.root_start_time, signal)
+        } else {
+            Ok(())
+        }
     }
 
-    #[cfg(unix)]
-    fn signal_descendants(&self, signal: libc::c_int) {
-        signal_pids(&self.child_descendant_pids(), signal);
+    #[cfg(all(unix, not(target_os = "linux")))]
+    fn signal_descendants(&self, signal: libc::c_int) -> std::io::Result<()> {
+        if let Some(pid) = self.child.process_id() {
+            signal_descendants(pid as libc::pid_t, signal)
+        } else {
+            Ok(())
+        }
     }
 
     #[cfg(not(unix))]
-    fn signal_descendants(&self, _signal: i32) {}
+    fn signal_descendants(&self, _signal: i32) -> std::io::Result<()> {
+        Ok(())
+    }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
+    fn signal_process_group(&self, signal: libc::c_int) {
+        let Some(pid) = self.child.process_id().map(|pid| pid as libc::pid_t) else {
+            return;
+        };
+        if !process_identity_matches(pid, self.root_start_time) {
+            return;
+        }
+        unsafe {
+            let pgid = libc::getpgid(pid);
+            if pgid > 0 {
+                libc::kill(-pgid, signal);
+            }
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
     fn signal_process_group(&self, signal: libc::c_int) {
         if let Some(pid) = self.child.process_id() {
             unsafe {
@@ -265,9 +315,10 @@ impl TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = self.writer.flush();
+        self.refresh_status();
         #[cfg(unix)]
-        {
-            self.signal_descendants(libc::SIGTERM);
+        if self.exit_code.is_none() {
+            let _ = self.signal_descendants(libc::SIGTERM);
             self.signal_process_group(libc::SIGTERM);
         }
         self.alive.store(false, Ordering::SeqCst);
@@ -302,8 +353,18 @@ pub(crate) fn terminal_env_owned() -> Vec<(String, String)> {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
-    fn process_exists(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    fn process_running(pid: u32) -> bool {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        stat.rsplit_once(") ")
+            .and_then(|(_, fields)| fields.split_whitespace().next())
+            != Some("Z")
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    fn process_running(pid: u32) -> bool {
         unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
     }
 
@@ -362,7 +423,7 @@ mod tests {
         }
         let child_pid = child_pid.unwrap_or_else(|| panic!("child pid not found in: {output:?}"));
         assert!(
-            process_exists(child_pid),
+            process_running(child_pid),
             "background child exited too early"
         );
 
@@ -370,7 +431,7 @@ mod tests {
 
         let mut still_running = false;
         for _ in 0..40 {
-            still_running = process_exists(child_pid);
+            still_running = process_running(child_pid);
             if !still_running {
                 break;
             }
