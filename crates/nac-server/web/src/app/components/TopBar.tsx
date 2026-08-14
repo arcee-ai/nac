@@ -12,9 +12,10 @@ import {
 } from "@/app/atoms";
 import { Breadcrumbs } from "@/app/components/Breadcrumbs";
 import { HeaderMenu } from "@/app/components/HeaderMenu";
+import { McpServersButton } from "@/app/components/McpServersButton";
 import { SessionHeaderActions } from "@/app/components/SessionHeaderActions";
 import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
-import { McpServersModal } from "@/app/components/modals/McpServersModal";
+import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServersModal";
 import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
@@ -77,12 +78,7 @@ export function TopBar() {
           </Link>
           <Breadcrumbs />
         </div>
-        <div
-          className={cn(
-            "relative flex items-center shrink-0",
-            isMobile && "gap-3",
-          )}
-        >
+        <div className="relative flex items-center shrink-0 gap-2">
           {/* On the list a phone has no filter rail to launch from, so the
               primary action rides in the bar. */}
           {isMobile && !inSession ? (
@@ -98,10 +94,10 @@ export function TopBar() {
             </Button>
           ) : null}
           <SessionHeaderActions />
+          <McpServersButton onOpen={() => setMcpServers(true)} />
           <HeaderMenu
             onConfigurations={() => setConfiguring(true)}
             onSshConfigs={() => setSshConfigs(true)}
-            onMcpServers={() => setMcpServers(true)}
           />
         </div>
       </header>

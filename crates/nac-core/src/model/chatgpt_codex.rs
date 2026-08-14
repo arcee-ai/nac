@@ -488,7 +488,7 @@ async fn request_device_code(client: &Client) -> Result<DeviceCode> {
         return Err(anyhow!(
             "Codex device-code request failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate(&redact_credentials(&body, &[]))
         ));
     }
 
@@ -701,7 +701,10 @@ async fn poll_device_code(client: &Client, device: &DeviceCode) -> Result<Author
             return Err(anyhow!(
                 "Codex device authorization failed with HTTP {}: {}",
                 status.as_u16(),
-                truncate(&body)
+                truncate(&redact_credentials(
+                    &body,
+                    &[device.device_auth_id.as_str(), device.user_code.as_str()]
+                ))
             ));
         }
 
@@ -737,7 +740,12 @@ async fn exchange_authorization_code(
         .await
         .context("failed to exchange Codex authorization code")?;
 
-    parse_token_response(response, "Codex token exchange").await
+    parse_token_response(
+        response,
+        "Codex token exchange",
+        &[code.code.as_str(), code.verifier.as_str()],
+    )
+    .await
 }
 
 async fn refresh_access_token(client: &Client, refresh_token: &str) -> Result<TokenResponse> {
@@ -753,10 +761,14 @@ async fn refresh_access_token(client: &Client, refresh_token: &str) -> Result<To
         .await
         .context("failed to refresh Codex access token")?;
 
-    parse_token_response(response, "Codex token refresh").await
+    parse_token_response(response, "Codex token refresh", &[refresh_token]).await
 }
 
-async fn parse_token_response(response: reqwest::Response, label: &str) -> Result<TokenResponse> {
+async fn parse_token_response(
+    response: reqwest::Response,
+    label: &str,
+    secrets: &[&str],
+) -> Result<TokenResponse> {
     let status = response.status();
     let body = response
         .text()
@@ -766,7 +778,7 @@ async fn parse_token_response(response: reqwest::Response, label: &str) -> Resul
         return Err(anyhow!(
             "{label} failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate(&redact_credentials(&body, secrets))
         ));
     }
     serde_json::from_str(&body).with_context(|| format!("failed to parse {label} response"))
@@ -992,10 +1004,17 @@ async fn post_codex_json_with_retry_delay(
             // Codex often omits Content-Type on streamed responses. `Accept`
             // and `stream: true` make a missing header an SSE response here.
             let result = if content_type.is_none() || is_event_stream(content_type.as_deref()) {
-                stream_codex_responses(response, url, status, on_delta).await
+                stream_codex_responses(response, url, status, on_delta, &[auth.access.as_str()])
+                    .await
             } else {
                 let response_body = read_codex_body(response, url, status).await?;
-                parse_codex_success_body(url, status, content_type.as_deref(), &response_body)
+                parse_codex_success_body(
+                    url,
+                    status,
+                    content_type.as_deref(),
+                    &response_body,
+                    &[auth.access.as_str()],
+                )
             };
             match result {
                 Ok(value) => return Ok(value),
@@ -1015,9 +1034,13 @@ async fn post_codex_json_with_retry_delay(
         let error = CodexRequestError {
             status: Some(status),
             message: format!(
-                "HTTP {} from {url}: {}",
+                "HTTP {} from {}: {}",
                 status.as_u16(),
-                truncate(&response_body)
+                redact_credentials(url, &[]),
+                truncate(&redact_credentials(
+                    &response_body,
+                    &[auth.access.as_str()],
+                ))
             ),
             retryable_stream: false,
             observable_delta: false,
@@ -1046,7 +1069,10 @@ async fn read_codex_body(
 ) -> std::result::Result<String, CodexRequestError> {
     response.text().await.map_err(|error| CodexRequestError {
         status: Some(status),
-        message: format!("Failed to read response body from {url}: {error}"),
+        message: format!(
+            "Failed to read response body from {}: {error}",
+            redact_credentials(url, &[])
+        ),
         retryable_stream: false,
         observable_delta: false,
     })
@@ -1065,8 +1091,9 @@ async fn stream_codex_responses(
     url: &str,
     status: StatusCode,
     on_delta: DeltaSink<'_>,
+    secrets: &[&str],
 ) -> std::result::Result<Value, CodexRequestError> {
-    read_sse_response(url, response, ResponsesStreamFold::new(on_delta))
+    read_sse_response(url, response, ResponsesStreamFold::new(on_delta), secrets)
         .await
         .map_err(|error| CodexRequestError {
             status: Some(status),
@@ -1081,28 +1108,34 @@ fn parse_codex_success_body(
     status: StatusCode,
     content_type: Option<&str>,
     response_body: &str,
+    secrets: &[&str],
 ) -> std::result::Result<Value, CodexRequestError> {
     if content_type
         .map(|value| value.contains("text/event-stream"))
         .unwrap_or(false)
         || response_body.lines().any(|line| line.starts_with("data:"))
     {
-        return parse_codex_sse_response(response_body).map_err(|error| CodexRequestError {
-            status: Some(status),
-            message: format!(
-                "Failed to parse SSE response from {url}: {error}\nBody: {}",
-                truncate(response_body)
-            ),
-            retryable_stream: error.is_retryable(),
-            observable_delta: false,
+        return parse_codex_sse_response(response_body).map_err(|error| {
+            let message = redact_credentials(&error.to_string(), secrets);
+            CodexRequestError {
+                status: Some(status),
+                message: format!(
+                    "Failed to parse SSE response from {}: {message}\nBody: {}",
+                    redact_credentials(url, &[]),
+                    truncate(&redact_credentials(response_body, secrets))
+                ),
+                retryable_stream: error.is_retryable(),
+                observable_delta: false,
+            }
         });
     }
 
     serde_json::from_str::<Value>(response_body).map_err(|error| CodexRequestError {
         status: Some(status),
         message: format!(
-            "Failed to parse response from {url}: {error}\nBody: {}",
-            truncate(response_body)
+            "Failed to parse response from {}: {error}\nBody: {}",
+            redact_credentials(url, &[]),
+            truncate(&redact_credentials(response_body, secrets))
         ),
         retryable_stream: false,
         observable_delta: false,
@@ -2144,6 +2177,7 @@ mod tests {
             StatusCode::OK,
             Some("application/json"),
             body,
+            &[],
         )
         .unwrap_err();
 

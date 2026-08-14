@@ -105,7 +105,7 @@ export function Breadcrumbs() {
               >
                 <span
                   className={cn(
-                    "label-medium min-w-0 max-w-[128px] truncate text-left",
+                    "label-medium min-w-0 max-w-[96px] truncate text-left",
                     currentRunning && "text-shimmer-basic",
                   )}
                 >

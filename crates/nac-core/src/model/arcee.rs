@@ -747,6 +747,7 @@ async fn request_token_refresh(
             status,
             redirect_location.as_deref(),
             &body,
+            &[refresh_token],
         ));
     }
 
@@ -768,7 +769,7 @@ async fn request_token_refresh(
         _ => Err(anyhow!(
             "Arcee token refresh failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate(&redact_credentials(&body, &[refresh_token]))
         )),
     }
 }
@@ -887,13 +888,14 @@ async fn request_device_code(client: &Client, service: &ArceeAuthService) -> Res
             status,
             redirect_location.as_deref(),
             &body,
+            &[],
         ));
     }
     if !status.is_success() {
         return Err(anyhow!(
             "Arcee device-code request failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&body)
+            truncate(&redact_credentials(&body, &[]))
         ));
     }
 
@@ -978,6 +980,7 @@ where
                 status,
                 redirect_location.as_deref(),
                 &body,
+                &[device.device_code.as_str()],
             ));
         }
 
@@ -1004,12 +1007,18 @@ where
                     "Arcee device code expired; run `nac arcee-auth login` again"
                 ))
             }
-            Some(other) => return Err(anyhow!("Arcee device authorization failed: {other}")),
+            Some(other) => {
+                let message = redact_credentials(
+                    other,
+                    &[device.device_code.as_str(), device.user_code.as_str()],
+                );
+                return Err(anyhow!("Arcee device authorization failed: {message}"));
+            }
             None => {
                 return Err(anyhow!(
                     "Arcee device authorization failed with HTTP {}: {}",
                     status.as_u16(),
-                    truncate(&body)
+                    truncate(&redact_credentials(&body, &[device.device_code.as_str()]))
                 ))
             }
         }
@@ -1066,15 +1075,21 @@ fn arcee_redirect_error(
     status: reqwest::StatusCode,
     location: Option<&str>,
     body: &str,
+    secrets: &[&str],
 ) -> anyhow::Error {
     let location = location
-        .map(|value| format!(" Location: {}.", truncate(value)))
+        .map(|value| {
+            format!(
+                " Location: {}.",
+                truncate(&redact_credentials(value, secrets))
+            )
+        })
         .unwrap_or_default();
     anyhow!(
         "Arcee {action} received HTTP {} redirect from {url}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
         status.as_u16(),
         location,
-        truncate(body)
+        truncate(&redact_credentials(body, secrets))
     )
 }
 
@@ -1471,6 +1486,40 @@ mod tests {
             assert_eq!(requests.len(), 1);
             assert_device_request(&requests[0], "/app/v1/device/token");
         }
+    }
+
+    #[tokio::test]
+    async fn token_poll_redacts_device_code_from_structured_error() {
+        let secret = "sensitive-device-code";
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "400 Bad Request",
+            format!(r#"{{"error":"{secret}"}}"#),
+        )]);
+        let device = DeviceCode {
+            device_code: secret.to_string(),
+            user_code: "ERROR".to_string(),
+            verification_uri_complete: "https://accounts.arcee.ai/device".to_string(),
+            interval_secs: 1,
+            expires_in_secs: 60,
+        };
+
+        let error = poll_device_code_with(
+            &no_redirect_client().unwrap(),
+            &ArceeAuthService::for_test(&server.base_url),
+            &device,
+            || 0,
+            |_| ready(()),
+        )
+        .await
+        .expect_err("terminal poll response should fail")
+        .to_string();
+        server.finish();
+
+        assert!(
+            !error.contains(secret),
+            "error leaked the echoed device credential: {error}"
+        );
+        assert!(error.contains(crate::model::redact::REDACTED), "{error}");
     }
 
     #[test]

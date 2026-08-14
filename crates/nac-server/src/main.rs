@@ -1,5 +1,4 @@
 use std::{
-    ffi::{OsStr, OsString},
     io::{self, IsTerminal, Write},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
@@ -7,7 +6,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use nac_core::{
     model::{
         run_arcee_auth_action, run_codex_auth_action, ArceeAuthAction, BackendKind,
@@ -35,9 +34,43 @@ const BUILD_VERSION: &str = concat!(
 );
 
 #[derive(Parser)]
-#[command(name = "nac-web", about = "web dashboard for managing nac sessions", version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+#[command(
+    name = "nac-web",
+    about = "Run the NAC web dashboard and manage credentials and updates",
+    long_about = "Run the NAC web dashboard for a project, or use a command to manage credentials or upgrade nac-web.\n\nWith no command, nac-web serves the selected project and opens the dashboard in the default browser when run interactively.",
+    version = RELEASE_VERSION,
+    long_version = BUILD_VERSION,
+    args_conflicts_with_subcommands = true,
+)]
+struct Cli {
+    #[command(flatten)]
+    server: ServerCli,
+
+    #[command(subcommand)]
+    command: Option<RootCommand>,
+}
+
+#[derive(Subcommand)]
+enum RootCommand {
+    /// Manage ChatGPT credentials used by Codex models
+    #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+    CodexAuth(CodexAuthCli),
+
+    /// Manage Arcee account credentials
+    #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+    ArceeAuth(ArceeAuthCli),
+
+    /// Download and reinstall the latest nac-web release
+    #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+    Upgrade(UpgradeCli),
+
+    #[command(name = "__worker", hide = true)]
+    ManagedWorker(ManagedWorkerCli),
+}
+
+#[derive(Args)]
 struct ServerCli {
-    /// Address to bind (default: localhost only).
+    /// Socket address to listen on (default: loopback only).
     #[arg(long, default_value = "127.0.0.1:3210")]
     bind: SocketAddr,
 
@@ -60,10 +93,10 @@ struct ServerCli {
     )]
     port: Option<u16>,
 
-    /// Project directory (skips the interactive confirmation).
+    /// Project directory to manage (skips the interactive confirmation).
     ///
     /// Without this flag an interactive terminal confirms the current working
-    /// directory, or asks for another path. Non-interactive runs use cwd.
+    /// directory or asks for another path. Non-interactive runs use cwd.
     #[arg(short = 'C', long)]
     directory: Option<PathBuf>,
 
@@ -75,7 +108,9 @@ struct ServerCli {
     #[arg(long)]
     store_path: Option<PathBuf>,
 
-    /// Worker executable for managed worker dispatch. Defaults to this nac-web binary.
+    /// Executable to launch for managed worker dispatch.
+    ///
+    /// Defaults to the running nac-web executable.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
 
@@ -86,7 +121,7 @@ struct ServerCli {
     #[arg(long, action = clap::ArgAction::SetTrue)]
     open: bool,
 
-    /// Do not open a browser window.
+    /// Do not open the dashboard in a browser.
     #[arg(long = "no-open", action = clap::ArgAction::SetTrue)]
     no_open: bool,
 }
@@ -109,8 +144,7 @@ impl ServerCli {
     }
 }
 
-#[derive(Parser)]
-#[command(name = "nac-web codex-auth", about = "manage ChatGPT Codex auth", version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+#[derive(Args)]
 struct CodexAuthCli {
     #[command(subcommand)]
     command: Option<CodexAuthCommand>,
@@ -118,16 +152,15 @@ struct CodexAuthCli {
 
 #[derive(Subcommand)]
 enum CodexAuthCommand {
-    /// Sign in with ChatGPT using device code authorization
+    /// Sign in to ChatGPT using device code authorization
     Login,
-    /// Show stored Codex auth status
+    /// Show stored ChatGPT credential status
     Status,
-    /// Remove stored Codex auth
+    /// Remove stored ChatGPT credentials
     Logout,
 }
 
-#[derive(Parser)]
-#[command(name = "nac-web arcee-auth", about = "manage Arcee auth", version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+#[derive(Args)]
 struct ArceeAuthCli {
     #[command(subcommand)]
     command: Option<ArceeAuthCommand>,
@@ -135,23 +168,20 @@ struct ArceeAuthCli {
 
 #[derive(Subcommand)]
 enum ArceeAuthCommand {
-    /// Sign in with Arcee using device code authorization
+    /// Sign in to Arcee using device code authorization
     Login,
-    /// Show stored Arcee auth status
+    /// Show stored Arcee credential status
     Status,
-    /// Remove stored Arcee auth
+    /// Remove stored Arcee credentials
     Logout,
 }
 
-#[derive(Parser)]
-#[command(
-    name = "nac-web upgrade",
-    about = "reinstall the latest nac-web release",
-    version = RELEASE_VERSION,
-    long_version = BUILD_VERSION
-)]
+#[derive(Args)]
 struct UpgradeCli {
-    /// Install directory to replace (default: current nac-web executable directory)
+    /// Directory containing the nac-web executable to replace.
+    ///
+    /// Defaults to $INSTALL_DIR when set, otherwise the current nac-web
+    /// executable directory.
     #[arg(long)]
     install_dir: Option<PathBuf>,
 
@@ -164,12 +194,7 @@ struct UpgradeCli {
     yes: bool,
 }
 
-#[derive(Parser)]
-#[command(
-    name = "nac-web __worker",
-    about = "internal managed worker dispatch",
-    hide = true
-)]
+#[derive(Args)]
 struct ManagedWorkerCli {
     /// Internal workspace cwd used for managed worker path resolution.
     #[arg(long, hide = true)]
@@ -387,60 +412,6 @@ struct SandboxArgs {
     sandbox_workdir: Option<String>,
 }
 
-enum ParsedCli {
-    Serve(ServerCli),
-    ManagedWorker(ManagedWorkerCli),
-    CodexAuth(CodexAuthCli),
-    ArceeAuth(ArceeAuthCli),
-    Upgrade(UpgradeCli),
-}
-
-fn parse_cli() -> ParsedCli {
-    let args: Vec<OsString> = std::env::args_os().collect();
-    if args
-        .get(1)
-        .is_some_and(|value| value == OsStr::new("__worker"))
-    {
-        ParsedCli::ManagedWorker(ManagedWorkerCli::parse_from(subcommand_args(
-            args,
-            "nac-web __worker",
-        )))
-    } else if args
-        .get(1)
-        .is_some_and(|value| value == OsStr::new("codex-auth"))
-    {
-        ParsedCli::CodexAuth(CodexAuthCli::parse_from(subcommand_args(
-            args,
-            "nac-web codex-auth",
-        )))
-    } else if args
-        .get(1)
-        .is_some_and(|value| value == OsStr::new("arcee-auth"))
-    {
-        ParsedCli::ArceeAuth(ArceeAuthCli::parse_from(subcommand_args(
-            args,
-            "nac-web arcee-auth",
-        )))
-    } else if args
-        .get(1)
-        .is_some_and(|value| value == OsStr::new("upgrade"))
-    {
-        ParsedCli::Upgrade(UpgradeCli::parse_from(subcommand_args(
-            args,
-            "nac-web upgrade",
-        )))
-    } else {
-        ParsedCli::Serve(ServerCli::parse_from(args))
-    }
-}
-
-fn subcommand_args(args: Vec<OsString>, name: &str) -> Vec<OsString> {
-    let mut parsed = Vec::with_capacity(args.len().saturating_sub(1));
-    parsed.push(OsString::from(name));
-    parsed.extend(args.into_iter().skip(2));
-    parsed
-}
-
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
@@ -450,12 +421,13 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    match parse_cli() {
-        ParsedCli::Serve(cli) => run_server(cli).await,
-        ParsedCli::ManagedWorker(cli) => run_managed_worker(cli).await,
-        ParsedCli::CodexAuth(cli) => run_codex_auth_cli(cli).await,
-        ParsedCli::ArceeAuth(cli) => run_arcee_auth_cli(cli).await,
-        ParsedCli::Upgrade(cli) => run_upgrade_cli(cli).await,
+    let cli = Cli::parse();
+    match cli.command {
+        None => run_server(cli.server).await,
+        Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
+        Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth).await,
+        Some(RootCommand::ArceeAuth(auth)) => run_arcee_auth_cli(auth).await,
+        Some(RootCommand::Upgrade(upgrade)) => run_upgrade_cli(upgrade).await,
     }
 }
 
@@ -668,8 +640,10 @@ async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
             Ok(())
         }
         None => {
-            let mut command = CodexAuthCli::command();
-            command.print_help()?;
+            let mut root = Cli::command();
+            root.find_subcommand_mut("codex-auth")
+                .expect("codex-auth command must exist")
+                .print_help()?;
             println!();
             Ok(())
         }
@@ -695,8 +669,10 @@ async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
             Ok(())
         }
         None => {
-            let mut command = ArceeAuthCli::command();
-            command.print_help()?;
+            let mut root = Cli::command();
+            root.find_subcommand_mut("arcee-auth")
+                .expect("arcee-auth command must exist")
+                .print_help()?;
             println!();
             Ok(())
         }
@@ -850,10 +826,25 @@ thread_timeout_secs = 7200
         let _ = std::fs::remove_dir_all(root);
     }
 
+    fn parse_server(args: &[&str]) -> ServerCli {
+        let cli = Cli::try_parse_from(args.iter().copied()).unwrap();
+        assert!(cli.command.is_none());
+        cli.server
+    }
+
+    fn rendered_help(args: &[&str]) -> String {
+        let error = Cli::try_parse_from(args.iter().copied())
+            .err()
+            .expect("--help must short-circuit parsing");
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+        error.to_string()
+    }
+
     #[test]
     fn worker_cli_rejects_malformed_header_json() {
-        let error = ManagedWorkerCli::try_parse_from([
-            "nac-web __worker",
+        let error = Cli::try_parse_from([
+            "nac-web",
+            "__worker",
             "--session-id",
             "session",
             "--thread-name",
@@ -887,17 +878,20 @@ thread_timeout_secs = 7200
             ("arcee-auth", BackendKind::ArceeAuth),
             ("arcee-api", BackendKind::ArceeApi),
         ] {
-            let mut args = vec!["nac-web __worker", "--backend", raw];
+            let mut args = vec!["nac-web", "__worker", "--backend", raw];
             args.extend(required);
-            let cli = ManagedWorkerCli::try_parse_from(args).unwrap();
-            assert_eq!(cli.dispatch.dispatch_id, "dispatch-123");
-            assert_eq!(cli.model.backend.map(BackendKind::from), Some(expected));
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
+                panic!("expected managed worker command");
+            };
+            assert_eq!(worker.dispatch.dispatch_id, "dispatch-123");
+            assert_eq!(worker.model.backend.map(BackendKind::from), Some(expected));
         }
 
         for raw in ["arcee", "auto"] {
-            let mut args = vec!["nac-web __worker", "--backend", raw];
+            let mut args = vec!["nac-web", "__worker", "--backend", raw];
             args.extend(required);
-            let error = ManagedWorkerCli::try_parse_from(args)
+            let error = Cli::try_parse_from(args)
                 .err()
                 .expect("removed backend must be rejected")
                 .to_string();
@@ -908,46 +902,66 @@ thread_timeout_secs = 7200
     }
 
     #[test]
-    fn codex_auth_command_parses_subcommands() {
-        let cli = CodexAuthCli::try_parse_from(["nac-web codex-auth"]).unwrap();
-        assert!(cli.command.is_none());
+    fn auth_commands_parse_optional_actions() {
+        let cli = Cli::try_parse_from(["nac-web", "codex-auth"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(RootCommand::CodexAuth(CodexAuthCli { command: None }))
+        ));
 
-        let cli = CodexAuthCli::try_parse_from(["nac-web codex-auth", "status"]).unwrap();
-        assert!(matches!(cli.command, Some(CodexAuthCommand::Status)));
-    }
+        let cli = Cli::try_parse_from(["nac-web", "codex-auth", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(RootCommand::CodexAuth(CodexAuthCli {
+                command: Some(CodexAuthCommand::Status)
+            }))
+        ));
 
-    #[test]
-    fn arcee_auth_command_parses_subcommands() {
-        let cli = ArceeAuthCli::try_parse_from(["nac-web arcee-auth"]).unwrap();
-        assert!(cli.command.is_none());
+        let cli = Cli::try_parse_from(["nac-web", "arcee-auth"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(RootCommand::ArceeAuth(ArceeAuthCli { command: None }))
+        ));
 
-        let cli = ArceeAuthCli::try_parse_from(["nac-web arcee-auth", "login"]).unwrap();
-        assert!(matches!(cli.command, Some(ArceeAuthCommand::Login)));
+        let cli = Cli::try_parse_from(["nac-web", "arcee-auth", "login"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(RootCommand::ArceeAuth(ArceeAuthCli {
+                command: Some(ArceeAuthCommand::Login)
+            }))
+        ));
     }
 
     #[test]
     fn upgrade_command_parses_arguments() {
-        let cli = UpgradeCli::try_parse_from(["nac-web upgrade"]).unwrap();
-        assert!(cli.install_dir.is_none());
-        assert!(!cli.pre_release);
-        assert!(!cli.yes);
+        let cli = Cli::try_parse_from(["nac-web", "upgrade"]).unwrap();
+        let Some(RootCommand::Upgrade(upgrade)) = cli.command else {
+            panic!("expected upgrade command");
+        };
+        assert!(upgrade.install_dir.is_none());
+        assert!(!upgrade.pre_release);
+        assert!(!upgrade.yes);
 
-        let cli = UpgradeCli::try_parse_from([
-            "nac-web upgrade",
+        let cli = Cli::try_parse_from([
+            "nac-web",
+            "upgrade",
             "--install-dir",
             "/tmp/test",
             "--pre-release",
             "-y",
         ])
         .unwrap();
+        let Some(RootCommand::Upgrade(upgrade)) = cli.command else {
+            panic!("expected upgrade command");
+        };
         assert_eq!(
-            cli.install_dir.as_deref(),
+            upgrade.install_dir.as_deref(),
             Some(std::path::Path::new("/tmp/test"))
         );
-        assert!(cli.pre_release);
-        assert!(cli.yes);
+        assert!(upgrade.pre_release);
+        assert!(upgrade.yes);
 
-        let error = UpgradeCli::try_parse_from(["nac-web upgrade", "--yes"])
+        let error = Cli::try_parse_from(["nac-web", "upgrade", "--yes"])
             .err()
             .expect("--yes without --pre-release must fail");
         assert_eq!(
@@ -958,7 +972,7 @@ thread_timeout_secs = 7200
 
     #[test]
     fn upgrade_help_describes_one_shot_prerelease_testing() {
-        let help = UpgradeCli::command().render_long_help().to_string();
+        let help = rendered_help(&["nac-web", "upgrade", "--help"]);
         assert!(help.contains("Explicitly test"), "{help}");
         assert!(help.contains("once"), "{help}");
         assert!(
@@ -1002,9 +1016,11 @@ thread_timeout_secs = 7200
         ] {
             assert!(warning.contains(expected), "missing {expected}: {warning}");
         }
-        let cli =
-            UpgradeCli::try_parse_from(["nac-web upgrade", "--pre-release", "--yes"]).unwrap();
-        assert!(cli.yes);
+        let cli = Cli::try_parse_from(["nac-web", "upgrade", "--pre-release", "--yes"]).unwrap();
+        let Some(RootCommand::Upgrade(upgrade)) = cli.command else {
+            panic!("expected upgrade command");
+        };
+        assert!(upgrade.yes);
     }
 
     #[test]
@@ -1016,35 +1032,31 @@ thread_timeout_secs = 7200
         ];
 
         for (args, expected) in cases {
-            let cli = ServerCli::try_parse_from(*args).unwrap();
-            assert_eq!(cli.bind_addr(), expected.parse().unwrap());
+            assert_eq!(parse_server(args).bind_addr(), expected.parse().unwrap());
         }
     }
 
     #[test]
     fn remote_binding_requires_explicit_acknowledgement() {
-        let guarded = ServerCli::try_parse_from(["nac-web", "--bind", "0.0.0.0:3210"]).unwrap();
+        let guarded = parse_server(&["nac-web", "--bind", "0.0.0.0:3210"]);
         assert_eq!(guarded.bind_policy(), BindPolicy::LoopbackOnly);
 
-        let allowed =
-            ServerCli::try_parse_from(["nac-web", "--bind", "192.168.1.20:3210", "--allow-remote"])
-                .unwrap();
+        let allowed = parse_server(&["nac-web", "--bind", "192.168.1.20:3210", "--allow-remote"]);
         assert_eq!(allowed.bind_policy(), BindPolicy::AllowRemote);
     }
 
     #[test]
     fn server_cli_rejects_bind_with_port() {
-        let error =
-            ServerCli::try_parse_from(["nac-web", "--bind", "127.0.0.1:4321", "--port", "4322"])
-                .err()
-                .expect("explicit --bind and --port must conflict");
+        let error = Cli::try_parse_from(["nac-web", "--bind", "127.0.0.1:4321", "--port", "4322"])
+            .err()
+            .expect("explicit --bind and --port must conflict");
         assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 
     #[test]
     fn server_cli_rejects_ports_outside_supported_range() {
         for port in ["0", "65536"] {
-            let error = ServerCli::try_parse_from(["nac-web", "--port", port])
+            let error = Cli::try_parse_from(["nac-web", "--port", port])
                 .err()
                 .expect("out-of-range port must be rejected");
             assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
@@ -1052,39 +1064,181 @@ thread_timeout_secs = 7200
     }
 
     #[test]
-    fn server_cli_version_reports_build_identity() {
-        let error = ServerCli::try_parse_from(["nac-web", "--version"])
-            .err()
-            .expect("--version must short-circuit parsing");
-        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
-        let rendered = error.to_string();
-        assert_eq!(
-            rendered,
-            format!(
-                "nac-web {} ({})\n",
-                RELEASE_VERSION,
-                env!("NAC_BUILD_REVISION")
-            )
-        );
-
-        // Rust CLI convention: the short flag prints the bare package version.
-        let short = ServerCli::try_parse_from(["nac-web", "-V"])
-            .err()
-            .expect("-V must short-circuit parsing");
-        assert_eq!(short.kind(), clap::error::ErrorKind::DisplayVersion);
-        let short_rendered = short.to_string();
-        assert_eq!(short_rendered, format!("nac-web {RELEASE_VERSION}\n"));
+    fn server_options_cannot_be_mixed_with_commands() {
+        for args in [
+            &["nac-web", "--no-open", "codex-auth"][..],
+            &["nac-web", "codex-auth", "--no-open"],
+            &["nac-web", "--no-open", "arcee-auth"],
+            &["nac-web", "arcee-auth", "--no-open"],
+            &["nac-web", "--no-open", "upgrade"],
+            &["nac-web", "upgrade", "--no-open"],
+            &["nac-web", "--no-open", "__worker"],
+            &["nac-web", "__worker", "--no-open"],
+        ] {
+            assert!(
+                Cli::try_parse_from(args.iter().copied()).is_err(),
+                "{args:?}"
+            );
+        }
     }
 
     #[test]
-    fn server_cli_help_documents_port_contract() {
-        let help = ServerCli::command().render_long_help().to_string();
-        assert!(help.contains("-p, --port <PORT>"), "{help}");
-        assert!(help.contains("127.0.0.1"), "{help}");
-        assert!(help.contains("1-65535"), "{help}");
-        assert!(help.contains("default: 3210"), "{help}");
-        assert!(help.contains("Cannot be used with --bind"), "{help}");
-        assert!(help.contains("--allow-remote"), "{help}");
-        assert!(help.contains("equivalent to the local user"), "{help}");
+    fn root_help_and_version_take_precedence_over_following_commands() {
+        let help = Cli::try_parse_from(["nac-web", "--help", "upgrade"])
+            .err()
+            .expect("--help must short-circuit parsing");
+        assert_eq!(help.kind(), clap::error::ErrorKind::DisplayHelp);
+
+        let version = Cli::try_parse_from(["nac-web", "--version", "upgrade"])
+            .err()
+            .expect("--version must short-circuit parsing");
+        assert_eq!(version.kind(), clap::error::ErrorKind::DisplayVersion);
+    }
+
+    #[test]
+    fn public_version_flags_preserve_build_identity() {
+        for prefix in [
+            &["nac-web"][..],
+            &["nac-web", "codex-auth"],
+            &["nac-web", "arcee-auth"],
+            &["nac-web", "upgrade"],
+        ] {
+            let mut long_args = prefix.to_vec();
+            long_args.push("--version");
+            let error = Cli::try_parse_from(long_args)
+                .err()
+                .expect("--version must short-circuit parsing");
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+            let rendered = error.to_string();
+            assert!(rendered.contains(RELEASE_VERSION), "{rendered}");
+            assert!(rendered.contains(env!("NAC_BUILD_REVISION")), "{rendered}");
+
+            let mut short_args = prefix.to_vec();
+            short_args.push("-V");
+            let short = Cli::try_parse_from(short_args)
+                .err()
+                .expect("-V must short-circuit parsing");
+            assert_eq!(short.kind(), clap::error::ErrorKind::DisplayVersion);
+            let short_rendered = short.to_string();
+            assert!(short_rendered.contains(RELEASE_VERSION), "{short_rendered}");
+            assert!(!short_rendered.contains('('), "{short_rendered}");
+        }
+    }
+
+    #[test]
+    fn version_flags_are_not_added_to_actions_or_internal_worker() {
+        for args in [
+            &["nac-web", "codex-auth", "login", "--version"][..],
+            &["nac-web", "arcee-auth", "status", "--version"],
+            &["nac-web", "__worker", "--version"],
+        ] {
+            let error = Cli::try_parse_from(args.iter().copied())
+                .err()
+                .expect("version must remain unsupported");
+            assert_ne!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+        }
+    }
+
+    #[test]
+    fn root_help_documents_public_command_and_server_contracts() {
+        let help = rendered_help(&["nac-web", "--help"]);
+        for expected in [
+            "With no command, nac-web serves the selected project",
+            "codex-auth",
+            "Manage ChatGPT credentials used by Codex models",
+            "arcee-auth",
+            "Manage Arcee account credentials",
+            "upgrade",
+            "Download and reinstall the latest nac-web release",
+            "-p, --port <PORT>",
+            "127.0.0.1",
+            "1-65535",
+            "default: 3210",
+            "Cannot be used with --bind",
+            "--allow-remote",
+            "equivalent to the local user",
+        ] {
+            assert!(help.contains(expected), "missing {expected:?}:\n{help}");
+        }
+        for hidden in ["__worker", "--session-id"] {
+            assert!(!help.contains(hidden), "unexpected {hidden:?}:\n{help}");
+        }
+        assert!(help.contains("\n  help "));
+
+        for args in [&["nac-web", "help"][..], &["nac-web", "help", "upgrade"]] {
+            let generated_help = Cli::try_parse_from(args.iter().copied())
+                .err()
+                .expect("generated root help command must be available");
+            assert_eq!(generated_help.kind(), clap::error::ErrorKind::DisplayHelp);
+        }
+    }
+
+    #[test]
+    fn auth_group_help_lists_every_action() {
+        for (group, credential) in [
+            ("codex-auth", "ChatGPT credentials"),
+            ("arcee-auth", "Arcee account credentials"),
+        ] {
+            let help = rendered_help(&["nac-web", group, "--help"]);
+            for expected in ["login", "status", "logout", "help", credential] {
+                assert!(help.contains(expected), "missing {expected:?}:\n{help}");
+            }
+
+            for args in [
+                &["nac-web", group, "help"][..],
+                &["nac-web", group, "help", "login"],
+            ] {
+                let generated_help = Cli::try_parse_from(args.iter().copied())
+                    .err()
+                    .expect("generated auth help command must be available");
+                assert_eq!(generated_help.kind(), clap::error::ErrorKind::DisplayHelp);
+            }
+        }
+    }
+
+    #[test]
+    fn auth_action_help_explains_all_six_actions() {
+        for (group, action, summary) in [
+            (
+                "codex-auth",
+                "login",
+                "Sign in to ChatGPT using device code authorization",
+            ),
+            (
+                "codex-auth",
+                "status",
+                "Show stored ChatGPT credential status",
+            ),
+            ("codex-auth", "logout", "Remove stored ChatGPT credentials"),
+            (
+                "arcee-auth",
+                "login",
+                "Sign in to Arcee using device code authorization",
+            ),
+            (
+                "arcee-auth",
+                "status",
+                "Show stored Arcee credential status",
+            ),
+            ("arcee-auth", "logout", "Remove stored Arcee credentials"),
+        ] {
+            let help = rendered_help(&["nac-web", group, action, "--help"]);
+            let usage = format!("Usage: nac-web {group} {action}");
+            assert!(help.contains(&usage), "missing {usage:?}:\n{help}");
+            assert!(help.contains(summary), "missing {summary:?}:\n{help}");
+        }
+    }
+
+    #[test]
+    fn upgrade_help_documents_reinstall_and_install_directory() {
+        let help = rendered_help(&["nac-web", "upgrade", "--help"]);
+        for expected in [
+            "Download and reinstall the latest nac-web release",
+            "--install-dir <INSTALL_DIR>",
+            "$INSTALL_DIR",
+            "current nac-web executable directory",
+        ] {
+            assert!(help.contains(expected), "missing {expected:?}:\n{help}");
+        }
     }
 }

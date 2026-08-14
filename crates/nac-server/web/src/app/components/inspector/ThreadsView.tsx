@@ -544,7 +544,7 @@ function ViewPills({
       {THREAD_DETAIL_VIEWS.map((name) => (
         <div
           key={name}
-          className="flex flex-1 min-w-0 rounded-full bg-elevation-level-3 shadow-2xl overflow-hidden"
+          className="flex min-w-0 rounded-full bg-elevation-level-3 shadow-2xl overflow-hidden"
         >
           <Button
             className="w-full"
