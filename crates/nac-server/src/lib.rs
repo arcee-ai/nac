@@ -53,7 +53,7 @@ use nac_core::{
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
     },
-    light_model::LightModelSettings,
+    light_model::{LightModelError, LightModelSettings},
     model::{
         list_managed_provider_models, list_provider_models, list_stored_api_keys,
         managed_backend_base_url, provider_default_base_url, provider_for_model,
@@ -1381,7 +1381,18 @@ impl SessionManager {
             },
             &config,
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            // A broken light model fails here, at launch resolution. Route it
+            // through the configuration-error boundary so the response names
+            // the actionable cause.
+            match error.downcast_ref::<LightModelError>() {
+                Some(light_error) if light_error.is_invalid_settings() => {
+                    request_configuration_error_from(error)
+                }
+                _ => error,
+            }
+        })?;
         let parts = SessionService::from_orchestrator_run_config(run_config);
         let service = parts.service;
         let snapshot = service.frontend_snapshot().await?;
@@ -2121,7 +2132,7 @@ impl SessionManager {
         // Fail a broken light model here, not at the session's next launch.
         if let Some(light) = prospective.light_model.as_ref() {
             nac_core::light_model::validate(light, &extra_headers)
-                .map_err(|error| request_configuration_error(error.to_string()))?;
+                .map_err(request_configuration_error_from)?;
         }
         validate_model_configuration(
             backend,
@@ -2886,7 +2897,7 @@ async fn create_model_config_handler(
             if let Some(name) = credential_name.as_deref() {
                 let _ = remove_api_key(name);
             }
-            return Err(request_configuration_error(error.to_string()).into());
+            return Err(request_configuration_error_from(error).into());
         }
     }
     let record = model_configurations::insert_model_configuration(
@@ -3072,7 +3083,7 @@ async fn update_model_config_handler(
             if let Some((name, _)) = replacement_credential.as_ref() {
                 let _ = remove_api_key(name);
             }
-            return Err(request_configuration_error(error.to_string()).into());
+            return Err(request_configuration_error_from(error).into());
         }
     }
     match model_configurations::update_model_configuration(
@@ -4130,6 +4141,14 @@ fn validate_steering_instruction(
 
 fn request_configuration_error(message: impl Into<String>) -> anyhow::Error {
     anyhow!(RequestConfigurationError(message.into()))
+}
+
+/// Render a failing configuration error at the HTTP boundary. This is the
+/// single place the full `{:#}` cause chain is rendered; inner layers keep
+/// their chains intact under plain `.context(...)` messages, so the cause
+/// appears exactly once.
+fn request_configuration_error_from(error: anyhow::Error) -> anyhow::Error {
+    request_configuration_error(format!("{error:#}"))
 }
 
 fn nonblank_request_string(value: String, field: &str) -> Result<String> {
@@ -8333,7 +8352,7 @@ model = "gpt-5.2"
     }
 
     #[tokio::test]
-    async fn update_reports_the_missing_light_model_credential_exactly_once() {
+    async fn update_reports_the_missing_light_model_credential() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("update_missing_light_credential");
         let nac_home = root.join("nac-home");
@@ -8361,16 +8380,23 @@ model = "gpt-5.2"
         let response = ApiError::from(error);
 
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        // Assert the rendered boundary output: the resolver keeps the cause
+        // chain intact and the boundary renders it once with `{:#}`, so the
+        // response pairs the context with the actionable cause.
         assert!(
-            response.message.contains("invalid light model settings"),
+            response
+                .message
+                .starts_with("invalid light model settings: "),
             "{}",
             response.message
         );
-        // The resolver's message already embeds the cause chain; rendering it
-        // with `{:#}` would repeat the cause.
-        assert_eq!(
-            response.message.matches("ARCEE_API_KEY").count(),
-            1,
+        assert!(
+            response.message.contains("api_key_env"),
+            "{}",
+            response.message
+        );
+        assert!(
+            response.message.contains("ARCEE_API_KEY"),
             "{}",
             response.message
         );

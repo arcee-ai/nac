@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     managed_backend_base_url, provider_for_model, BackendKind, EffectiveModelSettings, ModelClient,
-    ReasoningEffort,
+    ModelConfigurationError, ReasoningEffort,
 };
 
 /// The optional light worker model of a session. `Some` on a session enables
@@ -27,13 +27,59 @@ pub struct LightModelSettings {
     pub reasoning_effort: Option<ReasoningEffort>,
 }
 
+/// Error resolving a session's light model.
+///
+/// The variant carries the configuration-error semantics, so the shared
+/// runtime path matches on the type instead of type-sniffing an
+/// `anyhow::Error` chain. The inner error keeps its full cause chain under a
+/// plain context; the HTTP boundary renders that chain once with `{:#}`.
+#[derive(Debug)]
+pub enum LightModelError {
+    /// The light-model settings are invalid and the user can repair them.
+    InvalidSettings(anyhow::Error),
+    /// Resolution failed for a reason other than the settings themselves.
+    Other(anyhow::Error),
+}
+
+impl LightModelError {
+    /// Whether the failure is a caller-fixable settings problem.
+    pub fn is_invalid_settings(&self) -> bool {
+        matches!(self, Self::InvalidSettings(_))
+    }
+
+    /// The inner error, with its cause chain intact.
+    pub fn into_inner(self) -> anyhow::Error {
+        match self {
+            Self::InvalidSettings(error) | Self::Other(error) => error,
+        }
+    }
+}
+
+impl std::fmt::Display for LightModelError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidSettings(error) | Self::Other(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for LightModelError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // `Display` already renders the inner error's top context, so the
+        // source is the rest of the chain.
+        match self {
+            Self::InvalidSettings(error) | Self::Other(error) => error.chain().nth(1),
+        }
+    }
+}
+
 /// Resolve the light model at launch or resume, so invalid settings fail
 /// before the first dispatch. The client carries the session's extra
 /// headers, matching how single-mode workers inherit them.
 pub(crate) fn resolve_light_client(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
-) -> Result<ModelClient> {
+) -> std::result::Result<ModelClient, LightModelError> {
     let backend = light
         .backend
         .or_else(|| provider_for_model(light.model.as_str()));
@@ -51,12 +97,17 @@ pub(crate) fn resolve_light_client(
         session_headers.clone(),
     )
     .and_then(ModelClient::from_effective_settings)
-    // Embed the full cause chain in the context message while keeping the
-    // original error as the source for downcasting. Callers must render this
-    // error with `{}` (`to_string`); `{:#}` would print the cause twice.
     .map_err(|error| {
-        let message = format!("invalid light model settings: {error:#}");
-        error.context(message)
+        // Classify at the source, while the typed configuration error is
+        // still visible, and keep the cause chain intact under a plain
+        // context. Callers render the chain with `{:#}` at the boundary.
+        let invalid_settings = error.downcast_ref::<ModelConfigurationError>().is_some();
+        let error = error.context("invalid light model settings");
+        if invalid_settings {
+            LightModelError::InvalidSettings(error)
+        } else {
+            LightModelError::Other(error)
+        }
     })
 }
 
@@ -66,7 +117,9 @@ pub fn validate(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
 ) -> Result<()> {
-    resolve_light_client(light, session_headers).map(|_| ())
+    resolve_light_client(light, session_headers)
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
 }
 
 #[cfg(test)]
@@ -140,16 +193,18 @@ mod tests {
         let error = resolve_light_client(&light, &BTreeMap::new())
             .map(|_| ())
             .unwrap_err();
-        let message = error.to_string();
 
+        // The variant carries the configuration semantics; the chain stays
+        // intact inside the error and the boundary renders it once with
+        // `{:#}`.
+        assert!(error.is_invalid_settings());
+        let rendered = format!("{:#}", anyhow::Error::from(error));
         assert!(
-            error
-                .downcast_ref::<crate::model::ModelConfigurationError>()
-                .is_some()
+            rendered.contains("invalid light model settings"),
+            "{rendered}"
         );
-        assert!(message.contains("invalid light model settings"), "{message}");
-        assert!(message.contains("api_key_env"), "{message}");
-        assert!(message.contains("ARCEE_API_KEY"), "{message}");
+        assert!(rendered.contains("api_key_env"), "{rendered}");
+        assert!(rendered.contains("ARCEE_API_KEY"), "{rendered}");
 
         restore_env("ARCEE_API_KEY", original_arcee);
     }
