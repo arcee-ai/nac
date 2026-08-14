@@ -764,6 +764,8 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
     agent.messages = seeded;
+    // The seeded log rows stand in for this process's own commits.
+    agent.committed_log_len = agent.messages.len() as u64;
 
     agent.append_cancellation_marker().await.unwrap();
 
@@ -788,6 +790,8 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
         user_message("prompt"),
         plain_assistant("answer"),
     ];
+    // The seeded log rows stand in for this process's own commits.
+    clean.committed_log_len = clean.messages.len() as u64;
     clean.append_cancellation_marker().await.unwrap();
     assert_eq!(clean.messages.len(), 4);
     let log = read_log(&store_path, "session");
@@ -832,6 +836,9 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
             ],
         )
         .unwrap();
+    // All three log rows stand in for this process's own commits: the
+    // straggler append at idx 2 completed after the run task was aborted.
+    agent.committed_log_len = 3;
 
     agent.append_cancellation_marker().await.unwrap();
 
@@ -867,6 +874,8 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
     agent.messages = seeded;
+    // The seeded log rows stand in for this process's own commits.
+    agent.committed_log_len = agent.messages.len() as u64;
 
     agent.normalize_dangling_tail().await.unwrap();
 
@@ -889,9 +898,269 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
         user_message("prompt"),
         plain_assistant("answer"),
     ];
+    // The seeded log rows stand in for this process's own commits.
+    clean.committed_log_len = clean.messages.len() as u64;
     clean.normalize_dangling_tail().await.unwrap();
     assert_eq!(clean.messages.len(), 3);
     assert_eq!(read_log(&store_path, "session").len(), 2);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn normalize_dangling_tail_preserves_rows_committed_by_a_peer() {
+    // Shared-store recovery (issue #146): this agent's in-memory transcript
+    // is stale — a peer appended rows to the shared store while it held the
+    // operation lease (the previous run owner crashed). Run-failure
+    // normalization must adopt the durable state, never delete the peer's
+    // committed rows from the stale in-memory length.
+    let store_path = test_store_path("normalize_stale_peer_rows");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+    ];
+    store_snapshot_messages(&store_path, &blob);
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap();
+    assert_eq!(agent.messages.len(), 3);
+
+    // A peer commits its run's rows to the shared store while this agent
+    // stays cached.
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_batch(
+            "session",
+            3,
+            &[user_message("peer prompt"), plain_assistant("peer answer")],
+        )
+        .unwrap();
+
+    agent.normalize_dangling_tail().await.unwrap();
+
+    let log = read_log(&store_path, "session");
+    assert_eq!(
+        log.len(),
+        2,
+        "the peer's committed rows must survive the stale agent's normalization"
+    );
+    assert_eq!(log[0].0, 3);
+    assert!(matches!(log[0].1, Message::User { ref content } if content == "peer prompt"));
+    assert_eq!(log[1].0, 4);
+    assert!(
+        matches!(log[1].1, Message::Assistant { content: Some(ref text), .. } if text == "peer answer")
+    );
+    assert_eq!(
+        agent.messages.len(),
+        5,
+        "the stale agent adopts the durable transcript instead of truncating it"
+    );
+
+    // The next append lands contiguously at the refreshed length.
+    agent
+        .push_and_log_for_test(user_message("next prompt"))
+        .await
+        .unwrap();
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 3);
+    assert_eq!(log[2].0, 5);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn cancellation_marker_preserves_rows_committed_by_a_peer() {
+    // The cancel path shares the stale-vec guard (issue #146): peer rows
+    // are adopted, and the cancellation marker appends after them.
+    let store_path = test_store_path("cancel_stale_peer_rows");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+    ];
+    store_snapshot_messages(&store_path, &blob);
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap();
+
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_batch(
+            "session",
+            3,
+            &[user_message("peer prompt"), plain_assistant("peer answer")],
+        )
+        .unwrap();
+
+    agent
+        .append_cancellation_marker_preserving_tools()
+        .await
+        .unwrap();
+
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 3);
+    assert_eq!(log[0].0, 3);
+    assert!(matches!(log[0].1, Message::User { ref content } if content == "peer prompt"));
+    assert_eq!(log[1].0, 4);
+    assert!(
+        matches!(log[1].1, Message::Assistant { content: Some(ref text), .. } if text == "peer answer")
+    );
+    assert_eq!(log[2].0, 5);
+    assert!(
+        matches!(log[2].1, Message::Assistant { content: Some(ref text), .. } if text == "[run cancelled by user]"),
+        "the cancellation marker must append after the adopted peer rows"
+    );
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn refresh_transcript_under_lease_adopts_peer_appends() {
+    // The admission-time refresh (issue #146): a survivor's cached agent
+    // re-restores from the durable store under the operation lease, so the
+    // run's append cursor matches the durable tail.
+    let store_path = test_store_path("refresh_under_lease");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+    ];
+    store_snapshot_messages(&store_path, &blob);
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap();
+    assert_eq!(agent.messages.len(), 3);
+
+    // A peer commits its run's rows and crashes; the OS releases its lease.
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_batch(
+            "session",
+            3,
+            &[user_message("peer prompt"), plain_assistant("peer answer")],
+        )
+        .unwrap();
+
+    let lease =
+        crate::sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+    let refreshed_blob = agent.refresh_transcript_under_lease(&lease).unwrap();
+    assert!(refreshed_blob.is_none(), "the blob itself was not repaired");
+
+    assert_eq!(agent.messages.len(), 5);
+    assert!(matches!(agent.messages[3], Message::User { ref content } if content == "peer prompt"));
+    assert!(
+        matches!(agent.messages[4], Message::Assistant { content: Some(ref text), .. } if text == "peer answer")
+    );
+
+    // The run's first append lands contiguously at the refreshed length.
+    agent
+        .push_and_log_for_test(user_message("survivor prompt"))
+        .await
+        .unwrap();
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 3);
+    assert_eq!(log[2].0, 5);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn refresh_transcript_under_lease_normalizes_a_crashed_peers_dangling_turn() {
+    // The peer crashed between the assistant tool-call commit and the
+    // tool-result batch: the admission refresh trims the dangling turn from
+    // the log under the lease (crash-resume normalization).
+    let store_path = test_store_path("refresh_under_lease_dangling");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let blob = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("first prompt"),
+        plain_assistant("first answer"),
+    ];
+    store_snapshot_messages(&store_path, &blob);
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent
+        .restore_messages_merging_log_tail(blob, None)
+        .await
+        .unwrap();
+
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_batch(
+            "session",
+            3,
+            &[
+                user_message("peer prompt"),
+                tool_call_assistant(&["call-1"]),
+            ],
+        )
+        .unwrap();
+
+    let lease =
+        crate::sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+    agent.refresh_transcript_under_lease(&lease).unwrap();
+
+    assert_eq!(agent.messages.len(), 4);
+    assert!(matches!(agent.messages[3], Message::User { ref content } if content == "peer prompt"));
+    let log = read_log(&store_path, "session");
+    assert_eq!(
+        log.len(),
+        1,
+        "the crashed peer's dangling tool-call row is trimmed under the lease"
+    );
+    assert_eq!(log[0].0, 3);
+
+    agent
+        .push_and_log_for_test(user_message("survivor prompt"))
+        .await
+        .unwrap();
+    let log = read_log(&store_path, "session");
+    assert_eq!(log[1].0, 4);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[test]
+fn refresh_transcript_under_lease_rejects_a_foreign_lease() {
+    let store_path = test_store_path("refresh_lease_validation");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    crate::store::insert_test_session(&store_path, "other");
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let foreign_lease =
+        crate::sessions::SessionOperationLease::try_acquire(&store_path, "other").unwrap();
+    assert!(
+        agent
+            .refresh_transcript_under_lease(&foreign_lease)
+            .is_err(),
+        "a lease for a different session must not authorize the refresh"
+    );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
