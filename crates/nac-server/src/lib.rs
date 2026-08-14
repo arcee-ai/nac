@@ -1969,6 +1969,15 @@ impl SessionManager {
         if let Some(service) = service {
             // Explicitly destroy the sandbox even if SSE handlers retain the service.
             service.destroy_sandbox().await;
+        } else {
+            // No live service (the server restarted since the session ran):
+            // the container is already ownerless, but the persisted spec
+            // still holds the worktree metadata needed to remove the fork.
+            if let Ok(snapshot) = sessions::load_session(&self.inner.store_path, session_id) {
+                if let Some(worktree) = snapshot.sandbox_spec.and_then(|spec| spec.worktree) {
+                    runtime::cleanup_session_worktree(&worktree);
+                }
+            }
         }
 
         // The revision rows cascade with the session, but the git objects they

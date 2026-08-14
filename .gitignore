@@ -8,3 +8,4 @@ nac.db
 crates/nac-core/src/model/client_local.rs
 # local-only Cursor rules / agent handoff notes
 .cursor/
+.worktrees/

@@ -47,18 +47,14 @@ fn fixture_runtime() -> (crate::tools::ToolRuntime, std::path::PathBuf) {
 async fn podman_runtime(root: &std::path::Path) -> crate::tools::ToolRuntime {
     let sandbox = crate::sandbox::SandboxSession::create(
         crate::sandbox::SandboxSpec {
-            backend: crate::sandbox::SandboxBackendType::Podman,
-            image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![crate::sandbox::MountSpec {
                 host: root.to_path_buf(),
                 guest: std::path::PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
                 read_only: true,
             }],
-            workdir: std::path::PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
             memory_mib: 512,
+            ..Default::default()
         },
         format!("discovery-test-{}", uuid::Uuid::new_v4()),
         true,
@@ -798,8 +794,6 @@ async fn sandbox_discovery_composes_nested_workspace_mounts() {
     fs::write(&config, "single-file mount\n").expect("write single-file mount");
 
     let session = crate::sandbox::SandboxSession::new_for_test(crate::sandbox::SandboxSpec {
-        backend: crate::sandbox::SandboxBackendType::Podman,
-        image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
         mounts: vec![
             crate::sandbox::MountSpec {
                 host: base.clone(),
@@ -822,11 +816,8 @@ async fn sandbox_discovery_composes_nested_workspace_mounts() {
                 read_only: true,
             },
         ],
-        workdir: std::path::PathBuf::from("/workspace"),
-        gpu_devices: Vec::new(),
         shm_size: Some("0".to_string()),
-        cpus: 2,
-        memory_mib: 2048,
+        ..Default::default()
     });
     let mut runtime = crate::tools::test_runtime();
     runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Sandbox(session));
@@ -923,14 +914,9 @@ async fn podman_and_local_backends_return_identical_discovery_pages() {
     }
     let unmounted = crate::sandbox::SandboxSession::create(
         crate::sandbox::SandboxSpec {
-            backend: crate::sandbox::SandboxBackendType::Podman,
-            image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
-            mounts: Vec::new(),
-            workdir: std::path::PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
             memory_mib: 512,
+            ..Default::default()
         },
         format!("discovery-unmounted-test-{}", uuid::Uuid::new_v4()),
         true,

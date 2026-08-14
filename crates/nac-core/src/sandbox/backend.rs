@@ -250,7 +250,7 @@ pub fn select_execution_backend(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::{SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR};
+    use crate::sandbox::SandboxSpec;
     use crate::TEST_ENV_LOCK;
 
     fn local() -> ExecutionBackend {
@@ -260,16 +260,7 @@ mod tests {
     }
 
     fn sandbox() -> SandboxSession {
-        SandboxSession::new_for_test(SandboxSpec {
-            backend: crate::sandbox::SandboxBackendType::Podman,
-            image: DEFAULT_SANDBOX_IMAGE.to_string(),
-            mounts: Vec::new(),
-            workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
-            shm_size: None,
-            cpus: 2,
-            memory_mib: 2048,
-        })
+        SandboxSession::new_for_test(SandboxSpec::default())
     }
 
     fn local_paths() -> PathContext {
