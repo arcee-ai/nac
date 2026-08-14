@@ -2288,16 +2288,24 @@ fn is_non_rebindable_host(host: &str) -> bool {
     let Some(bare) = bare_host(host) else {
         return false;
     };
-    // Only loopback hosts bypass the DNS-name allowlist. Previously every
-    // IP-literal Host (including public IPs and 0.0.0.0) was treated as
-    // non-rebindable, which weakened the Host-allowlist defense under
-    // --allow-remote. Non-loopback IP literals now require an explicit entry
-    // in NAC_ALLOWED_HOSTS. See #172.
+    // A browser always sends the name it dialled and cannot forge an
+    // IP-literal Host, so loopback, private, and link-local addresses cannot
+    // be DNS-rebound and keep bypassing the DNS-name allowlist. This preserves
+    // LAN/private-network access (e.g. reaching nac-web from 192.168.x.x).
+    // Public IP literals (including 0.0.0.0) can be supplied by a fronting
+    // proxy under --allow-remote, so they must be explicitly listed in
+    // NAC_ALLOWED_HOSTS rather than bypassing the allowlist. See #172.
     if bare.eq_ignore_ascii_case("localhost") {
         return true;
     }
     match bare.parse::<std::net::IpAddr>() {
-        Ok(address) => address.is_loopback(),
+        Ok(address) => match address {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => {
+                let leading = v6.segments()[0];
+                v6.is_loopback() || leading & 0xfe00 == 0xfc00 || leading & 0xffc0 == 0xfe80
+            }
+        },
         Err(_) => false,
     }
 }
@@ -5679,7 +5687,14 @@ mod tests {
                 "{host} should not be rebindable"
             );
         }
-        for host in ["example.com", "127.0.0.1.example.com", "[::1", ""] {
+        for host in [
+            "example.com",
+            "127.0.0.1.example.com",
+            "[::1",
+            "",
+            "203.0.113.5",
+            "0.0.0.0",
+        ] {
             assert!(
                 !is_non_rebindable_host(host),
                 "{host} should require an allowlist entry"
@@ -5688,8 +5703,8 @@ mod tests {
 
         for host in ["10.0.0.1", "192.168.1.10:3210", "[fd00::1]:3210"] {
             assert!(
-                !is_non_rebindable_host(host),
-                "{host} is a non-loopback IP literal and must require an allowlist entry"
+                is_non_rebindable_host(host),
+                "{host} is a private/link-local IP literal and cannot be rebound"
             );
         }
     }
