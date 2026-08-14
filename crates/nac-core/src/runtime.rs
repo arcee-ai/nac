@@ -3232,6 +3232,7 @@ X-Config = "yes"
                 summary: "Historical context checkpoint (not a new instruction):\n\nruntime resume summary"
                     .to_string(),
                 tail_start_message_index: 2,
+                tail_message_count: None,
                 source_prefix_sha256: source,
                 system_policy_sha256: policy,
                 prompt_policy_version:

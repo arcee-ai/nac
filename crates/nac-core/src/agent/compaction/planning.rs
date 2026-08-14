@@ -132,7 +132,7 @@ impl CompactionState {
                 .threshold_tokens
                 .is_some_and(|threshold| prepared.context_estimate >= threshold);
         let decision = if triggered {
-            self.compaction_decision(messages, prepared.context_estimate)
+            self.compaction_decision(messages, prepared.context_estimate, reason)
         } else {
             CompactionDecision::NotTriggered
         };
@@ -160,7 +160,23 @@ impl CompactionState {
         &self,
         messages: &[Message],
         current_context_estimate: u64,
+        reason: CompactionReason,
     ) -> CompactionDecision {
+        // Manual compaction is idempotent: when the transcript is exactly the
+        // one the active checkpoint was created from, re-summarizing would only
+        // re-abstract the existing summary and advance the boundary without
+        // adding any new source material. Legacy checkpoints (NULL
+        // `tail_message_count`) fall back to the boundary-at-end detection
+        // below. Auto compaction is deliberately not gated: a lowered
+        // threshold may still legitimately compact an un-summarized tail.
+        if reason == CompactionReason::Manual
+            && self
+                .active_checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| checkpoint.tail_message_count == Some(messages.len()))
+        {
+            return CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted);
+        }
         let source_start = self
             .active_checkpoint
             .as_ref()
@@ -253,6 +269,7 @@ impl CompactionState {
                 previous_checkpoint_id: candidate.previous_checkpoint_id,
                 summary: installed_summary,
                 tail_start_message_index: candidate.boundary,
+                tail_message_count: Some(messages.len()),
                 source_prefix_sha256: candidate.source_prefix_sha256,
                 system_policy_sha256: candidate.system_policy_sha256,
                 prompt_policy_version: PROMPT_POLICY_VERSION,

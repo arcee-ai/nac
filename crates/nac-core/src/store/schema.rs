@@ -1,11 +1,14 @@
 use super::*;
 
-// 13 adds the light-model columns (`light_model_json` on both `sessions` and
+// 14 adds the compaction checkpoint tail message count
+// (`tail_message_count` on `orchestrator_compaction_checkpoints`), which lets
+// manual compaction detect an unchanged transcript and skip re-summarizing.
+// (13 added the light-model columns (`light_model_json` on both `sessions` and
 // `model_configurations`) — `open_runtime_connection` returns early whenever
-// the stored version already equals this one. (12 carries the same schema as
+// the stored version already equals this one. 12 carries the same schema as
 // 11, which added episodes.status; 10 added the ssh_configurations table; 9
 // the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 13;
+const STORE_SCHEMA_VERSION: i64 = 14;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -142,10 +145,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -201,6 +204,14 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         backfill_session_summaries(&transaction)?;
     }
     create_orchestrator_compaction_checkpoints_table(&transaction)?;
+    // NULL on legacy rows: manual compaction falls back to the boundary-at-end
+    // detection for checkpoints created before this column existed.
+    ensure_column(
+        &transaction,
+        "orchestrator_compaction_checkpoints",
+        "tail_message_count",
+        "INTEGER CHECK (tail_message_count IS NULL OR tail_message_count >= 0)",
+    )?;
     create_workspace_revisions_table(&transaction)?;
     // Revisions recorded before revert existed cannot say which transcript
     // prefix they describe; NULL is that "unknown", and a revert simply does
@@ -540,6 +551,8 @@ fn create_orchestrator_compaction_checkpoints_table(conn: &Connection) -> Result
              summary TEXT NOT NULL CHECK (length(trim(summary)) > 0),
              tail_start_message_index INTEGER NOT NULL
                  CHECK (tail_start_message_index >= 0),
+             tail_message_count INTEGER
+                 CHECK (tail_message_count IS NULL OR tail_message_count >= 0),
              source_prefix_sha256 BLOB NOT NULL
                  CHECK (length(source_prefix_sha256) = 32),
              system_policy_sha256 BLOB NOT NULL

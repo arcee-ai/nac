@@ -227,6 +227,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             previous_checkpoint_id: None,
             summary: compaction::installed_summary("prior"),
             tail_start_message_index: 2,
+            tail_message_count: None,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
             prompt_policy_version: compaction::PROMPT_POLICY_VERSION,

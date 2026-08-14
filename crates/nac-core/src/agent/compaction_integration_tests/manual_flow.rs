@@ -227,8 +227,8 @@ async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests
 }
 
 #[tokio::test]
-async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
-    use crate::events::CompactionReason;
+async fn repeated_manual_compaction_without_new_messages_is_already_compacted() {
+    use crate::events::{CompactionReason, CompactionSkipReason};
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
     let unique = std::time::SystemTime::now()
@@ -236,7 +236,7 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
         .unwrap()
         .as_nanos();
     let store_path = std::env::temp_dir()
-        .join(format!("nac_agent_manual_progressive_{unique}"))
+        .join(format!("nac_agent_manual_idempotent_{unique}"))
         .join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
@@ -275,11 +275,26 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
             content: format!("turn 4 {}", "x".repeat(1_000)),
         },
     ];
+    let message_count = agent.messages.len();
 
+    // First manual compaction summarizes the transcript.
     assert!(matches!(
         agent.compact().await.unwrap(),
         CompactionResult::Compacted { .. }
     ));
+
+    // Repeating manual compaction without any new message must not
+    // re-summarize the prior summary into a weaker checkpoint.
+    let result = agent.compact().await.unwrap();
+    let CompactionResult::Unchanged { reason, .. } = result else {
+        panic!("unchanged transcript should skip: {result:?}");
+    };
+    assert_eq!(reason, CompactionSkipReason::AlreadyCompacted);
+
+    // A new message makes manual compaction eligible again.
+    agent.messages.push(Message::User {
+        content: "turn 5".to_string(),
+    });
     assert!(matches!(
         agent.compact().await.unwrap(),
         CompactionResult::Compacted { .. }
@@ -291,8 +306,6 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
     let second_input = second_request["input"].to_string();
     assert!(second_input.contains("first summary"));
     assert!(second_input.contains("turn 3"));
-    assert!(!second_input.contains("turn 2"));
-    assert!(!second_input.contains("turn 4"));
 
     let checkpoints =
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
@@ -301,8 +314,9 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
         )
         .unwrap();
     assert_eq!(checkpoints.len(), 2);
-    assert_eq!(checkpoints[0].tail_start_message_index, 4);
-    assert_eq!(checkpoints[1].tail_start_message_index, 3);
+    assert_eq!(checkpoints[0].tail_message_count, Some(message_count + 1));
+    assert_eq!(checkpoints[1].tail_message_count, Some(message_count));
+    assert!(checkpoints[0].tail_start_message_index > checkpoints[1].tail_start_message_index);
     assert_eq!(
         checkpoints[0].previous_checkpoint_id,
         Some(checkpoints[1].id)
@@ -320,7 +334,7 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
                 }
             ))
             .count(),
-        2
+        3
     );
     assert_eq!(
         events
@@ -334,6 +348,20 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
             ))
             .count(),
         2
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                AgentEvent::OrchestratorCompactionSkipped {
+                    reason: CompactionReason::Manual,
+                    cause: CompactionSkipReason::AlreadyCompacted,
+                    ..
+                }
+            ))
+            .count(),
+        1
     );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

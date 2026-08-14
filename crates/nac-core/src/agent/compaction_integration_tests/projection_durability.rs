@@ -404,6 +404,7 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
             previous_checkpoint_id: None,
             summary: compaction::installed_summary("restored summary"),
             tail_start_message_index: 3,
+            tail_message_count: None,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
             prompt_policy_version: compaction::PROMPT_POLICY_VERSION,

@@ -300,6 +300,7 @@ fn active_end_checkpoint_without_new_messages_is_already_compacted() {
             previous_checkpoint_id: None,
             summary: installed_summary("complete"),
             tail_start_message_index: boundary,
+            tail_message_count: None,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
             prompt_policy_version: PROMPT_POLICY_VERSION,
@@ -319,6 +320,103 @@ fn active_end_checkpoint_without_new_messages_is_already_compacted() {
             .decision,
         CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
     ));
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+#[test]
+fn manual_compaction_with_unchanged_transcript_is_already_compacted() {
+    let path = temp_store_path("manual_idempotent");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![user("old"), assistant("answer"), user("current")];
+    let boundary = 2;
+    let (source, policy) = checkpoint_digests(&messages, boundary);
+    append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("prior summary"),
+            tail_start_message_index: boundary,
+            tail_message_count: Some(messages.len()),
+            source_prefix_sha256: source,
+            system_policy_sha256: policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let mut manual_state = state(path.clone(), None);
+    manual_state
+        .restore_newest_valid_checkpoint(&messages)
+        .unwrap();
+
+    // The transcript is exactly the one the active checkpoint was created
+    // from (boundary < len): manual compaction skips instead of
+    // re-summarizing the prior summary into a weaker checkpoint.
+    assert!(matches!(
+        manual_state
+            .plan(&messages, &[], CompactionReason::Manual)
+            .decision,
+        CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
+    ));
+
+    // Auto compaction is deliberately not gated by the idempotency guard.
+    let mut auto_state = state(path.clone(), Some(1));
+    auto_state
+        .restore_newest_valid_checkpoint(&messages)
+        .unwrap();
+    assert!(matches!(
+        auto_state
+            .plan(&messages, &[], CompactionReason::Auto)
+            .decision,
+        CompactionDecision::Candidate(_)
+    ));
+
+    // A new message makes manual compaction eligible again.
+    let mut appended = messages.clone();
+    appended.push(user("new"));
+    let candidate = candidate(manual_state.plan(&appended, &[], CompactionReason::Manual));
+    assert!(candidate.boundary > boundary);
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+#[test]
+fn legacy_checkpoint_without_tail_count_still_recompacts_mid_transcript() {
+    let path = temp_store_path("manual_legacy");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![user("old"), assistant("answer"), user("current")];
+    let boundary = 2;
+    let (source, policy) = checkpoint_digests(&messages, boundary);
+    append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("prior summary"),
+            tail_start_message_index: boundary,
+            // Legacy row: no recorded message count, so the idempotency
+            // guard cannot fire and planning falls back to the boundary.
+            tail_message_count: None,
+            source_prefix_sha256: source,
+            system_policy_sha256: policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let mut state = state(path.clone(), None);
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+
+    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Manual));
+    assert!(candidate.boundary > boundary);
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
