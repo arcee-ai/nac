@@ -31,8 +31,9 @@ pub struct LightModelSettings {
 ///
 /// The variant carries the configuration-error semantics, so the shared
 /// runtime path matches on the type instead of type-sniffing an
-/// `anyhow::Error` chain. The inner error keeps its full cause chain under a
-/// plain context; the HTTP boundary renders that chain once with `{:#}`.
+/// `anyhow::Error` chain. `Display` renders only the top-level context and
+/// `source` returns the inner error, so the HTTP boundary renders the full
+/// cause chain exactly once with `{:#}`.
 #[derive(Debug)]
 pub enum LightModelError {
     /// The light-model settings are invalid and the user can repair them.
@@ -57,18 +58,19 @@ impl LightModelError {
 
 impl std::fmt::Display for LightModelError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Only the top-level context; the inner error is the `source`, so
+        // `{:#}` walks the cause chain exactly once.
         match self {
-            Self::InvalidSettings(error) | Self::Other(error) => write!(formatter, "{error}"),
+            Self::InvalidSettings(_) => formatter.write_str("invalid light model settings"),
+            Self::Other(_) => formatter.write_str("failed to resolve the light model"),
         }
     }
 }
 
 impl std::error::Error for LightModelError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        // `Display` already renders the inner error's top context, so the
-        // source is the rest of the chain.
         match self {
-            Self::InvalidSettings(error) | Self::Other(error) => error.chain().nth(1),
+            Self::InvalidSettings(error) | Self::Other(error) => Some(error.as_ref()),
         }
     }
 }
@@ -99,11 +101,10 @@ pub(crate) fn resolve_light_client(
     .and_then(ModelClient::from_effective_settings)
     .map_err(|error| {
         // Classify at the source, while the typed configuration error is
-        // still visible, and keep the cause chain intact under a plain
-        // context. Callers render the chain with `{:#}` at the boundary.
-        let invalid_settings = error.downcast_ref::<ModelConfigurationError>().is_some();
-        let error = error.context("invalid light model settings");
-        if invalid_settings {
+        // still visible. The variant's `Display` carries the top-level
+        // context and the inner error stays the `source`, so callers render
+        // the chain once with `{:#}` at the boundary.
+        if error.downcast_ref::<ModelConfigurationError>().is_some() {
             LightModelError::InvalidSettings(error)
         } else {
             LightModelError::Other(error)
@@ -207,5 +208,25 @@ mod tests {
         assert!(rendered.contains("ARCEE_API_KEY"), "{rendered}");
 
         restore_env("ARCEE_API_KEY", original_arcee);
+    }
+
+    #[test]
+    fn alternate_rendering_walks_the_chain_exactly_once() {
+        let inner = || anyhow::anyhow!("leaf diagnostic").context("middle context");
+
+        let rendered = format!(
+            "{:#}",
+            anyhow::Error::from(LightModelError::InvalidSettings(inner()))
+        );
+        assert_eq!(
+            rendered,
+            "invalid light model settings: middle context: leaf diagnostic"
+        );
+
+        let rendered = format!("{:#}", anyhow::Error::from(LightModelError::Other(inner())));
+        assert_eq!(
+            rendered,
+            "failed to resolve the light model: middle context: leaf diagnostic"
+        );
     }
 }

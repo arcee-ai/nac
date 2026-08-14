@@ -1350,7 +1350,9 @@ async fn build_resume_config_from_snapshot(
             LightModelError::InvalidSettings(inner) => inner.context(
                 "stored session light-model settings are invalid; settings repair required",
             ),
-            LightModelError::Other(inner) => inner,
+            // Keep the typed wrapper so its top-level context still names
+            // the light model as the failing component.
+            error @ LightModelError::Other(_) => anyhow::Error::from(error),
         })?
         .map(std::sync::Arc::new);
     let sandbox = if ssh.is_some() {
