@@ -118,3 +118,14 @@ body {
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Opt-out for a rail that scrolls but should not advertise it, where the
+   overflowing content is itself the affordance — a row of filter chips cut off
+   mid-word reads as "there is more this way" without a bar under it. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

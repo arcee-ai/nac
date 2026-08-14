@@ -91,7 +91,7 @@ function SessionSwitcherRow({
       >
         <Button
           variant={ButtonVariant.Ghost}
-          size={ButtonSize.Small}
+          size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
           content={ButtonContent.Icon}
           title="Rename session"
           aria-label={`Rename ${displaySessionTitle(summary)}`}
@@ -101,7 +101,7 @@ function SessionSwitcherRow({
         </Button>
         <Button
           variant={ButtonVariant.GhostDestructive}
-          size={ButtonSize.Small}
+          size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
           content={ButtonContent.Icon}
           title="Delete session"
           aria-label={`Delete ${displaySessionTitle(summary)}`}
@@ -179,11 +179,13 @@ export function SessionSwitcher({
   );
 
   return (
-    <div className={isMobile ? "flex flex-col h-[calc(70dvh)]" : "flex flex-col"}>
+    <div
+      className={isMobile ? "flex flex-col h-[calc(70dvh)]" : "flex flex-col"}
+    >
       {/* The trail is gone on a phone, so the way back to the list (and the
           launch affordance) stay pinned above the switcher. */}
       {isMobile ? (
-        <div className="flex flex-col gap-2 shrink-0 pb-2">
+        <div className="flex flex-col gap-1 shrink-0 pb-2 border-b border-muted">
           <TabButton
             size={TabButtonSize.Large}
             onClick={() => {
@@ -196,6 +198,7 @@ export function SessionSwitcher({
               All Sessions
             </span>
           </TabButton>
+          <Separator />
           <TabButton
             size={TabButtonSize.Large}
             onClick={() => {
@@ -212,8 +215,8 @@ export function SessionSwitcher({
       ) : null}
       <div
         className={cn(
-          "flex flex-col",
-          isMobile && "flex-1 min-h-0 overflow-auto [&>*]:shrink-0",
+          "flex flex-col gap-1",
+          isMobile && "flex-1 min-h-0 overflow-auto [&>*]:shrink-0 pt-2",
         )}
       >
         {sessions.length === 0 ? (
