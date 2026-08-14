@@ -170,11 +170,11 @@ impl PodmanSession {
     }
 
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
-        let result = self.ensure_ready_inner().await;
-        // Whatever happened, setup is no longer in flight; stale activity is
-        // worse than none.
-        super::clear_activity(&self.activity_key);
-        result
+        // The guard clears the activity entry even when this future is
+        // dropped mid-setup (e.g. the client disconnects during a long first
+        // image pull); stale activity is worse than none.
+        let _guard = ActivityGuard(self.activity_key.clone());
+        self.ensure_ready_inner().await
     }
 
     async fn ensure_ready_inner(&self) -> Result<()> {
@@ -238,15 +238,19 @@ impl PodmanSession {
         );
         // Stdout stays inherited so pull progress is still streamed; stderr
         // is captured so registry, auth, and network failures reach the
-        // caller instead of only the terminal.
-        let output = Command::new("podman")
+        // caller instead of only the terminal. `kill_on_drop` keeps a
+        // cancelled launch from leaving the pull running, where a retry
+        // would race a second pull of the same image.
+        let child = Command::new("podman")
             .arg("pull")
             .arg(&self.spec.image)
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
-            .with_context(|| format!("failed to execute 'podman pull {}'", self.spec.image))?
+            .with_context(|| format!("failed to execute 'podman pull {}'", self.spec.image))?;
+        let output = child
             .wait_with_output()
             .await
             .with_context(|| format!("failed to wait for 'podman pull {}'", self.spec.image))?;
@@ -254,7 +258,7 @@ impl PodmanSession {
             return Err(explain_runtime_failure(anyhow!(
                 "failed to pull sandbox image '{}': {}",
                 self.spec.image,
-                first_stderr_line(&output.stderr)
+                pull_error_detail(&output.stderr)
             ))
             .await);
         }
@@ -604,6 +608,37 @@ fn classify_image_exists(code: Option<i32>, stderr: &[u8]) -> ImageCheck {
     }
 }
 
+/// `podman pull` streams progress ("Trying to pull ...", "Copying blob ...")
+/// to stderr along with the real failure, so the first line is rarely the
+/// error. Prefer the `Error:` line podman prints for the failure itself;
+/// fall back to the last non-empty line, which is where podman puts the
+/// reason when it is not `Error:`-prefixed.
+fn pull_error_detail(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    lines
+        .iter()
+        .rev()
+        .find(|line| line.starts_with("Error"))
+        .or_else(|| lines.last())
+        .map(|line| (*line).to_string())
+        .unwrap_or_else(|| "no details reported".to_string())
+}
+
+/// Removes a session's activity-map entry on drop, so cancelling the
+/// `ensure_ready` future mid-setup cannot leak a stale entry.
+struct ActivityGuard(String);
+
+impl Drop for ActivityGuard {
+    fn drop(&mut self) {
+        super::clear_activity(&self.0);
+    }
+}
+
 pub(crate) fn make_sandbox_pidfile() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
@@ -702,6 +737,23 @@ mod tests {
             ImageCheck::Failed(detail) => assert_eq!(detail, "no details reported"),
             _ => panic!("signal termination must be a check failure"),
         }
+    }
+
+    #[test]
+    fn pull_error_detail_prefers_the_error_line_over_progress() {
+        // Pull progress precedes the real failure on stderr; the first line
+        // is a status, not the reason.
+        let stderr = b"Trying to pull registry.example.com/img:latest...\nCopying blob sha256:abc\nError: initializing source: unauthorized\n";
+        assert_eq!(
+            pull_error_detail(stderr),
+            "Error: initializing source: unauthorized"
+        );
+        // Without an `Error:` line, the last non-empty line is the reason.
+        let stderr = b"Trying to pull registry.example.com/img:latest...\nmanifest unknown\n";
+        assert_eq!(pull_error_detail(stderr), "manifest unknown");
+        // Empty stderr still yields a usable message.
+        assert_eq!(pull_error_detail(b""), "no details reported");
+        assert_eq!(pull_error_detail(b"\n  \n"), "no details reported");
     }
 
     #[test]
