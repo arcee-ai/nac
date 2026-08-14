@@ -6,7 +6,7 @@ use std::{
     process,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use nac_core::{
     model::{
@@ -17,21 +17,25 @@ use nac_core::{
         self, ManagedWorkerOptions, ModelOptions, OptionalModelOption, SandboxOptions,
         StoreOptions, WorkerDispatchOptions,
     },
-    upgrade::{run_upgrade, UpgradeRequest},
+    upgrade::{
+        execute_prerelease_upgrade, resolve_prerelease_upgrade, run_upgrade, UpgradeRequest,
+        UpgradeTarget,
+    },
 };
 use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
 
-/// Build identity for `--version`: package version plus the source revision,
-/// so two builds of the mutable `edge` release can be told apart.
+/// Version reported by the binary. Release builds may override the package
+/// version so a prerelease binary exactly matches its immutable RC tag.
+const RELEASE_VERSION: &str = env!("NAC_RELEASE_VERSION");
 const BUILD_VERSION: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
+    env!("NAC_RELEASE_VERSION"),
     " (",
     env!("NAC_BUILD_REVISION"),
     ")"
 );
 
 #[derive(Parser)]
-#[command(name = "nac-web", about = "web dashboard for managing nac sessions", version, long_version = BUILD_VERSION)]
+#[command(name = "nac-web", about = "web dashboard for managing nac sessions", version = RELEASE_VERSION, long_version = BUILD_VERSION)]
 struct ServerCli {
     /// Address to bind (default: localhost only).
     #[arg(long, default_value = "127.0.0.1:3210")]
@@ -106,7 +110,7 @@ impl ServerCli {
 }
 
 #[derive(Parser)]
-#[command(name = "nac-web codex-auth", about = "manage ChatGPT Codex auth", version, long_version = BUILD_VERSION)]
+#[command(name = "nac-web codex-auth", about = "manage ChatGPT Codex auth", version = RELEASE_VERSION, long_version = BUILD_VERSION)]
 struct CodexAuthCli {
     #[command(subcommand)]
     command: Option<CodexAuthCommand>,
@@ -123,7 +127,7 @@ enum CodexAuthCommand {
 }
 
 #[derive(Parser)]
-#[command(name = "nac-web arcee-auth", about = "manage Arcee auth", version, long_version = BUILD_VERSION)]
+#[command(name = "nac-web arcee-auth", about = "manage Arcee auth", version = RELEASE_VERSION, long_version = BUILD_VERSION)]
 struct ArceeAuthCli {
     #[command(subcommand)]
     command: Option<ArceeAuthCommand>,
@@ -143,13 +147,21 @@ enum ArceeAuthCommand {
 #[command(
     name = "nac-web upgrade",
     about = "reinstall the latest nac-web release",
-    version,
+    version = RELEASE_VERSION,
     long_version = BUILD_VERSION
 )]
 struct UpgradeCli {
     /// Install directory to replace (default: current nac-web executable directory)
     #[arg(long)]
     install_dir: Option<PathBuf>,
+
+    /// Explicitly test the newest active candidate once without joining a prerelease channel
+    #[arg(long)]
+    pre_release: bool,
+
+    /// Proceed without an interactive prompt (requires --pre-release)
+    #[arg(short = 'y', long, requires = "pre_release")]
+    yes: bool,
 }
 
 #[derive(Parser)]
@@ -700,14 +712,72 @@ fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
 }
 
 async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
-    run_upgrade(UpgradeRequest {
+    let request = UpgradeRequest {
         install_dir: cli.install_dir,
         executable_path: Some(
             std::env::current_exe().context("failed to determine nac-web executable path")?,
         ),
-        package_version: env!("CARGO_PKG_VERSION").to_string(),
-    })
-    .await
+        package_version: RELEASE_VERSION.to_string(),
+    };
+    if !cli.pre_release {
+        return run_upgrade(request).await;
+    }
+
+    let target = resolve_prerelease_upgrade(request).await?;
+    eprintln!("{}", prerelease_warning(&target));
+    let proceed = if cli.yes {
+        true
+    } else {
+        if !io::stdin().is_terminal() {
+            return Err(anyhow!(
+                "prerelease upgrade requires interactive confirmation; automation must pass --yes"
+            ));
+        }
+        eprint!("Continue with prerelease upgrade? [y/N] ");
+        io::stderr()
+            .flush()
+            .context("failed to flush upgrade prompt")?;
+        let mut input = String::new();
+        let read = io::stdin()
+            .read_line(&mut input)
+            .context("failed to read prerelease upgrade confirmation")?;
+        affirmative_prerelease_consent((read != 0).then_some(input.as_str()))
+    };
+    if !proceed {
+        eprintln!("Prerelease upgrade cancelled.");
+        return Ok(());
+    }
+    execute_prerelease_upgrade(target).await
+}
+
+fn prerelease_warning(target: &UpgradeTarget) -> String {
+    let short_sha = target
+        .commit_sha
+        .get(..7)
+        .unwrap_or(target.commit_sha.as_str());
+    format!(
+        "WARNING: prerelease upgrade requested\n\
+         Current version: {}\n\
+         Target: {} ({})\n\
+         Source: {} ({})\n\
+         Install directory: {}\n\
+         Prerelease builds are unstable and may change local state in ways a stable build cannot roll back.\n\
+         Restart nac-web after the upgrade completes.",
+        target.current_version,
+        target.tag,
+        target.version,
+        target.commit_sha,
+        short_sha,
+        target.install_dir.display()
+    )
+}
+
+fn affirmative_prerelease_consent(input: Option<&str>) -> bool {
+    let Some(input) = input else {
+        return false;
+    };
+    let input = input.trim();
+    input.eq_ignore_ascii_case("y") || input.eq_ignore_ascii_case("yes")
 }
 
 fn load_managed_worker_runtime_config(config_cwd: &std::path::Path) -> Result<runtime::NacConfig> {
@@ -859,13 +929,82 @@ thread_timeout_secs = 7200
     fn upgrade_command_parses_arguments() {
         let cli = UpgradeCli::try_parse_from(["nac-web upgrade"]).unwrap();
         assert!(cli.install_dir.is_none());
+        assert!(!cli.pre_release);
+        assert!(!cli.yes);
 
-        let cli =
-            UpgradeCli::try_parse_from(["nac-web upgrade", "--install-dir", "/tmp/test"]).unwrap();
+        let cli = UpgradeCli::try_parse_from([
+            "nac-web upgrade",
+            "--install-dir",
+            "/tmp/test",
+            "--pre-release",
+            "-y",
+        ])
+        .unwrap();
         assert_eq!(
             cli.install_dir.as_deref(),
             Some(std::path::Path::new("/tmp/test"))
         );
+        assert!(cli.pre_release);
+        assert!(cli.yes);
+
+        let error = UpgradeCli::try_parse_from(["nac-web upgrade", "--yes"])
+            .err()
+            .expect("--yes without --pre-release must fail");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+    }
+
+    #[test]
+    fn upgrade_help_describes_one_shot_prerelease_testing() {
+        let help = UpgradeCli::command().render_long_help().to_string();
+        assert!(help.contains("Explicitly test"), "{help}");
+        assert!(help.contains("once"), "{help}");
+        assert!(
+            help.contains("without joining a prerelease channel"),
+            "{help}"
+        );
+    }
+
+    #[test]
+    fn prerelease_consent_is_fail_closed() {
+        assert!(affirmative_prerelease_consent(Some("y\n")));
+        assert!(affirmative_prerelease_consent(Some("YES\n")));
+        for input in [Some("\n"), None, Some("n"), Some("no"), Some("later")] {
+            assert!(!affirmative_prerelease_consent(input));
+        }
+    }
+
+    #[test]
+    fn prerelease_warning_identifies_exact_target_even_with_yes() {
+        let target = UpgradeTarget {
+            current_version: "0.1.1".to_string(),
+            tag: "v0.1.2-rc.10".to_string(),
+            version: "0.1.2-rc.10".to_string(),
+            commit_sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            install_dir: PathBuf::from("/tmp/nac"),
+            asset_name: "nac-aarch64-apple-darwin.tar.gz".to_string(),
+            uninstall_url: "https://example.test/uninstall.sh".to_string(),
+            install_url: "https://example.test/install.sh".to_string(),
+            asset_base_url: "https://example.test/release".to_string(),
+        };
+        let warning = prerelease_warning(&target);
+        for expected in [
+            "0.1.1",
+            "v0.1.2-rc.10",
+            "0123456789abcdef0123456789abcdef01234567",
+            "0123456",
+            "/tmp/nac",
+            "unstable",
+            "local state",
+            "Restart",
+        ] {
+            assert!(warning.contains(expected), "missing {expected}: {warning}");
+        }
+        let cli =
+            UpgradeCli::try_parse_from(["nac-web upgrade", "--pre-release", "--yes"]).unwrap();
+        assert!(cli.yes);
     }
 
     #[test]
@@ -919,8 +1058,14 @@ thread_timeout_secs = 7200
             .expect("--version must short-circuit parsing");
         assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
         let rendered = error.to_string();
-        assert!(rendered.contains(env!("CARGO_PKG_VERSION")), "{rendered}");
-        assert!(rendered.contains(env!("NAC_BUILD_REVISION")), "{rendered}");
+        assert_eq!(
+            rendered,
+            format!(
+                "nac-web {} ({})\n",
+                RELEASE_VERSION,
+                env!("NAC_BUILD_REVISION")
+            )
+        );
 
         // Rust CLI convention: the short flag prints the bare package version.
         let short = ServerCli::try_parse_from(["nac-web", "-V"])
@@ -928,11 +1073,7 @@ thread_timeout_secs = 7200
             .expect("-V must short-circuit parsing");
         assert_eq!(short.kind(), clap::error::ErrorKind::DisplayVersion);
         let short_rendered = short.to_string();
-        assert!(
-            short_rendered.contains(env!("CARGO_PKG_VERSION")),
-            "{short_rendered}"
-        );
-        assert!(!short_rendered.contains('('), "{short_rendered}");
+        assert_eq!(short_rendered, format!("nac-web {RELEASE_VERSION}\n"));
     }
 
     #[test]

@@ -46,6 +46,26 @@ and navigate to the interface in your browser (default: [http://127.0.0.1:3210](
 nac-web upgrade
 ```
 
+Plain `nac-web upgrade` and the standalone installer remain stable-only. To test
+the newest active release candidate once, resolve it and confirm the warning:
+
+```sh
+nac-web upgrade --pre-release
+```
+
+The warning identifies the exact candidate, source commit, and install
+directory before any installation script runs. Prereleases may be unstable and
+may change local state in ways that a stable build cannot roll back. For
+non-interactive automation, explicit consent is still required:
+
+```sh
+nac-web upgrade --pre-release --yes
+```
+
+`--pre-release` never falls back to a stable release, and it does not enroll the
+installation in a persistent prerelease channel. Restart `nac-web` after an
+upgrade completes.
+
 
 ### Model Provider Authentication
 

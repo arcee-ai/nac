@@ -1568,12 +1568,14 @@ dependencies = [
  "libc",
  "openssh-sftp-client",
  "portable-pty",
+ "parking_lot",
  "rand 0.9.4",
  "reqwest",
  "rmcp",
  "rusqlite",
  "serde",
  "serde_json",
+ "semver",
  "serde_yaml_ng",
  "sha2 0.10.9",
  "tokio",
@@ -1586,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "nac-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",

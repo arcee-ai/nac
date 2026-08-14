@@ -4,9 +4,13 @@
 fn main() {
     println!("cargo:rerun-if-changed=assets");
 
-    // Embed the source revision so `--version` can distinguish two `edge`
-    // builds (the release channel is a mutable tag). Falls back to "unknown"
-    // when building from a source archive without git metadata.
+    println!("cargo:rerun-if-env-changed=NAC_RELEASE_VERSION");
+    let release_version =
+        std::env::var("NAC_RELEASE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").into());
+    println!("cargo:rustc-env=NAC_RELEASE_VERSION={release_version}");
+
+    // Embed the source revision so release builds remain commit-identifiable.
+    // Falls back to "unknown" when building from a source archive without git metadata.
     let revision = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=NAC_BUILD_REVISION={revision}");
 

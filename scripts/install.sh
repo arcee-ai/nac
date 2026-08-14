@@ -4,6 +4,7 @@ set -eu
 REPO="${NAC_REPO:-arcee-ai/nac}"
 BASE_URL="${NAC_BASE_URL:-https://github.com/${REPO}/releases/latest/download}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+RELEASE_LABEL="${NAC_RELEASE_LABEL:-the latest release}"
 
 detect_target() {
   os="$(uname -s)"
@@ -67,7 +68,7 @@ mkdir -p "$INSTALL_DIR"
 tar -xzf "$archive" -C "$tmpdir"
 install -m 755 "$tmpdir/nac-web" "$INSTALL_DIR/nac-web"
 
-echo "downloaded $asset from the latest release"
+echo "downloaded $asset from $RELEASE_LABEL"
 echo "installed nac-web to $INSTALL_DIR/nac-web"
 
 case ":$PATH:" in
