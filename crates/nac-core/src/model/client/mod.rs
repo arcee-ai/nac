@@ -903,7 +903,7 @@ impl ModelClient {
             let response = self
                 .send_with_retry_headers(url, body, apply_headers, secrets)
                 .await?;
-            match read_sse_response(url, response, make_fold()).await {
+            match read_sse_response(url, response, make_fold(), secrets).await {
                 Ok(value) => return Ok(value),
                 Err(error) if error.is_retryable() && !error.has_observable_delta() => {
                     last_error = Some(ModelHttpError {

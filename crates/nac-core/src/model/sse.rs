@@ -86,7 +86,9 @@ pub(super) fn provider_stream_error(code: Option<&str>, message: &str) -> Stream
         )
     });
     // The message is provider-controlled text and can echo request credentials
-    // back; the exact secret is not known here, so mask recognizable shapes.
+    // back; the exact secret is not known at the fold layer, so mask
+    // recognizable shapes here. `SseError::fold` redacts the known secrets on
+    // top of this before the message is persisted.
     let message = redact_credentials(message, &[]);
     if retryable {
         StreamFoldError::retryable(message)
@@ -119,11 +121,11 @@ impl SseError {
         }
     }
 
-    fn fold(url: &str, error: StreamFoldError, observable_delta: bool) -> Self {
+    fn fold(url: &str, error: StreamFoldError, observable_delta: bool, secrets: &[&str]) -> Self {
         // The fold error text is provider-controlled and can echo request
-        // credentials back; the exact secret is not known here, so mask
-        // recognizable shapes before the message is persisted.
-        let message = redact_credentials(&error.message, &[]);
+        // credentials back; mask the known secrets and recognizable shapes
+        // before the message is persisted.
+        let message = redact_credentials(&error.message, secrets);
         Self {
             message: format!("model stream from {url} failed: {message}"),
             retryable: error.retryable,
@@ -183,13 +185,17 @@ pub(super) async fn read_sse_response<F: StreamFold>(
     url: &str,
     response: Response,
     mut fold: F,
+    secrets: &[&str],
 ) -> std::result::Result<Value, SseError> {
     let mut reader = SseReader::new(response);
 
     while let Some(frame) = reader.next_frame().await {
         let frame = frame.map_err(|error| {
             SseError::retryable(
-                format!("model stream from {url} failed: {error:#}"),
+                redact_credentials(
+                    &format!("model stream from {url} failed: {error:#}"),
+                    secrets,
+                ),
                 fold.has_observable_delta(),
             )
         })?;
@@ -203,14 +209,19 @@ pub(super) async fn read_sse_response<F: StreamFold>(
             SseError::permanent(
                 format!(
                     "invalid SSE event from {url}: {}\n{}",
-                    redact_credentials(&frame.data, &[]),
+                    redact_credentials(&frame.data, secrets),
                     error
                 ),
                 fold.has_observable_delta(),
             )
         })?;
         if let Err(error) = fold.push(&event) {
-            return Err(SseError::fold(url, error, fold.has_observable_delta()));
+            return Err(SseError::fold(
+                url,
+                error,
+                fold.has_observable_delta(),
+                secrets,
+            ));
         }
         if fold.is_complete() {
             break;
@@ -219,7 +230,7 @@ pub(super) async fn read_sse_response<F: StreamFold>(
 
     let observable_delta = fold.has_observable_delta();
     fold.finish()
-        .map_err(|error| SseError::fold(url, error, observable_delta))
+        .map_err(|error| SseError::fold(url, error, observable_delta, secrets))
 }
 
 /// One dispatched SSE event. Only the payload is kept: providers that also name
@@ -462,6 +473,72 @@ mod tests {
         assert!(!provider_stream_error(None, "failed").is_retryable());
     }
 
+    /// A provider error that echoes the request's API key back in prose must
+    /// not reach the caller intact: `read_sse_response` redacts the known
+    /// secrets on top of the pattern masking the fold layer applies.
+    #[tokio::test]
+    async fn stream_errors_redact_known_secrets() {
+        const CANARY: &str = "sk-canary-sse-0123456789";
+        let events = format!(
+            "data: {{\"error\":{{\"message\":\"invalid key {CANARY} supplied\",\"type\":\"authentication_error\"}}}}\n\n"
+        );
+        let (response, release_server, server) = held_open_sse_response(&events).await;
+        let result = timeout(
+            Duration::from_secs(1),
+            read_sse_response(
+                "http://redaction.test",
+                response,
+                ChatStreamFold::new(None, "reasoning_content"),
+                &[CANARY],
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let error = result
+            .expect("stream read should complete")
+            .expect_err("a provider error event should fail the stream");
+        let message = error.to_string();
+        assert!(!message.contains(CANARY), "{message}");
+        assert!(
+            message.contains(crate::model::redact::REDACTED),
+            "{message}"
+        );
+        assert!(message.contains("invalid key"), "{message}");
+    }
+
+    /// The same redaction covers SSE frames that fail to parse as JSON: the
+    /// raw frame data is quoted into the error and can carry echoed secrets.
+    #[tokio::test]
+    async fn invalid_sse_event_redacts_known_secrets() {
+        const CANARY: &str = "sk-canary-sse-0123456789";
+        let events = format!("data: not json mentioning {CANARY}\n\n");
+        let (response, release_server, server) = held_open_sse_response(&events).await;
+        let result = timeout(
+            Duration::from_secs(1),
+            read_sse_response(
+                "http://redaction.test",
+                response,
+                ChatStreamFold::new(None, "reasoning_content"),
+                &[CANARY],
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let error = result
+            .expect("stream read should complete")
+            .expect_err("an invalid JSON event should fail the stream");
+        let message = error.to_string();
+        assert!(!message.contains(CANARY), "{message}");
+        assert!(
+            message.contains(crate::model::redact::REDACTED),
+            "{message}"
+        );
+    }
+
     #[tokio::test]
     async fn responses_finish_on_terminal_event_before_body_closes() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -508,6 +585,7 @@ mod tests {
                 "http://responses.test",
                 response,
                 ResponsesStreamFold::new(None),
+                &[],
             ),
         )
         .await;
@@ -581,6 +659,7 @@ mod tests {
                 "http://chat-compatible.test",
                 response,
                 ChatStreamFold::new(None, "reasoning_content"),
+                &[],
             ),
         )
         .await;
@@ -618,6 +697,7 @@ mod tests {
             "http://anthropic.test",
             response,
             AnthropicStreamFold::new(None),
+            &[],
         ));
 
         assert!(
@@ -691,6 +771,7 @@ mod tests {
             "http://responses.benchmark",
             response,
             ResponsesStreamFold::new(None),
+            &[],
         )
         .await
         .unwrap();

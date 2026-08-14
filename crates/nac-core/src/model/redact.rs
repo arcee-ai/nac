@@ -64,10 +64,12 @@ fn header_value_re() -> &'static Regex {
 }
 
 /// A `Bearer`/`Basic` token standing alone in prose, without a header name.
+/// The token is captured separately so the replacement can tell credential
+/// material from an ordinary prose word (see `redact_patterns`).
 fn bearer_token_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=:-]{4,}")
+        Regex::new(r"(?i)\b(bearer|basic)\s+([A-Za-z0-9._~+/=:-]{4,})")
             .expect("valid bearer token regex")
     })
 }
@@ -108,7 +110,18 @@ fn redact_patterns(text: &str) -> String {
         .replace_all(&redacted, "$1: [REDACTED]")
         .into_owned();
     redacted = bearer_token_re()
-        .replace_all(&redacted, "$1 [REDACTED]")
+        .replace_all(&redacted, |captures: &regex::Captures<'_>| {
+            // Ordinary prose ("bearer token", "basic authentication") is all
+            // lowercase letters; credential material carries at least one
+            // digit, uppercase letter, or symbol. Masking a prose word would
+            // hide the actionable part of a provider error.
+            let token = &captures[2];
+            if token.bytes().any(|byte| !byte.is_ascii_lowercase()) {
+                format!("{} [REDACTED]", &captures[1])
+            } else {
+                captures[0].to_string()
+            }
+        })
         .into_owned();
     redacted = url_userinfo_re()
         .replace_all(&redacted, "$1[REDACTED]@")
@@ -226,6 +239,30 @@ mod tests {
         assert!(!redacted.contains("sk-live-abcdef"));
         assert!(redacted.contains("Bearer [REDACTED]"));
         assert!(redacted.contains("was rejected"));
+    }
+
+    #[test]
+    fn bearer_pattern_ignores_ordinary_prose() {
+        for text in [
+            "use a bearer token for authentication",
+            "basic authentication is not supported",
+            "the Bearer scheme expects a token",
+        ] {
+            assert_eq!(redact_credentials(text, &[]), text, "{text}");
+        }
+    }
+
+    #[test]
+    fn bearer_pattern_still_matches_credential_shaped_tokens() {
+        for (text, secret) in [
+            ("token Bearer dXNlcjpwYXNz rejected", "dXNlcjpwYXNz"),
+            ("token Bearer abc123def456 rejected", "abc123def456"),
+            ("token Basic QWxhZGRpbjpvcGVu rejected", "QWxhZGRpbjpvcGVu"),
+        ] {
+            let redacted = redact_credentials(text, &[]);
+            assert!(!redacted.contains(secret), "{text} -> {redacted}");
+            assert!(redacted.contains(REDACTED), "{text} -> {redacted}");
+        }
     }
 
     #[test]

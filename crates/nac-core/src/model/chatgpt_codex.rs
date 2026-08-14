@@ -1004,7 +1004,8 @@ async fn post_codex_json_with_retry_delay(
             // Codex often omits Content-Type on streamed responses. `Accept`
             // and `stream: true` make a missing header an SSE response here.
             let result = if content_type.is_none() || is_event_stream(content_type.as_deref()) {
-                stream_codex_responses(response, url, status, on_delta).await
+                stream_codex_responses(response, url, status, on_delta, &[auth.access.as_str()])
+                    .await
             } else {
                 let response_body = read_codex_body(response, url, status).await?;
                 parse_codex_success_body(
@@ -1086,8 +1087,9 @@ async fn stream_codex_responses(
     url: &str,
     status: StatusCode,
     on_delta: DeltaSink<'_>,
+    secrets: &[&str],
 ) -> std::result::Result<Value, CodexRequestError> {
-    read_sse_response(url, response, ResponsesStreamFold::new(on_delta))
+    read_sse_response(url, response, ResponsesStreamFold::new(on_delta), secrets)
         .await
         .map_err(|error| CodexRequestError {
             status: Some(status),
