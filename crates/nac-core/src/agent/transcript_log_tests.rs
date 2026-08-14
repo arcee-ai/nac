@@ -855,6 +855,58 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
 }
 
 #[tokio::test]
+async fn normalize_dangling_tail_trims_a_straggler_row_the_vec_never_saw() {
+    let store_path = test_store_path("normalize_straggler");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+
+    // A run task dropped while its spawn_blocking append was in flight: the
+    // append still completes, leaving a straggler row the vec never saw.
+    // The at-submission claim in log_transcript_batch keeps the row within
+    // this process's own commits (committed_log_len), so run-failure
+    // normalization must trim it — not mistake it for a peer's committed
+    // row and adopt the unmatched assistant tool-call turn, which the next
+    // provider call would reject.
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent.messages = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+    ];
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_batch(
+            "session",
+            0,
+            &[
+                Message::System {
+                    content: "system".to_string(),
+                },
+                user_message("prompt"),
+                tool_call_assistant(&["call-1"]),
+            ],
+        )
+        .unwrap();
+    // The straggler append at idx 2 was claimed at submission, before the
+    // run task was dropped: it stays within this process's own commits.
+    agent.committed_log_len = 3;
+
+    agent.normalize_dangling_tail().await.unwrap();
+
+    assert_eq!(agent.messages.len(), 2);
+    let log = read_log(&store_path, "session");
+    assert_eq!(
+        log.len(),
+        2,
+        "the straggler row is trimmed from the log, not adopted as a peer row"
+    );
+    assert!(matches!(log[1].1, Message::User { .. }));
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
     let store_path = test_store_path("normalize_failed");
     crate::store::initialize(&store_path).unwrap();
@@ -1065,8 +1117,12 @@ async fn refresh_transcript_under_lease_adopts_peer_appends() {
 
     let lease =
         crate::sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
-    let refreshed_blob = agent.refresh_transcript_under_lease(&lease).unwrap();
-    assert!(refreshed_blob.is_none(), "the blob itself was not repaired");
+    let durable_blob = agent.refresh_transcript_under_lease(&lease).unwrap();
+    assert_eq!(
+        durable_blob.map(|blob| blob.len()),
+        Some(3),
+        "the blob itself was not repaired: the refresh returns it unchanged"
+    );
 
     assert_eq!(agent.messages.len(), 5);
     assert!(matches!(agent.messages[3], Message::User { ref content } if content == "peer prompt"));
