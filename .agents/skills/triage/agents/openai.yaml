@@ -1,0 +1,4 @@
+interface:
+  display_name: "Issue Triage"
+  short_description: "Triage GitHub issues and diagnose root causes"
+  default_prompt: "Use $triage to review and triage this repository's open GitHub issues."
