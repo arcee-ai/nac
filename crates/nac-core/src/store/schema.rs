@@ -1,11 +1,11 @@
 use super::*;
 
-// 13 adds the light-model columns (`light_model_json` on both `sessions` and
-// `model_configurations`) — `open_runtime_connection` returns early whenever
-// the stored version already equals this one. (12 carries the same schema as
-// 11, which added episodes.status; 10 added the ssh_configurations table; 9
-// the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 13;
+// 14 adds the nullable transcript cursor columns used for bounded
+// shared-store admission. Existing sessions remain NULL until their first
+// lease-held bootstrap; new sessions initialize the cursor at creation.
+// `open_runtime_connection` returns early whenever the stored version already
+// equals this one.
+const STORE_SCHEMA_VERSION: i64 = 14;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -142,10 +142,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -172,6 +172,24 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "INTEGER NOT NULL DEFAULT 0 CHECK (visible_message_count >= 0)",
     )?;
     ensure_column(&transaction, "sessions", "last_user_prompt", "TEXT")?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "transcript_snapshot_len",
+        "INTEGER CHECK (transcript_snapshot_len IS NULL OR transcript_snapshot_len >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "transcript_next_idx",
+        "INTEGER CHECK (transcript_next_idx IS NULL OR transcript_next_idx >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "transcript_last_row_id",
+        "INTEGER CHECK (transcript_last_row_id IS NULL OR transcript_last_row_id > 0)",
+    )?;
     // A remote session records its whole connection, not just the host name, so
     // resume reaches the same machine without depending on the ssh config of
     // whoever restarts nac. NULL means "whatever ssh decides", which is what a
@@ -201,6 +219,24 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         backfill_session_summaries(&transaction)?;
     }
     create_orchestrator_compaction_checkpoints_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "orchestrator_compaction_checkpoints",
+        "transcript_snapshot_len",
+        "INTEGER CHECK (transcript_snapshot_len IS NULL OR transcript_snapshot_len >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "orchestrator_compaction_checkpoints",
+        "transcript_next_idx",
+        "INTEGER CHECK (transcript_next_idx IS NULL OR transcript_next_idx >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "orchestrator_compaction_checkpoints",
+        "transcript_last_row_id",
+        "INTEGER CHECK (transcript_last_row_id IS NULL OR transcript_last_row_id > 0)",
+    )?;
     create_workspace_revisions_table(&transaction)?;
     // Revisions recorded before revert existed cannot say which transcript
     // prefix they describe; NULL is that "unknown", and a revert simply does
@@ -296,6 +332,12 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              token_usages_json TEXT,
              config_version INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0),
              run_count INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0),
+             transcript_snapshot_len INTEGER
+                 CHECK (transcript_snapshot_len IS NULL OR transcript_snapshot_len >= 0),
+             transcript_next_idx INTEGER
+                 CHECK (transcript_next_idx IS NULL OR transcript_next_idx >= 0),
+             transcript_last_row_id INTEGER
+                 CHECK (transcript_last_row_id IS NULL OR transcript_last_row_id > 0),
              orchestrator_compaction_threshold INTEGER
                  CHECK (orchestrator_compaction_threshold IS NULL OR
                         (typeof(orchestrator_compaction_threshold) = 'integer' AND
@@ -561,6 +603,12 @@ fn create_orchestrator_compaction_checkpoints_table(conn: &Connection) -> Result
              new_context_estimate INTEGER NOT NULL
                  CHECK (new_context_estimate >= 0
                         AND new_context_estimate <= {max}),
+             transcript_snapshot_len INTEGER
+                 CHECK (transcript_snapshot_len IS NULL OR transcript_snapshot_len >= 0),
+             transcript_next_idx INTEGER
+                 CHECK (transcript_next_idx IS NULL OR transcript_next_idx >= 0),
+             transcript_last_row_id INTEGER
+                 CHECK (transcript_last_row_id IS NULL OR transcript_last_row_id > 0),
              created_at TEXT NOT NULL,
              UNIQUE (session_id, id),
              FOREIGN KEY (session_id, previous_checkpoint_id)

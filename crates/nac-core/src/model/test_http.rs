@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -8,6 +9,7 @@ pub(crate) struct ScriptedResponse {
     status: &'static str,
     headers: BTreeMap<String, String>,
     body: String,
+    gate: Option<Arc<(Mutex<bool>, Condvar)>>,
 }
 
 impl ScriptedResponse {
@@ -16,6 +18,7 @@ impl ScriptedResponse {
             status,
             headers: BTreeMap::new(),
             body: body.into(),
+            gate: None,
         }
     }
 
@@ -28,11 +31,17 @@ impl ScriptedResponse {
             status,
             headers: BTreeMap::from([("Location".to_string(), location.into())]),
             body: body.into(),
+            gate: None,
         }
     }
 
     pub(crate) fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub(crate) fn with_gate(mut self, gate: Arc<(Mutex<bool>, Condvar)>) -> Self {
+        self.gate = Some(gate);
         self
     }
 }
@@ -223,6 +232,17 @@ fn read_request(stream: &mut TcpStream) -> CapturedRequest {
 }
 
 fn write_response(stream: &mut TcpStream, response: &ScriptedResponse) {
+    if let Some(gate) = &response.gate {
+        let (released, notification) = &**gate;
+        let mut released = released
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while !*released {
+            released = notification
+                .wait(released)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
     let extra_headers = response
         .headers
         .iter()

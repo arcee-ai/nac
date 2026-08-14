@@ -560,8 +560,8 @@ mod tests {
         let reloaded = load_session(&store_path, "session-foreign").unwrap();
         assert_eq!(reloaded.messages.len(), 1);
         match &reloaded.messages[0] {
-            Message::User { content } => assert_eq!(content, "updated"),
-            other => panic!("expected updated user message, got {:?}", other),
+            Message::User { content } => assert_eq!(content, "hello"),
+            other => panic!("expected immutable user message, got {other:?}"),
         }
 
         let conn = crate::store::open_connection(&store_path).unwrap();
@@ -987,7 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn config_and_history_writes_preserve_each_other_in_both_orders() {
+    fn config_run_state_and_transcript_writes_preserve_each_other_in_both_orders() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("config_history_isolation");
 
@@ -1022,8 +1022,7 @@ mod tests {
                 BTreeMap::from([("X-Patched".to_string(), "true".to_string())]);
             config_patch.orchestrator_compaction_threshold = Some(8_192);
 
-            let mut completed_run = load_session(&store_path, session_id).unwrap();
-            completed_run.messages = vec![
+            let committed_messages = vec![
                 Message::User {
                     content: "new prompt".to_string(),
                 },
@@ -1037,6 +1036,8 @@ mod tests {
                     reasoning_field: None,
                 },
             ];
+            let mut completed_run = load_session(&store_path, session_id).unwrap();
+            completed_run.messages = committed_messages.clone();
             completed_run.last_response_duration_ms = Some(250);
             completed_run.previous_response_duration_ms = Some(125);
             completed_run.response_durations_ms = Some(vec![Some(250)]);
@@ -1051,10 +1052,17 @@ mod tests {
             })];
             completed_run.updated_at = "2026-01-02 00:00:00.000000000".to_string();
 
+            let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
             if config_first {
                 update_session_config(&store_path, &config_patch).unwrap();
+                writer
+                    .append_batch(session_id, 0, &committed_messages)
+                    .unwrap();
                 save_session(&store_path, &completed_run).unwrap();
             } else {
+                writer
+                    .append_batch(session_id, 0, &committed_messages)
+                    .unwrap();
                 save_session(&store_path, &completed_run).unwrap();
                 update_session_config(&store_path, &config_patch).unwrap();
             }
@@ -1071,15 +1079,18 @@ mod tests {
             );
             assert_eq!(stored.orchestrator_compaction_threshold, Some(8_192));
             assert_eq!(stored.config_version, 1);
-            assert_eq!(stored.messages.len(), 2);
-            assert!(matches!(
-                stored.messages.first(),
-                Some(Message::User { content }) if content == "new prompt"
-            ));
-            assert!(matches!(
-                stored.messages.get(1),
-                Some(Message::Assistant { content: Some(content), .. }) if content == "new response"
-            ));
+            assert!(
+                stored.messages.is_empty(),
+                "the creation-time snapshot remains immutable"
+            );
+            let stored_transcript = writer.read_from(session_id, 0).unwrap();
+            assert_eq!(stored_transcript.len(), 2);
+            assert!(
+                matches!(&stored_transcript[0].1, Message::User { content } if content == "new prompt")
+            );
+            assert!(
+                matches!(&stored_transcript[1].1, Message::Assistant { content: Some(content), .. } if content == "new response")
+            );
             assert_eq!(stored.last_response_duration_ms, Some(250));
             assert_eq!(stored.previous_response_duration_ms, Some(125));
             assert_eq!(stored.response_durations_ms, Some(vec![Some(250)]));

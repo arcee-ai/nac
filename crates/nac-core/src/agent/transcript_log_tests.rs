@@ -742,6 +742,51 @@ async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() 
 }
 
 #[tokio::test]
+async fn restore_rejects_a_same_length_stale_snapshot_cursor() {
+    let store_path = test_store_path("same_length_snapshot_replacement");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let durable = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("durable prompt"),
+        plain_assistant("durable answer"),
+    ];
+    store_snapshot_messages(&store_path, &durable);
+    crate::store::TranscriptLogWriter::new(&store_path)
+        .unwrap()
+        .bootstrap_cursor("session", 3, 3)
+        .unwrap();
+    let stale = vec![
+        Message::System {
+            content: "stored system".to_string(),
+        },
+        user_message("stale prompt"),
+        plain_assistant("stale answer"),
+    ];
+
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let refreshed = agent
+        .restore_messages_merging_log_tail(stale, None)
+        .await
+        .unwrap()
+        .expect("same-length replacement must refresh the stale snapshot");
+
+    assert!(matches!(&refreshed[1], Message::User { content } if content == "durable prompt"));
+    assert!(
+        matches!(&agent.messages[2], Message::Assistant { content: Some(content), .. } if content == "durable answer")
+    );
+    agent
+        .push_and_log_for_test(user_message("next prompt"))
+        .await
+        .unwrap();
+    assert_eq!(read_log(&store_path, "session")[0].0, 3);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     let store_path = test_store_path("cancel");
     crate::store::initialize(&store_path).unwrap();
@@ -763,6 +808,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     ];
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
+    agent.transcript_cursor = writer.current_cursor("session").unwrap();
     agent.messages = seeded;
     // The seeded log rows stand in for this process's own commits.
     agent.committed_log_len = agent.messages.len() as u64;
@@ -832,9 +878,12 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
                     content: "system".to_string(),
                 },
                 user_message("prompt"),
-                tool_call_assistant(&["call-1"]),
             ],
         )
+        .unwrap();
+    agent.transcript_cursor = writer.current_cursor("session").unwrap();
+    writer
+        .append("session", 2, &tool_call_assistant(&["call-1"]))
         .unwrap();
     // All three log rows stand in for this process's own commits: the
     // straggler append at idx 2 completed after the run task was aborted.
@@ -884,9 +933,12 @@ async fn normalize_dangling_tail_trims_a_straggler_row_the_vec_never_saw() {
                     content: "system".to_string(),
                 },
                 user_message("prompt"),
-                tool_call_assistant(&["call-1"]),
             ],
         )
+        .unwrap();
+    agent.transcript_cursor = writer.current_cursor("session").unwrap();
+    writer
+        .append("session", 2, &tool_call_assistant(&["call-1"]))
         .unwrap();
     // The straggler append at idx 2 was claimed at submission, before the
     // run task was dropped: it stays within this process's own commits.
@@ -925,6 +977,7 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
     ];
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
+    agent.transcript_cursor = writer.current_cursor("session").unwrap();
     agent.messages = seeded;
     // The seeded log rows stand in for this process's own commits.
     agent.committed_log_len = agent.messages.len() as u64;
@@ -950,11 +1003,74 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
         user_message("prompt"),
         plain_assistant("answer"),
     ];
+    clean.transcript_cursor = writer.current_cursor("session").unwrap();
     // The seeded log rows stand in for this process's own commits.
     clean.committed_log_len = clean.messages.len() as u64;
     clean.normalize_dangling_tail().await.unwrap();
     assert_eq!(clean.messages.len(), 3);
     assert_eq!(read_log(&store_path, "session").len(), 2);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn terminal_peer_append_preserves_the_active_compaction_checkpoint() {
+    let store_path = test_store_path("terminal_append_checkpoint");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let messages = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+        plain_assistant("answer"),
+    ];
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer.append_batch("session", 0, &messages).unwrap();
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    agent.messages = messages.clone();
+    agent.committed_log_len = messages.len() as u64;
+    agent.transcript_cursor = writer.current_cursor("session").unwrap();
+    agent.compaction = Some(super::compaction::CompactionState::new(
+        store_path.clone(),
+        "session".to_string(),
+        Some(1_000),
+    ));
+    let (source, policy) = super::compaction::checkpoint_digests(&messages, 2);
+    let checkpoint =
+        crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
+            &store_path,
+            &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {
+                session_id: "session".to_string(),
+                previous_checkpoint_id: None,
+                summary: super::compaction::installed_summary("prior context"),
+                tail_start_message_index: 2,
+                source_prefix_sha256: source,
+                system_policy_sha256: policy,
+                prompt_policy_version: super::compaction::PROMPT_POLICY_VERSION,
+                old_context_estimate: 100,
+                summary_prompt_tokens: None,
+                summary_completion_tokens: None,
+                new_context_estimate: 50,
+            },
+        )
+        .unwrap();
+    agent.initialize_compaction_checkpoint().unwrap();
+
+    writer
+        .append("session", 3, &user_message("peer prompt"))
+        .unwrap();
+    agent.reload_transcript_from_store().await.unwrap();
+
+    assert_eq!(agent.messages.len(), 4);
+    assert_eq!(
+        agent
+            .compaction
+            .as_ref()
+            .and_then(|state| state.active_checkpoint_for_test())
+            .map(|active| active.id),
+        Some(checkpoint.id)
+    );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -1119,7 +1235,7 @@ async fn refresh_transcript_under_lease_adopts_peer_appends() {
         crate::sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
     let durable_blob = agent.refresh_transcript_under_lease(&lease).unwrap();
     assert_eq!(
-        durable_blob.map(|blob| blob.len()),
+        durable_blob.map(|refresh| refresh.snapshot_len),
         Some(3),
         "the blob itself was not repaired: the refresh returns it unchanged"
     );

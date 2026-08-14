@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
@@ -120,6 +120,13 @@ fn light_model_prompt_guidance(light: &ModelClient) -> String {
     )
 }
 
+pub(crate) struct TranscriptRefresh {
+    pub snapshot_len: usize,
+    pub common_prefix_len: usize,
+    pub removed: Vec<Message>,
+    pub changed: bool,
+}
+
 pub struct Agent {
     client: ModelClient,
     pub messages: Vec<Message>,
@@ -141,6 +148,10 @@ pub struct Agent {
     /// delete them from stale in-memory boundaries (shared-store recovery,
     /// issue #146).
     committed_log_len: u64,
+    /// Durable snapshot/log cursor adopted by this process. Exact equality
+    /// makes operation admission independent of accumulated transcript size;
+    /// a mismatch is reconciled from the physical log suffix only.
+    transcript_cursor: Option<crate::store::TranscriptCursor>,
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
@@ -375,6 +386,7 @@ impl Agent {
             appended_steering_ids: HashSet::new(),
             transcript_log,
             committed_log_len,
+            transcript_cursor: None,
             transcript_recovery_warning: None,
             last_usage: None,
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
@@ -795,7 +807,7 @@ impl Agent {
         self.committed_log_len = messages.len() as u64;
         self.messages = messages;
         if let Some(compaction) = &mut self.compaction {
-            compaction.reset_for_transcript_replacement();
+            compaction.reset_for_restored_transcript(&self.messages);
         }
     }
 
@@ -823,8 +835,6 @@ impl Agent {
             self.restore_messages(messages);
             return Ok(None);
         };
-        let mut blob_len = messages.len() as u64;
-        let mut blob_len_usize = messages.len();
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
         if let Some(operation_lease) = operation_lease {
@@ -832,12 +842,29 @@ impl Agent {
                 .validate(&sink.store_path, &session_id)
                 .map_err(anyhow::Error::new)?;
         }
-
-        let mut snapshot_messages = messages;
-        let mut refreshed_blob = None;
+        let capture_writer = writer.clone();
+        let capture_session_id = session_id.clone();
+        let (snapshot_messages, initial_tail, captured_cursor) =
+            tokio::task::spawn_blocking(move || {
+                capture_writer.read_consistent_state(&capture_session_id)
+            })
+            .await
+            .map_err(|error| anyhow!("transcript state read task failed: {error}"))??;
+        let mut refreshed_blob = if transcripts_match(&messages, &snapshot_messages)? {
+            None
+        } else {
+            Some(snapshot_messages.clone())
+        };
+        let mut blob_len = snapshot_messages.len() as u64;
+        let mut blob_len_usize = snapshot_messages.len();
+        let mut snapshot_messages = snapshot_messages;
+        let mut initial_tail = Some(initial_tail);
+        self.transcript_cursor = captured_cursor;
         let mut _acquired_operation_lease = None;
         loop {
-            let mut tail = {
+            let mut tail = if let Some(initial_tail) = initial_tail.take() {
+                initial_tail
+            } else {
                 let writer = writer.clone();
                 let session_id = session_id.clone();
                 tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len))
@@ -961,6 +988,14 @@ impl Agent {
                     self.delete_log_tail(merged.len() as u64).await?;
                 }
             }
+            if operation_lease.is_some() || _acquired_operation_lease.is_some() {
+                let snapshot_len = merged.len().min(blob_len_usize) as u64;
+                self.transcript_cursor = Some(writer.bootstrap_cursor(
+                    &session_id,
+                    snapshot_len,
+                    merged.len() as u64,
+                )?);
+            }
             // The durable transcript is now exactly `merged`: every row it
             // holds was committed or adopted by this process.
             self.committed_log_len = merged.len() as u64;
@@ -985,19 +1020,15 @@ impl Agent {
     /// acquired: the lease excludes concurrent peer appends, so the refresh
     /// is race-free and the run starts from the newest durable state.
     ///
-    /// Synchronous counterpart of the async restore: admission is a sync
-    /// path that already performs blocking store reads (config revision,
-    /// compaction checkpoint). Returns the post-refresh durable snapshot
-    /// blob — the rewritten blob when dangling-turn normalization repaired
-    /// it, the unchanged blob otherwise — so the caller can reconcile its
-    /// cached snapshot copy on every admission: a prior admission may have
-    /// repaired the blob and then failed before patching that copy, and the
-    /// retry sees nothing left to repair. `None` only when the session has
-    /// no transcript log.
+    /// The durable cursor is probed first. An exact match does no work
+    /// proportional to transcript history; a mismatch reads only physical
+    /// rows after the newest surviving adopted row. The full restore below is
+    /// retained solely as the one-time legacy bootstrap/corruption repair
+    /// boundary.
     pub fn refresh_transcript_under_lease(
         &mut self,
         operation_lease: &crate::sessions::SessionOperationLease,
-    ) -> Result<Option<Vec<Message>>> {
+    ) -> Result<Option<TranscriptRefresh>> {
         self.transcript_recovery_warning = None;
         let Some(sink) = &self.transcript_log else {
             return Ok(None);
@@ -1007,6 +1038,55 @@ impl Agent {
             .map_err(anyhow::Error::new)?;
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
+
+        if let Some(adopted) = self.transcript_cursor {
+            match writer.reconcile_cursor(&session_id, adopted) {
+                Ok(None) => {
+                    return Ok(Some(TranscriptRefresh {
+                        snapshot_len: usize::try_from(adopted.snapshot_len)
+                            .context("transcript snapshot length overflowed")?,
+                        common_prefix_len: self.messages.len(),
+                        removed: Vec::new(),
+                        changed: false,
+                    }));
+                }
+                Ok(Some(reconciliation))
+                    if incomplete_tool_turn_index(&reconciliation.rows).is_none() =>
+                {
+                    let common_prefix_len = usize::try_from(reconciliation.common_prefix_len)
+                        .context("transcript common-prefix length overflowed")?;
+                    if common_prefix_len > self.messages.len() {
+                        return Err(anyhow!(
+                            "transcript common prefix {common_prefix_len} exceeds local length {}",
+                            self.messages.len()
+                        ));
+                    }
+                    let added_start = common_prefix_len;
+                    let removed = self.messages.split_off(common_prefix_len);
+                    self.messages.extend(reconciliation.rows);
+                    self.committed_log_len = reconciliation.cursor.next_idx;
+                    self.transcript_cursor = Some(reconciliation.cursor);
+                    if let Some(compaction) = &mut self.compaction {
+                        compaction.reconcile_transcript_suffix(
+                            common_prefix_len,
+                            &removed,
+                            &self.messages[added_start..],
+                        );
+                    }
+                    return Ok(Some(TranscriptRefresh {
+                        snapshot_len: usize::try_from(reconciliation.cursor.snapshot_len)
+                            .context("transcript snapshot length overflowed")?,
+                        common_prefix_len,
+                        removed,
+                        changed: true,
+                    }));
+                }
+                Ok(Some(_)) | Err(_) => {
+                    // A malformed/non-contiguous delta or dangling tool turn
+                    // needs the strict lease-held repair path below.
+                }
+            }
+        }
 
         let snapshot_messages = writer.read_snapshot_messages(&session_id)?;
         let blob_len = snapshot_messages.len() as u64;
@@ -1072,59 +1152,113 @@ impl Agent {
             }
         }
 
-        // The durable snapshot blob after the refresh: the rewritten blob
-        // when normalization repaired it, otherwise the unchanged prefix of
-        // the merged transcript.
-        let durable_blob = merged[..merged.len().min(blob_len_usize)].to_vec();
-
-        // The durable transcript is now exactly `merged`.
-        self.committed_log_len = merged.len() as u64;
-        if !transcripts_match(&self.messages, &merged)? {
-            self.restore_messages(merged);
+        let durable_snapshot_len = merged.len().min(blob_len_usize);
+        let common_prefix_len = self
+            .messages
+            .iter()
+            .zip(&merged)
+            .take_while(|(left, right)| {
+                transcripts_match(std::slice::from_ref(*left), std::slice::from_ref(*right))
+                    .unwrap_or(false)
+            })
+            .count();
+        let removed = self.messages.split_off(common_prefix_len);
+        self.messages.truncate(common_prefix_len);
+        self.messages
+            .extend(merged.into_iter().skip(common_prefix_len));
+        self.committed_log_len = self.messages.len() as u64;
+        self.transcript_cursor = Some(writer.bootstrap_cursor(
+            &session_id,
+            durable_snapshot_len as u64,
+            self.committed_log_len,
+        )?);
+        if let Some(compaction) = &mut self.compaction {
+            compaction.reconcile_transcript_suffix(
+                common_prefix_len,
+                &removed,
+                &self.messages[common_prefix_len..],
+            );
         }
-        Ok(Some(durable_blob))
+        Ok(Some(TranscriptRefresh {
+            snapshot_len: durable_snapshot_len,
+            common_prefix_len,
+            removed,
+            changed: true,
+        }))
     }
 
-    /// Stale-transcript guard for the terminal normalization paths (shared
-    /// store, issue #146): `true` when the durable transcript log holds
-    /// rows at or beyond `committed_log_len` — rows this process never
-    /// committed or adopted, so a peer must have appended them while it
-    /// held the operation lease (e.g. the previous run owner crashed and
-    /// this survivor's long-lived agent never re-restored). Deleting the
-    /// log tail from the stale in-memory length would permanently remove
-    /// those committed rows.
+    /// Stale-transcript guard for terminal normalization. Full cursor identity
+    /// detects same-length delete/reappend. The sole mismatch treated as local
+    /// is an append submitted by this Agent but not yet adopted because its
+    /// async task was dropped: that claim advances `committed_log_len` beyond
+    /// the adopted logical end before the blocking transaction starts.
     async fn durable_log_has_rows_past_own_commits(&self) -> Result<bool> {
         let Some(sink) = &self.transcript_log else {
             return Ok(false);
         };
-        let from_idx = self.committed_log_len;
+        let adopted = self.transcript_cursor;
+        let own_end = self.committed_log_len;
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
-        let tail = tokio::task::spawn_blocking(move || writer.read_from(&session_id, from_idx))
+        let current = tokio::task::spawn_blocking(move || writer.current_cursor(&session_id))
             .await
-            .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
-        Ok(!tail.is_empty())
+            .map_err(|error| anyhow!("transcript cursor read task failed: {error}"))??;
+        if current == adopted {
+            return Ok(false);
+        }
+        let is_claimed_local_append = adopted.zip(current).is_some_and(|(adopted, current)| {
+            own_end > adopted.next_idx && current.next_idx <= own_end
+        });
+        Ok(!is_claimed_local_append)
     }
-
-    /// Adopt the durable transcript (snapshot blob ++ log tail) in memory
-    /// without deleting anything: the read-only half of
-    /// [`Agent::refresh_transcript_under_lease`] for the terminal
-    /// normalization paths, which do not hold the operation lease they
-    /// could pass down. A genuine gap is left for the next lease-held
-    /// restore or admission refresh to repair.
+    /// Adopt a peer's durable delta without deleting anything. Cursor-backed
+    /// sessions decode only rows committed since this process's adopted row;
+    /// the full restore is retained only for a legacy uninitialized cursor.
     async fn reload_transcript_from_store(&mut self) -> Result<()> {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
-        let (snapshot, tail) = tokio::task::spawn_blocking(move || {
+        let adopted = self.transcript_cursor;
+        let loaded = tokio::task::spawn_blocking(move || {
+            if let Some(adopted) = adopted {
+                return Ok::<_, anyhow::Error>((
+                    writer.reconcile_cursor(&session_id, adopted)?,
+                    None,
+                ));
+            }
             let snapshot = writer.read_snapshot_messages(&session_id)?;
             let tail = writer.read_from(&session_id, snapshot.len() as u64)?;
-            Ok::<_, anyhow::Error>((snapshot, tail))
+            Ok((None, Some((snapshot, tail))))
         })
         .await
         .map_err(|error| anyhow!("transcript reload task failed: {error}"))??;
+        if let Some(reconciliation) = loaded.0 {
+            let common_prefix_len = usize::try_from(reconciliation.common_prefix_len)
+                .context("transcript common-prefix length overflowed")?;
+            if common_prefix_len > self.messages.len() {
+                return Err(anyhow!(
+                    "transcript common prefix {common_prefix_len} exceeds local length {}",
+                    self.messages.len()
+                ));
+            }
+            let removed = self.messages.split_off(common_prefix_len);
+            self.messages.extend(reconciliation.rows);
+            self.committed_log_len = reconciliation.cursor.next_idx;
+            self.transcript_cursor = Some(reconciliation.cursor);
+            if let Some(compaction) = &mut self.compaction {
+                compaction.reconcile_transcript_suffix(
+                    common_prefix_len,
+                    &removed,
+                    &self.messages[common_prefix_len..],
+                );
+            }
+            return Ok(());
+        }
+        let Some((snapshot, tail)) = loaded.1 else {
+            return Ok(());
+        };
         let mut merged = snapshot;
         let mut expected_idx = merged.len() as u64;
         for (idx, message) in tail {
@@ -1136,7 +1270,7 @@ impl Agent {
             merged.push(message);
             expected_idx = expected_idx
                 .checked_add(1)
-                .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
+                .context("transcript log index overflowed")?;
         }
         self.committed_log_len = merged.len() as u64;
         self.restore_messages(merged);
@@ -1279,19 +1413,22 @@ impl Agent {
         // process's own commits, so terminal normalization trims it instead
         // of mistaking it for a peer's committed row (issue #146).
         let pre_submission_committed = self.committed_log_len;
-        self.committed_log_len = self.committed_log_len.max(start_idx + batch_len);
+        let claimed_end = start_idx
+            .checked_add(batch_len)
+            .context("transcript log index overflowed")?;
+        self.committed_log_len = self.committed_log_len.max(claimed_end);
         let appended = tokio::task::spawn_blocking(move || {
             writer.append_batch(&session_id, start_idx, &messages)
         })
         .await
         .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
         match appended {
-            Ok(()) => {
+            Ok(cursor) => {
+                self.transcript_cursor = Some(cursor);
                 // Live trigger (step 3): emitted after the log commit,
                 // before the vec push — the store-backed read path sees the
                 // rows immediately.
-                self.event_sink
-                    .emit_transcript_appended(start_idx + batch_len);
+                self.event_sink.emit_transcript_appended(claimed_end);
                 Ok(())
             }
             Err(error) => {
@@ -1319,14 +1456,19 @@ impl Agent {
         // log_transcript_batch for why the straggler from a dropped run
         // task must stay within this process's own commits.
         let pre_submission_committed = self.committed_log_len;
-        self.committed_log_len = self.committed_log_len.max(idx + 1);
-        let appended = tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
-            .await
-            .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        let claimed_end = idx
+            .checked_add(1)
+            .context("transcript log index overflowed")?;
+        self.committed_log_len = self.committed_log_len.max(claimed_end);
+        let appended =
+            tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
+                .await
+                .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
         match appended {
-            Ok(()) => {
+            Ok(cursor) => {
+                self.transcript_cursor = Some(cursor);
                 // Live trigger (step 3): see log_transcript_batch.
-                self.event_sink.emit_transcript_appended(idx + 1);
+                self.event_sink.emit_transcript_appended(claimed_end);
                 Ok(())
             }
             Err(error) => {
@@ -1370,18 +1512,31 @@ impl Agent {
         };
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
-        tokio::task::spawn_blocking(move || writer.delete_from(&session_id, from_idx))
-            .await
-            .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
+        let cursor = tokio::task::spawn_blocking(move || {
+            writer.delete_from(&session_id, from_idx)?;
+            writer
+                .current_cursor(&session_id)?
+                .ok_or_else(|| anyhow!("transcript cursor is unavailable after tail deletion"))
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
+        self.transcript_cursor = Some(cursor);
         self.committed_log_len = self.committed_log_len.min(from_idx);
         Ok(())
     }
 
-    /// Restore the newest checkpoint that still validates against the complete
-    /// canonical transcript, falling back through older append-only rows.
-    pub(crate) fn restore_compaction_checkpoint(&mut self) -> Result<()> {
+    /// Adopt a changed peer checkpoint using only its stored transcript cursor.
+    /// Admission never scans or serializes transcript history.
+    pub(crate) fn initialize_compaction_checkpoint(&mut self) -> Result<()> {
         if let Some(compaction) = &mut self.compaction {
             compaction.restore_newest_valid_checkpoint(&self.messages)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_compaction_checkpoint(&mut self) -> Result<()> {
+        if let Some(compaction) = &mut self.compaction {
+            compaction.restore_checkpoint_if_changed(&self.messages)?;
         }
         Ok(())
     }

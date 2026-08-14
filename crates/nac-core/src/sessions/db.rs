@@ -103,9 +103,9 @@ pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
 pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
-    // Existing rows only receive run/history state. Model configuration is
-    // independently revisioned so a stale in-memory service cannot undo a
-    // configuration PATCH from another process.
+    // Existing rows receive only non-transcript run state. Transcript blob,
+    // materialized summaries, cursor metadata, and revisioned model settings
+    // retain their dedicated transactional owners.
     insert_or_replace_session(&tx, path, snapshot)?;
     tx.commit()?;
     Ok(())
@@ -841,18 +841,14 @@ fn insert_or_replace_session(
         .as_ref()
         .map(serialize_sandbox)
         .transpose()?;
-    // NEVER-FOLD (DB-direct transcript workset, step 4): this is the only
-    // writer of messages_json — session creation and the legacy full upsert
-    // below. Run end never rewrites the blob (`save_session_run_state`):
-    // the live transcript is the orchestrator transcript log
-    // (store/transcript.rs) and the blob is the write-once system head ++
-    // legacy prefix. DOWNGRADE CAVEAT (user-accepted): builds older than
-    // the transcript-log workset read only messages_json, so they show this
-    // store's history truncated to the blob — invisibility, not corruption;
-    // the log rows are untouched and a current build reads the full
-    // transcript again.
+    // NEVER-FOLD: `messages_json` and the initial transcript cursor are
+    // created together and remain immutable for an existing session. Growing
+    // history lives in the transcript log; the only later blob mutation is
+    // the lease-held prefix-truncation repair in store/transcript.rs.
     let messages_json = serde_json::to_string(&snapshot.messages)
         .context("failed to serialize session messages")?;
+    let transcript_snapshot_len =
+        i64::try_from(snapshot.messages.len()).context("session transcript length overflowed")?;
     let summary_visible_message_count = i64::try_from(visible_message_count(&snapshot.messages))
         .context("session visible message count overflowed")?;
     let summary_last_user_prompt = last_user_prompt(&snapshot.messages);
@@ -887,18 +883,17 @@ fn insert_or_replace_session(
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
              orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
-             light_model_json
+             light_model_json, transcript_snapshot_len, transcript_next_idx,
+             transcript_last_row_id
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+             ?26, ?27, NULL
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
              store_path = excluded.store_path,
              sandbox_json = excluded.sandbox_json,
-             messages_json = excluded.messages_json,
-             visible_message_count = excluded.visible_message_count,
-             last_user_prompt = excluded.last_user_prompt,
              last_response_duration_ms = excluded.last_response_duration_ms,
              previous_response_duration_ms = excluded.previous_response_duration_ms,
              response_durations_ms_json = excluded.response_durations_ms_json,
@@ -935,6 +930,8 @@ fn insert_or_replace_session(
             stored_ssh_port(snapshot.ssh.as_ref()),
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
             light_model_json,
+            transcript_snapshot_len,
+            transcript_snapshot_len,
         ],
     )?;
     Ok(())

@@ -1437,7 +1437,7 @@ async fn build_resume_config_from_snapshot(
     {
         snapshot.messages = repaired_blob;
     }
-    agent.restore_compaction_checkpoint()?;
+    agent.initialize_compaction_checkpoint()?;
 
     let session_id = snapshot.session_id.clone();
     Ok(OrchestratorRunConfig {

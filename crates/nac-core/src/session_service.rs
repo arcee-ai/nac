@@ -500,7 +500,7 @@ pub struct SessionService {
     workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
-    transcript_recovery_warning: Arc<Option<String>>,
+    transcript_recovery_warning: Arc<StdMutex<Option<String>>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
     /// go through the same connection as the agent's appends, so store-backed
     /// transcript reads serialize against commit points (step 3).
@@ -568,6 +568,7 @@ enum RunOutcome {
     Failed(String, Option<crate::model::TokenUsage>),
 }
 
+#[derive(Debug)]
 enum OperationAdmissionPreparationError {
     ExternalBusy { session_id: String },
     Coordination { message: SessionCoordinationError },
@@ -575,24 +576,17 @@ enum OperationAdmissionPreparationError {
 
 /// Incremental scan of the merged store transcript (snapshot blob ++
 /// transcript log tail). Rebuilt from the restored transcript at service
-/// construction, then advanced over newly appended rows only (append-only ⇒
-/// a scanned position's User-message content never changes: crash/cancel
-/// normalization trims only dangling Assistant/Tool tail messages, and
-/// compaction rewrites the provider view, never the transcript).
-///
-/// The counts survive scan-cursor rewinds (a shrinking merged length) for
-/// the same reason: `truncate_incomplete_tool_turn` trims only
-/// assistant-with-tool-calls and tool-result tails, never User messages and
-/// never visible responses (assistant messages without tool calls). A
-/// straggler row from an aborted append that is scanned in the cancel
-/// window before its `delete_from` would overcount — the same accepted
-/// imprecision class as `user_copies` (step 3).
+/// construction, then advanced over newly appended rows. Cursor reconciliation
+/// can replace a suffix at reused logical indices; `apply_replacement` reverses
+/// every scanned contribution in that suffix before scanning the authoritative
+/// replacement.
 #[derive(Default)]
 struct TranscriptScanCache {
     /// Raw merged-transcript length scanned so far.
     scanned_len: usize,
     user_count: usize,
     last_user_idx: Option<usize>,
+    user_indices: Vec<usize>,
     /// User message content → surviving copy count. Drives steering coverage
     /// with newest-first pairing (see `covered_orchestrator_steering_ids`).
     user_copies: HashMap<String, usize>,
@@ -617,12 +611,49 @@ impl TranscriptScanCache {
     fn scan_message(&mut self, idx: usize, message: &Message) {
         if let Message::User { content } = message {
             self.user_count += 1;
+            self.user_indices.push(idx);
             self.last_user_idx = Some(idx);
             *self.user_copies.entry(content.clone()).or_insert(0) += 1;
         }
         if is_visible_response(message) {
             self.visible_response_count += 1;
         }
+    }
+
+    fn apply_replacement(
+        &mut self,
+        common_prefix_len: usize,
+        removed: &[Message],
+        authoritative: &[Message],
+    ) {
+        if self.scanned_len > common_prefix_len {
+            let scanned_removed = self.scanned_len - common_prefix_len;
+            if removed.len() < scanned_removed {
+                *self = Self::from_transcript(authoritative);
+                return;
+            }
+            for message in removed.iter().take(scanned_removed).rev() {
+                if let Message::User { content } = message {
+                    self.user_count -= 1;
+                    if let Some(copies) = self.user_copies.get_mut(content) {
+                        *copies -= 1;
+                        if *copies == 0 {
+                            self.user_copies.remove(content);
+                        }
+                    }
+                }
+                if is_visible_response(message) {
+                    self.visible_response_count -= 1;
+                }
+            }
+            self.user_indices.retain(|idx| *idx < common_prefix_len);
+            self.last_user_idx = self.user_indices.last().copied();
+            self.scanned_len = common_prefix_len;
+        }
+        for (idx, message) in authoritative.iter().enumerate().skip(self.scanned_len) {
+            self.scan_message(idx, message);
+        }
+        self.scanned_len = authoritative.len();
     }
 }
 
@@ -690,9 +721,9 @@ impl SessionService {
             agent: Arc::new(Mutex::new(run_config.agent)),
             metadata: Arc::new(metadata.clone()),
             workspace_git,
+            transcript_recovery_warning: Arc::new(StdMutex::new(transcript_recovery_warning)),
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
-            transcript_recovery_warning: Arc::new(transcript_recovery_warning),
             transcript_log,
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
@@ -1196,9 +1227,13 @@ impl SessionService {
         metadata.extra_headers.clear();
         let snapshot = SessionFrontendSnapshot {
             metadata,
+            transcript_recovery_warning: self
+                .transcript_recovery_warning
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             messages: loaded_messages.messages,
             message_created_at: loaded_messages.created_at,
-            transcript_recovery_warning: (*self.transcript_recovery_warning).clone(),
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
@@ -1829,13 +1864,26 @@ impl SessionService {
                     message: SessionCoordinationError::local_agent_busy(),
                 }
             })?;
-            let durable_blob = agent
-                .refresh_transcript_under_lease(lease)
-                .map_err(|error| OperationAdmissionPreparationError::Coordination {
+            let refresh = agent.refresh_transcript_under_lease(lease);
+            if let Some(warning) = agent.transcript_recovery_warning().map(str::to_owned) {
+                *self
+                    .transcript_recovery_warning
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(warning);
+            }
+            let refresh =
+                refresh.map_err(|error| OperationAdmissionPreparationError::Coordination {
                     message: SessionCoordinationError::store(format!(
                         "failed to refresh the transcript under the operation lease: {error:#}"
                     )),
                 })?;
+            if let Some(refresh) = refresh.as_ref().filter(|refresh| refresh.changed) {
+                self.lock_transcript_scan().apply_replacement(
+                    refresh.common_prefix_len,
+                    &refresh.removed,
+                    &agent.messages,
+                );
+            }
             agent.restore_compaction_checkpoint().map_err(|error| {
                 OperationAdmissionPreparationError::Coordination {
                     message: SessionCoordinationError::store(format!(
@@ -1844,27 +1892,24 @@ impl SessionService {
                 }
             })?;
             drop(agent);
-            if let Some(durable_blob) = durable_blob {
-                // Reconcile the cached snapshot with the durable blob after
-                // every refresh, not only when this admission rewrote the
-                // blob itself: a prior admission may have repaired the blob
-                // and then failed before patching this copy (e.g. snapshot
-                // lock contention), and the retry sees nothing left to
-                // repair. Without the reconcile, store-backed transcript
-                // reads would serve the discarded dangling turn from the
-                // stale pre-repair snapshot for the rest of the process
-                // lifetime (mirrors the resume path in runtime.rs).
+            if let Some(refresh) = refresh {
+                // The durable blob is immutable after cursor bootstrap except
+                // for lease-held prefix truncation. Reconcile by length only;
+                // no admission clones or reparses the trusted snapshot.
                 let mut snapshot = self.session_snapshot.try_lock().map_err(|_| {
                     OperationAdmissionPreparationError::Coordination {
                         message: SessionCoordinationError::local_agent_busy(),
                     }
                 })?;
                 if let Some(snapshot) = snapshot.as_mut() {
-                    // The blob is write-once and repairs only truncate it,
-                    // so an equal length means this copy is already current.
-                    if snapshot.messages.len() != durable_blob.len() {
-                        snapshot.messages = durable_blob;
+                    if snapshot.messages.len() < refresh.snapshot_len {
+                        return Err(OperationAdmissionPreparationError::Coordination {
+                            message: SessionCoordinationError::store(
+                                "durable transcript snapshot unexpectedly grew".to_string(),
+                            ),
+                        });
                     }
+                    snapshot.messages.truncate(refresh.snapshot_len);
                 }
             }
         }
@@ -3069,6 +3114,53 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn transcript_scan_cache_reverses_replaced_indices() {
+        let assistant = |content: &str| Message::Assistant {
+            content: Some(content.to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
+        };
+        let original = vec![
+            Message::System {
+                content: "system".to_string(),
+            },
+            Message::User {
+                content: "discarded".to_string(),
+            },
+            assistant("discarded response"),
+            Message::User {
+                content: "also discarded".to_string(),
+            },
+        ];
+        let authoritative = vec![
+            original[0].clone(),
+            Message::User {
+                content: "replacement".to_string(),
+            },
+            assistant("replacement response"),
+            Message::User {
+                content: "replacement".to_string(),
+            },
+        ];
+        let mut cache = TranscriptScanCache::from_transcript(&original);
+
+        cache.apply_replacement(1, &original[1..], &authoritative);
+
+        assert_eq!(cache.scanned_len, authoritative.len());
+        assert_eq!(cache.user_count, 2);
+        assert_eq!(cache.user_indices, vec![1, 3]);
+        assert_eq!(cache.last_user_idx, Some(3));
+        assert_eq!(cache.user_copies.get("replacement"), Some(&2));
+        assert!(!cache.user_copies.contains_key("discarded"));
+        assert!(!cache.user_copies.contains_key("also discarded"));
+        assert_eq!(cache.visible_response_count, 1);
+    }
+
+    #[test]
     fn thread_tool_call_names_ignore_malformed_and_non_thread_calls() {
         let messages = mixed_message_history();
         // Names come from `thread` tool calls only; malformed arguments,
@@ -3214,7 +3306,12 @@ pub(super) mod tests {
         connection
             .execute(
                 "UPDATE sessions
-                 SET messages_json = ?1, visible_message_count = ?2, last_user_prompt = ?3
+                 SET messages_json = ?1,
+                     visible_message_count = ?2,
+                     last_user_prompt = ?3,
+                     transcript_snapshot_len = NULL,
+                     transcript_next_idx = NULL,
+                     transcript_last_row_id = NULL
                  WHERE session_id = ?4",
                 rusqlite::params![
                     serde_json::to_string(&messages).unwrap(),
@@ -5359,48 +5456,65 @@ pub(super) mod tests {
     }
 
     /// Peer process for
-    /// `shared_store_recovery_after_peer_crash_preserves_committed_transcript`:
-    /// plays the run owner on a shared store — acquires the session
-    /// operation lease, commits its run's transcript rows, signals
-    /// readiness, then sleeps holding the lease until the parent SIGKILLs it
-    /// (process death releases the lease).
+    /// `shared_store_recovery_after_peer_crash_preserves_committed_transcript`.
+    /// It runs a real `SessionService`: one operation completes, then a second
+    /// operation commits its user row and blocks in the model request while
+    /// retaining the process-wide operation lease. The parent kills the
+    /// process after observing that second request.
     #[test]
     fn shared_store_peer_process_helper() {
         let Some(store_path) = std::env::var_os("NAC_TEST_SHARED_STORE_STORE") else {
             return;
         };
-        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_SHARED_STORE_READY").unwrap());
         let session_id = std::env::var("NAC_TEST_SHARED_STORE_SESSION").unwrap();
-        let _lease =
-            sessions::SessionOperationLease::try_acquire(Path::new(&store_path), &session_id)
+        let base_url = std::env::var("NAC_TEST_SHARED_STORE_BASE_URL").unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let store_path = PathBuf::from(store_path);
+            let snapshot = sessions::load_session(&store_path, &session_id).unwrap();
+            let client = ModelClient::new_for_test_server(base_url);
+            let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+            let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+                agent,
+                client,
+                session: OrchestratorSession::Active {
+                    session_id: session_id.clone(),
+                    store_path,
+                    snapshot,
+                },
+                sandbox_status: "off".to_string(),
+                agents_md_status: "off".to_string(),
+                workspace_display: "/repo".to_string(),
+                workspace_git: Some(GitTarget::local("/repo")),
+                resume_base_cwd: PathBuf::from("/repo"),
+            });
+            let mut events = parts.service.subscribe_events();
+            parts
+                .service
+                .try_submit_prompt("peer completed prompt".to_string())
                 .unwrap();
-        let writer = crate::store::TranscriptLogWriter::new(Path::new(&store_path)).unwrap();
-        writer
-            .append(
-                &session_id,
-                1,
-                &Message::User {
-                    content: "peer prompt".to_string(),
-                },
-            )
-            .unwrap();
-        writer
-            .append(
-                &session_id,
-                2,
-                &Message::Assistant {
-                    content: Some("peer answer".to_string()),
-                    reasoning_text: None,
-                    reasoning_details: None,
-                    tool_calls: None,
-                    duration_ms: None,
-                    model_origin: None,
-                    reasoning_field: None,
-                },
-            )
-            .unwrap();
-        std::fs::write(ready_path, b"ready").unwrap();
-        std::thread::sleep(Duration::from_secs(30));
+            loop {
+                let envelope = events.recv().await.unwrap();
+                if matches!(envelope.event, SessionEvent::RunCompleted { .. }) {
+                    break;
+                }
+                assert!(
+                    !matches!(envelope.event, SessionEvent::RunFailed { .. }),
+                    "peer's first operation failed"
+                );
+            }
+            while parts.service.active_run().is_some() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            parts
+                .service
+                .try_submit_prompt("peer interrupted prompt".to_string())
+                .unwrap();
+            std::future::pending::<()>().await;
+        });
     }
 
     /// Regression test for issue #146 (shared-store recovery): two `nac-web`
@@ -5413,18 +5527,48 @@ pub(super) mod tests {
     #[tokio::test]
     async fn shared_store_recovery_after_peer_crash_preserves_committed_transcript() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+        let response_gate = Arc::new((StdMutex::new(false), std::sync::Condvar::new()));
+        struct KillOnDrop(std::process::Child);
+        impl Drop for KillOnDrop {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
 
         let store_path = test_store_path("shared_store_recovery");
         let session_id = "session-shared-store".to_string();
-        let server = ScriptedServer::start(vec![ScriptedResponse::json(
-            "200 OK",
+        let ready_path = store_path.parent().unwrap().join("peer-ready");
+        let observer_ready_path = ready_path.clone();
+        let completed_response = || {
             serde_json::json!({
                 "status": "completed",
-                "output": [{"type": "message", "content": [{"type": "output_text", "text": "survivor answer"}]}],
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "peer answer"}]}],
                 "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
             })
-            .to_string(),
-        )]);
+            .to_string()
+        };
+        let server = ScriptedServer::start_observed(
+            vec![
+                ScriptedResponse::json("200 OK", completed_response()),
+                ScriptedResponse::json("200 OK", completed_response())
+                    .with_gate(response_gate.clone()),
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "survivor answer"}]}],
+                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                    })
+                    .to_string(),
+                ),
+            ],
+            move |index, _| {
+                if index == 1 {
+                    std::fs::write(&observer_ready_path, b"ready").unwrap();
+                }
+            },
+        );
         let client = ModelClient::new_for_test_server(server.base_url.clone());
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
         let snapshot = sessions::new_snapshot(
@@ -5459,37 +5603,51 @@ pub(super) mod tests {
         // the creation-time transcript (one system message).
         assert_eq!(parts.service.agent.lock().await.messages.len(), 1);
 
-        // The peer process commits its run's transcript rows under the
-        // operation lease, then is killed mid-ownership (SIGKILL): the OS
-        // releases the lease.
-        let ready_path = store_path.parent().unwrap().join("peer-ready");
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "session_service::tests::shared_store_peer_process_helper",
-                "--nocapture",
-            ])
-            .env("NAC_TEST_SHARED_STORE_STORE", &store_path)
-            .env("NAC_TEST_SHARED_STORE_READY", &ready_path)
-            .env("NAC_TEST_SHARED_STORE_SESSION", &session_id)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
+        // The peer completes one real run, begins another, commits its user
+        // row, and blocks in the second model request while holding the lease.
+        let mut child = KillOnDrop(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "session_service::tests::shared_store_peer_process_helper",
+                    "--nocapture",
+                ])
+                .env("NAC_TEST_SHARED_STORE_STORE", &store_path)
+                .env("NAC_TEST_SHARED_STORE_SESSION", &session_id)
+                .env("NAC_TEST_SHARED_STORE_BASE_URL", &server.base_url)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
         for _ in 0..200 {
             if ready_path.exists() {
                 break;
             }
             assert!(
-                child.try_wait().unwrap().is_none(),
+                child.0.try_wait().unwrap().is_none(),
                 "peer helper exited early"
             );
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(ready_path.exists(), "peer helper never became ready");
-        child.kill().unwrap();
-        child.wait().unwrap();
+        let committed_before_kill = crate::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .read_from(&session_id, 0)
+            .unwrap();
+        assert_eq!(committed_before_kill.len(), 3);
+        assert!(matches!(
+            sessions::SessionOperationLease::try_acquire(&store_path, &session_id),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        let (released, notification) = &*response_gate;
+        *released
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        notification.notify_all();
 
         // The survivor accepts the recovery submission. Admission acquires
         // the released lease and must refresh the stale in-memory
@@ -5524,30 +5682,36 @@ pub(super) mod tests {
         }
         assert!(parts.service.active_run().is_none());
 
-        // No committed row was deleted: the peer's prompt and answer, then
-        // the survivor's prompt and answer, are all durable and contiguous.
+        // Every committed row survives: the completed peer run, the
+        // interrupted peer prompt, and the survivor run are contiguous.
         let log = crate::store::TranscriptLogWriter::new(&store_path)
             .unwrap()
             .read_from(&session_id, 0)
             .unwrap();
-        assert_eq!(log.len(), 4);
+        assert_eq!(log.len(), 5);
         assert_eq!(log[0].0, 1);
-        assert!(matches!(log[0].1, Message::User { ref content } if content == "peer prompt"));
+        assert!(
+            matches!(&log[0].1, Message::User { content } if content == "peer completed prompt")
+        );
         assert_eq!(log[1].0, 2);
         assert!(
-            matches!(log[1].1, Message::Assistant { content: Some(ref text), .. } if text == "peer answer")
+            matches!(&log[1].1, Message::Assistant { content: Some(text), .. } if text == "peer answer")
         );
         assert_eq!(log[2].0, 3);
-        assert!(matches!(log[2].1, Message::User { ref content } if content == "survivor prompt"));
-        assert_eq!(log[3].0, 4);
         assert!(
-            matches!(log[3].1, Message::Assistant { content: Some(ref text), .. } if text == "survivor answer")
+            matches!(&log[2].1, Message::User { content } if content == "peer interrupted prompt")
+        );
+        assert_eq!(log[3].0, 4);
+        assert!(matches!(&log[3].1, Message::User { content } if content == "survivor prompt"));
+        assert_eq!(log[4].0, 5);
+        assert!(
+            matches!(&log[4].1, Message::Assistant { content: Some(text), .. } if text == "survivor answer")
         );
 
         // Both processes now serve the same complete transcript: the
         // survivor's in-memory transcript matches the durable store.
         let agent = parts.service.agent.lock().await;
-        assert_eq!(agent.messages.len(), 5);
+        assert_eq!(agent.messages.len(), 6);
         for (idx, message) in &log {
             assert_eq!(
                 serde_json::to_vec(message).unwrap(),
@@ -5555,6 +5719,285 @@ pub(super) mod tests {
             );
         }
         drop(agent);
+
+        let connection = crate::store::open_connection(&store_path).unwrap();
+        let integrity: String = connection
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+        let (visible_count, last_prompt, run_count): (i64, Option<String>, i64) = connection
+            .query_row(
+                "SELECT visible_message_count, last_user_prompt, run_count
+                 FROM sessions WHERE session_id = ?1",
+                rusqlite::params![session_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(visible_count, 5);
+        assert_eq!(last_prompt.as_deref(), Some("survivor prompt"));
+        assert_eq!(run_count, 3);
+        drop(connection);
+
+        async fn restored_service(
+            store_path: &Path,
+            session_id: &str,
+            base_url: String,
+        ) -> SessionServiceParts {
+            let snapshot = sessions::load_session(store_path, session_id).unwrap();
+            let client = ModelClient::new_for_test_server(base_url);
+            let mut agent = test_agent(
+                client.clone(),
+                store_path.to_path_buf(),
+                Some(session_id.to_string()),
+            );
+            agent
+                .restore_messages_merging_log_tail(snapshot.messages.clone(), None)
+                .await
+                .unwrap();
+            SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+                agent,
+                client,
+                session: OrchestratorSession::Active {
+                    session_id: session_id.to_string(),
+                    store_path: store_path.to_path_buf(),
+                    snapshot,
+                },
+                sandbox_status: "off".to_string(),
+                agents_md_status: "off".to_string(),
+                workspace_display: "/repo".to_string(),
+                workspace_git: Some(GitTarget::local("/repo")),
+                resume_base_cwd: PathBuf::from("/repo"),
+            })
+        }
+        let fresh_a = restored_service(&store_path, &session_id, server.base_url.clone()).await;
+        let fresh_b = restored_service(&store_path, &session_id, server.base_url.clone()).await;
+        let survivor_snapshot = parts.service.frontend_snapshot().await.unwrap();
+        let fresh_a_snapshot = fresh_a.service.frontend_snapshot().await.unwrap();
+        let fresh_b_snapshot = fresh_b.service.frontend_snapshot().await.unwrap();
+        assert_eq!(
+            serde_json::to_vec(&fresh_a_snapshot.messages).unwrap(),
+            serde_json::to_vec(&survivor_snapshot.messages).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_vec(&fresh_b_snapshot.messages).unwrap(),
+            serde_json::to_vec(&survivor_snapshot.messages).unwrap()
+        );
+        assert_eq!(server.finish().len(), 3);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+    #[test]
+    fn admission_decodes_only_the_committed_delta() {
+        let (parts, store_path) =
+            test_active_service("bounded_admission_refresh", "bounded-admission-session");
+        let session_id = "bounded-admission-session";
+        let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+        let history = (0..4_096)
+            .map(|index| Message::System {
+                content: format!("history {index}"),
+            })
+            .collect::<Vec<_>>();
+        writer.append_batch(session_id, 1, &history).unwrap();
+
+        drop(parts.service.prepare_operation_admission(None).unwrap());
+        crate::store::reset_test_decode_count();
+        crate::store::reset_test_admission_read_counts();
+        drop(parts.service.prepare_operation_admission(None).unwrap());
+        assert_eq!(
+            crate::store::test_decode_count(),
+            0,
+            "an unchanged admission must not decode transcript rows"
+        );
+        assert_eq!(
+            crate::store::test_admission_read_counts(),
+            (1, 0, 0),
+            "unchanged admission performs one cursor probe, no snapshot read, and selects no rows"
+        );
+
+        let delta = vec![
+            Message::System {
+                content: "delta one".to_string(),
+            },
+            Message::System {
+                content: "delta two".to_string(),
+            },
+            Message::System {
+                content: "delta three".to_string(),
+            },
+        ];
+        writer
+            .append_batch(session_id, 1 + history.len() as u64, &delta)
+            .unwrap();
+        crate::store::reset_test_decode_count();
+        crate::store::reset_test_admission_read_counts();
+        drop(parts.service.prepare_operation_admission(None).unwrap());
+        assert_eq!(
+            crate::store::test_decode_count(),
+            delta.len() + 1,
+            "stale admission may decode only the new rows plus the surviving cursor row"
+        );
+        assert_eq!(
+            crate::store::test_admission_read_counts(),
+            (1, 0, delta.len() + 1),
+            "suffix admission selects only the new rows plus the surviving cursor row"
+        );
+        assert_eq!(
+            parts.service.agent.blocking_lock().messages.len(),
+            1 + history.len() + delta.len()
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn admission_repair_warning_reaches_frontend_snapshot() {
+        let (parts, store_path) =
+            test_active_service("admission_warning", "admission-warning-session");
+        let session_id = "admission-warning-session";
+        let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+        writer
+            .append(
+                session_id,
+                1,
+                &Message::User {
+                    content: "trusted prompt".to_string(),
+                },
+            )
+            .unwrap();
+        let gap_entry = crate::store::encode_transcript_log_entry(
+            3,
+            &Message::System {
+                content: "discard me".to_string(),
+            },
+        )
+        .unwrap();
+        let connection = crate::store::open_connection(&store_path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+                 VALUES (?1, ?2, ?3, 'created')",
+                rusqlite::params![
+                    session_id,
+                    crate::store::ORCHESTRATOR_STEERING_TARGET,
+                    gap_entry
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE sessions
+                 SET transcript_snapshot_len = NULL,
+                     transcript_next_idx = NULL,
+                     transcript_last_row_id = NULL
+                 WHERE session_id = ?1",
+                rusqlite::params![session_id],
+            )
+            .unwrap();
+        drop(connection);
+
+        drop(parts.service.prepare_operation_admission(None).unwrap());
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        let warning = snapshot
+            .transcript_recovery_warning
+            .expect("gap repair must be visible to the frontend");
+        assert!(warning.contains("index 2"), "{warning}");
+        assert!(warning.contains("index 3"), "{warning}");
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn admission_latches_repair_warning_before_a_later_failure() {
+        let (parts, store_path) =
+            test_active_service("admission_warning_failure", "warning-failure-session");
+        let session_id = "warning-failure-session";
+        let dangling = vec![
+            Message::System {
+                content: "system".to_string(),
+            },
+            Message::Assistant {
+                content: None,
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: Some(vec![thread_call("call-1", "{}")]),
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        ];
+        let gap_entry = crate::store::encode_transcript_log_entry(
+            3,
+            &Message::System {
+                content: "discard me".to_string(),
+            },
+        )
+        .unwrap();
+        let connection = crate::store::open_connection(&store_path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions
+                 SET messages_json = ?1,
+                     transcript_snapshot_len = NULL,
+                     transcript_next_idx = NULL,
+                     transcript_last_row_id = NULL
+                 WHERE session_id = ?2",
+                rusqlite::params![serde_json::to_string(&dangling).unwrap(), session_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+                 VALUES (?1, ?2, ?3, 'created')",
+                rusqlite::params![
+                    session_id,
+                    crate::store::ORCHESTRATOR_STEERING_TARGET,
+                    gap_entry
+                ],
+            )
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_snapshot_repair
+                 BEFORE UPDATE OF messages_json ON sessions
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected snapshot repair failure');
+                 END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(parts.service.prepare_operation_admission(None).is_err());
+        let snapshot = parts.service.frontend_snapshot().await.unwrap();
+        let warning = snapshot
+            .transcript_recovery_warning
+            .expect("committed gap repair must remain visible after later failure");
+        assert!(warning.contains("index 2"), "{warning}");
+        assert!(warning.contains("index 3"), "{warning}");
+        assert!(
+            crate::store::TranscriptLogWriter::new(&store_path)
+                .unwrap()
+                .read_from(session_id, 0)
+                .unwrap()
+                .is_empty(),
+            "the warning describes a repair that committed before the injected failure"
+        );
+
+        let connection = crate::store::open_connection(&store_path).unwrap();
+        connection
+            .execute_batch("DROP TRIGGER fail_snapshot_repair")
+            .unwrap();
+        drop(connection);
+        drop(parts.service.prepare_operation_admission(None).unwrap());
+        assert!(
+            parts
+                .service
+                .frontend_snapshot()
+                .await
+                .unwrap()
+                .transcript_recovery_warning
+                .is_some(),
+            "a successful retry must not erase the previously latched warning"
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

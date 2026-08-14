@@ -202,6 +202,9 @@ fn assert_current_schema(conn: &Connection) {
             "summary_prompt_tokens",
             "summary_completion_tokens",
             "new_context_estimate",
+            "transcript_snapshot_len",
+            "transcript_next_idx",
+            "transcript_last_row_id",
             "created_at",
         ]
     );
@@ -855,6 +858,64 @@ fn checkpoint_table_enforces_completed_row_constraints() {
         .unwrap();
     assert_eq!(row_count, 2);
     drop(conn);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v13_store_adds_nullable_transcript_cursor_columns() {
+    let path = temp_store_path("v13_transcript_cursor");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "legacy");
+    let legacy = open_runtime_connection(&path).unwrap();
+    legacy
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN transcript_last_row_id;
+             ALTER TABLE sessions DROP COLUMN transcript_next_idx;
+             ALTER TABLE sessions DROP COLUMN transcript_snapshot_len;
+             ALTER TABLE orchestrator_compaction_checkpoints
+                 DROP COLUMN transcript_last_row_id;
+             ALTER TABLE orchestrator_compaction_checkpoints
+                 DROP COLUMN transcript_next_idx;
+             ALTER TABLE orchestrator_compaction_checkpoints
+                 DROP COLUMN transcript_snapshot_len;",
+        )
+        .unwrap();
+    legacy.pragma_update(None, "user_version", 13).unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = open_runtime_connection(&path).unwrap();
+    let columns = table_columns(&migrated, "sessions");
+    for expected in [
+        "transcript_snapshot_len",
+        "transcript_next_idx",
+        "transcript_last_row_id",
+    ] {
+        assert!(columns.iter().any(|column| column == expected));
+    }
+    let cursor: (Option<i64>, Option<i64>, Option<i64>) = migrated
+        .query_row(
+            "SELECT transcript_snapshot_len, transcript_next_idx,
+                    transcript_last_row_id
+             FROM sessions WHERE session_id = 'legacy'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(cursor, (None, None, None));
+    let checkpoint_columns = table_columns(&migrated, "orchestrator_compaction_checkpoints");
+    for expected in [
+        "transcript_snapshot_len",
+        "transcript_next_idx",
+        "transcript_last_row_id",
+    ] {
+        assert!(
+            checkpoint_columns.iter().any(|column| column == expected),
+            "missing checkpoint cursor column {expected}"
+        );
+    }
+
+    drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

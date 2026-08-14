@@ -7,9 +7,11 @@ use sha2::{Digest, Sha256};
 
 use crate::events::{CompactionReason, CompactionSkipReason};
 use crate::store::orchestrator_compaction::{
-    append_orchestrator_compaction_checkpoint, load_orchestrator_compaction_checkpoints,
+    append_orchestrator_compaction_checkpoint, latest_orchestrator_compaction_checkpoint_id,
+    load_latest_orchestrator_compaction_checkpoint, load_orchestrator_compaction_checkpoints,
     NewOrchestratorCompactionCheckpoint, OrchestratorCompactionCheckpoint,
 };
+use crate::store::transcript_cursor_survives;
 use crate::types::{Message, ToolDefinition};
 
 pub(in crate::agent) const PROMPT_POLICY_VERSION: u32 = 2;
@@ -66,6 +68,8 @@ pub(in crate::agent) struct CompactionState {
     session_id: String,
     threshold_tokens: Option<u64>,
     active_checkpoint: Option<OrchestratorCompactionCheckpoint>,
+    observed_checkpoint_id: Option<Option<i64>>,
+    observed_system_policy_sha256: Option<[u8; 32]>,
     context_sample: Option<ContextSample>,
 }
 
@@ -76,15 +80,22 @@ impl CompactionState {
             session_id,
             threshold_tokens,
             active_checkpoint: None,
+            observed_checkpoint_id: None,
+            observed_system_policy_sha256: None,
             context_sample: None,
         }
     }
 
     pub fn restore_newest_valid_checkpoint(&mut self, messages: &[Message]) -> Result<()> {
-        let restored_checkpoint =
-            load_orchestrator_compaction_checkpoints(&self.store_path, &self.session_id)?
-                .into_iter()
-                .find(|checkpoint| checkpoint_is_valid(checkpoint, messages));
+        let observed_checkpoint_id =
+            latest_orchestrator_compaction_checkpoint_id(&self.store_path, &self.session_id)?;
+        let checkpoints =
+            load_orchestrator_compaction_checkpoints(&self.store_path, &self.session_id)?;
+        self.observed_system_policy_sha256 = Some(system_policy_digest(messages));
+        self.observed_checkpoint_id = Some(observed_checkpoint_id);
+        let restored_checkpoint = checkpoints
+            .into_iter()
+            .find(|checkpoint| checkpoint_is_valid(checkpoint, messages));
         let restored_checkpoint_id = restored_checkpoint.as_ref().map(|checkpoint| checkpoint.id);
         let preserve_context_sample = self.context_sample.as_ref().is_some_and(|sample| {
             sample.checkpoint_id == restored_checkpoint_id
@@ -106,9 +117,62 @@ impl CompactionState {
         Ok(())
     }
 
-    pub fn reset_for_transcript_replacement(&mut self) {
+    pub fn restore_checkpoint_if_changed(&mut self, messages: &[Message]) -> Result<()> {
+        let Some(observed_system_policy_sha256) = self.observed_system_policy_sha256 else {
+            return self.restore_newest_valid_checkpoint(messages);
+        };
+        let (newest, checkpoint) =
+            load_latest_orchestrator_compaction_checkpoint(&self.store_path, &self.session_id)?;
+        if self.observed_checkpoint_id == Some(newest) {
+            return Ok(());
+        }
+        let active_checkpoint = match checkpoint {
+            Some(checkpoint)
+                if checkpoint_is_bounded_valid(
+                    &self.store_path,
+                    &self.session_id,
+                    &checkpoint,
+                    observed_system_policy_sha256,
+                )? =>
+            {
+                Some(checkpoint)
+            }
+            _ => None,
+        };
+        self.observed_checkpoint_id = Some(newest);
+        self.context_sample = None;
+        self.active_checkpoint = active_checkpoint;
+        Ok(())
+    }
+
+    pub fn reset_for_restored_transcript(&mut self, messages: &[Message]) {
         self.active_checkpoint = None;
         self.context_sample = None;
+        self.observed_checkpoint_id = None;
+        self.observed_system_policy_sha256 = Some(system_policy_digest(messages));
+    }
+
+    pub fn reconcile_transcript_suffix(
+        &mut self,
+        common_prefix_len: usize,
+        removed: &[Message],
+        added: &[Message],
+    ) {
+        let policy_changed = removed
+            .iter()
+            .chain(added)
+            .any(|message| matches!(message, Message::System { .. }));
+        if policy_changed {
+            if let Some(policy) = &mut self.observed_system_policy_sha256 {
+                xor_system_policy_suffix(policy, common_prefix_len, removed);
+                xor_system_policy_suffix(policy, common_prefix_len, added);
+            }
+        }
+        if !removed.is_empty() || policy_changed {
+            self.active_checkpoint = None;
+            self.context_sample = None;
+            self.observed_checkpoint_id = None;
+        }
     }
 
     pub fn invalidate_context_sample(&mut self) {
@@ -269,6 +333,7 @@ impl CompactionState {
             .active_checkpoint
             .as_ref()
             .map(|checkpoint| checkpoint.id);
+        self.observed_checkpoint_id = Some(checkpoint_id);
         self.context_sample =
             sampled_projection_digest(messages, messages.len(), self.active_checkpoint.as_ref())
                 .map(|sampled_projection_sha256| ContextSample {
@@ -368,6 +433,11 @@ impl CompactionState {
     #[cfg(test)]
     pub fn active_checkpoint_for_test(&self) -> Option<&OrchestratorCompactionCheckpoint> {
         self.active_checkpoint.as_ref()
+    }
+
+    #[cfg(test)]
+    pub fn observed_system_policy_for_test(&self) -> Option<[u8; 32]> {
+        self.observed_system_policy_sha256
     }
 }
 
@@ -530,12 +600,54 @@ fn checkpoint_is_valid(
         && checkpoint.system_policy_sha256 == system_policy_digest(messages)
 }
 
+fn checkpoint_is_bounded_valid(
+    store_path: &std::path::Path,
+    session_id: &str,
+    checkpoint: &OrchestratorCompactionCheckpoint,
+    observed_system_policy_sha256: [u8; 32],
+) -> Result<bool> {
+    let Some(cursor) = checkpoint.transcript_cursor else {
+        return Ok(false);
+    };
+    let boundary = u64::try_from(checkpoint.tail_start_message_index)?;
+    Ok(checkpoint.prompt_policy_version == PROMPT_POLICY_VERSION
+        && boundary <= cursor.next_idx
+        && checkpoint
+            .summary
+            .strip_prefix(HISTORICAL_CONTEXT_PREFIX)
+            .is_some_and(|summary| !summary.trim().is_empty())
+        && checkpoint.system_policy_sha256 == observed_system_policy_sha256
+        && transcript_cursor_survives(store_path, session_id, cursor)?)
+}
+
 #[cfg(test)]
 pub(crate) fn checkpoint_digests(messages: &[Message], boundary: usize) -> ([u8; 32], [u8; 32]) {
     (
         source_prefix_digest(messages, boundary),
         system_policy_digest(messages),
     )
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_POLICY_DIGEST_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TEST_HASHED_MESSAGE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_hashed_message_count() {
+    TEST_POLICY_DIGEST_COUNT.with(|count| count.set(0));
+    TEST_HASHED_MESSAGE_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_hashed_message_count() -> usize {
+    TEST_HASHED_MESSAGE_COUNT.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn test_policy_digest_count() -> usize {
+    TEST_POLICY_DIGEST_COUNT.with(std::cell::Cell::get)
 }
 
 fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
@@ -552,18 +664,32 @@ fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
 }
 
 fn system_policy_digest(messages: &[Message]) -> [u8; 32] {
+    #[cfg(test)]
+    TEST_POLICY_DIGEST_COUNT.with(|count| count.set(count.get() + 1));
     let mut hasher = Sha256::new();
-    hasher.update(b"nac-orchestrator-compaction-system-policy-v2\0");
+    hasher.update(b"nac-orchestrator-compaction-system-policy-v3\0");
     hasher.update(PROMPT_POLICY_VERSION.to_be_bytes());
     update_bytes(&mut hasher, NAC_COMPACTION_PROMPT.as_bytes());
     update_bytes(&mut hasher, HISTORICAL_CONTEXT_PREFIX.as_bytes());
-    for message in messages
-        .iter()
-        .filter(|message| matches!(message, Message::System { .. }))
-    {
+    let mut digest: [u8; 32] = hasher.finalize().into();
+    xor_system_policy_suffix(&mut digest, 0, messages);
+    digest
+}
+
+fn xor_system_policy_suffix(digest: &mut [u8; 32], start_idx: usize, messages: &[Message]) {
+    for (offset, message) in messages.iter().enumerate() {
+        if !matches!(message, Message::System { .. }) {
+            continue;
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(b"nac-orchestrator-compaction-system-message-v1\0");
+        hasher.update((start_idx.saturating_add(offset) as u64).to_be_bytes());
         update_serialized(&mut hasher, message);
+        let contribution: [u8; 32] = hasher.finalize().into();
+        for (state, contribution) in digest.iter_mut().zip(contribution) {
+            *state ^= contribution;
+        }
     }
-    hasher.finalize().into()
 }
 
 fn estimate_non_source_tokens(messages: &[Message]) -> u64 {
@@ -598,6 +724,8 @@ pub(super) fn estimate_tool_tokens(tools: &[ToolDefinition]) -> u64 {
 }
 
 fn update_serialized<T: Serialize>(hasher: &mut Sha256, value: &T) {
+    #[cfg(test)]
+    TEST_HASHED_MESSAGE_COUNT.with(|count| count.set(count.get() + 1));
     let serialized = serde_json::to_vec(value).expect("message serialization must succeed");
     update_bytes(hasher, &serialized);
 }

@@ -31,6 +31,10 @@ pub(crate) struct OrchestratorCompactionCheckpoint {
     pub summary_prompt_tokens: Option<u64>,
     pub summary_completion_tokens: Option<u64>,
     pub new_context_estimate: u64,
+    /// Transcript identity captured atomically with checkpoint insertion.
+    /// `None` identifies a legacy checkpoint, which admission never adopts
+    /// without the startup validation pass.
+    pub transcript_cursor: Option<TranscriptCursor>,
     pub created_at: String,
 }
 
@@ -38,7 +42,8 @@ const CHECKPOINT_COLUMNS: &str =
     "id, session_id, previous_checkpoint_id, summary, tail_start_message_index, \
      source_prefix_sha256, system_policy_sha256, prompt_policy_version, \
      old_context_estimate, summary_prompt_tokens, summary_completion_tokens, \
-     new_context_estimate, created_at";
+     new_context_estimate, transcript_snapshot_len, transcript_next_idx, \
+     transcript_last_row_id, created_at";
 
 pub(crate) fn append_orchestrator_compaction_checkpoint(
     path: &Path,
@@ -110,14 +115,16 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
             ));
         }
     }
+    let transcript_cursor = transcript_cursor(&transaction, &checkpoint.session_id)?;
 
     transaction.execute(
         "INSERT INTO orchestrator_compaction_checkpoints
              (session_id, previous_checkpoint_id, summary, tail_start_message_index,
               source_prefix_sha256, system_policy_sha256, prompt_policy_version,
               old_context_estimate, summary_prompt_tokens, summary_completion_tokens,
-              new_context_estimate, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+              new_context_estimate, transcript_snapshot_len, transcript_next_idx,
+              transcript_last_row_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             checkpoint.session_id,
             checkpoint.previous_checkpoint_id,
@@ -130,6 +137,13 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
             summary_prompt_tokens,
             summary_completion_tokens,
             new_context_estimate,
+            transcript_cursor
+                .map(|cursor| i64::try_from(cursor.snapshot_len))
+                .transpose()?,
+            transcript_cursor
+                .map(|cursor| i64::try_from(cursor.next_idx))
+                .transpose()?,
+            transcript_cursor.and_then(|cursor| cursor.last_row_id),
             now_utc(),
         ],
     )?;
@@ -138,6 +152,62 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
         .ok_or_else(|| anyhow!("inserted orchestrator compaction checkpoint {id} was not found"))?;
     transaction.commit()?;
     Ok(inserted)
+}
+
+pub(crate) fn latest_orchestrator_compaction_checkpoint_id(
+    path: &Path,
+    session_id: &str,
+) -> Result<Option<i64>> {
+    let conn = open_runtime_connection(path)?;
+    conn.query_row(
+        "SELECT MAX(id)
+         FROM orchestrator_compaction_checkpoints
+         WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+/// Load only the newest physical checkpoint row. A malformed newest row is
+/// reported as absent while preserving its ID, so admission can remember that
+/// it was examined without scanning older history.
+pub(crate) fn load_latest_orchestrator_compaction_checkpoint(
+    path: &Path,
+    session_id: &str,
+) -> Result<(Option<i64>, Option<OrchestratorCompactionCheckpoint>)> {
+    let conn = open_runtime_connection(path)?;
+    let latest_id = conn.query_row(
+        "SELECT MAX(id)
+         FROM orchestrator_compaction_checkpoints
+         WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get(0),
+    )?;
+    let Some(latest_id) = latest_id else {
+        return Ok((None, None));
+    };
+    match conn
+        .query_row(
+            &format!(
+                "SELECT {CHECKPOINT_COLUMNS}
+                 FROM orchestrator_compaction_checkpoints
+                 WHERE id = ?1 AND session_id = ?2"
+            ),
+            params![latest_id, session_id],
+            map_checkpoint_row,
+        )
+        .optional()
+    {
+        Ok(checkpoint) => Ok((Some(latest_id), checkpoint)),
+        Err(error) if is_checkpoint_decode_error(&error) => {
+            eprintln!(
+                "nac: ignoring malformed newest orchestrator compaction checkpoint {latest_id}: {error}"
+            );
+            Ok((Some(latest_id), None))
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub(crate) fn load_orchestrator_compaction_checkpoints(
@@ -213,7 +283,38 @@ fn map_checkpoint_row(
             .map(|value| token_count_from_sqlite(value, 10))
             .transpose()?,
         new_context_estimate: token_count_from_sqlite(row.get(11)?, 11)?,
-        created_at: row.get(12)?,
+        transcript_cursor: match (
+            row.get::<_, Option<i64>>(12)?,
+            row.get::<_, Option<i64>>(13)?,
+            row.get::<_, Option<i64>>(14)?,
+        ) {
+            (None, None, None) => None,
+            (Some(snapshot_len), Some(next_idx), last_row_id) => Some(TranscriptCursor {
+                snapshot_len: u64::try_from(snapshot_len).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        12,
+                        rusqlite::types::Type::Integer,
+                        Box::new(error),
+                    )
+                })?,
+                next_idx: u64::try_from(next_idx).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        13,
+                        rusqlite::types::Type::Integer,
+                        Box::new(error),
+                    )
+                })?,
+                last_row_id,
+            }),
+            _ => {
+                return Err(rusqlite::Error::FromSqlConversionFailure(
+                    12,
+                    rusqlite::types::Type::Integer,
+                    "partially initialized checkpoint transcript cursor".into(),
+                ));
+            }
+        },
+        created_at: row.get(15)?,
     })
 }
 

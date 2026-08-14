@@ -253,7 +253,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
     agent.set_steering_dispatch_id(Some("run".to_string()));
     agent.messages = messages;
     store_agent_snapshot(&store_path, &agent);
-    agent.restore_compaction_checkpoint().unwrap();
+    agent.initialize_compaction_checkpoint().unwrap();
     let agent = Arc::new(tokio::sync::Mutex::new(agent));
     let task_agent = agent.clone();
     let task = tokio::spawn(async move { task_agent.lock().await.send("current").await });

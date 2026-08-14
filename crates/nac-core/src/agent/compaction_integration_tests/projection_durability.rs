@@ -415,7 +415,7 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
     )
     .unwrap();
 
-    agent.restore_compaction_checkpoint().unwrap();
+    agent.initialize_compaction_checkpoint().unwrap();
     let view = agent
         .prepare_provider_view(&mut TokenUsage::default())
         .await;

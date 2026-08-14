@@ -10,9 +10,10 @@
 //! The orchestrator transcript is an append-only log in the existing
 //! `thread_events` table: one row per transcript message, written under the
 //! reserved thread name `__orchestrator__` (`ORCHESTRATOR_STEERING_TARGET`).
-//! No schema change: the table already has the needed shape (session_id FK,
-//! thread_name, event_json, created_at) and index (session_id, thread_name,
-//! id).
+//! The row table already supplies the needed `(session_id, thread_name, id)`
+//! index. `sessions` additionally stores a transactional transcript cursor:
+//! immutable snapshot length, logical next index, and newest physical row id.
+//! Admission compares that fixed-size cursor before reading any payload.
 //!
 //! # Payload format (load-bearing)
 //!
@@ -88,11 +89,13 @@
 //! counts (run start vs run end) and `sessions::save_session_run_state`
 //! UPDATEs only run-state columns. Session summaries (visible message count,
 //! last user prompt) are materialized on `sessions`: append updates them in
-//! the same transaction as the log rows, while tail truncation rebuilds them
-//! from blob ++ remaining log. The polling read path therefore never scans
-//! transcript history. DOWNGRADE CAVEAT (accepted by the user): a build older
-//! than the transcript-log workset reads only `messages_json`, so it shows
-//! this store's history truncated to the head/legacy prefix — invisibility,
+//! the same transaction as the log rows. Normal assistant/tool-tail
+//! truncation applies only the deleted suffix's delta; arbitrary user-facing
+//! reverts retain a strict full-summary rebuild. The polling read path never
+//! scans transcript history.
+//! DOWNGRADE CAVEAT (accepted by the user): a build older than the
+//! transcript-log workset reads only `messages_json`, so it shows this store's
+//! history truncated to the head/legacy prefix — invisibility,
 //! not corruption; the log rows are untouched and a current build reads the
 //! full transcript again.
 //!
@@ -180,6 +183,46 @@ struct TranscriptLogPayload {
     nac_transcript_message: TranscriptLogEntry,
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_DECODE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TEST_CURSOR_PROBE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TEST_SNAPSHOT_READ_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TEST_SELECTED_ROW_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TEST_CURSOR_PROBE_FAILURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_decode_count() {
+    TEST_DECODE_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_decode_count() -> usize {
+    TEST_DECODE_COUNT.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_admission_read_counts() {
+    TEST_CURSOR_PROBE_COUNT.with(|count| count.set(0));
+    TEST_SNAPSHOT_READ_COUNT.with(|count| count.set(0));
+    TEST_SELECTED_ROW_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_admission_read_counts() -> (usize, usize, usize) {
+    (
+        TEST_CURSOR_PROBE_COUNT.with(std::cell::Cell::get),
+        TEST_SNAPSHOT_READ_COUNT.with(std::cell::Cell::get),
+        TEST_SELECTED_ROW_COUNT.with(std::cell::Cell::get),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_test_cursor_probe() {
+    TEST_CURSOR_PROBE_FAILURES.with(|remaining| remaining.set(1));
+}
+
 /// Encode one transcript log row payload (see the module docs for the exact
 /// wire format).
 pub fn encode_transcript_log_entry(idx: u64, message: &Message) -> Result<String> {
@@ -200,6 +243,8 @@ pub fn encode_transcript_log_entry(idx: u64, message: &Message) -> Result<String
 /// Fully decode a transcript log row payload. Returns `None` when the payload
 /// is not a transcript row (e.g. a regular `AgentEvent` row).
 pub fn decode_transcript_log_entry(event_json: &str) -> Option<TranscriptLogEntry> {
+    #[cfg(test)]
+    TEST_DECODE_COUNT.with(|count| count.set(count.get() + 1));
     serde_json::from_str::<TranscriptLogPayload>(event_json)
         .ok()
         .map(|payload| payload.nac_transcript_message)
@@ -278,6 +323,191 @@ pub struct TranscriptLogWriter {
     connection: Mutex<Connection>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TranscriptCursor {
+    pub snapshot_len: u64,
+    pub next_idx: u64,
+    pub last_row_id: Option<i64>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TranscriptReconciliation {
+    pub cursor: TranscriptCursor,
+    pub common_prefix_len: u64,
+    pub rows: Vec<Message>,
+}
+
+pub(crate) fn transcript_cursor(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<TranscriptCursor>> {
+    let (snapshot_len, next_idx, last_row_id) = conn.query_row(
+        "SELECT transcript_snapshot_len, transcript_next_idx, transcript_last_row_id
+         FROM sessions
+         WHERE session_id = ?1",
+        params![session_id],
+        |row| {
+            Ok((
+                row.get::<_, Option<i64>>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        },
+    )?;
+    match (snapshot_len, next_idx, last_row_id) {
+        (None, None, None) => Ok(None),
+        (Some(snapshot_len), Some(next_idx), last_row_id) => {
+            let snapshot_len = u64::try_from(snapshot_len)
+                .context("stored transcript snapshot length was negative")?;
+            let next_idx =
+                u64::try_from(next_idx).context("stored transcript next index was negative")?;
+            if next_idx < snapshot_len {
+                return Err(anyhow!(
+                    "stored transcript cursor ends at {next_idx} before snapshot length {snapshot_len}"
+                ));
+            }
+            Ok(Some(TranscriptCursor {
+                snapshot_len,
+                next_idx,
+                last_row_id,
+            }))
+        }
+        _ => Err(anyhow!(
+            "stored transcript cursor is partially initialized for session {session_id}"
+        )),
+    }
+}
+
+pub(crate) fn transcript_cursor_survives(
+    path: &Path,
+    session_id: &str,
+    checkpoint: TranscriptCursor,
+) -> Result<bool> {
+    #[cfg(test)]
+    {
+        let fail = TEST_CURSOR_PROBE_FAILURES.with(|remaining| {
+            let current = remaining.get();
+            remaining.set(current.saturating_sub(1));
+            current > 0
+        });
+        if fail {
+            anyhow::bail!("injected transcript cursor survival failure");
+        }
+    }
+    let conn = open_runtime_connection(path)?;
+    let Some(current) = transcript_cursor(&conn, session_id)? else {
+        return Ok(false);
+    };
+    if current.snapshot_len != checkpoint.snapshot_len || current.next_idx < checkpoint.next_idx {
+        return Ok(false);
+    }
+    let Some(last_row_id) = checkpoint.last_row_id else {
+        return Ok(checkpoint.next_idx == checkpoint.snapshot_len);
+    };
+    let Some((physical_row_id, entry)) =
+        newest_transcript_row(&conn, session_id, Some(last_row_id))?
+    else {
+        return Ok(false);
+    };
+    Ok(physical_row_id == last_row_id && entry.idx.checked_add(1) == Some(checkpoint.next_idx))
+}
+
+fn newest_transcript_row(
+    conn: &Connection,
+    session_id: &str,
+    at_or_before: Option<i64>,
+) -> Result<Option<(i64, TranscriptLogEntry)>> {
+    let row = match at_or_before {
+        Some(row_id) => conn
+            .query_row(
+                "SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2 AND id <= ?3
+                 ORDER BY id DESC
+                 LIMIT 1",
+                params![session_id, ORCHESTRATOR_STEERING_TARGET, row_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?,
+        None => conn
+            .query_row(
+                "SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2
+                 ORDER BY id DESC
+                 LIMIT 1",
+                params![session_id, ORCHESTRATOR_STEERING_TARGET],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?,
+    };
+    row.map(|(id, event_json)| {
+        let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+            anyhow!(
+                "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+            )
+        })?;
+        Ok((id, entry))
+    })
+    .transpose()
+}
+
+fn store_transcript_cursor(
+    conn: &Connection,
+    session_id: &str,
+    snapshot_len: u64,
+    next_idx: u64,
+) -> Result<TranscriptCursor> {
+    let last_row_id = newest_transcript_row(conn, session_id, None)?.map(|(id, _)| id);
+    let updated = conn.execute(
+        "UPDATE sessions
+         SET transcript_snapshot_len = ?1,
+             transcript_next_idx = ?2,
+             transcript_last_row_id = ?3
+         WHERE session_id = ?4",
+        params![
+            i64::try_from(snapshot_len).context("transcript snapshot length overflowed")?,
+            i64::try_from(next_idx).context("transcript next index overflowed")?,
+            last_row_id,
+            session_id
+        ],
+    )?;
+    if updated != 1 {
+        return Err(anyhow!(
+            "transcript cursor update expected one session row, updated {updated}"
+        ));
+    }
+    Ok(TranscriptCursor {
+        snapshot_len,
+        next_idx,
+        last_row_id,
+    })
+}
+
+fn load_or_initialize_cursor(conn: &Connection, session_id: &str) -> Result<TranscriptCursor> {
+    if let Some(cursor) = transcript_cursor(conn, session_id)? {
+        return Ok(cursor);
+    }
+    let snapshot_len: i64 = conn.query_row(
+        "SELECT json_array_length(messages_json) FROM sessions WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get(0),
+    )?;
+    let snapshot_len =
+        u64::try_from(snapshot_len).context("stored session transcript length was negative")?;
+    let next_idx = newest_transcript_row(conn, session_id, None)?
+        .map(|(_, entry)| {
+            entry
+                .idx
+                .checked_add(1)
+                .context("transcript log index overflowed")
+        })
+        .transpose()?
+        .unwrap_or(0)
+        .max(snapshot_len);
+    store_transcript_cursor(conn, session_id, snapshot_len, next_idx)
+}
+
 /// Length of the log tail relative to a snapshot blob of `blob_len` messages,
 /// read from the newest row's `idx`. Callers hold the connection lock, so the
 /// extent cannot shift under a window read taken with it.
@@ -314,8 +544,206 @@ impl TranscriptLogWriter {
         })
     }
 
+    pub(crate) fn current_cursor(&self, session_id: &str) -> Result<Option<TranscriptCursor>> {
+        #[cfg(test)]
+        TEST_CURSOR_PROBE_COUNT.with(|count| count.set(count.get() + 1));
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        transcript_cursor(&connection, session_id)
+    }
+
+    pub(crate) fn bootstrap_cursor(
+        &self,
+        session_id: &str,
+        snapshot_len: u64,
+        next_idx: u64,
+    ) -> Result<TranscriptCursor> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(cursor) = transcript_cursor(&transaction, session_id)? {
+            transaction.commit()?;
+            return Ok(cursor);
+        }
+        let newest = newest_transcript_row(&transaction, session_id, None)?;
+        let durable_next_idx = newest
+            .as_ref()
+            .map(|(_, entry)| {
+                entry
+                    .idx
+                    .checked_add(1)
+                    .context("transcript log index overflowed")
+            })
+            .transpose()?
+            .unwrap_or(0)
+            .max(snapshot_len);
+        if durable_next_idx != next_idx {
+            return Err(anyhow!(
+                "cannot bootstrap stale transcript cursor: durable next idx is {durable_next_idx}, local next idx is {next_idx}"
+            ));
+        }
+        let last_row_id = newest.map(|(id, _)| id);
+        let updated = transaction.execute(
+            "UPDATE sessions
+             SET transcript_snapshot_len = ?1,
+                 transcript_next_idx = ?2,
+                 transcript_last_row_id = ?3
+             WHERE session_id = ?4
+               AND transcript_snapshot_len IS NULL
+               AND transcript_next_idx IS NULL
+               AND transcript_last_row_id IS NULL",
+            params![
+                i64::try_from(snapshot_len).context("transcript snapshot length overflowed")?,
+                i64::try_from(next_idx).context("transcript next index overflowed")?,
+                last_row_id,
+                session_id
+            ],
+        )?;
+        if updated != 1 {
+            return Err(anyhow!(
+                "transcript cursor bootstrap expected one uninitialized session row, updated {updated}"
+            ));
+        }
+        let cursor = TranscriptCursor {
+            snapshot_len,
+            next_idx,
+            last_row_id,
+        };
+        transaction.commit()?;
+        Ok(cursor)
+    }
+
+    pub(crate) fn reconcile_cursor(
+        &self,
+        session_id: &str,
+        adopted: TranscriptCursor,
+    ) -> Result<Option<TranscriptReconciliation>> {
+        #[cfg(test)]
+        TEST_CURSOR_PROBE_COUNT.with(|count| count.set(count.get() + 1));
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection.transaction()?;
+        let Some(cursor) = transcript_cursor(&transaction, session_id)? else {
+            return Err(anyhow!(
+                "transcript cursor is not initialized for session {session_id}"
+            ));
+        };
+        if cursor == adopted {
+            transaction.commit()?;
+            return Ok(None);
+        }
+
+        let surviving = adopted
+            .last_row_id
+            .map(|row_id| newest_transcript_row(&transaction, session_id, Some(row_id)))
+            .transpose()?
+            .flatten();
+        #[cfg(test)]
+        let mut selected_row_count = usize::from(surviving.is_some());
+        let common_prefix_len = surviving
+            .as_ref()
+            .map(|(_, entry)| {
+                entry
+                    .idx
+                    .checked_add(1)
+                    .context("transcript log index overflowed")
+            })
+            .transpose()?
+            .unwrap_or_else(|| adopted.snapshot_len.min(cursor.snapshot_len))
+            .max(cursor.snapshot_len);
+        if common_prefix_len > adopted.next_idx || common_prefix_len > cursor.next_idx {
+            return Err(anyhow!(
+                "transcript cursor common prefix {common_prefix_len} exceeds local end {} or durable end {}",
+                adopted.next_idx,
+                cursor.next_idx
+            ));
+        }
+
+        let mut rows = Vec::new();
+        if let Some(end_row_id) = cursor.last_row_id {
+            let after_row_id = surviving.as_ref().map(|(id, _)| *id).unwrap_or(0);
+            let mut statement = transaction.prepare(
+                "SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2
+                   AND id > ?3 AND id <= ?4
+                 ORDER BY id ASC",
+            )?;
+            let selected = statement.query_map(
+                params![
+                    session_id,
+                    ORCHESTRATOR_STEERING_TARGET,
+                    after_row_id,
+                    end_row_id
+                ],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            let mut expected_idx = common_prefix_len;
+            for row in selected {
+                let (id, event_json) = row?;
+                #[cfg(test)]
+                {
+                    selected_row_count += 1;
+                }
+                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                    anyhow!(
+                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    )
+                })?;
+                if entry.idx < cursor.snapshot_len {
+                    continue;
+                }
+                if entry.idx != expected_idx {
+                    return Err(anyhow!(
+                        "transcript cursor delta is not contiguous: expected idx {expected_idx}, found {}",
+                        entry.idx
+                    ));
+                }
+                let message: Message =
+                    serde_json::from_str(&entry.message_json).with_context(|| {
+                        format!("thread_events row {id} holds an undecodable transcript message")
+                    })?;
+                rows.push(message);
+                expected_idx = expected_idx
+                    .checked_add(1)
+                    .context("transcript log index overflowed")?;
+            }
+            if expected_idx != cursor.next_idx {
+                return Err(anyhow!(
+                    "transcript cursor delta ended at idx {expected_idx}, durable end is {}",
+                    cursor.next_idx
+                ));
+            }
+        } else if common_prefix_len != cursor.next_idx {
+            return Err(anyhow!(
+                "transcript cursor has no log rows but common prefix {common_prefix_len} differs from durable end {}",
+                cursor.next_idx
+            ));
+        }
+        #[cfg(test)]
+        TEST_SELECTED_ROW_COUNT.with(|count| count.set(count.get() + selected_row_count));
+        transaction.commit()?;
+        Ok(Some(TranscriptReconciliation {
+            cursor,
+            common_prefix_len,
+            rows,
+        }))
+    }
+
     /// Append `message` at absolute transcript position `idx`.
-    pub fn append(&self, session_id: &str, idx: u64, message: &Message) -> Result<()> {
+    pub(crate) fn append(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+    ) -> Result<TranscriptCursor> {
         self.append_batch(session_id, idx, std::slice::from_ref(message))
     }
 
@@ -325,14 +753,22 @@ impl TranscriptLogWriter {
     /// all-or-nothing. Used for the parallel tool-result batch, whose
     /// provider-view invariant requires the complete batch to be durable
     /// together.
-    pub fn append_batch(
+    pub(crate) fn append_batch(
         &self,
         session_id: &str,
         start_idx: u64,
         messages: &[Message],
-    ) -> Result<()> {
+    ) -> Result<TranscriptCursor> {
         if messages.is_empty() {
-            return Ok(());
+            let mut connection = self
+                .connection
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let transaction =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let cursor = load_or_initialize_cursor(&transaction, session_id)?;
+            transaction.commit()?;
+            return Ok(cursor);
         }
         let visible_delta = i64::try_from(crate::sessions::visible_message_count(messages))
             .context("transcript visible message count overflowed")?;
@@ -343,48 +779,24 @@ impl TranscriptLogWriter {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let blob_len = transaction.query_row(
-            "SELECT json_array_length(messages_json)
-             FROM sessions
-             WHERE session_id = ?1",
-            params![session_id],
-            |row| row.get::<_, i64>(0),
-        )?;
-        let blob_len =
-            u64::try_from(blob_len).context("stored session transcript length was negative")?;
-        let last_row = transaction
-            .query_row(
-                "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
-                 ORDER BY id DESC
-                 LIMIT 1",
-                params![session_id, ORCHESTRATOR_STEERING_TARGET],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?;
-        let log_next_idx = match last_row {
-            None => 0,
-            Some((id, event_json)) => {
-                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
-                    anyhow!(
-                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
-                    )
-                })?;
-                entry
-                    .idx
-                    .checked_add(1)
-                    .context("transcript log index overflowed")?
-            }
-        };
-        let expected_start_idx = blob_len.max(log_next_idx);
-        if start_idx != expected_start_idx {
+        let cursor = load_or_initialize_cursor(&transaction, session_id)?;
+        if start_idx != cursor.next_idx {
             return Err(anyhow!(
-                "transcript log append is not contiguous: expected start idx {expected_start_idx}, found {start_idx}"
+                "transcript log append is not contiguous: expected start idx {}, found {start_idx}",
+                cursor.next_idx
             ));
         }
+        let batch_len =
+            u64::try_from(messages.len()).context("transcript batch length overflowed")?;
+        let next_idx = start_idx
+            .checked_add(batch_len)
+            .context("transcript log index overflowed")?;
         for (offset, message) in messages.iter().enumerate() {
-            let event_json = encode_transcript_log_entry(start_idx + offset as u64, message)?;
+            let offset = u64::try_from(offset).context("transcript batch offset overflowed")?;
+            let idx = start_idx
+                .checked_add(offset)
+                .context("transcript log index overflowed")?;
+            let event_json = encode_transcript_log_entry(idx, message)?;
             transaction.execute(
                 "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
                  VALUES (?1, ?2, ?3, ?4)",
@@ -396,12 +808,21 @@ impl TranscriptLogWriter {
                 ],
             )?;
         }
+        let last_row_id = transaction.last_insert_rowid();
         let updated = transaction.execute(
             "UPDATE sessions
              SET visible_message_count = visible_message_count + ?1,
-                 last_user_prompt = COALESCE(?2, last_user_prompt)
-             WHERE session_id = ?3",
-            params![visible_delta, last_user_prompt, session_id],
+                 last_user_prompt = COALESCE(?2, last_user_prompt),
+                 transcript_next_idx = ?3,
+                 transcript_last_row_id = ?4
+             WHERE session_id = ?5",
+            params![
+                visible_delta,
+                last_user_prompt,
+                i64::try_from(next_idx).context("transcript next index overflowed")?,
+                last_row_id,
+                session_id
+            ],
         )?;
         if updated != 1 {
             return Err(anyhow!(
@@ -409,7 +830,11 @@ impl TranscriptLogWriter {
             ));
         }
         transaction.commit()?;
-        Ok(())
+        Ok(TranscriptCursor {
+            snapshot_len: cursor.snapshot_len,
+            next_idx,
+            last_row_id: Some(last_row_id),
+        })
     }
 
     /// Read the full log tail relative to a snapshot blob of `blob_len`
@@ -595,6 +1020,67 @@ impl TranscriptLogWriter {
         }
         Ok(entries)
     }
+    pub(crate) fn read_consistent_state(
+        &self,
+        session_id: &str,
+    ) -> Result<(Vec<Message>, Vec<(u64, Message)>, Option<TranscriptCursor>)> {
+        #[cfg(test)]
+        TEST_SNAPSHOT_READ_COUNT.with(|count| count.set(count.get() + 1));
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection.transaction()?;
+        let messages_json: String = transaction.query_row(
+            "SELECT messages_json FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )?;
+        let snapshot: Vec<Message> = serde_json::from_str(&messages_json)
+            .context("failed to parse stored session messages")?;
+        let from_idx = snapshot.len() as u64;
+        let mut statement = transaction.prepare(
+            "SELECT id, event_json
+             FROM thread_events
+             WHERE session_id = ?1 AND thread_name = ?2
+             ORDER BY id ASC",
+        )?;
+        let rows = statement
+            .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+        let mut tail = Vec::new();
+        let mut physical_last_row_id = None;
+        for row in rows {
+            let (id, event_json) = row?;
+            physical_last_row_id = Some(id);
+            let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                anyhow!(
+                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                )
+            })?;
+            if entry.idx < from_idx {
+                continue;
+            }
+            let message = serde_json::from_str(&entry.message_json).with_context(|| {
+                format!("thread_events row {id} holds an undecodable transcript message")
+            })?;
+            tail.push((entry.idx, message));
+        }
+        drop(statement);
+        let cursor = transcript_cursor(&transaction, session_id)?.filter(|cursor| {
+            let contiguous_end = tail.iter().try_fold(from_idx, |expected, (idx, _)| {
+                (*idx == expected)
+                    .then(|| expected.checked_add(1))
+                    .flatten()
+            });
+            cursor.snapshot_len == from_idx
+                && contiguous_end == Some(cursor.next_idx)
+                && cursor.last_row_id == physical_last_row_id
+        });
+        transaction.commit()?;
+        Ok((snapshot, tail, cursor))
+    }
 
     /// Read the trusted log tail and atomically repair a validly encoded index
     /// gap. Rows covered by the snapshot remain untouched. At the first tail
@@ -668,6 +1154,7 @@ impl TranscriptLogWriter {
                 transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
             }
             refresh_session_summary(&transaction, session_id)?;
+            store_transcript_cursor(&transaction, session_id, blob_len, expected_idx)?;
             Some(TranscriptLogRecovery {
                 expected_idx,
                 found_idx,
@@ -681,9 +1168,9 @@ impl TranscriptLogWriter {
     }
 
     /// Delete committed entries with `idx >= from_idx` (tail truncation for
-    /// crash/cancel normalization). Returns the number of deleted rows.
-    /// Infrequent path: the idx values live inside the JSON payloads, so this
-    /// scans the session's transcript rows and deletes by row id.
+    /// crash/cancel normalization). Cursor-backed sessions read and decode
+    /// only the deleted suffix. Legacy/uninitialized sessions retain the
+    /// full validation fallback below.
     pub fn delete_from(&self, session_id: &str, from_idx: u64) -> Result<usize> {
         let mut connection = self
             .connection
@@ -691,6 +1178,118 @@ impl TranscriptLogWriter {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(cursor) = transcript_cursor(&transaction, session_id)? {
+            let physical_last_row_id =
+                newest_transcript_row(&transaction, session_id, None)?.map(|(id, _)| id);
+            if physical_last_row_id != cursor.last_row_id {
+                return Err(anyhow!(
+                    "transcript cursor last row {:?} does not match physical last row {:?}",
+                    cursor.last_row_id,
+                    physical_last_row_id
+                ));
+            }
+            if from_idx >= cursor.snapshot_len {
+                if from_idx >= cursor.next_idx {
+                    transaction.commit()?;
+                    return Ok(0);
+                }
+                let delete_count = cursor.next_idx - from_idx;
+                let last_row_id = cursor.last_row_id.ok_or_else(|| {
+                    anyhow!("transcript cursor has a tail extent without a last row id")
+                })?;
+                let selected = {
+                    let mut statement = transaction.prepare(
+                        "SELECT id, event_json
+                         FROM thread_events
+                         WHERE session_id = ?1 AND thread_name = ?2 AND id <= ?3
+                         ORDER BY id DESC
+                         LIMIT ?4",
+                    )?;
+                    let rows = statement.query_map(
+                        params![
+                            session_id,
+                            ORCHESTRATOR_STEERING_TARGET,
+                            last_row_id,
+                            i64::try_from(delete_count)
+                                .context("transcript delete count overflowed")?
+                        ],
+                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                    )?;
+                    rows.collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                if selected.len() as u64 != delete_count {
+                    return Err(anyhow!(
+                        "transcript suffix expected {delete_count} rows, found {}",
+                        selected.len()
+                    ));
+                }
+                let mut deleted_messages = Vec::with_capacity(selected.len());
+                for (offset, (id, event_json)) in selected.iter().enumerate() {
+                    let entry = decode_transcript_log_entry(event_json).ok_or_else(|| {
+                        anyhow!(
+                            "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                        )
+                    })?;
+                    let expected_idx = cursor.next_idx - 1 - offset as u64;
+                    if entry.idx != expected_idx {
+                        return Err(anyhow!(
+                            "transcript suffix is not contiguous: expected idx {expected_idx}, found {}",
+                            entry.idx
+                        ));
+                    }
+                    deleted_messages.push(
+                        serde_json::from_str::<Message>(&entry.message_json).with_context(
+                            || {
+                                format!(
+                                "thread_events row {id} holds an undecodable transcript message"
+                            )
+                            },
+                        )?,
+                    );
+                }
+                let boundary_row_id = selected.last().expect("non-empty suffix").0;
+                let deleted = transaction.execute(
+                    "DELETE FROM thread_events
+                     WHERE session_id = ?1 AND thread_name = ?2
+                       AND id >= ?3 AND id <= ?4",
+                    params![
+                        session_id,
+                        ORCHESTRATOR_STEERING_TARGET,
+                        boundary_row_id,
+                        last_row_id
+                    ],
+                )?;
+                if deleted != selected.len() {
+                    return Err(anyhow!(
+                        "transcript suffix delete expected {} rows, deleted {deleted}",
+                        selected.len()
+                    ));
+                }
+                if deleted_messages
+                    .iter()
+                    .any(|message| matches!(message, Message::User { .. }))
+                {
+                    // Arbitrary user-facing reverts need the previous prompt,
+                    // so retain the strict full-summary fallback on that rare
+                    // destructive path.
+                    refresh_session_summary(&transaction, session_id)?;
+                } else {
+                    let deleted_visible =
+                        i64::try_from(crate::sessions::visible_message_count(&deleted_messages))
+                            .context("deleted transcript visible count overflowed")?;
+                    transaction.execute(
+                        "UPDATE sessions
+                         SET visible_message_count =
+                             MAX(0, visible_message_count - ?1)
+                         WHERE session_id = ?2",
+                        params![deleted_visible, session_id],
+                    )?;
+                }
+                store_transcript_cursor(&transaction, session_id, cursor.snapshot_len, from_idx)?;
+                transaction.commit()?;
+                return Ok(selected.len());
+            }
+        }
         let row_ids = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
@@ -721,6 +1320,15 @@ impl TranscriptLogWriter {
         }
         if !row_ids.is_empty() {
             refresh_session_summary(&transaction, session_id)?;
+            let snapshot_len = transcript_cursor(&transaction, session_id)?
+                .map(|cursor| cursor.snapshot_len)
+                .unwrap_or(from_idx);
+            store_transcript_cursor(
+                &transaction,
+                session_id,
+                snapshot_len,
+                from_idx.max(snapshot_len),
+            )?;
         }
         transaction.commit()?;
         Ok(row_ids.len())
@@ -783,6 +1391,7 @@ impl TranscriptLogWriter {
             transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
         }
         refresh_session_summary(&transaction, session_id)?;
+        store_transcript_cursor(&transaction, session_id, from_idx, from_idx)?;
         transaction.commit()?;
         Ok(row_ids.len())
     }
@@ -1081,6 +1690,46 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
+    #[test]
+    fn transcript_cursor_detects_same_length_delete_and_reappend() {
+        let path = temp_store_path("cursor_same_length_replacement");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        set_snapshot_messages(
+            &path,
+            "session-a",
+            &[Message::System {
+                content: "head".to_string(),
+            }],
+        );
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let adopted = writer
+            .append(
+                "session-a",
+                1,
+                &Message::User {
+                    content: "old".to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(writer.delete_from("session-a", 1).unwrap(), 1);
+        let replacement = Message::User {
+            content: "replacement".to_string(),
+        };
+        writer.append("session-a", 1, &replacement).unwrap();
+
+        let reconciliation = writer
+            .reconcile_cursor("session-a", adopted)
+            .unwrap()
+            .expect("same-length physical replacement must change the cursor");
+        assert_eq!(reconciliation.common_prefix_len, 1);
+        assert_eq!(reconciliation.rows.len(), 1);
+        assert_eq!(canonical(&reconciliation.rows[0]), canonical(&replacement));
+        assert_eq!(reconciliation.cursor.next_idx, 2);
+        assert_ne!(reconciliation.cursor.last_row_id, adopted.last_row_id);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 
     #[test]
     fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
@@ -1233,7 +1882,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_log_summary_refresh_ignores_blob_covered_rows() {
+    fn existing_session_save_cannot_replace_transcript_state() {
         let path = temp_store_path("summary_covered_rows");
         initialize(&path).unwrap();
         let snapshot = crate::sessions::new_snapshot(
@@ -1273,6 +1922,7 @@ mod tests {
             )
             .unwrap();
 
+        let cursor_before_save = writer.current_cursor("session-a").unwrap();
         let mut snapshot = crate::sessions::load_session(&path, "session-a").unwrap();
         snapshot.messages = vec![
             Message::User {
@@ -1289,6 +1939,18 @@ mod tests {
             },
         ];
         crate::sessions::save_session(&path, &snapshot).unwrap();
+        assert!(
+            crate::sessions::load_session(&path, "session-a")
+                .unwrap()
+                .messages
+                .is_empty(),
+            "existing-session save must not replace the immutable snapshot blob"
+        );
+        assert_eq!(
+            writer.current_cursor("session-a").unwrap(),
+            cursor_before_save,
+            "existing-session save must not reset transcript cursor identity"
+        );
 
         writer
             .append_batch(
@@ -1321,7 +1983,7 @@ mod tests {
         assert_eq!(summary.visible_message_count, 2);
         assert_eq!(
             summary.last_user_prompt.as_deref(),
-            Some("blob replacement prompt")
+            Some("stale covered prompt")
         );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -1579,6 +2241,158 @@ mod tests {
         assert_eq!(
             last_transcript_log_user_prompt(&conn, "session-b", 0).unwrap(),
             None
+        );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+    #[test]
+    fn transcript_transactions_roll_back_rows_summaries_and_cursor_together() {
+        let path = temp_store_path("atomic_cursor_rollback");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        set_snapshot_messages(
+            &path,
+            "session",
+            &[Message::System {
+                content: "system".to_string(),
+            }],
+        );
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer.bootstrap_cursor("session", 1, 1).unwrap();
+        let read_state = || {
+            open_connection(&path)
+                .unwrap()
+                .query_row(
+                    "SELECT messages_json, visible_message_count, last_user_prompt,
+                            transcript_snapshot_len, transcript_next_idx,
+                            transcript_last_row_id
+                     FROM sessions WHERE session_id = 'session'",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<i64>>(3)?,
+                            row.get::<_, Option<i64>>(4)?,
+                            row.get::<_, Option<i64>>(5)?,
+                        ))
+                    },
+                )
+                .unwrap()
+        };
+        let before_append = read_state();
+        let connection = open_connection(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_cursor_update
+                 BEFORE UPDATE OF transcript_next_idx ON sessions
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected cursor update failure');
+                 END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(writer
+            .append(
+                "session",
+                1,
+                &Message::User {
+                    content: "rolled back".to_string(),
+                },
+            )
+            .is_err());
+        assert!(writer.read_from("session", 0).unwrap().is_empty());
+        assert_eq!(read_state(), before_append);
+
+        let connection = open_connection(&path).unwrap();
+        connection
+            .execute_batch("DROP TRIGGER fail_cursor_update")
+            .unwrap();
+        drop(connection);
+        writer
+            .append_batch(
+                "session",
+                1,
+                &[
+                    Message::User {
+                        content: "kept prompt".to_string(),
+                    },
+                    Message::Assistant {
+                        content: Some("kept answer".to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
+                    },
+                ],
+            )
+            .unwrap();
+        let before_delete = read_state();
+        let connection = open_connection(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_cursor_update
+                 BEFORE UPDATE OF transcript_next_idx ON sessions
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected cursor update failure');
+                 END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(writer.delete_from("session", 1).is_err());
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 2);
+        assert_eq!(read_state(), before_delete);
+        assert!(writer
+            .replace_snapshot_and_delete_from(
+                "session",
+                &[Message::System {
+                    content: "replacement system".to_string(),
+                }],
+            )
+            .is_err());
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 2);
+        assert_eq!(
+            read_state(),
+            before_delete,
+            "snapshot blob, rows, summaries, and cursor must roll back together"
+        );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+    #[test]
+    fn cursor_delta_query_uses_the_session_thread_id_index() {
+        let path = temp_store_path("cursor_query_plan");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let connection = open_connection(&path).unwrap();
+        let mut statement = connection
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id, event_json
+                 FROM thread_events
+                 WHERE session_id = ?1 AND thread_name = ?2
+                   AND id > ?3 AND id <= ?4
+                 ORDER BY id ASC",
+            )
+            .unwrap();
+        let details = statement
+            .query_map(
+                params!["session", ORCHESTRATOR_STEERING_TARGET, 0_i64, i64::MAX],
+                |row| row.get::<_, String>(3),
+            )
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            details
+                .iter()
+                .any(|detail| detail.contains("idx_thread_events_session_thread_id")),
+            "cursor delta query must use the bounded session/thread/id index: {details:?}"
         );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
