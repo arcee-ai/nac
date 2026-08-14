@@ -1974,13 +1974,29 @@ impl SessionService {
         // The caller holds the local operation-state lock and the lease above
         // excludes other processes. Refresh before publishing active state so
         // every run and manual compaction starts from the newest valid durable
-        // checkpoint, including direct callers.
-        if operation_lease.is_some() {
+        // state, including direct callers.
+        //
+        // The transcript refresh is load-bearing for shared-store recovery
+        // (issue #146): this long-lived service can survive the peer process
+        // that owned the previous run. The OS releases the peer's lease on
+        // its death, but the cached agent's in-memory transcript still
+        // predates the peer's committed rows — a run started from it would
+        // append at a stale index (rejected by the log's contiguity guard)
+        // and terminal normalization would delete the peer's committed rows
+        // from the stale length. Re-restoring under the lease is race-free.
+        if let Some(lease) = operation_lease.as_ref() {
             let mut agent = self.agent.try_lock().map_err(|_| {
                 OperationAdmissionPreparationError::Coordination {
                     message: SessionCoordinationError::local_agent_busy(),
                 }
             })?;
+            let repaired_blob = agent
+                .refresh_transcript_under_lease(lease)
+                .map_err(|error| OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to refresh the transcript under the operation lease: {error:#}"
+                    )),
+                })?;
             agent.restore_compaction_checkpoint().map_err(|error| {
                 OperationAdmissionPreparationError::Coordination {
                     message: SessionCoordinationError::store(format!(
@@ -1988,6 +2004,21 @@ impl SessionService {
                     )),
                 }
             })?;
+            drop(agent);
+            if let Some(repaired_blob) = repaired_blob {
+                // Dangling-turn normalization rewrote the blob itself:
+                // install the repaired blob so store-backed transcript reads
+                // do not serve the discarded turn from the stale pre-repair
+                // snapshot (mirrors the resume path in runtime.rs).
+                let mut snapshot = self.session_snapshot.try_lock().map_err(|_| {
+                    OperationAdmissionPreparationError::Coordination {
+                        message: SessionCoordinationError::local_agent_busy(),
+                    }
+                })?;
+                if let Some(snapshot) = snapshot.as_mut() {
+                    snapshot.messages = repaired_blob;
+                }
+            }
         }
 
         Ok(operation_lease)
@@ -5769,6 +5800,207 @@ pub(super) mod tests {
         assert!(
             matches!(log[2].1, Message::Assistant { content: Some(ref text), .. } if text == "recovered")
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    /// Peer process for
+    /// `shared_store_recovery_after_peer_crash_preserves_committed_transcript`:
+    /// plays the run owner on a shared store — acquires the session
+    /// operation lease, commits its run's transcript rows, signals
+    /// readiness, then sleeps holding the lease until the parent SIGKILLs it
+    /// (process death releases the lease).
+    #[test]
+    fn shared_store_peer_process_helper() {
+        let Some(store_path) = std::env::var_os("NAC_TEST_SHARED_STORE_STORE") else {
+            return;
+        };
+        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_SHARED_STORE_READY").unwrap());
+        let session_id = std::env::var("NAC_TEST_SHARED_STORE_SESSION").unwrap();
+        let _lease =
+            sessions::SessionOperationLease::try_acquire(Path::new(&store_path), &session_id)
+                .unwrap();
+        let writer = crate::store::TranscriptLogWriter::new(Path::new(&store_path)).unwrap();
+        writer
+            .append(
+                &session_id,
+                1,
+                &Message::User {
+                    content: "peer prompt".to_string(),
+                },
+            )
+            .unwrap();
+        writer
+            .append(
+                &session_id,
+                2,
+                &Message::Assistant {
+                    content: Some("peer answer".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
+                },
+            )
+            .unwrap();
+        std::fs::write(ready_path, b"ready").unwrap();
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    /// Regression test for issue #146 (shared-store recovery): two `nac-web`
+    /// processes share one SQLite store. The peer (child process) commits
+    /// transcript rows under the operation lease and is killed; this
+    /// service's long-lived cached agent still holds the pre-peer in-memory
+    /// transcript. Accepting the recovery submission must refresh the stale
+    /// transcript under the released lease: the run must succeed, and no
+    /// committed row may be deleted.
+    #[tokio::test]
+    async fn shared_store_recovery_after_peer_crash_preserves_committed_transcript() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let store_path = test_store_path("shared_store_recovery");
+        let session_id = "session-shared-store".to_string();
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            serde_json::json!({
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "survivor answer"}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+            .to_string(),
+        )]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_git: Some(GitTarget::local("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        // The survivor's cached agent is stale from the start: it holds only
+        // the creation-time transcript (one system message).
+        assert_eq!(parts.service.agent.lock().await.messages.len(), 1);
+
+        // The peer process commits its run's transcript rows under the
+        // operation lease, then is killed mid-ownership (SIGKILL): the OS
+        // releases the lease.
+        let ready_path = store_path.parent().unwrap().join("peer-ready");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "session_service::tests::shared_store_peer_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_TEST_SHARED_STORE_STORE", &store_path)
+            .env("NAC_TEST_SHARED_STORE_READY", &ready_path)
+            .env("NAC_TEST_SHARED_STORE_SESSION", &session_id)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        for _ in 0..200 {
+            if ready_path.exists() {
+                break;
+            }
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "peer helper exited early"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(ready_path.exists(), "peer helper never became ready");
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        // The survivor accepts the recovery submission. Admission acquires
+        // the released lease and must refresh the stale in-memory
+        // transcript from the durable store before the run appends.
+        let mut events = parts.service.subscribe_events();
+        parts
+            .service
+            .try_submit_prompt("survivor prompt".to_string())
+            .unwrap();
+        let terminal = loop {
+            let envelope = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("timed out waiting for the recovery run's terminal event")
+                .unwrap();
+            if matches!(
+                envelope.event,
+                SessionEvent::RunFailed { .. } | SessionEvent::RunCompleted { .. }
+            ) {
+                break envelope;
+            }
+        };
+        assert!(
+            matches!(terminal.event, SessionEvent::RunCompleted { ref response, .. } if response == "survivor answer"),
+            "the recovery run must complete from the refreshed transcript: {:?}",
+            terminal.event
+        );
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+
+        // No committed row was deleted: the peer's prompt and answer, then
+        // the survivor's prompt and answer, are all durable and contiguous.
+        let log = crate::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .read_from(&session_id, 0)
+            .unwrap();
+        assert_eq!(log.len(), 4);
+        assert_eq!(log[0].0, 1);
+        assert!(matches!(log[0].1, Message::User { ref content } if content == "peer prompt"));
+        assert_eq!(log[1].0, 2);
+        assert!(
+            matches!(log[1].1, Message::Assistant { content: Some(ref text), .. } if text == "peer answer")
+        );
+        assert_eq!(log[2].0, 3);
+        assert!(matches!(log[2].1, Message::User { ref content } if content == "survivor prompt"));
+        assert_eq!(log[3].0, 4);
+        assert!(
+            matches!(log[3].1, Message::Assistant { content: Some(ref text), .. } if text == "survivor answer")
+        );
+
+        // Both processes now serve the same complete transcript: the
+        // survivor's in-memory transcript matches the durable store.
+        let agent = parts.service.agent.lock().await;
+        assert_eq!(agent.messages.len(), 5);
+        for (idx, message) in &log {
+            assert_eq!(
+                serde_json::to_vec(message).unwrap(),
+                serde_json::to_vec(&agent.messages[*idx as usize]).unwrap()
+            );
+        }
+        drop(agent);
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
