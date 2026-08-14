@@ -726,16 +726,26 @@ impl SessionEventBus {
             run_id,
             event,
         };
-        // The durable log is the sequence's source of truth:
-        // `published_sequence_id` only advances when the event is persisted,
-        // so it always equals the last durable event and a restart never
-        // reuses a sequence id a client already saw. Delivery is fail-open:
-        // an event that cannot be persisted is still broadcast and retained
-        // in the recent ring so subscribers observe run lifecycle events even
-        // when the event store is unavailable, but it is marked non-durable
-        // so replay subscriptions never serve events a restart would lose.
-        let persisted =
-            self.persist_session_event(&envelope) && self.persist_thread_event(&envelope);
+        // The durable session event log is the sequence's source of truth:
+        // `published_sequence_id` only advances when the event is persisted
+        // to that log, so it always equals the last durable event and a
+        // restart never reuses a sequence id a client already saw. Delivery
+        // is fail-open: an event that cannot be persisted is still broadcast
+        // and retained in the recent ring so subscribers observe run
+        // lifecycle events even when the event store is unavailable, but it
+        // is marked non-durable so replay subscriptions never serve events a
+        // restart would lose.
+        //
+        // Durability is decided by the session event log alone: replay
+        // subscriptions and restart recovery read that log, so an event that
+        // reached it stays durable even when the thread-event page write
+        // fails. Both writes are attempted independently so one failing
+        // store never skips the other.
+        let persisted = self.persist_session_event(&envelope);
+        // Thread-event pages are a separate consumer-facing log; a failure
+        // here is logged inside `persist_thread_event` and must not mark the
+        // session event non-durable.
+        let _ = self.persist_thread_event(&envelope);
         if persisted {
             state.published_sequence_id = envelope.sequence_id;
         }
@@ -835,8 +845,9 @@ impl SessionEventBus {
     }
 
     /// Persist the envelope to the durable per-session event log before
-    /// publication. `false` means the event could not be made durable and must
-    /// not be published (fail closed).
+    /// publication. `false` means the event could not be made durable: it is
+    /// still broadcast (fail-open delivery) but marked non-durable so replay
+    /// subscriptions and the published boundary reflect the durable log.
     fn persist_session_event(&self, envelope: &SessionEventEnvelope) -> bool {
         if !should_persist_session_event(&envelope.event) {
             return true;
@@ -2558,6 +2569,52 @@ mod tests {
         assert_eq!(records["worker"].len(), 1);
         assert!(records["worker"][0].event_json.contains("persisted"));
         assert!(!records["worker"][0].event_json.contains("not persisted"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_thread_event_append_stays_durable_when_session_log_write_succeeds() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_event_thread_failure_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-thread-failure");
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-thread-failure".to_string()),
+            path.clone(),
+        );
+        // Break only the thread-event pages: the durable session event log
+        // keeps working while every thread_events append fails.
+        crate::store::open_runtime_connection(&path)
+            .unwrap()
+            .execute_batch("DROP TABLE thread_events;")
+            .unwrap();
+
+        let envelope = bus
+            .emit_agent(AgentEvent::AssistantMessage {
+                thread_name: Some("worker".to_string()),
+                content: "session-durable".to_string(),
+                usage: None,
+            })
+            .unwrap();
+        assert_eq!(envelope.sequence_id, 1);
+
+        // The event reached the durable session log, so it is durable: the
+        // boundary advances and replay serves it without a false gap.
+        let (boundary, _) = bus.thread_event_boundary(|| Ok(())).unwrap();
+        assert_eq!(boundary.sequence_id, 1);
+        let subscription = bus.subscribe_for_client_with_replay(SessionClientId::new(), None, 10);
+        assert_eq!(subscription.replay_boundary_sequence_id, 1);
+        assert_eq!(subscription.replayed_events, vec![envelope.clone()]);
+        assert_eq!(subscription.replay_gap, None);
+
+        // A restart rebuilds from the durable log and still sees the event.
+        let rebuilt = SessionEventBus::with_thread_event_store(
+            Some("session-thread-failure".to_string()),
+            path.clone(),
+        );
+        assert_eq!(rebuilt.recent_events(None, 10), vec![envelope]);
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
