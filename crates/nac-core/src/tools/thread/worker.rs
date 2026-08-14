@@ -15,6 +15,7 @@ use crate::tools::{ThreadCancellation, ToolRuntime};
 const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
 // SSH cleanup can spend five seconds in the kill request; Podman can spend two.
 const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
+const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
 
 pub(super) struct WorkerRun {
     pub(super) stdout: String,
@@ -25,6 +26,7 @@ pub(super) struct WorkerRun {
     pub(super) timeout_reason: Option<String>,
     pub(super) usage: Option<TokenUsage>,
     pub(super) model_error: Option<String>,
+    pub(super) cleanup_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -258,14 +260,23 @@ pub(super) async fn run_worker(
     let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = timeout_trace.clone();
     let (cancel_ack_tx, mut cancel_ack_rx) = watch::channel(false);
+    let reader_shutdown = ThreadCancellation::default();
     let stderr_cancellation = cancellation.clone();
+    let stderr_shutdown = reader_shutdown.clone();
     let stderr_handle = tokio::spawn(async move {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
         let mut output = String::new();
         let mut worker_usage = TokenUsage::default();
         let mut model_error = None;
-        while let Some(line) = next_pipe_line(&mut lines).await {
+        loop {
+            let line = tokio::select! {
+                _ = stderr_shutdown.cancelled() => break,
+                line = next_pipe_line(&mut lines) => line,
+            };
+            let Some(line) = line else {
+                break;
+            };
             if stderr_cancellation.is_cancelled() {
                 break;
             }
@@ -315,12 +326,20 @@ pub(super) async fn run_worker(
     });
 
     let stdout_cancellation = cancellation.clone();
+    let stdout_shutdown = reader_shutdown.clone();
     let stdout = child.stdout.take().unwrap();
     let stdout_handle = tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut output = String::new();
-        while let Some(line) = next_pipe_line(&mut lines).await {
+        loop {
+            let line = tokio::select! {
+                _ = stdout_shutdown.cancelled() => break,
+                line = next_pipe_line(&mut lines) => line,
+            };
+            let Some(line) = line else {
+                break;
+            };
             if stdout_cancellation.is_cancelled() {
                 break;
             }
@@ -379,8 +398,16 @@ pub(super) async fn run_worker(
 
     let timed_out = matches!(outcome, WaitOutcome::TimedOut);
     let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
+    let mut cleanup_error = None;
+    let mut force_reader_shutdown = false;
     if timed_out || (cancelled && !cooperatively_cancelled) {
-        process_tree.terminate(&mut child).await;
+        match process_tree.terminate(&mut child).await {
+            Ok(()) => force_reader_shutdown = true,
+            Err(error) => {
+                reader_shutdown.cancel();
+                cleanup_error = Some(format!("worker cleanup incomplete: {error}"));
+            }
+        }
     }
 
     let readers = async {
@@ -389,18 +416,35 @@ pub(super) async fn run_worker(
         (stderr, worker_usage, model_error, stdout)
     };
     tokio::pin!(readers);
-    let (stderr, worker_usage, model_error, stdout) = if timed_out || cancelled {
-        readers.await
-    } else {
+    let mut reader_output = None;
+    if !timed_out && !cancelled {
         tokio::select! {
             biased;
             _ = cancellation.cancelled() => {
                 cancelled = true;
-                process_tree.terminate(&mut child).await;
+                match process_tree.terminate(&mut child).await {
+                    Ok(()) => force_reader_shutdown = true,
+                    Err(error) => {
+                        reader_shutdown.cancel();
+                        cleanup_error = Some(format!("worker cleanup incomplete: {error}"));
+                    }
+                }
+            }
+            output = &mut readers => reader_output = Some(output),
+        }
+    }
+    let (stderr, worker_usage, model_error, stdout) = if let Some(output) = reader_output {
+        output
+    } else if force_reader_shutdown {
+        match timeout(READER_DRAIN_GRACE, &mut readers).await {
+            Ok(output) => output,
+            Err(_) => {
+                reader_shutdown.cancel();
                 readers.await
             }
-            output = &mut readers => output,
         }
+    } else {
+        readers.await
     };
 
     if !timed_out && !cancelled {
@@ -425,6 +469,7 @@ pub(super) async fn run_worker(
         timeout_reason,
         usage: worker_usage,
         model_error,
+        cleanup_error,
     })
 }
 
@@ -560,6 +605,117 @@ wait
         assert!(!root.join("a.late").exists());
         assert!(!root.join("b.late").exists());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn pidfd_failure_does_not_block_worker_timeout_or_cancellation() {
+        let _test_lock = crate::process::PIDFD_OPEN_FAILURE_LOCK.lock().await;
+        let expected_usage = TokenUsage {
+            input_tokens: 7,
+            output_tokens: 3,
+            ..TokenUsage::default()
+        };
+        let usage_event = serde_json::to_string(&AgentEvent::AssistantMessage {
+            thread_name: Some("worker".to_string()),
+            content: "partial".to_string(),
+            usage: Some(expected_usage.clone()),
+        })
+        .unwrap();
+        for cancel in [false, true] {
+            let root =
+                std::env::temp_dir().join(format!("nac_worker_pidfd_{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("worker.sh");
+            let script = format!(
+                "#!/bin/sh\n\
+                 setsid sh -c 'printf $$ > \"{root}/descendant.pid\"; \
+                 printf \"child-output\\n\"; trap \"\" TERM; sleep 30' &\n\
+                 printf 'worker-output\\n'\n\
+                 printf 'worker-stderr\\n' >&2\n\
+                 printf '%s\\n' '{prefix}{usage_event}' >&2\n\
+                 sleep 0.1\n\
+                 printf ready > \"{root}/ready\"\n\
+                 trap '' TERM\n\
+                 wait\n",
+                prefix = crate::events::STDERR_EVENT_PREFIX,
+                root = root.display()
+            );
+            std::fs::write(&executable, script).unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+            let mut runtime = test_runtime();
+            runtime.workspace_cwd = root.clone();
+            runtime.config_cwd = root.clone();
+            runtime.worker_executable = Some(executable);
+            let cancellation = ThreadCancellation::default();
+            let worker_cancellation = cancellation.clone();
+            let no_sources = Vec::<String>::new();
+            let no_skills = Vec::<String>::new();
+            let client = ModelClient::new_for_test();
+            let worker = run_worker(
+                &runtime,
+                &client,
+                WorkerInvocation {
+                    session_id: "session",
+                    thread_name: "worker",
+                    dispatch_id: "dispatch",
+                    action: "worker",
+                    source_threads: &no_sources,
+                    scheduled_skills: &no_skills,
+                    timeout_secs: if cancel { 30 } else { 1 },
+                },
+                worker_cancellation,
+            );
+            struct PidfdFailureReset;
+            impl Drop for PidfdFailureReset {
+                fn drop(&mut self) {
+                    crate::process::set_pidfd_open_failure_for_test(0);
+                }
+            }
+            let _failure_reset = PidfdFailureReset;
+            let stop_when_ready = async {
+                let descendant_pid = tokio::time::timeout(Duration::from_secs(2), async {
+                    loop {
+                        if root.join("ready").exists() {
+                            let pid = std::fs::read_to_string(root.join("descendant.pid")).unwrap();
+                            break pid.parse::<libc::pid_t>().unwrap();
+                        }
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("isolated worker descendant did not publish its pid");
+                crate::process::set_pidfd_open_failure_for_test(descendant_pid);
+                if cancel {
+                    cancellation.cancel();
+                }
+                descendant_pid
+            };
+
+            let (run, descendant_pid) = tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::join!(worker, stop_when_ready)
+            })
+            .await
+            .expect("worker cleanup remained blocked on inherited pipes");
+            let run = run.unwrap();
+
+            assert_eq!(run.cancelled, cancel);
+            assert_eq!(run.timed_out, !cancel);
+            assert!(run.stdout.contains("worker-output"));
+            assert!(run.stdout.contains("child-output"));
+            assert!(run.stderr.contains("worker-stderr"));
+            assert_eq!(run.usage.as_ref(), Some(&expected_usage));
+            assert!(run
+                .cleanup_error
+                .as_deref()
+                .is_some_and(|error| error.contains("pidfd_open/capture")));
+
+            unsafe {
+                libc::kill(descendant_pid, libc::SIGKILL);
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     #[cfg(unix)]

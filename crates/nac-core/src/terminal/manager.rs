@@ -23,6 +23,7 @@ use super::{
 const PIPE_CHUNK_BYTES: usize = 16 * 1024;
 const PIPE_CHANNEL_CHUNKS: usize = 16;
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
 
 const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
@@ -78,7 +79,12 @@ impl TerminalManager {
             sessions.remove(&name)
         };
         if let Some(mut old) = old {
-            let _ = old.kill().await;
+            if let Err(error) = old.kill().await {
+                eprintln!(
+                    "nac: terminal session '{}' cleanup incomplete during replacement: {error:#}",
+                    old.name
+                );
+            }
         }
 
         let evicted: Vec<TerminalSession> = {
@@ -100,7 +106,12 @@ impl TerminalManager {
             evicted
         };
         for mut session in evicted {
-            let _ = session.kill().await;
+            if let Err(error) = session.kill().await {
+                eprintln!(
+                    "nac: terminal session '{}' cleanup incomplete during eviction: {error:#}",
+                    session.name
+                );
+            }
         }
 
         let session = TerminalSession::spawn(
@@ -291,8 +302,19 @@ impl TerminalManager {
         let stderr = child.stderr.take().expect("piped stderr is present");
         let output_id = self.output_registry.create(ArtifactKind::Command);
         let (sender, mut receiver) = mpsc::channel(PIPE_CHANNEL_CHUNKS);
-        let stdout_reader = tokio::spawn(read_chunks(stdout, OutputStream::Stdout, sender.clone()));
-        let stderr_reader = tokio::spawn(read_chunks(stderr, OutputStream::Stderr, sender));
+        let reader_shutdown = ThreadCancellation::default();
+        let stdout_reader = tokio::spawn(read_chunks(
+            stdout,
+            OutputStream::Stdout,
+            sender.clone(),
+            reader_shutdown.clone(),
+        ));
+        let stderr_reader = tokio::spawn(read_chunks(
+            stderr,
+            OutputStream::Stderr,
+            sender,
+            reader_shutdown.clone(),
+        ));
 
         let deadline = start + Duration::from_millis(yield_ms);
         let mut status = CommandStatus::Completed;
@@ -352,40 +374,83 @@ impl TerminalManager {
             }
         }
 
+        let mut force_reader_shutdown = false;
         if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
                 let _ = backend.terminal_pipe_kill(pidfile).await;
             }
-            terminate_child_tree(&mut child).await;
+            match terminate_child_tree(&mut child).await {
+                Ok(()) => force_reader_shutdown = true,
+                Err(error) => {
+                    reader_shutdown.cancel();
+                    let cleanup_error = format!("command cleanup incomplete: {error}");
+                    runtime_error = Some(match runtime_error.take() {
+                        Some(existing) => format!("{existing}\n{cleanup_error}"),
+                        None => cleanup_error,
+                    });
+                }
+            }
             exit_code = None;
         }
 
-        let mut append_failed = false;
-        while let Some(chunk) = receiver.recv().await {
-            if append_failed {
-                continue;
+        let preserve_status = !process_exited;
+        let record_output_error =
+            |message: String, status: &mut CommandStatus, runtime_error: &mut Option<String>| {
+                if preserve_status {
+                    *runtime_error = Some(match runtime_error.take() {
+                        Some(existing) => format!("{existing}\n{message}"),
+                        None => message,
+                    });
+                } else {
+                    *status = CommandStatus::SpawnError;
+                    *runtime_error = Some(message);
+                }
+            };
+
+        let reader_shutdown_timer = async {
+            if force_reader_shutdown {
+                sleep(READER_DRAIN_GRACE).await;
+            } else {
+                std::future::pending::<()>().await;
             }
-            if let Err(error) = self
-                .output_registry
-                .append(&output_id, chunk.stream, chunk.bytes)
-            {
-                status = CommandStatus::SpawnError;
-                runtime_error = Some(error.to_string());
-                append_failed = true;
+        };
+        tokio::pin!(reader_shutdown_timer);
+        let mut reader_shutdown_pending = force_reader_shutdown;
+        let mut append_failed = false;
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut reader_shutdown_timer, if reader_shutdown_pending => {
+                    reader_shutdown.cancel();
+                    reader_shutdown_pending = false;
+                }
+                chunk = receiver.recv() => {
+                    let Some(chunk) = chunk else {
+                        break;
+                    };
+                    if append_failed {
+                        continue;
+                    }
+                    if let Err(error) = self.output_registry.append(
+                        &output_id,
+                        chunk.stream,
+                        chunk.bytes,
+                    ) {
+                        record_output_error(error.to_string(), &mut status, &mut runtime_error);
+                        append_failed = true;
+                    }
+                }
             }
         }
 
         for reader in [stdout_reader, stderr_reader] {
-            match reader.await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    status = CommandStatus::SpawnError;
-                    runtime_error = Some(format!("failed to read command output: {error}"));
-                }
-                Err(error) => {
-                    status = CommandStatus::SpawnError;
-                    runtime_error = Some(format!("command output reader failed: {error}"));
-                }
+            let message = match reader.await {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(format!("failed to read command output: {error}")),
+                Err(error) => Some(format!("command output reader failed: {error}")),
+            };
+            if let Some(message) = message {
+                record_output_error(message, &mut status, &mut runtime_error);
             }
         }
 
@@ -447,7 +512,12 @@ impl TerminalManager {
             .map(|(_, session)| session)
             .collect();
         for mut session in sessions {
-            let _ = session.kill().await;
+            if let Err(error) = session.kill().await {
+                eprintln!(
+                    "nac: terminal session '{}' cleanup incomplete during removal: {error:#}",
+                    session.name
+                );
+            }
         }
         self.output_registry.clear();
     }
@@ -527,18 +597,26 @@ async fn read_chunks<R>(
     mut reader: R,
     stream: OutputStream,
     sender: mpsc::Sender<StreamChunk>,
+    shutdown: ThreadCancellation,
 ) -> std::io::Result<()>
 where
     R: AsyncRead + Unpin,
 {
     loop {
         let mut bytes = vec![0u8; PIPE_CHUNK_BYTES];
-        let read = reader.read(&mut bytes).await?;
+        let read = tokio::select! {
+            _ = shutdown.cancelled() => return Ok(()),
+            read = reader.read(&mut bytes) => read?,
+        };
         if read == 0 {
             return Ok(());
         }
         bytes.truncate(read);
-        if sender.send(StreamChunk { stream, bytes }).await.is_err() {
+        let sent = tokio::select! {
+            _ = shutdown.cancelled() => return Ok(()),
+            sent = sender.send(StreamChunk { stream, bytes }) => sent,
+        };
+        if sent.is_err() {
             return Ok(());
         }
     }
@@ -546,6 +624,33 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn pipe_reader_shutdown_preserves_queued_output_and_closes_channel() {
+        use tokio::io::AsyncWriteExt;
+
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let (sender, mut receiver) = mpsc::channel(1);
+        let shutdown = ThreadCancellation::default();
+        let handle = tokio::spawn(read_chunks(
+            reader,
+            OutputStream::Stdout,
+            sender,
+            shutdown.clone(),
+        ));
+
+        writer.write_all(b"before shutdown").await.unwrap();
+        let chunk = receiver.recv().await.unwrap();
+        assert_eq!(chunk.bytes, b"before shutdown");
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("reader did not stop")
+            .unwrap()
+            .unwrap();
+        assert!(receiver.recv().await.is_none());
+    }
     use super::*;
     use crate::paths::PathContext;
     use crate::sandbox::{
@@ -609,6 +714,94 @@ mod tests {
 
         assert_eq!(output.status, CommandStatus::TimedOut);
         assert_eq!(output.exit_code, None);
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn run_one_shot_with_pidfd_failure(cancel: bool) -> CommandOutput {
+        let _test_lock = crate::process::PIDFD_OPEN_FAILURE_LOCK.lock().await;
+        let manager = TerminalManager::new();
+        let root = std::env::temp_dir().join(format!("nac-pidfd-failure-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let pidfile = root.join("descendant-pid");
+        let command = format!(
+            "setsid sh -c 'printf $$ > {pidfile}; printf child-output; \
+             printf child-error >&2; trap \"\" TERM; sleep 30' & \
+             printf parent-output; printf parent-error >&2; sleep 30",
+            pidfile = pidfile.display()
+        );
+        let cancellation = ThreadCancellation::default();
+        let task_cancellation = cancellation.clone();
+        let task_manager = manager.clone();
+        let task_backend = backend();
+        let timeout_ms = if cancel { 5_000 } else { 200 };
+        let task = tokio::spawn(async move {
+            task_manager
+                .exec_one_shot(
+                    &command,
+                    None,
+                    120,
+                    40,
+                    timeout_ms,
+                    8_000,
+                    &task_backend,
+                    cancel.then_some(&task_cancellation),
+                )
+                .await
+        });
+
+        let descendant_pid = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(pid) = std::fs::read_to_string(&pidfile) {
+                    break pid.parse::<libc::pid_t>().unwrap();
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("isolated descendant did not publish its pid");
+        struct PidfdFailureReset;
+        impl Drop for PidfdFailureReset {
+            fn drop(&mut self) {
+                crate::process::set_pidfd_open_failure_for_test(0);
+            }
+        }
+        let _failure_reset = PidfdFailureReset;
+        crate::process::set_pidfd_open_failure_for_test(descendant_pid);
+        if cancel {
+            cancellation.cancel();
+        }
+
+        let output = tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .expect("one-shot cleanup remained blocked on inherited pipes")
+            .unwrap();
+
+        assert_eq!(output.exit_code, None);
+        assert!(output.stdout_preview.contains("parent-output"));
+        assert!(output.stdout_preview.contains("child-output"));
+        assert!(output.stderr_preview.contains("parent-error"));
+        assert!(output.stderr_preview.contains("child-error"));
+        assert!(output.stderr_preview.contains("command cleanup incomplete"));
+
+        unsafe {
+            libc::kill(descendant_pid, libc::SIGKILL);
+        }
+        let _ = std::fs::remove_dir_all(root);
+        output
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn one_shot_pidfd_failure_is_bounded_and_preserves_timeout_output() {
+        let output = run_one_shot_with_pidfd_failure(false).await;
+        assert_eq!(output.status, CommandStatus::TimedOut);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn one_shot_pidfd_failure_is_bounded_and_preserves_cancellation_output() {
+        let output = run_one_shot_with_pidfd_failure(true).await;
+        assert_eq!(output.status, CommandStatus::Cancelled);
     }
 
     #[cfg(unix)]
