@@ -73,9 +73,10 @@ pub(crate) async fn launch_session(
     spec: SandboxSpec,
     session_key: String,
     owner: bool,
+    activity_key: String,
 ) -> Result<SandboxSession> {
     let forked = spec.worktree.clone();
-    match SandboxSession::create(spec, session_key, owner).await {
+    match SandboxSession::create(spec, session_key, owner, activity_key).await {
         Ok(session) => Ok(session),
         Err(error) => {
             if let Some(worktree) = &forked {

@@ -58,6 +58,7 @@ async fn podman_runtime(root: &std::path::Path) -> crate::tools::ToolRuntime {
         },
         format!("discovery-test-{}", uuid::Uuid::new_v4()),
         true,
+        "discovery-test".to_string(),
     )
     .await
     .expect("create Podman discovery fixture");
@@ -920,6 +921,7 @@ async fn podman_and_local_backends_return_identical_discovery_pages() {
         },
         format!("discovery-unmounted-test-{}", uuid::Uuid::new_v4()),
         true,
+        "discovery-unmounted-test".to_string(),
     )
     .await
     .expect("create unmounted Podman fixture");

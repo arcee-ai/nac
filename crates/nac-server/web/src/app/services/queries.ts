@@ -67,6 +67,8 @@ import type {
   SshTarget,
   StoredCredentialList,
   StoreInfo,
+  SandboxActivity,
+  SandboxAvailability,
   SwitchBranchRequest,
   UpdateConfigRequest,
   UpdateModelConfigurationRequest,
@@ -85,6 +87,8 @@ export const WORKSPACE_STATS_POLL_MS = 30_000;
 
 export const queryKeys = {
   storeInfo: ["store"] as const,
+  sandboxAvailability: ["sandbox-availability"] as const,
+  sandboxActivity: ["sandbox-activity"] as const,
   credentials: ["credentials"] as const,
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
@@ -154,6 +158,38 @@ export function useStoreInfo() {
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
     staleTime: Infinity,
+  });
+}
+
+/**
+ * Whether this host can run sandboxed sessions. Probing spawns podman
+ * subprocesses, so it runs only while a caller asks for it — today that is
+ * the launch form with sandbox mode selected.
+ */
+export function useSandboxAvailability(enabled: boolean) {
+  return useQuery<SandboxAvailability>({
+    queryKey: queryKeys.sandboxAvailability,
+    queryFn: ({ signal }) => api.getSandboxAvailability(signal),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/**
+ * Sandbox setup in progress for one launch (image pull, container start),
+ * polled while the launch request is in flight so a minutes-long first pull
+ * shows movement instead of a frozen button. Keyed by the launch id sent
+ * with the create request, so concurrent launches stay independent.
+ */
+export function useSandboxActivity(enabled: boolean, key: string | null) {
+  return useQuery<SandboxActivity | null>({
+    queryKey: [...queryKeys.sandboxActivity, key],
+    queryFn: ({ signal }) => api.getSandboxActivity(key as string, signal),
+    enabled: enabled && key !== null,
+    staleTime: 0,
+    refetchInterval: 1000,
+    retry: false,
   });
 }
 

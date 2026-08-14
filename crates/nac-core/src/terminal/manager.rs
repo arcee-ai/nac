@@ -1109,6 +1109,7 @@ mod tests {
             },
             format!("output-artifacts-test-{}", uuid::Uuid::new_v4()),
             true,
+            "output-artifacts-test".to_string(),
         )
         .await
         .unwrap();

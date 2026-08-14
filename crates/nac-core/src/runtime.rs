@@ -24,7 +24,10 @@ use crate::sandbox::{
     SandboxBackendType, SandboxSession, SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
 pub use crate::sandbox::session_worktree::cleanup_session_worktree;
-pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
+pub use crate::sandbox::{
+    current_activity, probe_availability, RemoteBrowseError, RemoteEntry, RemoteListing,
+    SandboxActivity, SandboxAvailability,
+};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
@@ -352,6 +355,10 @@ pub struct SandboxOptions {
     pub sandbox_backend: Option<String>,
     pub sandbox_cpus: Option<u8>,
     pub sandbox_mem: Option<u32>,
+    /// Client-generated launch id used to key sandbox setup activity so a
+    /// launching UI can poll its own progress. Not a sandbox config flag:
+    /// it neither enables the sandbox nor marks explicit configuration.
+    pub sandbox_activity_key: Option<String>,
 }
 
 impl SandboxOptions {
@@ -514,6 +521,7 @@ pub struct EffectiveSandboxOptions {
     pub sandbox_backend: crate::sandbox::SandboxBackendType,
     pub sandbox_cpus: u8,
     pub sandbox_mem: u32,
+    pub sandbox_activity_key: Option<String>,
     pub explicit_sandbox_config_flags_present: bool,
 }
 
@@ -631,6 +639,7 @@ pub(crate) fn effective_sandbox_options(
         sandbox_backend,
         sandbox_cpus,
         sandbox_mem,
+        sandbox_activity_key: options.sandbox_activity_key,
         explicit_sandbox_config_flags_present,
     }
 }
@@ -1359,7 +1368,8 @@ async fn build_resume_config_from_snapshot(
                 if let Some(worktree) = &spec.worktree {
                     session_worktree::restore(worktree)?;
                 }
-                Some(SandboxSession::create(spec, Uuid::new_v4().to_string(), true).await?)
+                let session_key = Uuid::new_v4().to_string();
+                Some(SandboxSession::create(spec, session_key.clone(), true, session_key).await?)
             }
             None => None,
         }
@@ -1581,7 +1591,15 @@ pub async fn build_sandbox_session(
         }
     };
     spec.worktree = forked_worktree;
-    let session = session_worktree::launch_session(spec, session_key, owner).await?;
+    // A launching UI polls setup activity under its own client-generated key;
+    // without one, the session key is the correlation id. Bounded so a
+    // caller cannot grow the activity map with unbounded keys.
+    let activity_key = options
+        .sandbox_activity_key
+        .clone()
+        .filter(|key| !key.is_empty() && key.len() <= 128)
+        .unwrap_or_else(|| session_key.clone());
+    let session = session_worktree::launch_session(spec, session_key, owner, activity_key).await?;
     Ok(Some(session))
 }
 

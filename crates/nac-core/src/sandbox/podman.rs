@@ -5,13 +5,92 @@ use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use portable_pty::CommandBuilder as PtyCommandBuilder;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use super::{MountSpec, SandboxSpec};
+use super::{MountSpec, SandboxAvailability, SandboxAvailabilityStatus, SandboxSpec};
+use crate::workspace::first_stderr_line;
+
+/// Probes whether podman can be used on this host right now: first the binary
+/// (`podman --version`), then the runtime (`podman info`, which fails while a
+/// macOS `podman machine` is stopped or never initialized).
+pub(crate) async fn probe_availability() -> SandboxAvailability {
+    match Command::new("podman").arg("--version").output().await {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            return SandboxAvailability {
+                status: SandboxAvailabilityStatus::Missing,
+                detail: Some(first_stderr_line(&output.stderr)),
+                guidance: Some(install_guidance()),
+            };
+        }
+        Err(error) => {
+            let detail = (error.kind() != std::io::ErrorKind::NotFound).then(|| error.to_string());
+            return SandboxAvailability {
+                status: SandboxAvailabilityStatus::Missing,
+                detail,
+                guidance: Some(install_guidance()),
+            };
+        }
+    }
+    match Command::new("podman").arg("info").output().await {
+        Ok(output) if output.status.success() => SandboxAvailability {
+            status: SandboxAvailabilityStatus::Ready,
+            detail: None,
+            guidance: None,
+        },
+        Ok(output) => SandboxAvailability {
+            status: SandboxAvailabilityStatus::Unavailable,
+            detail: Some(first_stderr_line(&output.stderr)),
+            guidance: Some(start_guidance()),
+        },
+        Err(error) => SandboxAvailability {
+            status: SandboxAvailabilityStatus::Unavailable,
+            detail: Some(error.to_string()),
+            guidance: Some(start_guidance()),
+        },
+    }
+}
+
+/// When a podman operation fails, an availability probe says better than the
+/// raw error whether the runtime is even there; if it probes fine, the
+/// original error is the more specific one and stays.
+async fn explain_runtime_failure(error: anyhow::Error) -> anyhow::Error {
+    let availability = probe_availability().await;
+    if availability.available() {
+        error
+    } else {
+        error.context(availability.message())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn install_guidance() -> String {
+    "brew install podman\npodman machine init\npodman machine start".to_string()
+}
+
+#[cfg(target_os = "linux")]
+fn install_guidance() -> String {
+    "sudo apt install podman    # Debian/Ubuntu\nsudo dnf install podman    # Fedora".to_string()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn install_guidance() -> String {
+    "install podman: https://podman.io/docs/installation".to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn start_guidance() -> String {
+    "podman machine init    # first run only\npodman machine start".to_string()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_guidance() -> String {
+    "check 'podman info' on this host for why the runtime is not responding".to_string()
+}
 
 pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
 if command -v setsid >/dev/null 2>&1; then
@@ -63,16 +142,26 @@ pub(crate) struct PodmanSession {
     session_key: String,
     owner: bool,
     container_name: String,
+    /// Key setup activity is reported under: a client-supplied launch id when
+    /// one was sent, else the session key. Keyed per launch so concurrent
+    /// launches do not clobber each other's reported phase.
+    activity_key: String,
 }
 
 impl PodmanSession {
-    pub(crate) fn new(spec: SandboxSpec, session_key: String, owner: bool) -> Self {
+    pub(crate) fn new(
+        spec: SandboxSpec,
+        session_key: String,
+        owner: bool,
+        activity_key: String,
+    ) -> Self {
         let container_name = format!("nac-{}", sanitize_name(&session_key));
         Self {
             spec,
             session_key,
             owner,
             container_name,
+            activity_key,
         }
     }
 
@@ -81,7 +170,18 @@ impl PodmanSession {
     }
 
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
-        let exists = self.container_exists().await?;
+        let result = self.ensure_ready_inner().await;
+        // Whatever happened, setup is no longer in flight; stale activity is
+        // worse than none.
+        super::clear_activity(&self.activity_key);
+        result
+    }
+
+    async fn ensure_ready_inner(&self) -> Result<()> {
+        let exists = match self.container_exists().await {
+            Ok(exists) => exists,
+            Err(error) => return Err(explain_runtime_failure(error).await),
+        };
         if !exists {
             if !self.owner {
                 bail!(
@@ -89,6 +189,8 @@ impl PodmanSession {
                     self.session_key
                 );
             }
+            self.ensure_image().await?;
+            super::report_activity(&self.activity_key, "starting the sandbox container");
             self.create_container().await?;
             return Ok(());
         }
@@ -97,6 +199,47 @@ impl PodmanSession {
             self.start_container().await?;
         }
 
+        Ok(())
+    }
+
+    /// A first sandbox launch spends nearly all its time here. Pulling
+    /// explicitly — rather than letting `podman run` pull implicitly — is
+    /// what lets the slow phase be reported and streamed instead of looking
+    /// frozen.
+    async fn ensure_image(&self) -> Result<()> {
+        let exists = Command::new("podman")
+            .arg("image")
+            .arg("exists")
+            .arg(&self.spec.image)
+            .output()
+            .await
+            .with_context(|| "failed to execute 'podman image exists'")?;
+        if exists.status.success() {
+            return Ok(());
+        }
+        super::report_activity(
+            &self.activity_key,
+            format!(
+                "pulling image {} (first run can take several minutes)",
+                self.spec.image
+            ),
+        );
+        let status = Command::new("podman")
+            .arg("pull")
+            .arg(&self.spec.image)
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .with_context(|| format!("failed to execute 'podman pull {}'", self.spec.image))?;
+        if !status.success() {
+            return Err(explain_runtime_failure(anyhow!(
+                "failed to pull sandbox image '{}'",
+                self.spec.image
+            ))
+            .await);
+        }
         Ok(())
     }
 
@@ -318,11 +461,12 @@ impl PodmanSession {
             .await
             .with_context(|| "failed to execute 'podman run'")?;
         if !output.status.success() {
-            bail!(
+            return Err(explain_runtime_failure(anyhow!(
                 "failed to create sandbox container '{}': {}",
                 self.container_name,
                 String::from_utf8_lossy(&output.stderr).trim()
-            );
+            ))
+            .await);
         }
         Ok(())
     }
@@ -335,11 +479,12 @@ impl PodmanSession {
             .await
             .with_context(|| "failed to execute 'podman start'")?;
         if !output.status.success() {
-            bail!(
+            return Err(explain_runtime_failure(anyhow!(
                 "failed to start sandbox container '{}': {}",
                 self.container_name,
                 String::from_utf8_lossy(&output.stderr).trim()
-            );
+            ))
+            .await);
         }
         Ok(())
     }
@@ -495,6 +640,7 @@ mod tests {
             },
             "abc123".to_string(),
             false,
+            "abc123".to_string(),
         )
     }
 
@@ -547,6 +693,7 @@ mod tests {
             },
             "empty".to_string(),
             false,
+            "empty".to_string(),
         );
         let rendered: Vec<String> = session
             .create_container_args()
@@ -569,6 +716,7 @@ mod tests {
             },
             "gpu".to_string(),
             false,
+            "gpu".to_string(),
         );
         let rendered: Vec<String> = session
             .create_container_args()
