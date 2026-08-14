@@ -122,6 +122,15 @@ pub fn is_usable(path: &Path) -> bool {
 /// success.
 pub fn remove(repo_root: &Path, path: &Path) -> Result<()> {
     if !path.exists() {
+        // A directory deleted externally leaves a stale administrative entry
+        // that still counts the session branch as checked out, which blocks
+        // deleting that branch. `remove --force` clears such an entry; it
+        // fails when nothing was ever registered at `path`, which is equally
+        // fine — either way nothing there holds the branch anymore.
+        let _ = run_git(
+            repo_root,
+            &["worktree", "remove", "--force", &path.display().to_string()],
+        );
         return Ok(());
     }
     let output = run_git(
@@ -321,6 +330,24 @@ mod tests {
         assert_eq!(branch_head(&info.root, "nac/test123"), None);
 
         let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    #[test]
+    fn remove_clears_the_stale_entry_of_an_externally_deleted_worktree() {
+        let repo = TestRepo::new("stale-entry");
+        repo.commit_file("a.txt", "a");
+        let info = find_repo(&repo.root).unwrap().unwrap();
+        let worktree = repo.worktree_path("session");
+
+        create(&info.root, &worktree, "nac/test789").unwrap();
+        // Deleting the directory externally — not `git worktree remove` —
+        // leaves the worktree registered, so git still considers the branch
+        // checked out and would refuse to delete it.
+        std::fs::remove_dir_all(&worktree).unwrap();
+
+        remove(&info.root, &worktree).unwrap();
+        delete_branch(&info.root, "nac/test789").unwrap();
+        assert_eq!(branch_head(&info.root, "nac/test789"), None);
     }
 
     #[test]
