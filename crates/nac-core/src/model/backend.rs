@@ -125,13 +125,36 @@ fn normalized_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
+/// Whether a host is loopback, and therefore safe to auto-approve for
+/// credential-bearing requests without an explicit operator opt-in.
+///
+/// Private and link-local networks are deliberately excluded: an attacker who
+/// can influence `base_url` must not be able to aim the model client at an
+/// internal service (e.g. the cloud metadata endpoint `169.254.169.254`) and
+/// have NAC transmit the resolved API key to it. Such hosts must instead be
+/// listed under `[security] trusted_base_url_hosts`.
+fn is_loopback_host(host: &url::Host<&str>) -> bool {
+    match host {
+        url::Host::Domain(domain) => {
+            let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+            domain == "localhost" || domain.ends_with(".localhost")
+        }
+        url::Host::Ipv4(address) => address.is_loopback(),
+        url::Host::Ipv6(address) => address.is_loopback(),
+    }
+}
+
 /// Reject a base URL that would send an API key to an origin the operator
 /// never approved.
 ///
 /// This is the trust boundary for values arriving over the unauthenticated
 /// loopback HTTP API: `config.toml` is edited by hand and is therefore
-/// authoritative, while a request body is not. Loopback and private-network
-/// hosts stay usable without an opt-in so local proxies keep working.
+/// authoritative, while a request body is not. Only loopback hosts are
+/// auto-approved without an opt-in; private/link-local networks (including the
+/// cloud metadata endpoint `169.254.169.254`) must be listed under
+/// `[security] trusted_base_url_hosts` so an attacker who can influence
+/// `base_url` cannot point the client at an internal service and have NAC send
+/// the API key there.
 pub fn validate_caller_supplied_base_url(
     backend: BackendKind,
     base_url: &str,
@@ -154,7 +177,11 @@ pub fn validate_caller_supplied_base_url(
             base_url
         ))
     })?;
-    if types::allows_plaintext_transport(&host) {
+    // Only loopback hosts are auto-approved for credential-bearing requests
+    // arriving over the unauthenticated API. Previously this also approved
+    // every private/link-local address (incl. 169.254.169.254), which let a
+    // caller exfiltrate the API key to an internal/cloud service (SSRF).
+    if is_loopback_host(&host) {
         return Ok(());
     }
 
