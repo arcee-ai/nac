@@ -81,10 +81,12 @@ fn url_userinfo_re() -> &'static Regex {
 
 /// Redact credentials from provider-controlled text.
 ///
-/// Exact secret values are replaced first (longest first, so a secret that is a
-/// prefix of another cannot leave a tail behind), then recognizable credential
-/// shapes — `Authorization`/`x-api-key` header lines, `Bearer`/`Basic` tokens,
-/// and URL userinfo — are masked even when the exact value is not known.
+/// Known secrets of four or more bytes are replaced wherever they appear.
+/// Shorter secrets are replaced only as complete credential values so values
+/// such as `no`, `v1`, or `4` do not destroy ordinary prose, paths, or status
+/// codes. Recognizable credential shapes — `Authorization`/`x-api-key` header
+/// lines, `Bearer`/`Basic` tokens, and URL userinfo — are masked even when the
+/// exact value is not known.
 pub(crate) fn redact_credentials(text: &str, secrets: &[&str]) -> String {
     CredentialRedactor::new(secrets.iter().copied()).redact(text)
 }
@@ -98,27 +100,57 @@ pub(crate) fn redact_credentials_with_extra_headers(
     secrets: &[&str],
     extra_headers: &BTreeMap<String, String>,
 ) -> String {
-    CredentialRedactor::new(
-        secrets
-            .iter()
-            .copied()
-            .chain(extra_headers.values().map(String::as_str)),
-    )
-    .redact(text)
+    CredentialRedactor::with_extra_headers(secrets.iter().copied(), extra_headers).redact(text)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct KnownSecret<'a> {
+    value: &'a str,
+    header_name: Option<&'a str>,
 }
 
 struct CredentialRedactor<'a> {
-    known: Vec<&'a str>,
+    known: Vec<KnownSecret<'a>>,
 }
 
 impl<'a> CredentialRedactor<'a> {
     fn new(secrets: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut known: Vec<&str> = secrets
+        Self::from_known(secrets.into_iter().map(|value| KnownSecret {
+            value,
+            header_name: None,
+        }))
+    }
+
+    fn with_extra_headers(
+        secrets: impl IntoIterator<Item = &'a str>,
+        extra_headers: &'a BTreeMap<String, String>,
+    ) -> Self {
+        Self::from_known(
+            secrets
+                .into_iter()
+                .map(|value| KnownSecret {
+                    value,
+                    header_name: None,
+                })
+                .chain(extra_headers.iter().map(|(name, value)| KnownSecret {
+                    value: value.as_str(),
+                    header_name: (value.len() < 4).then_some(name.as_str()),
+                })),
+        )
+    }
+
+    fn from_known(secrets: impl IntoIterator<Item = KnownSecret<'a>>) -> Self {
+        let mut known: Vec<KnownSecret<'a>> = secrets
             .into_iter()
-            .filter(|secret| !secret.is_empty())
+            .filter(|secret| !secret.value.is_empty())
             .collect();
         known.sort_unstable_by(|left, right| {
-            right.len().cmp(&left.len()).then_with(|| left.cmp(right))
+            right
+                .value
+                .len()
+                .cmp(&left.value.len())
+                .then_with(|| left.value.cmp(right.value))
+                .then_with(|| left.header_name.cmp(&right.header_name))
         });
         known.dedup();
         Self { known }
@@ -127,10 +159,134 @@ impl<'a> CredentialRedactor<'a> {
     fn redact(&self, text: &str) -> String {
         let mut redacted = text.to_string();
         for secret in &self.known {
-            redacted = redacted.replace(secret, REDACTED);
+            redacted = if secret.value.len() >= 4 {
+                if redacted.contains(secret.value) {
+                    redacted.replace(secret.value, REDACTED)
+                } else {
+                    redacted
+                }
+            } else {
+                replace_short_secret(redacted, secret.value, secret.header_name)
+            };
         }
         redact_patterns(redacted)
     }
+}
+
+fn replace_short_secret(text: String, secret: &str, header_name: Option<&str>) -> String {
+    let mut output: Option<String> = None;
+    let mut cursor = 0;
+    for (start, _) in text.match_indices(secret) {
+        let end = start + secret.len();
+        if !short_secret_is_credential_value(&text, start, end, header_name) {
+            continue;
+        }
+        let output = output.get_or_insert_with(|| String::with_capacity(text.len()));
+        output.push_str(&text[cursor..start]);
+        output.push_str(REDACTED);
+        cursor = end;
+    }
+    match output {
+        Some(mut output) => {
+            output.push_str(&text[cursor..]);
+            output
+        }
+        None => text,
+    }
+}
+
+fn short_secret_is_credential_value(
+    text: &str,
+    start: usize,
+    end: usize,
+    header_name: Option<&str>,
+) -> bool {
+    let before = &text[..start];
+    let after = &text[end..];
+    if before.trim().is_empty() && after.trim().is_empty() {
+        return true;
+    }
+    if after
+        .chars()
+        .next()
+        .is_some_and(is_short_secret_token_character)
+    {
+        return false;
+    }
+
+    let prefix = before.trim_end();
+    if prefix.ends_with('=') {
+        return true;
+    }
+    if prefix.ends_with(':')
+        && (prefix.len() != before.len()
+            || no_space_colon_has_credential_label(prefix, header_name))
+    {
+        return true;
+    }
+    let quoted = matches!(prefix.chars().last(), Some('"' | '\''));
+    let unquoted_prefix = if quoted {
+        prefix[..prefix.len() - 1].trim_end()
+    } else {
+        prefix
+    };
+    if quoted && matches!(unquoted_prefix.chars().last(), Some(':' | '=')) {
+        return true;
+    }
+    if before
+        .chars()
+        .next_back()
+        .is_some_and(is_short_secret_token_character)
+    {
+        return false;
+    }
+
+    let cue = unquoted_prefix
+        .rsplit(|character: char| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        })
+        .next()
+        .unwrap_or_default();
+    is_credential_cue(cue)
+}
+
+fn no_space_colon_has_credential_label(prefix: &str, header_name: Option<&str>) -> bool {
+    let label = prefix
+        .strip_suffix(':')
+        .and_then(|prefix| {
+            prefix
+                .rsplit(|character: char| {
+                    character.is_ascii_whitespace()
+                        || matches!(character, '"' | '\'' | '{' | '[' | '(' | ',' | ';')
+                })
+                .next()
+        })
+        .unwrap_or_default();
+    is_credential_cue(label)
+        || header_name.is_some_and(|header_name| label.eq_ignore_ascii_case(header_name))
+}
+
+fn is_short_secret_token_character(character: char) -> bool {
+    character.is_alphanumeric() || matches!(character, '-' | '_')
+}
+
+fn is_credential_cue(value: &str) -> bool {
+    [
+        "authorization",
+        "bearer",
+        "basic",
+        "credential",
+        "secret",
+        "token",
+        "key",
+        "api-key",
+        "apikey",
+        "x-api-key",
+        "password",
+        "cookie",
+    ]
+    .iter()
+    .any(|cue| value.eq_ignore_ascii_case(cue))
 }
 
 fn redact_patterns(mut redacted: String) -> String {
@@ -188,12 +344,7 @@ pub(crate) fn redact_json_body_with_extra_headers(
 ) -> String {
     redact_json_body_with(
         body,
-        &CredentialRedactor::new(
-            secrets
-                .iter()
-                .copied()
-                .chain(extra_headers.values().map(String::as_str)),
-        ),
+        &CredentialRedactor::with_extra_headers(secrets.iter().copied(), extra_headers),
     )
 }
 
@@ -266,6 +417,57 @@ mod tests {
         assert_eq!(redact_credentials("plain", &[""]), "plain");
     }
 
+    #[test]
+    fn short_known_secrets_preserve_unrelated_prose_and_paths() {
+        let text = "no credits; api key noël; failed to tokenize input; endpoint /v1/models or \
+                    http://localhost:4/v1; HTTP 400";
+        assert_eq!(redact_credentials(text, &["no", "ize", "v1", "4"]), text);
+    }
+
+    #[test]
+    fn short_known_secrets_redact_only_credential_values() {
+        for (text, secret, expected) in [
+            ("invalid key abc", "abc", "invalid key [REDACTED]"),
+            ("extra=no", "no", "extra=[REDACTED]"),
+            ("x-provider: 4", "4", "x-provider: [REDACTED]"),
+            ("Authorization:4", "4", "Authorization: [REDACTED]"),
+            (r#""echo":"4""#, "4", r#""echo":"[REDACTED]""#),
+            (" 4\n", "4", " [REDACTED]\n"),
+        ] {
+            assert_eq!(redact_credentials(text, &[secret]), expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn short_extra_header_values_match_embedded_header_names() {
+        let extra_headers = BTreeMap::from([
+            ("Tenant".to_string(), "abc".to_string()),
+            ("XFoo".to_string(), "4".to_string()),
+        ]);
+        let text = "echoed XFoo:4 rejected; Tenant:abc";
+        assert_eq!(
+            redact_credentials_with_extra_headers(text, &[], &extra_headers),
+            "echoed XFoo:[REDACTED] rejected; Tenant:[REDACTED]"
+        );
+
+        let json = redact_json_body_with_extra_headers(
+            r#"{"message":"echoed XFoo:4 rejected"}"#,
+            &[],
+            &extra_headers,
+        );
+        assert!(json.contains("XFoo:[REDACTED]"), "{json}");
+        assert!(!json.contains("XFoo:4"), "{json}");
+    }
+
+    #[test]
+    fn short_known_secrets_preserve_json_diagnostics() {
+        let redacted = redact_json_body(r#"{"echo":"4","message":"status=4; HTTP 400"}"#, &["4"]);
+        assert!(redacted.contains(r#""echo":"[REDACTED]""#), "{redacted}");
+        assert!(
+            redacted.contains(r#""message":"status=[REDACTED]; HTTP 400""#),
+            "{redacted}"
+        );
+    }
     #[test]
     fn redacts_authorization_header_with_scheme() {
         for text in [
