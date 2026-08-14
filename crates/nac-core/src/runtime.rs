@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::EventSink;
-use crate::light_model::{resolve_light_client, LightModelSettings};
+use crate::light_model::{resolve_light_client, LightModelError, LightModelSettings};
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
     managed_backend_base_url, resolve_model_metadata, BackendKind, EffectiveModelSettings,
@@ -1343,11 +1343,16 @@ async fn build_resume_config_from_snapshot(
         .as_ref()
         .map(|light| resolve_light_client(light, &snapshot.extra_headers))
         .transpose()
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "stored session light-model settings are invalid; settings repair required: {:#}",
-                error
-            )
+        .map_err(|error| match error {
+            // The resolver classifies the failure at the source; add the
+            // repair context without type-sniffing the chain. The boundary
+            // renders the full chain once with `{:#}`.
+            LightModelError::InvalidSettings(inner) => inner.context(
+                "stored session light-model settings are invalid; settings repair required",
+            ),
+            // Keep the typed wrapper so its top-level context still names
+            // the light model as the failing component.
+            error @ LightModelError::Other(_) => anyhow::Error::from(error),
         })?
         .map(std::sync::Arc::new);
     let sandbox = if ssh.is_some() {

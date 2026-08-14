@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
     managed_backend_base_url, provider_for_model, BackendKind, EffectiveModelSettings, ModelClient,
-    ReasoningEffort,
+    ModelConfigurationError, ReasoningEffort,
 };
 
 /// The optional light worker model of a session. `Some` on a session enables
@@ -27,13 +27,61 @@ pub struct LightModelSettings {
     pub reasoning_effort: Option<ReasoningEffort>,
 }
 
+/// Error resolving a session's light model.
+///
+/// The variant carries the configuration-error semantics, so the shared
+/// runtime path matches on the type instead of type-sniffing an
+/// `anyhow::Error` chain. `Display` renders only the top-level context and
+/// `source` returns the inner error, so the HTTP boundary renders the full
+/// cause chain exactly once with `{:#}`.
+#[derive(Debug)]
+pub enum LightModelError {
+    /// The light-model settings are invalid and the user can repair them.
+    InvalidSettings(anyhow::Error),
+    /// Resolution failed for a reason other than the settings themselves.
+    Other(anyhow::Error),
+}
+
+impl LightModelError {
+    /// Whether the failure is a caller-fixable settings problem.
+    pub fn is_invalid_settings(&self) -> bool {
+        matches!(self, Self::InvalidSettings(_))
+    }
+
+    /// The inner error, with its cause chain intact.
+    pub fn into_inner(self) -> anyhow::Error {
+        match self {
+            Self::InvalidSettings(error) | Self::Other(error) => error,
+        }
+    }
+}
+
+impl std::fmt::Display for LightModelError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Only the top-level context; the inner error is the `source`, so
+        // `{:#}` walks the cause chain exactly once.
+        match self {
+            Self::InvalidSettings(_) => formatter.write_str("invalid light model settings"),
+            Self::Other(_) => formatter.write_str("failed to resolve the light model"),
+        }
+    }
+}
+
+impl std::error::Error for LightModelError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidSettings(error) | Self::Other(error) => Some(error.as_ref()),
+        }
+    }
+}
+
 /// Resolve the light model at launch or resume, so invalid settings fail
 /// before the first dispatch. The client carries the session's extra
 /// headers, matching how single-mode workers inherit them.
 pub(crate) fn resolve_light_client(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
-) -> Result<ModelClient> {
+) -> std::result::Result<ModelClient, LightModelError> {
     let backend = light
         .backend
         .or_else(|| provider_for_model(light.model.as_str()));
@@ -51,7 +99,17 @@ pub(crate) fn resolve_light_client(
         session_headers.clone(),
     )
     .and_then(ModelClient::from_effective_settings)
-    .context("invalid light model settings")
+    .map_err(|error| {
+        // Classify at the source, while the typed configuration error is
+        // still visible. The variant's `Display` carries the top-level
+        // context and the inner error stays the `source`, so callers render
+        // the chain once with `{:#}` at the boundary.
+        if error.downcast_ref::<ModelConfigurationError>().is_some() {
+            LightModelError::InvalidSettings(error)
+        } else {
+            LightModelError::Other(error)
+        }
+    })
 }
 
 /// Validate a light-model configuration through the same resolution path
@@ -60,7 +118,9 @@ pub fn validate(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
 ) -> Result<()> {
-    resolve_light_client(light, session_headers).map(|_| ())
+    resolve_light_client(light, session_headers)
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
 }
 
 #[cfg(test)]
@@ -114,5 +174,59 @@ mod tests {
         assert!(error.contains("invalid light model settings"));
 
         restore_env("OPENAI_API_KEY", original_openai);
+    }
+
+    #[test]
+    fn missing_light_model_api_key_names_the_required_credential() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_arcee = std::env::var_os("ARCEE_API_KEY");
+        unsafe {
+            std::env::remove_var("ARCEE_API_KEY");
+        }
+
+        let light = LightModelSettings {
+            model: "deepseek/deepseek-v4-flash-latest".to_string(),
+            backend: Some(BackendKind::ArceeApi),
+            base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+            api_key_env: None,
+            reasoning_effort: None,
+        };
+        let error = resolve_light_client(&light, &BTreeMap::new())
+            .map(|_| ())
+            .unwrap_err();
+
+        // The variant carries the configuration semantics; the chain stays
+        // intact inside the error and the boundary renders it once with
+        // `{:#}`.
+        assert!(error.is_invalid_settings());
+        let rendered = format!("{:#}", anyhow::Error::from(error));
+        assert!(
+            rendered.contains("invalid light model settings"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("api_key_env"), "{rendered}");
+        assert!(rendered.contains("ARCEE_API_KEY"), "{rendered}");
+
+        restore_env("ARCEE_API_KEY", original_arcee);
+    }
+
+    #[test]
+    fn alternate_rendering_walks_the_chain_exactly_once() {
+        let inner = || anyhow::anyhow!("leaf diagnostic").context("middle context");
+
+        let rendered = format!(
+            "{:#}",
+            anyhow::Error::from(LightModelError::InvalidSettings(inner()))
+        );
+        assert_eq!(
+            rendered,
+            "invalid light model settings: middle context: leaf diagnostic"
+        );
+
+        let rendered = format!("{:#}", anyhow::Error::from(LightModelError::Other(inner())));
+        assert_eq!(
+            rendered,
+            "failed to resolve the light model: middle context: leaf diagnostic"
+        );
     }
 }
