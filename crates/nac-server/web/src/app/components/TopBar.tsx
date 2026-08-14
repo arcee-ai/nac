@@ -9,13 +9,13 @@ import {
   Icon,
   IconName,
   Logo,
-  StickyButton,
 } from "@/app/atoms";
 import { Breadcrumbs } from "@/app/components/Breadcrumbs";
 import { HeaderMenu } from "@/app/components/HeaderMenu";
+import { McpServersButton } from "@/app/components/McpServersButton";
 import { SessionHeaderActions } from "@/app/components/SessionHeaderActions";
 import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
-import { McpServersModal } from "@/app/components/modals/McpServersModal";
+import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServersModal";
 import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
@@ -81,7 +81,7 @@ export function TopBar() {
         <div
           className={cn(
             "relative flex items-center shrink-0",
-            isMobile ? "gap-3" : "gap-2",
+            isMobile ? "gap-1" : "gap-2",
           )}
         >
           {/* On the list a phone has no filter rail to launch from, so the
@@ -99,31 +99,7 @@ export function TopBar() {
             </Button>
           ) : null}
           <SessionHeaderActions />
-          {/* The tools a session can reach for are worth one tap from anywhere,
-              so they sit in the bar rather than behind the menu. The phone drops
-              the label and takes the floating pill form the width already uses
-              for its own controls. */}
-          {isMobile ? (
-            <StickyButton
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label="MCP servers"
-              onClick={() => setMcpServers(true)}
-            >
-              <Icon iconName={IconName.Toolbox} />
-            </StickyButton>
-          ) : (
-            <Button
-              variant={ButtonVariant.Secondary}
-              size={ButtonSize.Medium}
-              content={ButtonContent.IconLeft}
-              aria-label="MCP servers"
-              onClick={() => setMcpServers(true)}
-            >
-              <Icon iconName={IconName.Toolbox} />
-              MCP
-            </Button>
-          )}
+          <McpServersButton onOpen={() => setMcpServers(true)} />
           <HeaderMenu
             onConfigurations={() => setConfiguring(true)}
             onSshConfigs={() => setSshConfigs(true)}
