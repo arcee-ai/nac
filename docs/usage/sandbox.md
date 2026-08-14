@@ -6,6 +6,10 @@
 nac-web --sandbox
 ```
 
+The first sandbox launch pulls the container image and can take a few
+minutes; the launch dialog shows the current phase and elapsed time while it
+runs.
+
 By default this mounts the current directory into the sandbox at `/workspace`.
 When the current directory belongs to a git repository, the sandbox mounts a
 throwaway per-session [git worktree](https://git-scm.com/docs/git-worktree)

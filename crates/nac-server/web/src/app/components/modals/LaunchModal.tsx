@@ -56,6 +56,8 @@ import {
   useCreateModelConfig,
   useCreateSession,
   useModelCatalog,
+  useSandboxActivity,
+  useSandboxAvailability,
   useStoreInfo,
   useUpdatePresentation,
 } from "@/app/services/queries";
@@ -189,10 +191,35 @@ function LaunchForm({
 
   const isMobile = useIsMobile();
   const isSsh = mode === "ssh";
+  // Probed only while sandbox mode is selected, so a missing or stopped
+  // podman runtime is flagged here instead of failing the launch.
+  const sandboxAvailability = useSandboxAvailability(mode === "sandbox").data;
   const connected = isSsh ? connection : null;
   // A local or sandboxed session has nothing to connect to, so it is ready at once.
   const ready = !isSsh || connected !== null;
   const busy = createSession.isPending || createModelConfig.isPending;
+
+  // A sandboxed launch can spend minutes pulling the image on first run;
+  // the polled phase plus an elapsed timer is the difference between
+  // "working" and "frozen". Each attempt gets a fresh launch id, sent with
+  // the create request, so the poll only ever sees this launch's phase even
+  // when another launch is in flight.
+  const [launchKey, setLaunchKey] = useState<string | null>(null);
+  const sandboxLaunching = createSession.isPending && mode === "sandbox";
+  const sandboxActivity = useSandboxActivity(sandboxLaunching, launchKey).data;
+  const activitySince = sandboxActivity?.since_epoch_ms;
+  const [launchElapsed, setLaunchElapsed] = useState(0);
+  useEffect(() => {
+    if (!sandboxLaunching) return;
+    const timer = setInterval(() => {
+      setLaunchElapsed(
+        activitySince
+          ? Math.max(0, Math.floor((Date.now() - activitySince) / 1000))
+          : 0,
+      );
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [sandboxLaunching, activitySince]);
 
   // Any edit clears the previous attempt's error, which also re-enables submit.
   const edit =
@@ -388,6 +415,8 @@ function LaunchForm({
     if (threshold !== null)
       body.orchestrator_compaction_threshold = Number(threshold);
     if (!body.ssh_host) {
+      const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
+      setLaunchKey(activityKey);
       body.sandbox = {
         enabled: mode === "sandbox",
         no_mount_cwd: sandbox.noMount,
@@ -397,6 +426,7 @@ function LaunchForm({
         shm_size: nullable(sandbox.shm),
         mounts: csv(sandbox.mounts),
         mounts_ro: [],
+        activity_key: activityKey,
       };
     }
 
@@ -520,6 +550,22 @@ function LaunchForm({
           <p className="pt-1 text-micro text-basic-muted">
             {MODES.find((item) => item.id === mode)?.description}
           </p>
+          {mode === "sandbox" &&
+          sandboxAvailability &&
+          sandboxAvailability.status !== "ready" ? (
+            <div className="pt-1">
+              <p className="text-error-primary text-micro">
+                {sandboxAvailability.status === "missing"
+                  ? "Sandbox mode runs sessions in a podman container, and podman is not installed on this machine."
+                  : `Sandbox mode needs podman, which is not responding${sandboxAvailability.detail ? `: ${sandboxAvailability.detail}` : "."}`}
+              </p>
+              {sandboxAvailability.guidance ? (
+                <pre className="pt-1 whitespace-pre-wrap font-mono text-micro text-basic-muted">
+                  {sandboxAvailability.guidance}
+                </pre>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         {isSsh ? (
@@ -756,6 +802,21 @@ function LaunchForm({
               ) : null}
             </div>
           </ConfigurationsPanel>
+        ) : null}
+
+        {sandboxLaunching ? (
+          <div
+            className="flex items-center gap-2"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="text-micro text-basic-primary">
+              {sandboxActivity?.phase ?? "Creating the sandbox…"}
+            </span>
+            <span className="text-micro text-basic-muted">
+              {launchElapsed}s
+            </span>
+          </div>
         ) : null}
       </div>
 

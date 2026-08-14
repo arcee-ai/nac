@@ -47,6 +47,19 @@ export interface StoreInfo {
   worker_executable: string;
 }
 
+export type SandboxAvailabilityStatus = "ready" | "missing" | "unavailable";
+
+export interface SandboxAvailability {
+  status: SandboxAvailabilityStatus;
+  detail: string | null;
+  guidance: string | null;
+}
+
+export interface SandboxActivity {
+  phase: string;
+  since_epoch_ms: number;
+}
+
 /**
  * Cost in micro-USD (1e-6 USD), priced from the model catalog when the
  * response was parsed. All-zero means the catalog has no rates for the model,
@@ -1098,6 +1111,8 @@ export interface SandboxRequest {
   gpus?: string[];
   shm_size?: string | null;
   session_key?: string | null;
+  /** Client-generated launch id correlating sandbox activity polling. */
+  activity_key?: string | null;
   workdir?: string | null;
   backend?: string | null;
   cpus?: number | null;

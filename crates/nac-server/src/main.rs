@@ -619,6 +619,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             sandbox_backend: cli.sandbox.sandbox_backend,
             sandbox_cpus: cli.sandbox.sandbox_cpus,
             sandbox_mem: cli.sandbox.sandbox_mem,
+            sandbox_activity_key: None,
         },
         ssh: runtime::SshOptions {
             host: cli.ssh_host,

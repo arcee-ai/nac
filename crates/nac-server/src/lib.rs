@@ -490,6 +490,11 @@ pub struct SandboxRequest {
     pub backend: Option<String>,
     pub cpus: Option<u8>,
     pub memory_mib: Option<u32>,
+    /// Client-generated launch id used to key sandbox setup activity, so the
+    /// launching UI polls its own launch's progress. Deliberately not part of
+    /// `sandbox_requested`: it correlates progress reporting, nothing else.
+    #[serde(default)]
+    pub activity_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -2547,6 +2552,8 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
     let documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(store_info))
+        .routes(routes!(sandbox_availability_handler))
+        .routes(routes!(sandbox_activity_handler))
         .routes(routes!(browse_filesystem_handler))
         .routes(routes!(browse_ssh_handler))
         .routes(routes!(provider_models_handler))
@@ -2739,6 +2746,46 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
 )]
 async fn store_info(State(manager): State<SessionManager>) -> Json<StoreInfo> {
     Json(manager.store_info())
+}
+
+/// Whether this host can run sandboxed sessions right now. The launch UI
+/// queries this only when the user picks sandbox mode, so the probe's
+/// subprocess cost is paid on demand rather than on every page load.
+#[utoipa::path(
+    get,
+    path = "/sandbox/availability",
+    operation_id = "get_sandbox_availability",
+    tag = "system",
+    responses((status = 200, description = "Success", body = runtime::SandboxAvailability, content_type = "application/json"))
+)]
+async fn sandbox_availability_handler() -> Json<runtime::SandboxAvailability> {
+    Json(runtime::probe_availability().await)
+}
+
+/// Sandbox setup currently in progress for one launch (image pull, container
+/// start), or `null` when that launch is idle. The launch UI generates a key
+/// per attempt, sends it with the create request, and polls here with it —
+/// keyed so concurrent launches never show each other's phase. A first image
+/// pull can take minutes with no other visible signal.
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SandboxActivityQuery {
+    /// The activity key the create request carried (`sandbox.activity_key`).
+    pub key: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/sandbox/activity",
+    operation_id = "get_sandbox_activity",
+    tag = "system",
+    params(SandboxActivityQuery),
+    responses((status = 200, description = "Success", body = Option<runtime::SandboxActivity>, content_type = "application/json"))
+)]
+async fn sandbox_activity_handler(
+    Query(query): Query<SandboxActivityQuery>,
+) -> Json<Option<runtime::SandboxActivity>> {
+    Json(runtime::current_activity(&query.key))
 }
 
 /// The picker starts wherever the caller last was; with no path yet it opens on
@@ -4518,6 +4565,7 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
         sandbox_backend: request.backend,
         sandbox_cpus: request.cpus,
         sandbox_mem: request.memory_mib,
+        sandbox_activity_key: request.activity_key,
     }
 }
 
@@ -4873,6 +4921,8 @@ mod tests {
         ("GET", "/mcp_library/servers"),
         ("GET", "/model-configs"),
         ("GET", "/models"),
+        ("GET", "/sandbox/activity"),
+        ("GET", "/sandbox/availability"),
         ("GET", "/sessions"),
         ("GET", "/sessions/{session_id}"),
         ("GET", "/sessions/{session_id}/config"),

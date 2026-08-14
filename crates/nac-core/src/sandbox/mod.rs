@@ -23,6 +23,107 @@ pub use ssh_command::SshConnection;
 pub const DEFAULT_SANDBOX_IMAGE: &str = "python:3.13-bookworm";
 pub const DEFAULT_SANDBOX_WORKDIR: &str = "/workspace";
 
+/// Whether the sandbox runtime (podman) can be used on this host right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxAvailabilityStatus {
+    Ready,
+    /// The `podman` binary was not found.
+    Missing,
+    /// Installed but not answering: on macOS usually a stopped or missing
+    /// `podman machine`.
+    Unavailable,
+}
+
+/// The result of probing the sandbox runtime, with the steps that would make
+/// it usable. Surfaced by the API so launch UIs can warn before a session
+/// fails, and embedded in session-creation errors for agents driving the MCP.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SandboxAvailability {
+    pub status: SandboxAvailabilityStatus,
+    /// Why the runtime is unusable, when it is.
+    pub detail: Option<String>,
+    /// Platform-specific commands that would make it usable.
+    pub guidance: Option<String>,
+}
+
+impl SandboxAvailability {
+    pub fn available(&self) -> bool {
+        self.status == SandboxAvailabilityStatus::Ready
+    }
+
+    /// The availability problem as a single human-readable sentence, guidance
+    /// included. This is what session creation errors carry.
+    pub fn message(&self) -> String {
+        let problem = match self.status {
+            SandboxAvailabilityStatus::Ready => return "sandbox runtime is available".to_string(),
+            SandboxAvailabilityStatus::Missing => "podman is not installed".to_string(),
+            SandboxAvailabilityStatus::Unavailable => match &self.detail {
+                Some(detail) => format!("podman is installed but not responding ({detail})"),
+                None => "podman is installed but not responding".to_string(),
+            },
+        };
+        match &self.guidance {
+            Some(guidance) => format!("sandbox requested but {problem}. To fix:\n{guidance}"),
+            None => format!("sandbox requested but {problem}"),
+        }
+    }
+}
+
+/// Probes the sandbox runtime. Costs two subprocess spawns, so callers on hot
+/// paths should only probe when an operation has already failed.
+pub async fn probe_availability() -> SandboxAvailability {
+    podman::probe_availability().await
+}
+
+/// What sandbox setup is currently doing for one launching session, for UIs
+/// waiting on a launch. Sandbox creation can take minutes (a first image
+/// pull), and without this the only signal is a hung request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SandboxActivity {
+    pub phase: String,
+    pub since_epoch_ms: u64,
+}
+
+/// In-flight sandbox setups, keyed by the launch's activity key (a
+/// client-supplied launch id when one was sent, else the sandbox session
+/// key). Keyed rather than a single slot so concurrent launches do not
+/// clobber each other's phase and a polling UI only ever sees its own
+/// launch's progress.
+static CURRENT_ACTIVITY: std::sync::LazyLock<
+    std::sync::RwLock<std::collections::HashMap<String, SandboxActivity>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+
+/// The sandbox setup in progress for `key`, if any.
+pub fn current_activity(key: &str) -> Option<SandboxActivity> {
+    CURRENT_ACTIVITY.read().ok()?.get(key).cloned()
+}
+
+pub(crate) fn report_activity(key: &str, phase: impl Into<String>) {
+    let since_epoch_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    if let Ok(mut current) = CURRENT_ACTIVITY.write() {
+        current.insert(
+            key.to_string(),
+            SandboxActivity {
+                phase: phase.into(),
+                since_epoch_ms,
+            },
+        );
+    }
+}
+
+pub(crate) fn clear_activity(key: &str) {
+    if let Ok(mut current) = CURRENT_ACTIVITY.write() {
+        current.remove(key);
+    }
+}
+
 /// Identifies which sandbox backend implementation to use.
 ///
 /// Kept as an enum (currently Podman-only) so a future sandbox rework has a
@@ -185,10 +286,20 @@ pub enum SandboxSession {
 }
 
 impl SandboxSession {
-    pub async fn create(spec: SandboxSpec, session_key: String, owner: bool) -> Result<Self> {
+    pub async fn create(
+        spec: SandboxSpec,
+        session_key: String,
+        owner: bool,
+        activity_key: String,
+    ) -> Result<Self> {
         let session = match spec.backend {
             SandboxBackendType::Podman => {
-                let inner = Arc::new(podman::PodmanSession::new(spec, session_key, owner));
+                let inner = Arc::new(podman::PodmanSession::new(
+                    spec,
+                    session_key,
+                    owner,
+                    activity_key,
+                ));
                 inner.ensure_ready().await?;
                 Self::Podman(inner)
             }
@@ -359,6 +470,7 @@ impl SandboxSession {
                 spec,
                 "test-session".to_string(),
                 false,
+                "test-session".to_string(),
             ))),
         }
     }
@@ -645,6 +757,64 @@ mod tests {
 
         restore_nac_home(original);
         let _ = std::fs::remove_dir_all(&nac_home);
+    }
+
+    #[test]
+    fn activity_is_reported_and_cleared_per_key() {
+        assert_eq!(current_activity("launch-a"), None);
+        report_activity("launch-a", "pulling image python:3.13-bookworm");
+        report_activity("launch-b", "starting the sandbox container");
+        let activity = current_activity("launch-a").expect("activity must be reported");
+        assert!(activity.phase.contains("pulling image"));
+        assert!(activity.since_epoch_ms > 0);
+        // Concurrent launches do not clobber each other.
+        assert_eq!(
+            current_activity("launch-b").unwrap().phase,
+            "starting the sandbox container"
+        );
+        report_activity("launch-a", "starting the sandbox container");
+        assert_eq!(
+            current_activity("launch-a").unwrap().phase,
+            "starting the sandbox container"
+        );
+        clear_activity("launch-a");
+        assert_eq!(current_activity("launch-a"), None);
+        assert!(current_activity("launch-b").is_some());
+        clear_activity("launch-b");
+    }
+
+    #[test]
+    fn availability_message_combines_problem_and_guidance() {
+        let missing = SandboxAvailability {
+            status: SandboxAvailabilityStatus::Missing,
+            detail: None,
+            guidance: Some("brew install podman".to_string()),
+        };
+        assert!(!missing.available());
+        let message = missing.message();
+        assert!(
+            message.contains("podman is not installed"),
+            "got: {message}"
+        );
+        assert!(message.contains("brew install podman"), "got: {message}");
+
+        let unavailable = SandboxAvailability {
+            status: SandboxAvailabilityStatus::Unavailable,
+            detail: Some("cannot connect to Podman socket".to_string()),
+            guidance: None,
+        };
+        let message = unavailable.message();
+        assert!(
+            message.contains("not responding") && message.contains("cannot connect"),
+            "got: {message}"
+        );
+
+        let ready = SandboxAvailability {
+            status: SandboxAvailabilityStatus::Ready,
+            detail: None,
+            guidance: None,
+        };
+        assert!(ready.available());
     }
 
     #[test]

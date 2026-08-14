@@ -5,13 +5,92 @@ use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use portable_pty::CommandBuilder as PtyCommandBuilder;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use super::{MountSpec, SandboxSpec};
+use super::{MountSpec, SandboxAvailability, SandboxAvailabilityStatus, SandboxSpec};
+use crate::workspace::first_stderr_line;
+
+/// Probes whether podman can be used on this host right now: first the binary
+/// (`podman --version`), then the runtime (`podman info`, which fails while a
+/// macOS `podman machine` is stopped or never initialized).
+pub(crate) async fn probe_availability() -> SandboxAvailability {
+    match Command::new("podman").arg("--version").output().await {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            return SandboxAvailability {
+                status: SandboxAvailabilityStatus::Missing,
+                detail: Some(first_stderr_line(&output.stderr)),
+                guidance: Some(install_guidance()),
+            };
+        }
+        Err(error) => {
+            let detail = (error.kind() != std::io::ErrorKind::NotFound).then(|| error.to_string());
+            return SandboxAvailability {
+                status: SandboxAvailabilityStatus::Missing,
+                detail,
+                guidance: Some(install_guidance()),
+            };
+        }
+    }
+    match Command::new("podman").arg("info").output().await {
+        Ok(output) if output.status.success() => SandboxAvailability {
+            status: SandboxAvailabilityStatus::Ready,
+            detail: None,
+            guidance: None,
+        },
+        Ok(output) => SandboxAvailability {
+            status: SandboxAvailabilityStatus::Unavailable,
+            detail: Some(first_stderr_line(&output.stderr)),
+            guidance: Some(start_guidance()),
+        },
+        Err(error) => SandboxAvailability {
+            status: SandboxAvailabilityStatus::Unavailable,
+            detail: Some(error.to_string()),
+            guidance: Some(start_guidance()),
+        },
+    }
+}
+
+/// When a podman operation fails, an availability probe says better than the
+/// raw error whether the runtime is even there; if it probes fine, the
+/// original error is the more specific one and stays.
+async fn explain_runtime_failure(error: anyhow::Error) -> anyhow::Error {
+    let availability = probe_availability().await;
+    if availability.available() {
+        error
+    } else {
+        error.context(availability.message())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn install_guidance() -> String {
+    "brew install podman\npodman machine init\npodman machine start".to_string()
+}
+
+#[cfg(target_os = "linux")]
+fn install_guidance() -> String {
+    "sudo apt install podman    # Debian/Ubuntu\nsudo dnf install podman    # Fedora".to_string()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn install_guidance() -> String {
+    "install podman: https://podman.io/docs/installation".to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn start_guidance() -> String {
+    "podman machine init    # first run only\npodman machine start".to_string()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_guidance() -> String {
+    "check 'podman info' on this host for why the runtime is not responding".to_string()
+}
 
 pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
 if command -v setsid >/dev/null 2>&1; then
@@ -63,16 +142,26 @@ pub(crate) struct PodmanSession {
     session_key: String,
     owner: bool,
     container_name: String,
+    /// Key setup activity is reported under: a client-supplied launch id when
+    /// one was sent, else the session key. Keyed per launch so concurrent
+    /// launches do not clobber each other's reported phase.
+    activity_key: String,
 }
 
 impl PodmanSession {
-    pub(crate) fn new(spec: SandboxSpec, session_key: String, owner: bool) -> Self {
+    pub(crate) fn new(
+        spec: SandboxSpec,
+        session_key: String,
+        owner: bool,
+        activity_key: String,
+    ) -> Self {
         let container_name = format!("nac-{}", sanitize_name(&session_key));
         Self {
             spec,
             session_key,
             owner,
             container_name,
+            activity_key,
         }
     }
 
@@ -81,7 +170,18 @@ impl PodmanSession {
     }
 
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
-        let exists = self.container_exists().await?;
+        // The guard clears the activity entry even when this future is
+        // dropped mid-setup (e.g. the client disconnects during a long first
+        // image pull); stale activity is worse than none.
+        let _guard = ActivityGuard(self.activity_key.clone());
+        self.ensure_ready_inner().await
+    }
+
+    async fn ensure_ready_inner(&self) -> Result<()> {
+        let exists = match self.container_exists().await {
+            Ok(exists) => exists,
+            Err(error) => return Err(explain_runtime_failure(error).await),
+        };
         if !exists {
             if !self.owner {
                 bail!(
@@ -89,6 +189,8 @@ impl PodmanSession {
                     self.session_key
                 );
             }
+            self.ensure_image().await?;
+            super::report_activity(&self.activity_key, "starting the sandbox container");
             self.create_container().await?;
             return Ok(());
         }
@@ -97,6 +199,69 @@ impl PodmanSession {
             self.start_container().await?;
         }
 
+        Ok(())
+    }
+
+    /// A first sandbox launch spends nearly all its time here. Pulling
+    /// explicitly — rather than letting `podman run` pull implicitly — is
+    /// what lets the slow phase be reported and streamed instead of looking
+    /// frozen.
+    async fn ensure_image(&self) -> Result<()> {
+        let exists = Command::new("podman")
+            .arg("image")
+            .arg("exists")
+            .arg(&self.spec.image)
+            .output()
+            .await
+            .with_context(|| "failed to execute 'podman image exists'")?;
+        match classify_image_exists(exists.status.code(), &exists.stderr) {
+            ImageCheck::Present => return Ok(()),
+            ImageCheck::Missing => {}
+            // A runtime failure (125 while the engine is down, connection
+            // errors, ...) must not fall through to a pull: that would
+            // disguise an availability problem as a slow first-run pull.
+            ImageCheck::Failed(detail) => {
+                return Err(explain_runtime_failure(anyhow!(
+                    "failed to check for sandbox image '{}': {}",
+                    self.spec.image,
+                    detail
+                ))
+                .await);
+            }
+        }
+        super::report_activity(
+            &self.activity_key,
+            format!(
+                "pulling image {} (first run can take several minutes)",
+                self.spec.image
+            ),
+        );
+        // Stdout stays inherited so pull progress is still streamed; stderr
+        // is captured so registry, auth, and network failures reach the
+        // caller instead of only the terminal. `kill_on_drop` keeps a
+        // cancelled launch from leaving the pull running, where a retry
+        // would race a second pull of the same image.
+        let child = Command::new("podman")
+            .arg("pull")
+            .arg(&self.spec.image)
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .with_context(|| format!("failed to execute 'podman pull {}'", self.spec.image))?;
+        let output = child
+            .wait_with_output()
+            .await
+            .with_context(|| format!("failed to wait for 'podman pull {}'", self.spec.image))?;
+        if !output.status.success() {
+            return Err(explain_runtime_failure(anyhow!(
+                "failed to pull sandbox image '{}': {}",
+                self.spec.image,
+                pull_error_detail(&output.stderr)
+            ))
+            .await);
+        }
         Ok(())
     }
 
@@ -304,11 +469,12 @@ impl PodmanSession {
             .await
             .with_context(|| "failed to execute 'podman run'")?;
         if !output.status.success() {
-            bail!(
+            return Err(explain_runtime_failure(anyhow!(
                 "failed to create sandbox container '{}': {}",
                 self.container_name,
                 String::from_utf8_lossy(&output.stderr).trim()
-            );
+            ))
+            .await);
         }
         Ok(())
     }
@@ -321,11 +487,12 @@ impl PodmanSession {
             .await
             .with_context(|| "failed to execute 'podman start'")?;
         if !output.status.success() {
-            bail!(
+            return Err(explain_runtime_failure(anyhow!(
                 "failed to start sandbox container '{}': {}",
                 self.container_name,
                 String::from_utf8_lossy(&output.stderr).trim()
-            );
+            ))
+            .await);
         }
         Ok(())
     }
@@ -410,6 +577,54 @@ impl Drop for PodmanSession {
     }
 }
 
+/// `podman image exists` exit codes: 0 = present, 1 = missing, anything
+/// else (125 while the engine is down, connection failures, being killed by
+/// a signal) = the check itself failed.
+enum ImageCheck {
+    Present,
+    Missing,
+    Failed(String),
+}
+
+fn classify_image_exists(code: Option<i32>, stderr: &[u8]) -> ImageCheck {
+    match code {
+        Some(0) => ImageCheck::Present,
+        Some(1) => ImageCheck::Missing,
+        _ => ImageCheck::Failed(first_stderr_line(stderr)),
+    }
+}
+
+/// `podman pull` streams progress ("Trying to pull ...", "Copying blob ...")
+/// to stderr along with the real failure, so the first line is rarely the
+/// error. Prefer the `Error:` line podman prints for the failure itself;
+/// fall back to the last non-empty line, which is where podman puts the
+/// reason when it is not `Error:`-prefixed.
+fn pull_error_detail(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    lines
+        .iter()
+        .rev()
+        .find(|line| line.starts_with("Error"))
+        .or_else(|| lines.last())
+        .map(|line| (*line).to_string())
+        .unwrap_or_else(|| "no details reported".to_string())
+}
+
+/// Removes a session's activity-map entry on drop, so cancelling the
+/// `ensure_ready` future mid-setup cannot leak a stale entry.
+struct ActivityGuard(String);
+
+impl Drop for ActivityGuard {
+    fn drop(&mut self) {
+        super::clear_activity(&self.0);
+    }
+}
+
 pub(crate) fn make_sandbox_pidfile() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
@@ -481,7 +696,50 @@ mod tests {
             },
             "abc123".to_string(),
             false,
+            "abc123".to_string(),
         )
+    }
+
+    #[test]
+    fn image_exists_exit_codes_are_classified() {
+        assert!(matches!(
+            classify_image_exists(Some(0), b""),
+            ImageCheck::Present
+        ));
+        assert!(matches!(
+            classify_image_exists(Some(1), b""),
+            ImageCheck::Missing
+        ));
+        // Engine-down style failure (podman exits 125) surfaces its stderr.
+        match classify_image_exists(Some(125), b"Error: unable to connect to Podman socket\n") {
+            ImageCheck::Failed(detail) => {
+                assert!(detail.contains("unable to connect to Podman socket"));
+            }
+            _ => panic!("exit 125 must be a check failure, not a missing image"),
+        }
+        // Signal termination (no exit code) is also a failure, and empty
+        // stderr still yields a usable message.
+        match classify_image_exists(None, b"") {
+            ImageCheck::Failed(detail) => assert_eq!(detail, "no details reported"),
+            _ => panic!("signal termination must be a check failure"),
+        }
+    }
+
+    #[test]
+    fn pull_error_detail_prefers_the_error_line_over_progress() {
+        // Pull progress precedes the real failure on stderr; the first line
+        // is a status, not the reason.
+        let stderr = b"Trying to pull registry.example.com/img:latest...\nCopying blob sha256:abc\nError: initializing source: unauthorized\n";
+        assert_eq!(
+            pull_error_detail(stderr),
+            "Error: initializing source: unauthorized"
+        );
+        // Without an `Error:` line, the last non-empty line is the reason.
+        let stderr = b"Trying to pull registry.example.com/img:latest...\nmanifest unknown\n";
+        assert_eq!(pull_error_detail(stderr), "manifest unknown");
+        // Empty stderr still yields a usable message.
+        assert_eq!(pull_error_detail(b""), "no details reported");
+        assert_eq!(pull_error_detail(b"\n  \n"), "no details reported");
     }
 
     #[test]
@@ -533,6 +791,7 @@ mod tests {
             },
             "empty".to_string(),
             false,
+            "empty".to_string(),
         );
         let rendered: Vec<String> = session
             .create_container_args()
@@ -555,6 +814,7 @@ mod tests {
             },
             "gpu".to_string(),
             false,
+            "gpu".to_string(),
         );
         let rendered: Vec<String> = session
             .create_container_args()
