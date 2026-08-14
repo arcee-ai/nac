@@ -1007,7 +1007,13 @@ where
                     "Arcee device code expired; run `nac arcee-auth login` again"
                 ))
             }
-            Some(other) => return Err(anyhow!("Arcee device authorization failed: {other}")),
+            Some(other) => {
+                let message = redact_credentials(
+                    other,
+                    &[device.device_code.as_str(), device.user_code.as_str()],
+                );
+                return Err(anyhow!("Arcee device authorization failed: {message}"));
+            }
             None => {
                 return Err(anyhow!(
                     "Arcee device authorization failed with HTTP {}: {}",
@@ -1480,6 +1486,40 @@ mod tests {
             assert_eq!(requests.len(), 1);
             assert_device_request(&requests[0], "/app/v1/device/token");
         }
+    }
+
+    #[tokio::test]
+    async fn token_poll_redacts_device_code_from_structured_error() {
+        let secret = "sensitive-device-code";
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "400 Bad Request",
+            format!(r#"{{"error":"{secret}"}}"#),
+        )]);
+        let device = DeviceCode {
+            device_code: secret.to_string(),
+            user_code: "ERROR".to_string(),
+            verification_uri_complete: "https://accounts.arcee.ai/device".to_string(),
+            interval_secs: 1,
+            expires_in_secs: 60,
+        };
+
+        let error = poll_device_code_with(
+            &no_redirect_client().unwrap(),
+            &ArceeAuthService::for_test(&server.base_url),
+            &device,
+            || 0,
+            |_| ready(()),
+        )
+        .await
+        .expect_err("terminal poll response should fail")
+        .to_string();
+        server.finish();
+
+        assert!(
+            !error.contains(secret),
+            "error leaked the echoed device credential: {error}"
+        );
+        assert!(error.contains(crate::model::redact::REDACTED), "{error}");
     }
 
     #[test]

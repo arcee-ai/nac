@@ -2,7 +2,7 @@ use super::anthropic_stream::AnthropicStreamFold;
 use super::chat_stream::ChatStreamFold;
 use super::pseudo_tool_calls::finalize_chat_tool_recovery;
 use super::responses_stream::ResponsesStreamFold;
-use super::sse::{read_sse_response, with_source_chain, StreamFold};
+use super::sse::{read_sse_response_with_extra_headers, with_source_chain, StreamFold};
 use super::*;
 use anyhow::Context;
 
@@ -733,14 +733,18 @@ impl ModelClient {
         let body_text = read_response_body(response).await?;
         serde_json::from_str::<Value>(&body_text).map_err(|e| ModelHttpError {
             status: Some(status.as_u16()),
-            message: redact_credentials(
-                &format!(
-                    "Failed to parse response from {}: {}\nBody: {}",
-                    url,
-                    e,
-                    truncate_utf8(&redact_credentials(&body_text, secrets), 500)
-                ),
-                secrets,
+            message: format!(
+                "Failed to parse response from {}: {}\nBody: {}",
+                redact_credentials(url, &[]),
+                e,
+                truncate_utf8(
+                    &redact_credentials_with_extra_headers(
+                        &body_text,
+                        secrets,
+                        &self.extra_headers,
+                    ),
+                    500,
+                )
             ),
         })
     }
@@ -784,7 +788,7 @@ impl ModelClient {
                         status: None,
                         message: format!(
                             "HTTP request failed for {}: {}",
-                            url,
+                            redact_credentials(url, &[]),
                             with_source_chain(&e)
                         ),
                     };
@@ -807,41 +811,57 @@ impl ModelClient {
             }
 
             let body = read_response_body(response).await?;
+            let safe_url = redact_credentials(url, &[]);
 
             if status.is_redirection() {
                 let location = redirect_location.as_deref().map(|value| {
                     format!(
                         " Location: {}.",
-                        truncate_utf8(&redact_credentials(value, secrets), 500)
+                        truncate_utf8(
+                            &redact_credentials_with_extra_headers(
+                                value,
+                                secrets,
+                                &self.extra_headers,
+                            ),
+                            500,
+                        )
                     )
                 });
                 let location = location.unwrap_or_default();
                 return Err(ModelHttpError {
                     status: Some(status.as_u16()),
-                    message: redact_credentials(
-                        &format!(
-                            "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
-                            self.backend,
-                            status.as_u16(),
-                            url,
-                            location,
-                            truncate_utf8(&redact_json_body(&body, secrets), 500)
-                        ),
-                        secrets,
+                    message: format!(
+                        "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
+                        self.backend,
+                        status.as_u16(),
+                        safe_url,
+                        location,
+                        truncate_utf8(
+                            &redact_json_body_with_extra_headers(
+                                &body,
+                                secrets,
+                                &self.extra_headers,
+                            ),
+                            500,
+                        )
                     ),
                 });
             }
 
             let error = ModelHttpError {
                 status: Some(status.as_u16()),
-                message: redact_credentials(
-                    &format!(
-                        "HTTP {} from {}: {}",
-                        status.as_u16(),
-                        url,
-                        truncate_utf8(&redact_json_body(&body, secrets), 500)
-                    ),
-                    secrets,
+                message: format!(
+                    "HTTP {} from {}: {}",
+                    status.as_u16(),
+                    safe_url,
+                    truncate_utf8(
+                        &redact_json_body_with_extra_headers(
+                            &body,
+                            secrets,
+                            &self.extra_headers,
+                        ),
+                        500,
+                    )
                 ),
             };
 
@@ -903,7 +923,15 @@ impl ModelClient {
             let response = self
                 .send_with_retry_headers(url, body, apply_headers, secrets)
                 .await?;
-            match read_sse_response(url, response, make_fold(), secrets).await {
+            match read_sse_response_with_extra_headers(
+                url,
+                response,
+                make_fold(),
+                secrets,
+                &self.extra_headers,
+            )
+            .await
+            {
                 Ok(value) => return Ok(value),
                 Err(error) if error.is_retryable() && !error.has_observable_delta() => {
                     last_error = Some(ModelHttpError {

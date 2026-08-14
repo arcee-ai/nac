@@ -12,9 +12,11 @@
 //! error prose is left intact so the actionable part of a provider message
 //! ("no credits", "bad key", "rate limit") survives.
 
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
 use regex::Regex;
 use serde_json::Value;
-use std::sync::OnceLock;
 
 /// Marker substituted for any credential material found in provider text.
 pub(crate) const REDACTED: &str = "[REDACTED]";
@@ -36,11 +38,6 @@ const SENSITIVE_JSON_KEYS: [&str; 13] = [
     "cookie",
     "set-cookie",
 ];
-
-/// Secrets shorter than this are not replaced verbatim: a one- or two-character
-/// "secret" would otherwise rewrite ordinary words. Header-shape patterns still
-/// catch short credentials when they appear in a recognizable form.
-const MIN_EXACT_SECRET_LEN: usize = 4;
 
 /// `Authorization: Bearer <token>` / `Authorization: Basic <b64>`, with or
 /// without the surrounding quotes JSON would add.
@@ -89,43 +86,87 @@ fn url_userinfo_re() -> &'static Regex {
 /// shapes — `Authorization`/`x-api-key` header lines, `Bearer`/`Basic` tokens,
 /// and URL userinfo — are masked even when the exact value is not known.
 pub(crate) fn redact_credentials(text: &str, secrets: &[&str]) -> String {
-    let mut redacted = text.to_string();
-    let mut known: Vec<&str> = secrets
-        .iter()
-        .copied()
-        .filter(|secret| !secret.is_empty() && secret.len() >= MIN_EXACT_SECRET_LEN)
-        .collect();
-    known.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
-    for secret in known {
-        redacted = redacted.replace(secret, REDACTED);
-    }
-    redact_patterns(&redacted)
+    CredentialRedactor::new(secrets.iter().copied()).redact(text)
 }
 
-fn redact_patterns(text: &str) -> String {
-    let mut redacted = header_with_scheme_re()
-        .replace_all(text, "$1: [REDACTED]")
-        .into_owned();
-    redacted = header_value_re()
-        .replace_all(&redacted, "$1: [REDACTED]")
-        .into_owned();
-    redacted = bearer_token_re()
-        .replace_all(&redacted, |captures: &regex::Captures<'_>| {
-            // Ordinary prose ("bearer token", "basic authentication") is all
-            // lowercase letters; credential material carries at least one
-            // digit, uppercase letter, or symbol. Masking a prose word would
-            // hide the actionable part of a provider error.
-            let token = &captures[2];
-            if token.bytes().any(|byte| !byte.is_ascii_lowercase()) {
-                format!("{} [REDACTED]", &captures[1])
-            } else {
-                captures[0].to_string()
-            }
-        })
-        .into_owned();
-    redacted = url_userinfo_re()
-        .replace_all(&redacted, "$1[REDACTED]@")
-        .into_owned();
+/// Redact known credentials plus every configured extra-header value.
+///
+/// Extra headers may use provider-specific names that pattern matching cannot
+/// recognize, so their values must travel with the request's ordinary secrets.
+pub(crate) fn redact_credentials_with_extra_headers(
+    text: &str,
+    secrets: &[&str],
+    extra_headers: &BTreeMap<String, String>,
+) -> String {
+    CredentialRedactor::new(
+        secrets
+            .iter()
+            .copied()
+            .chain(extra_headers.values().map(String::as_str)),
+    )
+    .redact(text)
+}
+
+struct CredentialRedactor<'a> {
+    known: Vec<&'a str>,
+}
+
+impl<'a> CredentialRedactor<'a> {
+    fn new(secrets: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut known: Vec<&str> = secrets
+            .into_iter()
+            .filter(|secret| !secret.is_empty())
+            .collect();
+        known.sort_unstable_by(|left, right| {
+            right.len().cmp(&left.len()).then_with(|| left.cmp(right))
+        });
+        known.dedup();
+        Self { known }
+    }
+
+    fn redact(&self, text: &str) -> String {
+        let mut redacted = text.to_string();
+        for secret in &self.known {
+            redacted = redacted.replace(secret, REDACTED);
+        }
+        redact_patterns(redacted)
+    }
+}
+
+fn redact_patterns(mut redacted: String) -> String {
+    let pattern = header_with_scheme_re();
+    if pattern.is_match(&redacted) {
+        redacted = pattern
+            .replace_all(&redacted, "$1: [REDACTED]")
+            .into_owned();
+    }
+    let pattern = header_value_re();
+    if pattern.is_match(&redacted) {
+        redacted = pattern
+            .replace_all(&redacted, "$1: [REDACTED]")
+            .into_owned();
+    }
+    let pattern = bearer_token_re();
+    if pattern.is_match(&redacted) {
+        redacted = pattern
+            .replace_all(&redacted, |captures: &regex::Captures<'_>| {
+                // Ordinary prose ("bearer token", "basic authentication") is all
+                // lowercase letters; credential material carries at least one
+                // digit, uppercase letter, or symbol. Masking a prose word would
+                // hide the actionable part of a provider error.
+                let token = &captures[2];
+                if token.bytes().any(|byte| !byte.is_ascii_lowercase()) {
+                    format!("{} [REDACTED]", &captures[1])
+                } else {
+                    captures[0].to_string()
+                }
+            })
+            .into_owned();
+    }
+    let pattern = url_userinfo_re();
+    if pattern.is_match(&redacted) {
+        redacted = pattern.replace_all(&redacted, "$1[REDACTED]@").into_owned();
+    }
     redacted
 }
 
@@ -135,15 +176,36 @@ fn redact_patterns(text: &str) -> String {
 /// value is passed through [`redact_credentials`]; otherwise the whole body is
 /// treated as plain text. The result is always a `String`, so callers can
 /// truncate it afterwards without ever truncating a secret first.
+#[cfg(test)]
 pub(crate) fn redact_json_body(body: &str, secrets: &[&str]) -> String {
+    redact_json_body_with(body, &CredentialRedactor::new(secrets.iter().copied()))
+}
+
+pub(crate) fn redact_json_body_with_extra_headers(
+    body: &str,
+    secrets: &[&str],
+    extra_headers: &BTreeMap<String, String>,
+) -> String {
+    redact_json_body_with(
+        body,
+        &CredentialRedactor::new(
+            secrets
+                .iter()
+                .copied()
+                .chain(extra_headers.values().map(String::as_str)),
+        ),
+    )
+}
+
+fn redact_json_body_with(body: &str, redactor: &CredentialRedactor<'_>) -> String {
     match serde_json::from_str::<Value>(body) {
-        Ok(value) => serde_json::to_string(&redact_json_value(value, secrets))
-            .unwrap_or_else(|_| redact_credentials(body, secrets)),
-        Err(_) => redact_credentials(body, secrets),
+        Ok(value) => serde_json::to_string(&redact_json_value(value, redactor))
+            .unwrap_or_else(|_| redactor.redact(body)),
+        Err(_) => redactor.redact(body),
     }
 }
 
-fn redact_json_value(value: Value, secrets: &[&str]) -> Value {
+fn redact_json_value(value: Value, redactor: &CredentialRedactor<'_>) -> Value {
     match value {
         Value::Object(map) => {
             let mut redacted = serde_json::Map::with_capacity(map.len());
@@ -154,7 +216,7 @@ fn redact_json_value(value: Value, secrets: &[&str]) -> Value {
                 {
                     redacted.insert(key, Value::String(REDACTED.to_string()));
                 } else {
-                    redacted.insert(key, redact_json_value(value, secrets));
+                    redacted.insert(key, redact_json_value(value, redactor));
                 }
             }
             Value::Object(redacted)
@@ -162,10 +224,10 @@ fn redact_json_value(value: Value, secrets: &[&str]) -> Value {
         Value::Array(items) => Value::Array(
             items
                 .into_iter()
-                .map(|item| redact_json_value(item, secrets))
+                .map(|item| redact_json_value(item, redactor))
                 .collect(),
         ),
-        Value::String(text) => Value::String(redact_credentials(&text, secrets)),
+        Value::String(text) => Value::String(redactor.redact(&text)),
         other => other,
     }
 }
@@ -198,9 +260,10 @@ mod tests {
     }
 
     #[test]
-    fn ignores_empty_and_short_secrets_for_verbatim_replacement() {
-        assert_eq!(redact_credentials("abc", &["abc"]), "abc");
-        assert_eq!(redact_credentials("plain", &["", "x"]), "plain");
+    fn redacts_short_known_secrets_and_ignores_empty_values() {
+        let redacted = redact_credentials("invalid key abc", &["abc"]);
+        assert_eq!(redacted, "invalid key [REDACTED]");
+        assert_eq!(redact_credentials("plain", &[""]), "plain");
     }
 
     #[test]
