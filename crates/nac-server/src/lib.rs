@@ -2178,7 +2178,12 @@ impl SessionManager {
             )
             .await?
         };
-        Ok(SessionService::from_orchestrator_run_config(run_config).service)
+        let service = SessionService::from_orchestrator_run_config(run_config).service;
+        // Finalize a run the previous process left interrupted (issue #148):
+        // the caller holds the lease, so a surviving active-run marker is
+        // provably stale and safe to finalize exactly once.
+        service.recover_interrupted_run(operation_lease).await?;
+        Ok(service)
     }
 
     async fn resume_session_attachment(
@@ -2211,11 +2216,12 @@ impl SessionManager {
                 Some(self.inner.worker_executable.clone()),
             )
             .await?;
-        Ok((
-            SessionService::from_orchestrator_run_config(run_config).service,
-            cacheable,
-            operation_lease,
-        ))
+        let service = SessionService::from_orchestrator_run_config(run_config).service;
+        // Finalize a run the previous process left interrupted (issue #148).
+        // When no lease is held here, recovery acquires one itself and skips
+        // when another process is live (its run is not stale).
+        service.recover_interrupted_run(operation_lease.as_ref()).await?;
+        Ok((service, cacheable, operation_lease))
     }
 }
 

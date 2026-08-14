@@ -500,7 +500,10 @@ pub struct SessionService {
     workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
-    transcript_recovery_warning: Arc<Option<String>>,
+    /// Set by restore-time transcript recovery and by interrupted-run recovery
+    /// (issue #148); rendered in the frontend snapshot. Mutex so recovery can
+    /// install the warning after construction.
+    transcript_recovery_warning: Arc<StdMutex<Option<String>>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
     /// go through the same connection as the agent's appends, so store-backed
     /// transcript reads serialize against commit points (step 3).
@@ -692,7 +695,7 @@ impl SessionService {
             workspace_git,
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
-            transcript_recovery_warning: Arc::new(transcript_recovery_warning),
+            transcript_recovery_warning: Arc::new(StdMutex::new(transcript_recovery_warning)),
             transcript_log,
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
@@ -1198,7 +1201,11 @@ impl SessionService {
             metadata,
             messages: loaded_messages.messages,
             message_created_at: loaded_messages.created_at,
-            transcript_recovery_warning: (*self.transcript_recovery_warning).clone(),
+            transcript_recovery_warning: self
+                .transcript_recovery_warning
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
@@ -2134,6 +2141,25 @@ impl SessionService {
             {
                 eprintln!("nac: failed to record run count: {error:#}");
             }
+            // Durable interrupted-run marker (issue #148): written with the run
+            // so a process restart can finalize the abandoned run exactly once.
+            // Best-effort like the run counter: a marker write failure must not
+            // abort the run, it only forfeits restart recovery for this run.
+            let marker = crate::store::ActiveRunRecord {
+                run_id: active_run.run_id.to_string(),
+                client_id: active_run.client_id.as_ref().map(|id| id.to_string()),
+                prompt_preview: active_run.prompt_preview.clone(),
+                submitted_user_message: active_run
+                    .submitted_user_message
+                    .as_ref()
+                    .map(|message| message.content.clone()),
+                started_at_epoch_ms: active_run.started_at_epoch_ms,
+            };
+            if let Err(error) =
+                crate::store::upsert_active_run(&self.metadata.store_path, session_id, &marker)
+            {
+                eprintln!("nac: failed to record active run marker: {error:#}");
+            }
         }
 
         self.event_bus.emit_with_context(
@@ -2388,7 +2414,84 @@ impl SessionService {
             )
         }) {
             *guard = None;
+            if let Some(session_id) = self.metadata.session_id.as_deref() {
+                if let Err(error) =
+                    crate::store::delete_active_run(&self.metadata.store_path, session_id)
+                {
+                    eprintln!("nac: failed to clear active run marker: {error:#}");
+                }
+            }
         }
+    }
+
+    /// Finalizes a run that was interrupted by a process restart (issue #148).
+    ///
+    /// Called on resume/attach while the session operation lease is held (or
+    /// after acquiring it here): a surviving durable active-run marker means
+    /// the previous process died mid-run. Emit exactly one durable terminal
+    /// event for the original run id, clear the marker, and surface a recovery
+    /// warning in the frontend snapshot. Idempotent: a cleared marker (or an
+    /// already-written terminal event for the run) means nothing to do, so
+    /// repeated restarts never duplicate the terminal outcome.
+    pub async fn recover_interrupted_run(
+        &self,
+        operation_lease: Option<&sessions::SessionOperationLease>,
+    ) -> Result<()> {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(());
+        };
+        let store_path = self.metadata.store_path.clone();
+        let acquired_lease;
+        let lease = match operation_lease {
+            Some(lease) => {
+                lease
+                    .validate(&store_path, session_id)
+                    .map_err(anyhow::Error::new)?;
+                None
+            }
+            None => match sessions::SessionOperationLease::try_acquire(&store_path, session_id) {
+                Ok(acquired) => {
+                    acquired_lease = Some(acquired);
+                    acquired_lease.as_ref()
+                }
+                // Another process is live and owns this session's operations;
+                // its run is not stale, so there is nothing to recover.
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => return Ok(()),
+                Err(error) => return Err(error.into()),
+            },
+        };
+        let _lease = lease;
+
+        let Some(marker) = crate::store::load_active_run(&store_path, session_id)? else {
+            return Ok(());
+        };
+        let run_id = SessionRunId::from_string(marker.run_id.clone());
+        let client_id = marker
+            .client_id
+            .as_ref()
+            .map(|client_id| SessionClientId::from_string(client_id.clone()));
+        if !crate::store::has_terminal_event_for_run(&store_path, session_id, &marker.run_id)? {
+            // Internal emit: the fixed recovery message must survive the
+            // external sanitization pass (which rewrites RunFailed messages)
+            // so the durable log records why the run ended.
+            self.event_bus.emit_internal(
+                SessionEvent::RunFailed {
+                    message: "run interrupted by process restart".to_string(),
+                },
+                Some(run_id),
+                client_id,
+            );
+        }
+        crate::store::delete_active_run(&store_path, session_id)?;
+        *self
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(
+            "The previous run was interrupted by a process restart before it completed. \
+             Its submitted prompt is preserved in the transcript; resubmit it to continue."
+                .to_string(),
+        );
+        Ok(())
     }
 
     fn lock_active_operation(&self) -> std::sync::MutexGuard<'_, Option<ActiveSessionOperation>> {
@@ -4340,6 +4443,104 @@ pub(super) mod tests {
             }
         ));
         assert!(parts.service.active_run().is_none());
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn recover_interrupted_run_finalizes_stale_marker_exactly_once() {
+        let (mut parts, store_path) = test_active_service("interrupted_recovery", "recovery-session");
+        let service = parts.service.clone();
+        let run_id = SessionRunId::new();
+        let marker = crate::store::ActiveRunRecord {
+            run_id: run_id.to_string(),
+            client_id: Some("client-1".to_string()),
+            prompt_preview: "interrupted prompt".to_string(),
+            submitted_user_message: Some("full prompt".to_string()),
+            started_at_epoch_ms: 42,
+        };
+        crate::store::upsert_active_run(&store_path, "recovery-session", &marker).unwrap();
+
+        service.recover_interrupted_run(None).await.unwrap();
+
+        // Exactly one durable terminal event for the original run id.
+        let terminal = parts.events.try_recv().unwrap();
+        assert_eq!(terminal.run_id.as_ref(), Some(&run_id));
+        assert!(matches!(
+            terminal.event,
+            SessionEvent::RunFailed { ref message }
+                if message == "run interrupted by process restart"
+        ));
+        assert!(crate::store::has_terminal_event_for_run(
+            &store_path,
+            "recovery-session",
+            &marker.run_id
+        )
+        .unwrap());
+        // Marker cleared and warning surfaced in the frontend snapshot.
+        assert!(crate::store::load_active_run(&store_path, "recovery-session")
+            .unwrap()
+            .is_none());
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert!(snapshot.transcript_recovery_warning.is_some());
+
+        // Idempotent: a second recovery emits nothing and keeps one terminal
+        // event.
+        let mut receiver = service.event_bus.subscribe();
+        service.recover_interrupted_run(None).await.unwrap();
+        assert!(receiver.try_recv().is_err());
+        assert!(crate::store::has_terminal_event_for_run(
+            &store_path,
+            "recovery-session",
+            &marker.run_id
+        )
+        .unwrap());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn recover_interrupted_run_skips_when_terminal_event_already_durable() {
+        let (mut parts, store_path) =
+            test_active_service("interrupted_recovery_dup", "recovery-dup-session");
+        let service = parts.service.clone();
+        let run_id = SessionRunId::new();
+        let marker = crate::store::ActiveRunRecord {
+            run_id: run_id.to_string(),
+            client_id: None,
+            prompt_preview: "interrupted prompt".to_string(),
+            submitted_user_message: None,
+            started_at_epoch_ms: 42,
+        };
+        crate::store::upsert_active_run(&store_path, "recovery-dup-session", &marker).unwrap();
+        // Simulate a crash between the terminal-event write and the marker
+        // clear: the terminal event is already durable.
+        service.event_bus.emit_with_context(
+            SessionEvent::RunFailed {
+                message: "run interrupted by process restart".to_string(),
+            },
+            Some(run_id),
+            None,
+        );
+        let _ = parts.events.try_recv().unwrap();
+
+        let mut receiver = service.event_bus.subscribe();
+        service.recover_interrupted_run(None).await.unwrap();
+        // No second terminal event.
+        assert!(receiver.try_recv().is_err());
+        // Marker cleared and warning surfaced.
+        assert!(crate::store::load_active_run(&store_path, "recovery-dup-session")
+            .unwrap()
+            .is_none());
+        let snapshot = service.frontend_snapshot().await.unwrap();
+        assert!(snapshot.transcript_recovery_warning.is_some());
+        // Still exactly one durable terminal event.
+        assert!(crate::store::has_terminal_event_for_run(
+            &store_path,
+            "recovery-dup-session",
+            &marker.run_id
+        )
+        .unwrap());
+
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 

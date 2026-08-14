@@ -1,11 +1,14 @@
 use super::*;
 
-// 13 adds the light-model columns (`light_model_json` on both `sessions` and
+// 15 adds the durable session event log (`session_events`) and the
+// interrupted-run marker (`active_runs`) — the restart-recovery substrate for
+// issue #148. (14 added the compaction checkpoint tail message count; 13 added
+// the light-model columns (`light_model_json` on both `sessions` and
 // `model_configurations`) — `open_runtime_connection` returns early whenever
-// the stored version already equals this one. (12 carries the same schema as
+// the stored version already equals this one. 12 carries the same schema as
 // 11, which added episodes.status; 10 added the ssh_configurations table; 9
 // the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 13;
+const STORE_SCHEMA_VERSION: i64 = 15;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -142,10 +145,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -219,6 +222,8 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "TEXT",
     )?;
     create_ssh_configurations_table(&transaction)?;
+    create_session_events_table(&transaction)?;
+    create_active_runs_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -658,6 +663,49 @@ fn create_ssh_configurations_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Durable per-session event log (issue #148). Every published session event
+/// envelope is appended here synchronously before it is broadcast, so a
+/// process restart can rebuild the replay ring and continue the per-session
+/// sequence instead of erasing history and reusing sequence ids. `seq` is the
+/// bus's monotonic per-session sequence; the `UNIQUE(session_id, seq)`
+/// constraint is what makes recovery idempotent (a terminal event for an
+/// interrupted run can only be written once).
+fn create_session_events_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_events (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             seq INTEGER NOT NULL CHECK (seq >= 0),
+             envelope_json TEXT NOT NULL,
+             created_at TEXT NOT NULL,
+             UNIQUE (session_id, seq)
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_events_session_seq
+             ON session_events(session_id, seq DESC);",
+    )?;
+    Ok(())
+}
+
+/// Durable marker for an in-flight run (issue #148). Written when a run
+/// starts and deleted when it finishes; a marker left behind after a process
+/// restart is the signal that the run was interrupted and must be finalized
+/// exactly once on resume.
+fn create_active_runs_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS active_runs (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
+             client_id TEXT,
+             prompt_preview TEXT NOT NULL,
+             submitted_user_message TEXT,
+             started_at_epoch_ms INTEGER NOT NULL CHECK (started_at_epoch_ms >= 0)
+         );",
+    )?;
+    Ok(())
+}
+
 /// Same bound the per-session column enforces, so a saved default can never
 /// describe a session the sessions table would refuse.
 fn model_configuration_threshold_check() -> String {
@@ -770,6 +818,8 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "thread_events",
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
+        "session_events",
+        "active_runs",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

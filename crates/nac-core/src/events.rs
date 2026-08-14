@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex as StdMutex},
 };
 
@@ -26,6 +26,12 @@ pub struct SessionClientId(String);
 impl SessionClientId {
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
+    }
+
+    /// Reconstructs a client id from its stored string form (durable event
+    /// log and active-run marker).
+    pub fn from_string(value: String) -> Self {
+        Self(value)
     }
 
     pub fn as_str(&self) -> &str {
@@ -80,6 +86,12 @@ pub struct SessionRunId(String);
 impl SessionRunId {
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
+    }
+
+    /// Reconstructs a run id from its stored string form (durable event log
+    /// and active-run marker).
+    pub fn from_string(value: String) -> Self {
+        Self(value)
     }
 
     pub fn as_str(&self) -> &str {
@@ -432,6 +444,7 @@ pub struct SessionEventReplaySubscription {
 pub struct SessionEventBus {
     session_id: Option<String>,
     thread_event_persistence: ThreadEventPersistence,
+    session_event_persistence: SessionEventPersistence,
     epoch_id: String,
     sender: broadcast::Sender<SessionEventEnvelope>,
     delta_sender: broadcast::Sender<AssistantStreamDelta>,
@@ -450,6 +463,25 @@ enum ThreadEventPersistence {
 #[derive(Clone)]
 struct ThreadEventStore {
     writer: Arc<crate::store::ThreadEventWriter>,
+    session_id: String,
+}
+
+/// Durable per-session event log persistence (issue #148). Every published
+/// envelope is appended to `session_events` before it is broadcast, so a
+/// restarted process continues the sequence and replays pre-restart history.
+/// `Unavailable` (writer could not be opened) fails closed: an event that
+/// cannot be made durable is not published, keeping `published_sequence_id`
+/// equal to the last persisted event.
+#[derive(Clone)]
+enum SessionEventPersistence {
+    Disabled,
+    Available(SessionEventStore),
+    Unavailable,
+}
+
+#[derive(Clone)]
+struct SessionEventStore {
+    writer: Arc<crate::store::SessionEventWriter>,
     session_id: String,
 }
 
@@ -476,7 +508,7 @@ impl SessionEventBus {
 
     pub fn with_thread_event_store(session_id: Option<String>, path: PathBuf) -> Self {
         let mut bus = Self::new(session_id.clone());
-        bus.thread_event_persistence = match session_id {
+        bus.thread_event_persistence = match session_id.clone() {
             Some(session_id) => match crate::store::ThreadEventWriter::new(&path) {
                 Ok(writer) => ThreadEventPersistence::Available(ThreadEventStore {
                     writer: Arc::new(writer),
@@ -489,7 +521,63 @@ impl SessionEventBus {
             },
             None => ThreadEventPersistence::Disabled,
         };
+        bus.session_event_persistence = match session_id {
+            Some(session_id) => match crate::store::SessionEventWriter::new(&path) {
+                Ok(writer) => {
+                    // A restart rebuilds the bus from the durable log: continue
+                    // the per-session sequence and seed the replay ring with
+                    // pre-restart history (issue #148).
+                    bus.seed_from_session_event_store(&session_id, &path);
+                    SessionEventPersistence::Available(SessionEventStore {
+                        writer: Arc::new(writer),
+                        session_id,
+                    })
+                }
+                Err(error) => {
+                    eprintln!("nac: failed to open session event store: {error:#}");
+                    SessionEventPersistence::Unavailable
+                }
+            },
+            None => SessionEventPersistence::Disabled,
+        };
         bus
+    }
+
+    /// Seeds sequence counters and the replay ring from the durable event log
+    /// so a restarted process continues where the previous one left off.
+    /// Best-effort: a store read failure leaves a fresh in-memory bus rather
+    /// than failing session construction.
+    fn seed_from_session_event_store(&self, session_id: &str, path: &Path) {
+        let state = match crate::store::load_session_event_state(path, session_id, self.recent_capacity)
+        {
+            Ok(state) => state,
+            Err(error) => {
+                eprintln!("nac: failed to load session event history: {error:#}");
+                return;
+            }
+        };
+        let mut locked = self.lock_state();
+        // The bus's `next_sequence_id` holds the last issued id and increments
+        // before each emit, so seeding both counters with the last durable id
+        // makes the next emit continue at `MAX(seq) + 1`.
+        locked.next_sequence_id = state.last_sequence_id;
+        locked.published_sequence_id = state.last_sequence_id;
+        for (_, envelope_json) in state.recent {
+            match serde_json::from_str::<SessionEventEnvelope>(&envelope_json) {
+                Ok(envelope) => push_recent(
+                    &mut locked,
+                    envelope,
+                    self.recent_capacity,
+                    self.recent_byte_capacity,
+                ),
+                // A newer build may have written an envelope this build cannot
+                // decode. Skip it (the sequence still advances from MAX(seq))
+                // rather than failing the whole session.
+                Err(error) => {
+                    eprintln!("nac: failed to decode persisted session event: {error:#}");
+                }
+            }
+        }
     }
 
     fn with_limits(session_id: Option<String>, capacity: usize, byte_capacity: usize) -> Self {
@@ -500,6 +588,7 @@ impl SessionEventBus {
         Self {
             session_id,
             thread_event_persistence: ThreadEventPersistence::Disabled,
+            session_event_persistence: SessionEventPersistence::Disabled,
             epoch_id: Uuid::new_v4().to_string(),
             sender,
             delta_sender,
@@ -598,6 +687,20 @@ impl SessionEventBus {
         self.emit_sanitized(event, run_id, client_id)
     }
 
+    /// Emits an already-sanitized internal event without the external
+    /// sanitization pass, so fixed internal messages (recovery bookkeeping)
+    /// survive into the durable log verbatim. `pub(crate)` and only used for
+    /// constant, non-user content: external callers must go through
+    /// [`SessionEventBus::emit_with_context`].
+    pub(crate) fn emit_internal(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> SessionEventEnvelope {
+        self.emit_sanitized(event, run_id, client_id)
+    }
+
     fn emit_sanitized(
         &self,
         event: SessionEvent,
@@ -617,27 +720,23 @@ impl SessionEventBus {
             run_id,
             event,
         };
+        // The durable log is the sequence's source of truth: an event that
+        // cannot be persisted is not published, so `published_sequence_id`
+        // always equals the last durable event and a restart never reuses a
+        // sequence id a client already saw.
+        if !self.persist_session_event(&envelope) {
+            return envelope;
+        }
         if !self.persist_thread_event(&envelope) {
             return envelope;
         }
         state.published_sequence_id = envelope.sequence_id;
-        if let Some(serialized_bytes) =
-            serialized_envelope_len(&envelope, self.recent_byte_capacity)
-        {
-            while state.recent.len() >= self.recent_capacity {
-                pop_recent_front(&mut state);
-            }
-            while state.recent_bytes.saturating_add(serialized_bytes) > self.recent_byte_capacity {
-                if !pop_recent_front(&mut state) {
-                    break;
-                }
-            }
-            state.recent_bytes = state.recent_bytes.saturating_add(serialized_bytes);
-            state.recent.push_back(RecentSessionEvent {
-                envelope: envelope.clone(),
-                serialized_bytes,
-            });
-        }
+        push_recent(
+            &mut state,
+            envelope.clone(),
+            self.recent_capacity,
+            self.recent_byte_capacity,
+        );
         let _ = self.sender.send(envelope.clone());
         envelope
     }
@@ -725,6 +824,49 @@ impl SessionEventBus {
             }
         }
     }
+
+    /// Persist the envelope to the durable per-session event log before
+    /// publication. `false` means the event could not be made durable and must
+    /// not be published (fail closed).
+    fn persist_session_event(&self, envelope: &SessionEventEnvelope) -> bool {
+        if !should_persist_session_event(&envelope.event) {
+            return true;
+        }
+        let store = match &self.session_event_persistence {
+            SessionEventPersistence::Disabled => return true,
+            SessionEventPersistence::Available(store) => store,
+            SessionEventPersistence::Unavailable => return false,
+        };
+        let envelope_json = match serde_json::to_string(envelope) {
+            Ok(envelope_json) => envelope_json,
+            Err(error) => {
+                eprintln!("nac: failed to serialize session event: {error}");
+                return false;
+            }
+        };
+        match store
+            .writer
+            .append(&store.session_id, envelope.sequence_id, &envelope_json)
+        {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("nac: failed to persist session event: {error:#}");
+                false
+            }
+        }
+    }
+}
+
+/// Which session events are durable. Everything except the live-only
+/// transcript signals: they fire at every transcript commit point and are
+/// worthless once the subscriber refetches the store-backed transcript, so
+/// persisting them would bloat the durable log without adding recoverable
+/// information.
+fn should_persist_session_event(event: &SessionEvent) -> bool {
+    !matches!(
+        event,
+        SessionEvent::TranscriptAppended { .. } | SessionEvent::TranscriptReverted { .. }
+    )
 }
 
 fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
@@ -1190,6 +1332,33 @@ fn pop_recent_front(state: &mut SessionEventBusState) -> bool {
     };
     state.recent_bytes = state.recent_bytes.saturating_sub(removed.serialized_bytes);
     true
+}
+
+/// Pushes an envelope into the bounded replay ring, trimming by count and by
+/// serialized byte cap. Shared by live emission and restart seeding so both
+/// paths apply identical retention.
+fn push_recent(
+    state: &mut SessionEventBusState,
+    envelope: SessionEventEnvelope,
+    capacity: usize,
+    byte_capacity: usize,
+) {
+    let Some(serialized_bytes) = serialized_envelope_len(&envelope, byte_capacity) else {
+        return;
+    };
+    while state.recent.len() >= capacity {
+        pop_recent_front(state);
+    }
+    while state.recent_bytes.saturating_add(serialized_bytes) > byte_capacity {
+        if !pop_recent_front(state) {
+            break;
+        }
+    }
+    state.recent_bytes = state.recent_bytes.saturating_add(serialized_bytes);
+    state.recent.push_back(RecentSessionEvent {
+        envelope,
+        serialized_bytes,
+    });
 }
 
 #[derive(Clone, Default)]
@@ -2143,6 +2312,95 @@ mod tests {
         assert!(serialized.contains("thread timed out"));
         let replay = serde_json::to_string(&bus.recent_events(None, 20)).unwrap();
         assert!(!replay.contains("CANARY"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn session_event_bus_restart_preserves_history_and_continues_sequence() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_event_restart_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-restart");
+
+        let first = {
+            let bus = SessionEventBus::with_thread_event_store(
+                Some("session-restart".to_string()),
+                path.clone(),
+            );
+            let first = bus.emit(SessionEvent::RunStarted {
+                prompt_preview: "prompt".to_string(),
+                submitted_user_message: None,
+                started_at_epoch_ms: 0,
+            });
+            let second = bus.emit(SessionEvent::RunCompleted {
+                response: "done".to_string(),
+                duration_ms: None,
+            });
+            assert_eq!(first.sequence_id, 1);
+            assert_eq!(second.sequence_id, 2);
+            first
+        };
+
+        // Rebuild the bus from the durable log, as a restarted process does.
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-restart".to_string()),
+            path.clone(),
+        );
+        // Pre-restart history is replayed, including the original epoch id.
+        let replayed = bus.recent_events(None, 10);
+        assert_eq!(replayed.len(), 2);
+        assert_eq!(replayed[0], first);
+        assert_eq!(replayed[1].sequence_id, 2);
+        // The boundary is the last durable event, not 0.
+        let (boundary, _) = bus.thread_event_boundary(|| Ok::<_, anyhow::Error>(())).unwrap();
+        assert_eq!(boundary.sequence_id, 2);
+        // The sequence continues instead of restarting at 1.
+        let third = bus.emit(SessionEvent::RunFailed {
+            message: "boom".to_string(),
+        });
+        assert_eq!(third.sequence_id, 3);
+        assert_eq!(bus.recent_events(Some(2), 10), vec![third]);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn live_only_transcript_signals_are_not_durable_and_do_not_advance_restart_sequence() {
+        let path = std::env::temp_dir()
+            .join(format!("nac_event_live_only_{}", Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-live");
+
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-live".to_string()),
+            path.clone(),
+        );
+        bus.emit(SessionEvent::TranscriptAppended { transcript_len: 3 });
+        // Live-only: broadcast and replayed in-process, but not durable.
+        assert_eq!(bus.recent_events(None, 10).len(), 1);
+        let started = bus.emit(SessionEvent::RunStarted {
+            prompt_preview: "prompt".to_string(),
+            submitted_user_message: None,
+            started_at_epoch_ms: 0,
+        });
+        assert_eq!(started.sequence_id, 2);
+        drop(bus);
+
+        // After restart the live-only signal is gone and the sequence resumes
+        // from the last durable event (the epoch change forces a full snapshot
+        // refetch, so the reused live-only id is never a durable cursor).
+        let bus = SessionEventBus::with_thread_event_store(
+            Some("session-live".to_string()),
+            path.clone(),
+        );
+        assert_eq!(bus.recent_events(None, 10), vec![started]);
+        let failed = bus.emit(SessionEvent::RunFailed {
+            message: "boom".to_string(),
+        });
+        assert_eq!(failed.sequence_id, 3);
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

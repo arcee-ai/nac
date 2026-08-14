@@ -188,6 +188,24 @@ fn assert_current_schema(conn: &Connection) {
         assert_session_cascade(conn, table);
     }
     assert_eq!(
+        table_columns(conn, "session_events"),
+        ["id", "session_id", "seq", "envelope_json", "created_at"]
+    );
+    assert_eq!(
+        table_columns(conn, "active_runs"),
+        [
+            "session_id",
+            "run_id",
+            "client_id",
+            "prompt_preview",
+            "submitted_user_message",
+            "started_at_epoch_ms"
+        ]
+    );
+    for table in ["session_events", "active_runs"] {
+        assert_session_cascade(conn, table);
+    }
+    assert_eq!(
         table_columns(conn, "orchestrator_compaction_checkpoints"),
         [
             "id",
@@ -907,6 +925,48 @@ fn opening_v4_store_is_idempotent() {
         .query_row("SELECT id FROM thread_events", [], |row| row.get(0))
         .unwrap();
     assert_eq!(stored_id, event_id);
+    drop(reopened);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn pre_durable_event_store_migrates_to_v15_with_event_tables() {
+    let path = temp_store_path("v14_migration");
+    initialize(&path).unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    insert_legacy_session(&conn, "owned");
+    // Simulate a pre-#148 store: drop the durable tables and rewind the
+    // version so the next open runs the migration that recreates them.
+    conn.execute_batch("DROP TABLE session_events; DROP TABLE active_runs;")
+        .unwrap();
+    conn.pragma_update(None, "user_version", 14).unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+
+    let reopened = open_runtime_connection(&path).unwrap();
+    let version: i64 = reopened
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORE_SCHEMA_VERSION);
+    assert_eq!(
+        table_columns(&reopened, "session_events"),
+        ["id", "session_id", "seq", "envelope_json", "created_at"]
+    );
+    assert_eq!(
+        table_columns(&reopened, "active_runs"),
+        [
+            "session_id",
+            "run_id",
+            "client_id",
+            "prompt_preview",
+            "submitted_user_message",
+            "started_at_epoch_ms"
+        ]
+    );
+    for table in ["session_events", "active_runs"] {
+        assert_session_cascade(&reopened, table);
+    }
     drop(reopened);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
