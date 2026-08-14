@@ -149,6 +149,9 @@ pub struct SessionRunStateUpdate {
     pub ssh: Option<SshConnection>,
     pub sandbox_spec: Option<SandboxSpec>,
     pub run_state: SessionRunState,
+    /// Matching durable active run to clear in the same transaction. `None`
+    /// for compaction, revert bookkeeping, and other non-terminal saves.
+    pub finished_run_id: Option<String>,
     pub updated_at: String,
 }
 
@@ -169,6 +172,7 @@ impl SessionSnapshot {
             ssh: self.ssh.clone(),
             sandbox_spec: self.sandbox_spec.clone(),
             run_state,
+            finished_run_id: None,
             updated_at: self.updated_at.clone(),
         }
     }

@@ -307,6 +307,85 @@ fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Resu
     }
 }
 
+fn append_messages_in_transaction(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    start_idx: u64,
+    messages: &[Message],
+) -> Result<i64> {
+    let visible_delta = i64::try_from(crate::sessions::visible_message_count(messages))
+        .context("transcript visible message count overflowed")?;
+    let last_user_prompt = crate::sessions::last_user_prompt(messages);
+    let blob_len = transaction.query_row(
+        "SELECT json_array_length(messages_json)
+         FROM sessions
+         WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let blob_len =
+        u64::try_from(blob_len).context("stored session transcript length was negative")?;
+    let last_row = transaction
+        .query_row(
+            "SELECT id, event_json
+             FROM thread_events
+             WHERE session_id = ?1 AND thread_name = ?2
+             ORDER BY id DESC
+             LIMIT 1",
+            params![session_id, ORCHESTRATOR_STEERING_TARGET],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let log_next_idx = match last_row {
+        None => 0,
+        Some((id, event_json)) => {
+            let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                anyhow!(
+                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                )
+            })?;
+            entry
+                .idx
+                .checked_add(1)
+                .context("transcript log index overflowed")?
+        }
+    };
+    let expected_start_idx = blob_len.max(log_next_idx);
+    if start_idx != expected_start_idx {
+        return Err(anyhow!(
+            "transcript log append is not contiguous: expected start idx {expected_start_idx}, found {start_idx}"
+        ));
+    }
+    let mut last_inserted_id = 0;
+    for (offset, message) in messages.iter().enumerate() {
+        let event_json = encode_transcript_log_entry(start_idx + offset as u64, message)?;
+        transaction.execute(
+            "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                session_id,
+                ORCHESTRATOR_STEERING_TARGET,
+                event_json,
+                now_utc()
+            ],
+        )?;
+        last_inserted_id = transaction.last_insert_rowid();
+    }
+    let updated = transaction.execute(
+        "UPDATE sessions
+         SET visible_message_count = visible_message_count + ?1,
+             last_user_prompt = COALESCE(?2, last_user_prompt)
+         WHERE session_id = ?3",
+        params![visible_delta, last_user_prompt, session_id],
+    )?;
+    if updated != 1 {
+        return Err(anyhow!(
+            "transcript summary update expected one session row, updated {updated}"
+        ));
+    }
+    Ok(last_inserted_id)
+}
+
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
@@ -334,80 +413,42 @@ impl TranscriptLogWriter {
         if messages.is_empty() {
             return Ok(());
         }
-        let visible_delta = i64::try_from(crate::sessions::visible_message_count(messages))
-            .context("transcript visible message count overflowed")?;
-        let last_user_prompt = crate::sessions::last_user_prompt(messages);
         let mut connection = self
             .connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let blob_len = transaction.query_row(
-            "SELECT json_array_length(messages_json)
-             FROM sessions
-             WHERE session_id = ?1",
-            params![session_id],
-            |row| row.get::<_, i64>(0),
+        append_messages_in_transaction(&transaction, session_id, start_idx, messages)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Append the submitted user turn and install its recovery obligation in
+    /// the same transaction. No provider request may begin until this returns.
+    pub fn append_run_prompt(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+    ) -> Result<()> {
+        if !matches!(message, Message::User { .. }) {
+            return Err(anyhow!("a run prompt must be a user transcript message"));
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let submitted_message_id = append_messages_in_transaction(
+            &transaction,
+            session_id,
+            idx,
+            std::slice::from_ref(message),
         )?;
-        let blob_len =
-            u64::try_from(blob_len).context("stored session transcript length was negative")?;
-        let last_row = transaction
-            .query_row(
-                "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
-                 ORDER BY id DESC
-                 LIMIT 1",
-                params![session_id, ORCHESTRATOR_STEERING_TARGET],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?;
-        let log_next_idx = match last_row {
-            None => 0,
-            Some((id, event_json)) => {
-                let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
-                    anyhow!(
-                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
-                    )
-                })?;
-                entry
-                    .idx
-                    .checked_add(1)
-                    .context("transcript log index overflowed")?
-            }
-        };
-        let expected_start_idx = blob_len.max(log_next_idx);
-        if start_idx != expected_start_idx {
-            return Err(anyhow!(
-                "transcript log append is not contiguous: expected start idx {expected_start_idx}, found {start_idx}"
-            ));
-        }
-        for (offset, message) in messages.iter().enumerate() {
-            let event_json = encode_transcript_log_entry(start_idx + offset as u64, message)?;
-            transaction.execute(
-                "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    session_id,
-                    ORCHESTRATOR_STEERING_TARGET,
-                    event_json,
-                    now_utc()
-                ],
-            )?;
-        }
-        let updated = transaction.execute(
-            "UPDATE sessions
-             SET visible_message_count = visible_message_count + ?1,
-                 last_user_prompt = COALESCE(?2, last_user_prompt)
-             WHERE session_id = ?3",
-            params![visible_delta, last_user_prompt, session_id],
-        )?;
-        if updated != 1 {
-            return Err(anyhow!(
-                "transcript summary update expected one session row, updated {updated}"
-            ));
-        }
+        replace_with_active_run(&transaction, session_id, run_id, submitted_message_id)?;
         transaction.commit()?;
         Ok(())
     }

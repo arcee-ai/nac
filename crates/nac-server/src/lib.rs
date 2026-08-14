@@ -51,7 +51,8 @@ use nac_core::{
         slash_command_definitions, PreparedUserInput, SlashCommand, SlashCommandDefinition,
     },
     events::{
-        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
+        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventBoundary,
+        SessionEventEnvelope, SessionReplayGap,
     },
     light_model::{LightModelError, LightModelSettings},
     model::{
@@ -755,6 +756,7 @@ pub struct ThreadSteeringResponse {
 #[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct EventsQuery {
+    pub after_epoch_id: Option<String>,
     pub after_sequence_id: Option<u64>,
     pub limit: Option<usize>,
 }
@@ -848,6 +850,7 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct RecentEventsResponse {
+    pub boundary: SessionEventBoundary,
     pub events: Vec<SessionEventEnvelope>,
 }
 
@@ -1935,19 +1938,18 @@ impl SessionManager {
     pub async fn recent_events(
         &self,
         session_id: &str,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
-    ) -> Result<Vec<SessionEventEnvelope>> {
+    ) -> Result<(SessionEventBoundary, Vec<SessionEventEnvelope>)> {
         Ok(self
             .attach_session(session_id)
             .await?
-            .recent_events(after_sequence_id, limit))
+            .recent_events(cursor, limit))
     }
-
     pub async fn subscribe_events(
         &self,
         session_id: &str,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
     ) -> Result<(
         String,
@@ -1960,7 +1962,7 @@ impl SessionManager {
         let service = self.attach_session(session_id).await?;
         let subscription = service
             .connect_client()
-            .subscribe_events_with_replay(after_sequence_id, limit);
+            .subscribe_events_with_replay(cursor, limit);
         Ok((
             subscription.epoch_id,
             subscription.replay_boundary_sequence_id,
@@ -4029,6 +4031,22 @@ async fn queue_thread_steering_handler(
     ))
 }
 
+fn event_cursor(
+    query: &EventsQuery,
+) -> std::result::Result<Option<SessionEventBoundary>, ApiError> {
+    match (&query.after_epoch_id, query.after_sequence_id) {
+        (None, None) => Ok(None),
+        (Some(epoch_id), Some(sequence_id)) => Ok(Some(SessionEventBoundary {
+            epoch_id: epoch_id.clone(),
+            sequence_id,
+        })),
+        _ => Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "after_epoch_id and after_sequence_id must be supplied together".to_string(),
+        }),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/sessions/{session_id}/events",
@@ -4042,14 +4060,15 @@ async fn recent_events(
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<EventsQuery>,
 ) -> std::result::Result<Json<RecentEventsResponse>, ApiError> {
-    let events = manager
+    let cursor = event_cursor(&query)?;
+    let (boundary, events) = manager
         .recent_events(
             &session_id,
-            query.after_sequence_id,
+            cursor.as_ref(),
             query.limit.unwrap_or(DEFAULT_REPLAY_LIMIT),
         )
         .await?;
-    Ok(Json(RecentEventsResponse { events }))
+    Ok(Json(RecentEventsResponse { boundary, events }))
 }
 
 #[utoipa::path(
@@ -4068,6 +4087,7 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
+    let cursor = event_cursor(&query)?;
     let (
         epoch_id,
         replay_boundary_sequence_id,
@@ -4078,7 +4098,7 @@ async fn stream_events(
     ) = manager
         .subscribe_events(
             &session_id,
-            query.after_sequence_id,
+            cursor.as_ref(),
             query.limit.unwrap_or(DEFAULT_REPLAY_LIMIT),
         )
         .await?;
@@ -4874,6 +4894,39 @@ mod tests {
         ("PUT", "/sessions/order"),
         ("PUT", "/sessions/{session_id}/presentation"),
     ];
+
+    #[test]
+    fn event_cursor_requires_both_epoch_and_sequence() {
+        assert!(event_cursor(&EventsQuery {
+            after_epoch_id: None,
+            after_sequence_id: None,
+            limit: None,
+        })
+        .unwrap()
+        .is_none());
+        assert!(event_cursor(&EventsQuery {
+            after_epoch_id: Some("epoch".to_string()),
+            after_sequence_id: Some(7),
+            limit: None,
+        })
+        .unwrap()
+        .is_some());
+        for query in [
+            EventsQuery {
+                after_epoch_id: Some("epoch".to_string()),
+                after_sequence_id: None,
+                limit: None,
+            },
+            EventsQuery {
+                after_epoch_id: None,
+                after_sequence_id: Some(7),
+                limit: None,
+            },
+        ] {
+            let error = event_cursor(&query).unwrap_err();
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        }
+    }
 
     fn concrete_api_path(path: &str) -> String {
         path.replace("{provider}", "arcee")
@@ -6902,6 +6955,93 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
+    async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch() {
+        let root = temp_root("interrupted_run_restart");
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("restart-test-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let writer = nac_core::store::TranscriptLogWriter::new(&store_path).unwrap();
+        writer
+            .append_run_prompt(
+                "session",
+                0,
+                &nac_core::types::Message::User {
+                    content: "persisted before process death".to_string(),
+                },
+                "run-before-restart",
+            )
+            .unwrap();
+
+        let first_manager = test_manager(&root);
+        let first = first_manager.snapshot("session").await.unwrap();
+        assert_eq!(
+            first.transcript_recovery_warning.as_deref(),
+            Some(
+                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
+            )
+        );
+        assert_eq!(
+            first
+                .messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    nac_core::types::Message::User { content }
+                        if content == "persisted before process death"
+                ))
+                .count(),
+            1
+        );
+        let first_recovery_events = first_manager
+            .recent_events("session", None, 64)
+            .await
+            .unwrap()
+            .1;
+        assert_eq!(
+            first_recovery_events
+                .iter()
+                .filter(|envelope| {
+                    envelope.run_id.as_ref().map(|run_id| run_id.as_str())
+                        == Some("run-before-restart")
+                        && matches!(
+                            envelope.event,
+                            nac_core::events::SessionEvent::RunFailed { .. }
+                        )
+                })
+                .count(),
+            1
+        );
+        let first_epoch = first.thread_event_boundary.epoch_id;
+        drop(first_manager);
+
+        let second_manager = test_manager(&root);
+        let second = second_manager.snapshot("session").await.unwrap();
+        assert_eq!(
+            second.transcript_recovery_warning,
+            first.transcript_recovery_warning
+        );
+        assert_ne!(second.thread_event_boundary.epoch_id, first_epoch);
+        assert!(
+            second_manager
+                .recent_events("session", None, 64)
+                .await
+                .unwrap()
+                .1
+                .iter()
+                .all(|envelope| !matches!(
+                    envelope.event,
+                    nac_core::events::SessionEvent::RunFailed { .. }
+                )),
+            "idempotent rebuild must not synthesize another terminal event"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionally_repairable() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("repair_incomplete_settings");
@@ -7339,6 +7479,7 @@ thread_timeout_secs = 7200
 
         let terminal_events = service
             .recent_events(None, 64)
+            .1
             .into_iter()
             .filter(|envelope| {
                 matches!(

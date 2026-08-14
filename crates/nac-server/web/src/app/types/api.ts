@@ -552,6 +552,11 @@ export type SessionEvent =
   /** A revert cut the transcript back; everything past this length is gone. */
   | { type: "transcript_reverted"; transcript_len: number };
 
+export interface SessionEventBoundary {
+  epoch_id: string;
+  sequence_id: number;
+}
+
 export interface SessionEventEnvelope {
   session_id: string | null;
   epoch_id: string;
@@ -1188,5 +1193,6 @@ export interface ThreadSteeringResponse {
 }
 
 export interface RecentEventsResponse {
+  boundary: SessionEventBoundary;
   events: SessionEventEnvelope[];
 }

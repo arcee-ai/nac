@@ -1116,6 +1116,15 @@ pub async fn build_resume_picker_config(
     })
 }
 
+fn record_interrupted_run_recovery(
+    run_config: &mut OrchestratorRunConfig,
+    recovery: store::ActiveRunReconciliation,
+) {
+    if let store::ActiveRunReconciliation::Interrupted { run_id } = recovery {
+        run_config.agent.set_interrupted_run_recovery(run_id);
+    }
+}
+
 pub async fn build_resume_config(
     options: ResumeOptions,
     config: &NacConfig,
@@ -1132,18 +1141,25 @@ pub async fn build_resume_config(
         (Some(_), true) => unreachable!(),
         (None, _) => sessions::load_last_session(&resume_store_path)?,
     };
+    let session_id = snapshot.session_id.clone();
+    let lease = sessions::SessionOperationLease::try_acquire(&resume_store_path, &session_id)?;
+    lease.validate(&resume_store_path, &session_id)?;
+    let recovery = store::reconcile_active_run(&resume_store_path, &session_id)?;
+    let snapshot = sessions::load_session(&resume_store_path, &session_id)?;
 
-    build_resume_config_from_snapshot(
+    let mut run_config = build_resume_config_from_snapshot(
         snapshot,
         resume_store_path,
         config,
         lookup_cwd,
         options.worker_executable,
-        None,
+        Some(&lease),
         true,
         None,
     )
-    .await
+    .await?;
+    record_interrupted_run_recovery(&mut run_config, recovery);
+    Ok(run_config)
 }
 
 pub async fn build_resume_config_for_session(
@@ -1153,18 +1169,23 @@ pub async fn build_resume_config_for_session(
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
 ) -> Result<OrchestratorRunConfig> {
+    let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
+    lease.validate(&store_path, session_id)?;
+    let recovery = store::reconcile_active_run(&store_path, session_id)?;
     let snapshot = sessions::load_session(&store_path, session_id)?;
-    build_resume_config_from_snapshot(
+    let mut run_config = build_resume_config_from_snapshot(
         snapshot,
         store_path,
         config,
         resume_base_cwd,
         worker_executable,
-        None,
+        Some(&lease),
         true,
         None,
     )
-    .await
+    .await?;
+    record_interrupted_run_recovery(&mut run_config, recovery);
+    Ok(run_config)
 }
 
 pub async fn build_resume_config_for_session_attachment(
@@ -1183,7 +1204,8 @@ pub async fn build_resume_config_for_session_attachment(
     let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
         metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
     });
-    if !requires_migration {
+    let requires_run_recovery = store::load_run_recovery(&store_path, session_id)?.is_some();
+    if !requires_migration && !requires_run_recovery {
         let run_config = build_resume_config_from_snapshot(
             snapshot,
             store_path,
@@ -1197,11 +1219,12 @@ pub async fn build_resume_config_for_session_attachment(
         .await?;
         return Ok((run_config, true, None));
     }
-
     match sessions::SessionOperationLease::try_acquire(&store_path, session_id) {
         Ok(lease) => {
+            lease.validate(&store_path, session_id)?;
+            let recovery = store::reconcile_active_run(&store_path, session_id)?;
             let snapshot = sessions::load_session(&store_path, session_id)?;
-            let run_config = build_resume_config_from_snapshot(
+            let mut run_config = build_resume_config_from_snapshot(
                 snapshot,
                 store_path,
                 config,
@@ -1212,6 +1235,7 @@ pub async fn build_resume_config_for_session_attachment(
                 None,
             )
             .await?;
+            record_interrupted_run_recovery(&mut run_config, recovery);
             Ok((run_config, true, Some(lease)))
         }
         Err(sessions::SessionOperationLeaseError::Busy(_)) => {
@@ -1241,8 +1265,9 @@ pub async fn build_resume_config_for_session_with_lease(
     operation_lease: &sessions::SessionOperationLease,
 ) -> Result<OrchestratorRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
+    let recovery = store::reconcile_active_run(&store_path, session_id)?;
     let snapshot = sessions::load_session(&store_path, session_id)?;
-    build_resume_config_from_snapshot(
+    let mut run_config = build_resume_config_from_snapshot(
         snapshot,
         store_path,
         config,
@@ -1252,7 +1277,9 @@ pub async fn build_resume_config_for_session_with_lease(
         true,
         None,
     )
-    .await
+    .await?;
+    record_interrupted_run_recovery(&mut run_config, recovery);
+    Ok(run_config)
 }
 
 async fn build_resume_config_from_snapshot(

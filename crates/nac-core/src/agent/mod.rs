@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tokio::task::JoinSet;
 
-use crate::events::{AgentEvent, AssistantStreamDelta, EventSink};
+use crate::events::{AgentEvent, AssistantStreamDelta, EventSink, SessionRunId};
 use crate::mcp::McpRegistry;
 use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, TokenUsage};
 use crate::sandbox::{SandboxSession, SshConnection};
@@ -42,6 +42,7 @@ use tool_exec::execute_tools_parallel;
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
 const WORKER_SYSTEM_PROMPT: &str = include_str!("prompts/nac_worker.md");
 const ORCHESTRATOR_SYSTEM_PROMPT: &str = include_str!("prompts/nac_orchestrator.md");
+pub(crate) const RUN_CANCELLED_MARKER: &str = "[run cancelled by user]";
 
 fn render_worker_system_prompt(working_directory: &str) -> String {
     let (prefix, suffix) = WORKER_SYSTEM_PROMPT
@@ -78,6 +79,12 @@ fn duration_millis(duration: Duration) -> u64 {
 pub enum AgentMode {
     Worker,
     Orchestrator,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RunPromptCommitStatus {
+    Pending,
+    Committed,
+    Failed,
 }
 
 pub struct AgentConfig {
@@ -137,6 +144,9 @@ pub struct Agent {
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
+    /// Set only when this process atomically transitioned a prior active run to
+    /// interrupted during resume. Consumed once when the session bus is built.
+    interrupted_run_recovery: Option<String>,
     /// Token usage from the most recent `send()` call, updated after each
     /// model call; `None` if the provider omitted usage.
     pub last_usage: Option<crate::model::TokenUsage>,
@@ -365,6 +375,7 @@ impl Agent {
             appended_steering_ids: HashSet::new(),
             transcript_log,
             transcript_recovery_warning: None,
+            interrupted_run_recovery: None,
             last_usage: None,
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
         })
@@ -420,6 +431,23 @@ impl Agent {
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
+        self.send_inner(prompt, None).await
+    }
+
+    pub(crate) async fn send_session_run(
+        &mut self,
+        prompt: &str,
+        run_id: &SessionRunId,
+        prompt_commit: watch::Sender<RunPromptCommitStatus>,
+    ) -> Result<String> {
+        self.send_inner(prompt, Some((run_id, prompt_commit))).await
+    }
+
+    async fn send_inner(
+        &mut self,
+        prompt: &str,
+        session_run: Option<(&SessionRunId, watch::Sender<RunPromptCommitStatus>)>,
+    ) -> Result<String> {
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),
@@ -428,14 +456,23 @@ impl Agent {
         // the first current model response from persisting a previous run's usage.
         self.last_usage = None;
         self.clear_partial_stream();
-        // Transcript commit point (prompt): the prompt is durable in the log
-        // before the first model call. A log failure is fatal to the run.
-        if let Err(error) = self
-            .push_and_log(Message::User {
-                content: prompt.to_string(),
-            })
-            .await
-        {
+        // Transcript commit point (prompt): the prompt and its recovery row
+        // are durable before the first model call. A store failure is fatal.
+        let prompt_message = Message::User {
+            content: prompt.to_string(),
+        };
+        let prompt_result = match session_run.as_ref() {
+            Some((run_id, _)) => self.push_and_log_run_prompt(prompt_message, run_id).await,
+            None => self.push_and_log(prompt_message).await,
+        };
+        if let Some((_, prompt_commit)) = session_run {
+            prompt_commit.send_replace(if prompt_result.is_ok() {
+                RunPromptCommitStatus::Committed
+            } else {
+                RunPromptCommitStatus::Failed
+            });
+        }
+        if let Err(error) = prompt_result {
             self.emit(AgentEvent::Error {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
@@ -767,9 +804,26 @@ impl Agent {
         self.transcript_recovery_warning.as_deref()
     }
 
+    pub(crate) fn set_interrupted_run_recovery(&mut self, run_id: String) {
+        self.interrupted_run_recovery = Some(run_id);
+    }
+
+    pub(crate) fn take_interrupted_run_recovery(&mut self) -> Option<String> {
+        self.interrupted_run_recovery.take()
+    }
+
     #[cfg(test)]
     pub(crate) async fn push_and_log_for_test(&mut self, message: Message) -> Result<()> {
         self.push_and_log(message).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn push_and_log_run_prompt_for_test(
+        &mut self,
+        message: Message,
+        run_id: &SessionRunId,
+    ) -> Result<()> {
+        self.push_and_log_run_prompt(message, run_id).await
     }
 
     /// Restore a stored transcript while keeping the current system prompt.
@@ -1021,7 +1075,7 @@ impl Agent {
             });
         }
         messages.push(Message::Assistant {
-            content: Some("[run cancelled by user]".to_string()),
+            content: Some(RUN_CANCELLED_MARKER.to_string()),
             reasoning_text: None,
             reasoning_details: None,
             tool_calls: None,
@@ -1095,6 +1149,27 @@ impl Agent {
     async fn push_and_log(&mut self, message: Message) -> Result<()> {
         let idx = self.messages.len() as u64;
         self.log_transcript_message(idx, &message).await?;
+        self.messages.push(message);
+        Ok(())
+    }
+    async fn push_and_log_run_prompt(
+        &mut self,
+        message: Message,
+        run_id: &SessionRunId,
+    ) -> Result<()> {
+        let idx = self.messages.len() as u64;
+        if let Some(sink) = &self.transcript_log {
+            let writer = sink.writer.clone();
+            let session_id = sink.session_id.clone();
+            let stored_message = message.clone();
+            let run_id = run_id.to_string();
+            tokio::task::spawn_blocking(move || {
+                writer.append_run_prompt(&session_id, idx, &stored_message, &run_id)
+            })
+            .await
+            .map_err(|error| anyhow!("run prompt append task failed: {error}"))??;
+            self.event_sink.emit_transcript_appended(idx + 1);
+        }
         self.messages.push(message);
         Ok(())
     }

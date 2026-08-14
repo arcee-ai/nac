@@ -263,7 +263,7 @@ async fn compact_route_returns_success_without_run_or_snapshot_side_effects() {
     assert!(service.active_run().is_none());
     assert!(service.active_compaction().is_none());
 
-    let events = service.recent_events(None, 64);
+    let events = service.recent_events(None, 64).1;
     assert!(events.iter().all(|envelope| envelope.run_id.is_none()));
     assert!(events.iter().all(|envelope| {
         !matches!(

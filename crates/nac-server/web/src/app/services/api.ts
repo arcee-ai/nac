@@ -41,6 +41,7 @@ import type {
   ResolvedModelConfiguration,
   RevertSessionResponse,
   SessionSnapshotResponse,
+  SessionEventBoundary,
   SessionSummarySnapshot,
   SlashCommandDefinition,
   SshBrowseRequest,
@@ -563,11 +564,16 @@ export const api = {
 
   getRecentEvents: (
     id: string,
-    options: { afterSequenceId?: number; limit?: number; signal?: AbortSignal } = {},
+    options: {
+      cursor?: SessionEventBoundary;
+      limit?: number;
+      signal?: AbortSignal;
+    } = {},
   ) => {
     const params = new URLSearchParams();
-    if (options.afterSequenceId !== undefined) {
-      params.set("after_sequence_id", String(options.afterSequenceId));
+    if (options.cursor !== undefined) {
+      params.set("after_epoch_id", options.cursor.epoch_id);
+      params.set("after_sequence_id", String(options.cursor.sequence_id));
     }
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     const query = params.toString();

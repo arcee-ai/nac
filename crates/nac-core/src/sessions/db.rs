@@ -184,6 +184,9 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
             update.session_id
         ));
     }
+    if let Some(run_id) = update.finished_run_id.as_deref() {
+        crate::store::clear_active_run(&tx, &update.session_id, run_id)?;
+    }
     tx.commit()?;
     Ok(())
 }
