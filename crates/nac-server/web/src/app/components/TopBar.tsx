@@ -78,12 +78,7 @@ export function TopBar() {
           </Link>
           <Breadcrumbs />
         </div>
-        <div
-          className={cn(
-            "relative flex items-center shrink-0",
-            isMobile ? "gap-1" : "gap-2",
-          )}
-        >
+        <div className="relative flex items-center shrink-0 gap-2">
           {/* On the list a phone has no filter rail to launch from, so the
               primary action rides in the bar. */}
           {isMobile && !inSession ? (
