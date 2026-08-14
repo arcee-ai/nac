@@ -46,6 +46,11 @@ and navigate to the interface in your browser (default: [http://127.0.0.1:3210](
 nac-web upgrade
 ```
 
+```sh
+# Upgrade to the latest nightly release candidate
+nac-web upgrade --pre-release
+```
+
 
 ### Model Provider Authentication
 
