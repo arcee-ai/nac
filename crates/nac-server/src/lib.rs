@@ -2666,6 +2666,22 @@ async fn browse_filesystem_handler(
     Query(query): Query<filesystem::BrowseQuery>,
 ) -> std::result::Result<Json<filesystem::BrowseListing>, ApiError> {
     let listing = filesystem::browse(&query, &manager.inner.root_cwd)?;
+    // The loopback API is unauthenticated, so confine the picker to the
+    // workspace and the user's home. Without this, any client could enumerate
+    // arbitrary host directories (e.g. /etc, other users' homes). See #168.
+    let allowed_roots: Vec<std::path::PathBuf> = {
+        let mut roots = vec![manager.inner.root_cwd.clone()];
+        if let Some(home) = std::env::var_os("HOME") {
+            roots.push(std::path::PathBuf::from(home));
+        }
+        roots
+    };
+    let target = std::path::Path::new(&listing.path);
+    if !allowed_roots.iter().any(|root| target.starts_with(root)) {
+        return Err(ApiError::from(filesystem::BrowseError::OutsideAllowedRoots(
+            listing.path.clone(),
+        )));
+    }
     Ok(Json(listing))
 }
 
@@ -4619,6 +4635,7 @@ impl From<filesystem::BrowseError> for ApiError {
             filesystem::BrowseError::NotFound(_) => StatusCode::NOT_FOUND,
             filesystem::BrowseError::NotADirectory(_) => StatusCode::BAD_REQUEST,
             filesystem::BrowseError::Unreadable { .. } => StatusCode::FORBIDDEN,
+            filesystem::BrowseError::OutsideAllowedRoots(_) => StatusCode::FORBIDDEN,
         };
         Self {
             status,

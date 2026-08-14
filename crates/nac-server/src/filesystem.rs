@@ -63,6 +63,10 @@ pub enum BrowseError {
     NotFound(String),
     NotADirectory(String),
     Unreadable { path: String, reason: String },
+    /// The requested path resolved outside the roots the server is allowed to
+    /// expose (the workspace and the user's home). Returned instead of listing
+    /// an arbitrary host directory over the unauthenticated loopback API.
+    OutsideAllowedRoots(String),
 }
 
 impl std::fmt::Display for BrowseError {
@@ -72,6 +76,9 @@ impl std::fmt::Display for BrowseError {
             Self::NotADirectory(path) => write!(formatter, "path '{path}' is not a directory"),
             Self::Unreadable { path, reason } => {
                 write!(formatter, "could not read directory '{path}': {reason}")
+            }
+            Self::OutsideAllowedRoots(path) => {
+                write!(formatter, "path '{path}' is outside the allowed roots")
             }
         }
     }
