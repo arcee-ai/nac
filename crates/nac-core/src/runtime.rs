@@ -21,7 +21,7 @@ use crate::paths::PathContext;
 pub use crate::sandbox::SshConnection;
 use crate::sandbox::{
     browse_remote_directory, build_sandbox_spec, parse_mount_spec, session_worktree, MountSpec,
-    SandboxBackendType, SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+    SandboxBackendType, SandboxSession, SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
 };
 pub use crate::sandbox::session_worktree::cleanup_session_worktree;
 pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
@@ -1510,60 +1510,76 @@ pub async fn build_sandbox_session(
         .clone()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-    let mut mounts = Vec::new();
+    // Everything between the fork (inside `cwd_mount`) and `launch_session`
+    // is fallible, and `launch_session`'s rollback only covers
+    // `SandboxSession::create` failing. A forked worktree predates the
+    // session row, so nothing else would ever clean it up: roll it back here
+    // when any intermediate step fails.
     let mut forked_worktree = None;
-    if !options.no_mount_cwd {
-        let cwd_mount = session_worktree::cwd_mount(cwd, &session_key, owner);
-        mounts.extend(cwd_mount.git_dir_mount);
-        forked_worktree = cwd_mount.worktree;
-        mounts.push(parse_mount_spec(
-            &format!("{}:{}", cwd_mount.host.display(), DEFAULT_SANDBOX_WORKDIR),
-            false,
-            cwd,
+    let spec = (|| -> Result<SandboxSpec> {
+        let mut mounts = Vec::new();
+        if !options.no_mount_cwd {
+            let cwd_mount = session_worktree::cwd_mount(cwd, &session_key, owner);
+            mounts.extend(cwd_mount.git_dir_mount);
+            forked_worktree = cwd_mount.worktree;
+            mounts.push(parse_mount_spec(
+                &format!("{}:{}", cwd_mount.host.display(), DEFAULT_SANDBOX_WORKDIR),
+                false,
+                cwd,
+            )?);
+        }
+        for mount in &options.mounts {
+            mounts.push(parse_mount_spec(mount, false, cwd)?);
+        }
+        for mount in &options.mounts_ro {
+            mounts.push(parse_mount_spec(mount, true, cwd)?);
+        }
+
+        let workdir = options
+            .sandbox_workdir
+            .clone()
+            .unwrap_or_else(|| DEFAULT_SANDBOX_WORKDIR.to_string());
+        let skills_workspace_dir = workspace_dir_from_mounts(&mounts, PathBuf::from(&workdir))
+            .unwrap_or_else(|| cwd.to_path_buf());
+        mounts.extend(skills::auto_mounts(
+            &skills_workspace_dir,
+            &mounts,
+            &PathContext::new(cwd),
         )?);
-    }
-    for mount in &options.mounts {
-        mounts.push(parse_mount_spec(mount, false, cwd)?);
-    }
-    for mount in &options.mounts_ro {
-        mounts.push(parse_mount_spec(mount, true, cwd)?);
-    }
 
-    let workdir = options
-        .sandbox_workdir
-        .clone()
-        .unwrap_or_else(|| DEFAULT_SANDBOX_WORKDIR.to_string());
-    let skills_workspace_dir = workspace_dir_from_mounts(&mounts, PathBuf::from(&workdir))
-        .unwrap_or_else(|| cwd.to_path_buf());
-    mounts.extend(skills::auto_mounts(
-        &skills_workspace_dir,
-        &mounts,
-        &PathContext::new(cwd),
-    )?);
-
-    let mut spec = build_sandbox_spec(
-        options.sandbox_backend,
-        options
-            .sandbox_image
-            .as_deref()
-            .unwrap_or(DEFAULT_SANDBOX_IMAGE)
-            .to_string(),
-        workdir,
-        mounts,
-        options
-            .sandbox_gpus
-            .iter()
-            .map(|device| normalize_gpu_device(device))
-            .collect(),
-        Some(
+        build_sandbox_spec(
+            options.sandbox_backend,
             options
-                .sandbox_shm_size
-                .clone()
-                .unwrap_or_else(|| "0".to_string()),
-        ),
-        options.sandbox_cpus,
-        options.sandbox_mem,
-    )?;
+                .sandbox_image
+                .as_deref()
+                .unwrap_or(DEFAULT_SANDBOX_IMAGE)
+                .to_string(),
+            workdir,
+            mounts,
+            options
+                .sandbox_gpus
+                .iter()
+                .map(|device| normalize_gpu_device(device))
+                .collect(),
+            Some(
+                options
+                    .sandbox_shm_size
+                    .clone()
+                    .unwrap_or_else(|| "0".to_string()),
+            ),
+            options.sandbox_cpus,
+            options.sandbox_mem,
+        )
+    })();
+    let mut spec = match spec {
+        Ok(spec) => spec,
+        Err(error) => {
+            if let Some(worktree) = &forked_worktree {
+                session_worktree::rollback(worktree);
+            }
+            return Err(error);
+        }
+    };
     spec.worktree = forked_worktree;
     let session = session_worktree::launch_session(spec, session_key, owner).await?;
     Ok(Some(session))
@@ -2350,6 +2366,62 @@ mod tests {
         );
         assert_eq!(overridden.sandbox_image(), Some("cli-image"));
         assert!(overridden.explicit_sandbox_config_flags_present());
+    }
+
+    #[tokio::test]
+    async fn sandbox_spec_failure_after_fork_rolls_back_the_worktree() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let repo = crate::workspace::worktree::test_harness::TestRepo::new("spec-rollback");
+        let nac_home = repo.base.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home);
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        repo.commit_file("a.txt", "a");
+
+        // The fork succeeds, then this mount fails validation: the worktree
+        // and its branch must be rolled back rather than orphaned.
+        let options = EffectiveSandboxOptions {
+            sandbox: true,
+            no_mount_cwd: false,
+            mounts: vec!["/definitely-missing-nac-test-path:/data".to_string()],
+            mounts_ro: Vec::new(),
+            sandbox_image: None,
+            sandbox_gpus: Vec::new(),
+            sandbox_shm_size: None,
+            sandbox_session_key: None,
+            sandbox_workdir: None,
+            sandbox_backend: SandboxBackendType::Podman,
+            sandbox_cpus: 0,
+            sandbox_mem: 0,
+            explicit_sandbox_config_flags_present: false,
+        };
+        let result = build_sandbox_session(&options, &repo.root).await;
+
+        assert!(result.is_err(), "a missing mount source must fail the launch");
+        let branches = String::from_utf8_lossy(
+            &std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo.root)
+                .args(["branch", "--list", "nac/*"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        assert_eq!(branches, "", "the forked worktree branch must be rolled back");
+        let worktrees = nac_home.join("worktrees");
+        assert!(
+            !worktrees.exists() || std::fs::read_dir(&worktrees).unwrap().next().is_none(),
+            "the forked worktree directory must be rolled back"
+        );
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
     }
 
     #[test]

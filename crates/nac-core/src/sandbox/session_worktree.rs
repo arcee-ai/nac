@@ -25,8 +25,12 @@ pub(crate) struct SessionWorktreeFork {
     pub worktree: SandboxWorktree,
     /// Identity mount for the repository's shared git dir: the worktree's
     /// `.git` file refers to it by absolute host path, so the container must
-    /// see it at that same path for git to work inside.
-    pub git_dir_mount: MountSpec,
+    /// see it at that same path for git to work inside. Present only when
+    /// the whole worktree is mounted; a subdirectory mount cannot use git
+    /// inside the container, and exposing the live repository's git dir
+    /// read-write there would only let the container alter hooks, config,
+    /// and refs.
+    pub git_dir_mount: Option<MountSpec>,
 }
 
 /// What a sandboxed session mounts at its workdir: the live cwd, or — for an
@@ -48,7 +52,7 @@ pub(crate) fn cwd_mount(cwd: &Path, session_key: &str, owner: bool) -> CwdMount 
         if let Some(fork) = fork(cwd, session_key) {
             return CwdMount {
                 host: fork.host,
-                git_dir_mount: Some(fork.git_dir_mount),
+                git_dir_mount: fork.git_dir_mount,
                 worktree: Some(fork.worktree),
             };
         }
@@ -130,10 +134,18 @@ pub(crate) fn fork(cwd: &Path, session_key: &str) -> Option<SessionWorktreeFork>
             return None;
         }
     }
-    let git_dir_mount = MountSpec {
-        host: repo.common_git_dir.clone(),
-        guest: repo.common_git_dir,
-        read_only: false,
+    // The git dir is mounted only when the whole worktree is: a subtree
+    // mount has no `.git` file in view, so git cannot work inside the
+    // container anyway, and the mount would expose the live repository's
+    // hooks, config, and refs to container writes for no benefit.
+    let git_dir_mount = if relative.as_os_str().is_empty() {
+        Some(MountSpec {
+            host: repo.common_git_dir.clone(),
+            guest: repo.common_git_dir,
+            read_only: false,
+        })
+    } else {
+        None
     };
     Some(SessionWorktreeFork {
         host,
@@ -279,11 +291,15 @@ mod tests {
             nac_home.join("worktrees/sessionkey123")
         );
         assert_eq!(forked.worktree.branch, "nac/sessionkey12");
+        let git_dir_mount = forked
+            .git_dir_mount
+            .as_ref()
+            .expect("a repo-root fork mounts the shared git dir");
         assert_eq!(
-            forked.git_dir_mount.host,
+            git_dir_mount.host,
             repo.root.join(".git").canonicalize().unwrap()
         );
-        assert_eq!(forked.git_dir_mount.host, forked.git_dir_mount.guest);
+        assert_eq!(git_dir_mount.host, git_dir_mount.guest);
         // The fork carries the committed tree but follows its own branch even
         // when the live checkout moves.
         assert!(forked.worktree.path.join("a.txt").exists());
@@ -303,6 +319,10 @@ mod tests {
         let sub = fork(&subdir, "subdirkey789").expect("subdir cwd gets a worktree");
         assert_eq!(sub.host, sub.worktree.path.join("crates/child"));
         assert!(sub.host.join("c.txt").exists());
+        assert!(
+            sub.git_dir_mount.is_none(),
+            "a subdirectory mount cannot use git and must not expose the git dir"
+        );
         rollback(&sub.worktree);
         rollback(&forked.worktree);
 
@@ -336,6 +356,38 @@ mod tests {
             worktree::branch_head(&worktree.repo_root, &worktree.branch),
             None,
             "a branch with no session commits must be deleted"
+        );
+
+        unsafe {
+            match original_nac_home {
+                Some(value) => std::env::set_var("NAC_HOME", value),
+                None => std::env::remove_var("NAC_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn cleanup_deletes_the_branch_when_the_worktree_dir_was_deleted_externally() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let repo = TestRepo::new("externally-deleted");
+        let nac_home = repo.base.join("nac-home");
+        std::fs::create_dir_all(nac_home.join("worktrees")).unwrap();
+        unsafe { std::env::set_var("NAC_HOME", &nac_home) };
+        repo.commit_file("a.txt", "a");
+        let worktree = forked_worktree(&repo, &nac_home, "cleanup-test");
+        // Deleting the directory externally leaves a stale administrative
+        // entry that counts the branch as checked out; cleanup must clear it
+        // or the untouched branch is left behind.
+        std::fs::remove_dir_all(&worktree.path).unwrap();
+
+        cleanup_session_worktree(&worktree);
+
+        assert!(!worktree.path.exists());
+        assert_eq!(
+            worktree::branch_head(&worktree.repo_root, &worktree.branch),
+            None,
+            "a stale worktree entry must not block deleting an untouched branch"
         );
 
         unsafe {
