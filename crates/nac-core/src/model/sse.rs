@@ -9,9 +9,11 @@
 //! `data: [DONE]` is left to the caller: it is a wire-only sentinel that only
 //! the OpenAI-shaped backends send.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::pin::Pin;
 
+use super::{redact_credentials, redact_credentials_with_extra_headers};
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -84,10 +86,26 @@ pub(super) fn provider_stream_error(code: Option<&str>, message: &str) -> Stream
                 | "server_error"
         )
     });
+    // The message is provider-controlled text and can echo request credentials
+    // back; the exact secret is not known at the fold layer, so mask
+    // recognizable shapes here. `SseError::fold` redacts the known secrets on
+    // top of this before the message is persisted.
+    let message = redact_credentials(message, &[]);
     if retryable {
         StreamFoldError::retryable(message)
     } else {
         StreamFoldError::permanent(message)
+    }
+}
+
+fn redact_request_credentials(
+    text: &str,
+    secrets: &[&str],
+    extra_headers: Option<&BTreeMap<String, String>>,
+) -> String {
+    match extra_headers {
+        Some(extra_headers) => redact_credentials_with_extra_headers(text, secrets, extra_headers),
+        None => redact_credentials(text, secrets),
     }
 }
 
@@ -115,9 +133,22 @@ impl SseError {
         }
     }
 
-    fn fold(url: &str, error: StreamFoldError, observable_delta: bool) -> Self {
+    fn fold(
+        url: &str,
+        error: StreamFoldError,
+        observable_delta: bool,
+        secrets: &[&str],
+        extra_headers: Option<&BTreeMap<String, String>>,
+    ) -> Self {
+        // The fold error text is provider-controlled and can echo request
+        // credentials back; mask the known secrets and recognizable shapes
+        // before the message is persisted.
+        let message = redact_request_credentials(&error.message, secrets, extra_headers);
         Self {
-            message: format!("model stream from {url} failed: {error}"),
+            message: format!(
+                "model stream from {} failed: {message}",
+                redact_credentials(url, &[])
+            ),
             retryable: error.retryable,
             observable_delta,
         }
@@ -174,14 +205,40 @@ pub(super) trait StreamFold {
 pub(super) async fn read_sse_response<F: StreamFold>(
     url: &str,
     response: Response,
+    fold: F,
+    secrets: &[&str],
+) -> std::result::Result<Value, SseError> {
+    read_sse_response_with_request_secrets(url, response, fold, secrets, None).await
+}
+
+pub(super) async fn read_sse_response_with_extra_headers<F: StreamFold>(
+    url: &str,
+    response: Response,
+    fold: F,
+    secrets: &[&str],
+    extra_headers: &BTreeMap<String, String>,
+) -> std::result::Result<Value, SseError> {
+    read_sse_response_with_request_secrets(url, response, fold, secrets, Some(extra_headers)).await
+}
+
+async fn read_sse_response_with_request_secrets<F: StreamFold>(
+    url: &str,
+    response: Response,
     mut fold: F,
+    secrets: &[&str],
+    extra_headers: Option<&BTreeMap<String, String>>,
 ) -> std::result::Result<Value, SseError> {
     let mut reader = SseReader::new(response);
 
     while let Some(frame) = reader.next_frame().await {
         let frame = frame.map_err(|error| {
+            let message =
+                redact_request_credentials(&format!("{error:#}"), secrets, extra_headers);
             SseError::retryable(
-                format!("model stream from {url} failed: {error:#}"),
+                format!(
+                    "model stream from {} failed: {message}",
+                    redact_credentials(url, &[])
+                ),
                 fold.has_observable_delta(),
             )
         })?;
@@ -193,12 +250,23 @@ pub(super) async fn read_sse_response<F: StreamFold>(
         }
         let event: Value = serde_json::from_str(&frame.data).map_err(|error| {
             SseError::permanent(
-                format!("invalid SSE event from {url}: {}\n{error}", frame.data),
+                format!(
+                    "invalid SSE event from {}: {}\n{}",
+                    redact_credentials(url, &[]),
+                    redact_request_credentials(&frame.data, secrets, extra_headers),
+                    error
+                ),
                 fold.has_observable_delta(),
             )
         })?;
         if let Err(error) = fold.push(&event) {
-            return Err(SseError::fold(url, error, fold.has_observable_delta()));
+            return Err(SseError::fold(
+                url,
+                error,
+                fold.has_observable_delta(),
+                secrets,
+                extra_headers,
+            ));
         }
         if fold.is_complete() {
             break;
@@ -207,7 +275,7 @@ pub(super) async fn read_sse_response<F: StreamFold>(
 
     let observable_delta = fold.has_observable_delta();
     fold.finish()
-        .map_err(|error| SseError::fold(url, error, observable_delta))
+        .map_err(|error| SseError::fold(url, error, observable_delta, secrets, extra_headers))
 }
 
 /// One dispatched SSE event. Only the payload is kept: providers that also name
@@ -450,6 +518,106 @@ mod tests {
         assert!(!provider_stream_error(None, "failed").is_retryable());
     }
 
+    /// A provider error that echoes the request's API key back in prose must
+    /// not reach the caller intact: `read_sse_response` redacts the known
+    /// secrets on top of the pattern masking the fold layer applies.
+    #[tokio::test]
+    async fn stream_errors_redact_known_secrets() {
+        const CANARY: &str = "sk-canary-sse-0123456789";
+        let events = format!(
+            "data: {{\"error\":{{\"message\":\"invalid key {CANARY} supplied\",\"type\":\"authentication_error\"}}}}\n\n"
+        );
+        let (response, release_server, server) = held_open_sse_response(&events).await;
+        let result = timeout(
+            Duration::from_secs(1),
+            read_sse_response(
+                "http://redaction.test",
+                response,
+                ChatStreamFold::new(None, "reasoning_content"),
+                &[CANARY],
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let error = result
+            .expect("stream read should complete")
+            .expect_err("a provider error event should fail the stream");
+        let message = error.to_string();
+        assert!(!message.contains(CANARY), "{message}");
+        assert!(
+            message.contains(crate::model::redact::REDACTED),
+            "{message}"
+        );
+        assert!(message.contains("invalid key"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn stream_errors_redact_extra_header_values() {
+        const CANARY: &str = "lowercaseheaderssecanary";
+        let events = format!(
+            "data: {{\"error\":{{\"message\":\"custom credential {CANARY} was rejected\",\"type\":\"authentication_error\"}}}}\n\n"
+        );
+        let extra_headers = BTreeMap::from([("x-provider-secret".to_string(), CANARY.to_string())]);
+        let (response, release_server, server) = held_open_sse_response(&events).await;
+        let result = timeout(
+            Duration::from_secs(1),
+            read_sse_response_with_extra_headers(
+                "http://redaction.test",
+                response,
+                ChatStreamFold::new(None, "reasoning_content"),
+                &[],
+                &extra_headers,
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let message = result
+            .expect("stream read should complete")
+            .expect_err("a provider error event should fail the stream")
+            .to_string();
+        assert!(!message.contains(CANARY), "{message}");
+        assert!(
+            message.contains(crate::model::redact::REDACTED),
+            "{message}"
+        );
+        assert!(message.contains("custom credential"), "{message}");
+    }
+
+    /// The same redaction covers SSE frames that fail to parse as JSON: the
+    /// raw frame data is quoted into the error and can carry echoed secrets.
+    #[tokio::test]
+    async fn invalid_sse_event_redacts_known_secrets() {
+        const CANARY: &str = "sk-canary-sse-0123456789";
+        let events = format!("data: not json mentioning {CANARY}\n\n");
+        let (response, release_server, server) = held_open_sse_response(&events).await;
+        let result = timeout(
+            Duration::from_secs(1),
+            read_sse_response(
+                "http://redaction.test",
+                response,
+                ChatStreamFold::new(None, "reasoning_content"),
+                &[CANARY],
+            ),
+        )
+        .await;
+
+        let _ = release_server.send(());
+        server.await.unwrap();
+        let error = result
+            .expect("stream read should complete")
+            .expect_err("an invalid JSON event should fail the stream");
+        let message = error.to_string();
+        assert!(!message.contains(CANARY), "{message}");
+        assert!(
+            message.contains(crate::model::redact::REDACTED),
+            "{message}"
+        );
+    }
+
     #[tokio::test]
     async fn responses_finish_on_terminal_event_before_body_closes() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -496,6 +664,7 @@ mod tests {
                 "http://responses.test",
                 response,
                 ResponsesStreamFold::new(None),
+                &[],
             ),
         )
         .await;
@@ -569,6 +738,7 @@ mod tests {
                 "http://chat-compatible.test",
                 response,
                 ChatStreamFold::new(None, "reasoning_content"),
+                &[],
             ),
         )
         .await;
@@ -606,6 +776,7 @@ mod tests {
             "http://anthropic.test",
             response,
             AnthropicStreamFold::new(None),
+            &[],
         ));
 
         assert!(
@@ -679,6 +850,7 @@ mod tests {
             "http://responses.benchmark",
             response,
             ResponsesStreamFold::new(None),
+            &[],
         )
         .await
         .unwrap();

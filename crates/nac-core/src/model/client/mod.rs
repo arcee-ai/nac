@@ -2,7 +2,7 @@ use super::anthropic_stream::AnthropicStreamFold;
 use super::chat_stream::ChatStreamFold;
 use super::pseudo_tool_calls::finalize_chat_tool_recovery;
 use super::responses_stream::ResponsesStreamFold;
-use super::sse::{read_sse_response, with_source_chain, StreamFold};
+use super::sse::{read_sse_response_with_extra_headers, with_source_chain, StreamFold};
 use super::*;
 use anyhow::Context;
 
@@ -675,12 +675,16 @@ impl ModelClient {
                     body,
                     |request| request.header("Authorization", format!("Bearer {token}")),
                     || ChatStreamFold::new(Some(on_delta), reasoning_field),
+                    &[token],
                 )
                 .await;
         }
-        self.try_post_json_with_retry_headers(url, body, |request| {
-            request.header("Authorization", format!("Bearer {token}"))
-        })
+        self.try_post_json_with_retry_headers(
+            url,
+            body,
+            |request| request.header("Authorization", format!("Bearer {token}")),
+            &[token],
+        )
         .await
     }
 
@@ -707,7 +711,7 @@ impl ModelClient {
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
-        self.try_post_json_with_retry_headers(url, body, apply_headers)
+        self.try_post_json_with_retry_headers(url, body, apply_headers, &[self.api_key.as_str()])
             .await
             .map_err(|error| anyhow!(error.message))
     }
@@ -717,12 +721,13 @@ impl ModelClient {
         url: &str,
         body: &Value,
         apply_headers: F,
+        secrets: &[&str],
     ) -> std::result::Result<Value, ModelHttpError>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
         let response = self
-            .send_with_retry_headers(url, body, apply_headers)
+            .send_with_retry_headers(url, body, apply_headers, secrets)
             .await?;
         let status = response.status();
         let body_text = read_response_body(response).await?;
@@ -730,9 +735,16 @@ impl ModelClient {
             status: Some(status.as_u16()),
             message: format!(
                 "Failed to parse response from {}: {}\nBody: {}",
-                url,
+                redact_credentials(url, &[]),
                 e,
-                truncate_utf8(&body_text, 500)
+                truncate_utf8(
+                    &redact_credentials_with_extra_headers(
+                        &body_text,
+                        secrets,
+                        &self.extra_headers,
+                    ),
+                    500,
+                )
             ),
         })
     }
@@ -745,6 +757,7 @@ impl ModelClient {
         url: &str,
         body: &Value,
         apply_headers: F,
+        secrets: &[&str],
     ) -> std::result::Result<reqwest::Response, ModelHttpError>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
@@ -775,7 +788,7 @@ impl ModelClient {
                         status: None,
                         message: format!(
                             "HTTP request failed for {}: {}",
-                            url,
+                            redact_credentials(url, &[]),
                             with_source_chain(&e)
                         ),
                     };
@@ -798,21 +811,39 @@ impl ModelClient {
             }
 
             let body = read_response_body(response).await?;
+            let safe_url = redact_credentials(url, &[]);
 
             if status.is_redirection() {
-                let location = redirect_location
-                    .as_deref()
-                    .map(|value| format!(" Location: {}.", truncate_utf8(value, 500)))
-                    .unwrap_or_default();
+                let location = redirect_location.as_deref().map(|value| {
+                    format!(
+                        " Location: {}.",
+                        truncate_utf8(
+                            &redact_credentials_with_extra_headers(
+                                value,
+                                secrets,
+                                &self.extra_headers,
+                            ),
+                            500,
+                        )
+                    )
+                });
+                let location = location.unwrap_or_default();
                 return Err(ModelHttpError {
                     status: Some(status.as_u16()),
                     message: format!(
                         "Model request for backend '{}' received HTTP {} redirect from {}; automatic redirects are disabled and the request was not replayed.{} Body: {}",
                         self.backend,
                         status.as_u16(),
-                        url,
+                        safe_url,
                         location,
-                        truncate_utf8(&body, 500)
+                        truncate_utf8(
+                            &redact_json_body_with_extra_headers(
+                                &body,
+                                secrets,
+                                &self.extra_headers,
+                            ),
+                            500,
+                        )
                     ),
                 });
             }
@@ -822,8 +853,15 @@ impl ModelClient {
                 message: format!(
                     "HTTP {} from {}: {}",
                     status.as_u16(),
-                    url,
-                    truncate_utf8(&body, 500)
+                    safe_url,
+                    truncate_utf8(
+                        &redact_json_body_with_extra_headers(
+                            &body,
+                            secrets,
+                            &self.extra_headers,
+                        ),
+                        500,
+                    )
                 ),
             };
 
@@ -856,9 +894,15 @@ impl ModelClient {
         MakeFold: Fn() -> Fold,
         Fold: StreamFold,
     {
-        self.try_post_sse_with_retry_headers(url, body, apply_headers, make_fold)
-            .await
-            .map_err(|error| anyhow!(error.message))
+        self.try_post_sse_with_retry_headers(
+            url,
+            body,
+            apply_headers,
+            make_fold,
+            &[self.api_key.as_str()],
+        )
+        .await
+        .map_err(|error| anyhow!(error.message))
     }
 
     async fn try_post_sse_with_retry_headers<F, MakeFold, Fold>(
@@ -867,6 +911,7 @@ impl ModelClient {
         body: &Value,
         apply_headers: F,
         make_fold: MakeFold,
+        secrets: &[&str],
     ) -> std::result::Result<Value, ModelHttpError>
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
@@ -876,9 +921,17 @@ impl ModelClient {
         let mut last_error = None;
         for attempt in 0..10 {
             let response = self
-                .send_with_retry_headers(url, body, apply_headers)
+                .send_with_retry_headers(url, body, apply_headers, secrets)
                 .await?;
-            match read_sse_response(url, response, make_fold()).await {
+            match read_sse_response_with_extra_headers(
+                url,
+                response,
+                make_fold(),
+                secrets,
+                &self.extra_headers,
+            )
+            .await
+            {
                 Ok(value) => return Ok(value),
                 Err(error) if error.is_retryable() && !error.has_observable_delta() => {
                     last_error = Some(ModelHttpError {
