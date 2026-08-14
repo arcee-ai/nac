@@ -9,6 +9,9 @@ pub(crate) struct NewOrchestratorCompactionCheckpoint {
     pub tail_start_message_index: usize,
     /// Total message count at checkpoint creation; NULL on legacy rows.
     pub tail_message_count: Option<usize>,
+    /// Digest of `messages[tail_start_message_index..]` at checkpoint
+    /// creation; NULL on legacy rows.
+    pub tail_sha256: Option<[u8; 32]>,
     pub source_prefix_sha256: [u8; 32],
     pub system_policy_sha256: [u8; 32],
     pub prompt_policy_version: u32,
@@ -28,6 +31,9 @@ pub(crate) struct OrchestratorCompactionCheckpoint {
     pub tail_start_message_index: usize,
     /// Total message count at checkpoint creation; NULL on legacy rows.
     pub tail_message_count: Option<usize>,
+    /// Digest of `messages[tail_start_message_index..]` at checkpoint
+    /// creation; NULL on legacy rows.
+    pub tail_sha256: Option<[u8; 32]>,
     pub source_prefix_sha256: [u8; 32],
     pub system_policy_sha256: [u8; 32],
     pub prompt_policy_version: u32,
@@ -40,9 +46,9 @@ pub(crate) struct OrchestratorCompactionCheckpoint {
 
 const CHECKPOINT_COLUMNS: &str =
     "id, session_id, previous_checkpoint_id, summary, tail_start_message_index, \
-     tail_message_count, source_prefix_sha256, system_policy_sha256, prompt_policy_version, \
-     old_context_estimate, summary_prompt_tokens, summary_completion_tokens, \
-     new_context_estimate, created_at";
+     tail_message_count, tail_sha256, source_prefix_sha256, system_policy_sha256, \
+     prompt_policy_version, old_context_estimate, summary_prompt_tokens, \
+     summary_completion_tokens, new_context_estimate, created_at";
 
 pub(crate) fn append_orchestrator_compaction_checkpoint(
     path: &Path,
@@ -122,16 +128,17 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
     transaction.execute(
         "INSERT INTO orchestrator_compaction_checkpoints
              (session_id, previous_checkpoint_id, summary, tail_start_message_index,
-              tail_message_count, source_prefix_sha256, system_policy_sha256,
+              tail_message_count, tail_sha256, source_prefix_sha256, system_policy_sha256,
               prompt_policy_version, old_context_estimate, summary_prompt_tokens,
               summary_completion_tokens, new_context_estimate, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             checkpoint.session_id,
             checkpoint.previous_checkpoint_id,
             checkpoint.summary,
             tail_start_message_index,
             tail_message_count,
+            checkpoint.tail_sha256.as_ref().map(<[u8; 32]>::as_slice),
             checkpoint.source_prefix_sha256.as_slice(),
             checkpoint.system_policy_sha256.as_slice(),
             prompt_policy_version,
@@ -213,20 +220,24 @@ fn map_checkpoint_row(
             .get::<_, Option<i64>>(5)?
             .map(|value| usize_from_sqlite(value, 5))
             .transpose()?,
-        source_prefix_sha256: digest_from_sqlite(row.get(6)?, 6)?,
-        system_policy_sha256: digest_from_sqlite(row.get(7)?, 7)?,
-        prompt_policy_version: u32_from_sqlite(row.get(8)?, 8)?,
-        old_context_estimate: token_count_from_sqlite(row.get(9)?, 9)?,
-        summary_prompt_tokens: row
-            .get::<_, Option<i64>>(10)?
-            .map(|value| token_count_from_sqlite(value, 10))
+        tail_sha256: row
+            .get::<_, Option<Vec<u8>>>(6)?
+            .map(|value| digest_from_sqlite(value, 6))
             .transpose()?,
-        summary_completion_tokens: row
+        source_prefix_sha256: digest_from_sqlite(row.get(7)?, 7)?,
+        system_policy_sha256: digest_from_sqlite(row.get(8)?, 8)?,
+        prompt_policy_version: u32_from_sqlite(row.get(9)?, 9)?,
+        old_context_estimate: token_count_from_sqlite(row.get(10)?, 10)?,
+        summary_prompt_tokens: row
             .get::<_, Option<i64>>(11)?
             .map(|value| token_count_from_sqlite(value, 11))
             .transpose()?,
-        new_context_estimate: token_count_from_sqlite(row.get(12)?, 12)?,
-        created_at: row.get(13)?,
+        summary_completion_tokens: row
+            .get::<_, Option<i64>>(12)?
+            .map(|value| token_count_from_sqlite(value, 12))
+            .transpose()?,
+        new_context_estimate: token_count_from_sqlite(row.get(13)?, 13)?,
+        created_at: row.get(14)?,
     })
 }
 
@@ -333,6 +344,7 @@ mod tests {
             summary: summary.to_string(),
             tail_start_message_index,
             tail_message_count: Some(tail_start_message_index),
+            tail_sha256: Some([7; 32]),
             source_prefix_sha256: [tail_start_message_index as u8; 32],
             system_policy_sha256: [42; 32],
             prompt_policy_version: 1,
@@ -367,6 +379,7 @@ mod tests {
         assert_eq!(second.previous_checkpoint_id, Some(first.id));
         assert_eq!(second.tail_start_message_index, 9);
         assert_eq!(second.tail_message_count, Some(9));
+        assert_eq!(second.tail_sha256, Some([7; 32]));
         assert_eq!(second.source_prefix_sha256, [9; 32]);
         assert_eq!(second.system_policy_sha256, [42; 32]);
         assert_eq!(second.prompt_policy_version, 1);

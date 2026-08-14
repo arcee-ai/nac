@@ -301,6 +301,7 @@ fn active_end_checkpoint_without_new_messages_is_already_compacted() {
             summary: installed_summary("complete"),
             tail_start_message_index: boundary,
             tail_message_count: None,
+            tail_sha256: None,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
             prompt_policy_version: PROMPT_POLICY_VERSION,
@@ -339,6 +340,7 @@ fn manual_compaction_with_unchanged_transcript_is_already_compacted() {
             summary: installed_summary("prior summary"),
             tail_start_message_index: boundary,
             tail_message_count: Some(messages.len()),
+            tail_sha256: Some(tail_digest(&messages, boundary)),
             source_prefix_sha256: source,
             system_policy_sha256: policy,
             prompt_policy_version: PROMPT_POLICY_VERSION,
@@ -402,6 +404,7 @@ fn legacy_checkpoint_without_tail_count_still_recompacts_mid_transcript() {
             // Legacy row: no recorded message count, so the idempotency
             // guard cannot fire and planning falls back to the boundary.
             tail_message_count: None,
+            tail_sha256: None,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
             prompt_policy_version: PROMPT_POLICY_VERSION,
@@ -417,6 +420,89 @@ fn legacy_checkpoint_without_tail_count_still_recompacts_mid_transcript() {
 
     let candidate = candidate(state.plan(&messages, &[], CompactionReason::Manual));
     assert!(candidate.boundary > boundary);
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+#[test]
+fn manual_compaction_with_same_length_edited_tail_recompacts() {
+    let path = temp_store_path("manual_tail_edit");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![user("old"), assistant("answer"), user("current")];
+    let boundary = 2;
+    let (source, policy) = checkpoint_digests(&messages, boundary);
+    append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("prior summary"),
+            tail_start_message_index: boundary,
+            tail_message_count: Some(messages.len()),
+            tail_sha256: Some(tail_digest(&messages, boundary)),
+            source_prefix_sha256: source,
+            system_policy_sha256: policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+
+    // A revert that stays past the boundary followed by new turns can restore
+    // the original message count with different tail content. The count-only
+    // guard would skip here and never summarize the new tail; the recorded
+    // tail digest must force recompaction instead.
+    let edited = vec![user("old"), assistant("answer"), user("edited tail")];
+    assert_eq!(edited.len(), messages.len());
+    let mut state = state(path.clone(), None);
+    state.restore_newest_valid_checkpoint(&edited).unwrap();
+
+    let candidate = candidate(state.plan(&edited, &[], CompactionReason::Manual));
+    assert!(candidate.boundary > boundary);
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+#[test]
+fn legacy_checkpoint_without_tail_digest_skips_on_count_match() {
+    let path = temp_store_path("manual_legacy_digest");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![user("old"), assistant("answer"), user("current")];
+    let boundary = 2;
+    let (source, policy) = checkpoint_digests(&messages, boundary);
+    append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("prior summary"),
+            tail_start_message_index: boundary,
+            tail_message_count: Some(messages.len()),
+            // Legacy row: written before the tail digest existed, so the
+            // guard falls back to the count-only comparison.
+            tail_sha256: None,
+            source_prefix_sha256: source,
+            system_policy_sha256: policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let mut state = state(path.clone(), None);
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+
+    assert!(matches!(
+        state
+            .plan(&messages, &[], CompactionReason::Manual)
+            .decision,
+        CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
+    ));
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

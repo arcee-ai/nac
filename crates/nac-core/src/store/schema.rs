@@ -1,14 +1,17 @@
 use super::*;
 
-// 14 adds the compaction checkpoint tail message count
+// 15 adds the compaction checkpoint tail digest (`tail_sha256` on
+// `orchestrator_compaction_checkpoints`), so the manual-compaction
+// idempotency guard detects same-length tails whose content changed.
+// (14 added the compaction checkpoint tail message count
 // (`tail_message_count` on `orchestrator_compaction_checkpoints`), which lets
 // manual compaction detect an unchanged transcript and skip re-summarizing.
-// (13 added the light-model columns (`light_model_json` on both `sessions` and
+// 13 added the light-model columns (`light_model_json` on both `sessions` and
 // `model_configurations`) — `open_runtime_connection` returns early whenever
 // the stored version already equals this one. 12 carries the same schema as
 // 11, which added episodes.status; 10 added the ssh_configurations table; 9
 // the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 14;
+const STORE_SCHEMA_VERSION: i64 = 15;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -211,6 +214,14 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "orchestrator_compaction_checkpoints",
         "tail_message_count",
         "INTEGER CHECK (tail_message_count IS NULL OR tail_message_count >= 0)",
+    )?;
+    // NULL on legacy rows: the idempotency guard falls back to the count-only
+    // comparison for checkpoints created before this column existed.
+    ensure_column(
+        &transaction,
+        "orchestrator_compaction_checkpoints",
+        "tail_sha256",
+        "BLOB CHECK (tail_sha256 IS NULL OR length(tail_sha256) = 32)",
     )?;
     create_workspace_revisions_table(&transaction)?;
     // Revisions recorded before revert existed cannot say which transcript
@@ -553,6 +564,8 @@ fn create_orchestrator_compaction_checkpoints_table(conn: &Connection) -> Result
                  CHECK (tail_start_message_index >= 0),
              tail_message_count INTEGER
                  CHECK (tail_message_count IS NULL OR tail_message_count >= 0),
+             tail_sha256 BLOB
+                 CHECK (tail_sha256 IS NULL OR length(tail_sha256) = 32),
              source_prefix_sha256 BLOB NOT NULL
                  CHECK (length(source_prefix_sha256) = 32),
              system_policy_sha256 BLOB NOT NULL

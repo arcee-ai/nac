@@ -196,6 +196,7 @@ fn assert_current_schema(conn: &Connection) {
             "summary",
             "tail_start_message_index",
             "tail_message_count",
+            "tail_sha256",
             "source_prefix_sha256",
             "system_policy_sha256",
             "prompt_policy_version",

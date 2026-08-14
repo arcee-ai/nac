@@ -316,6 +316,8 @@ async fn repeated_manual_compaction_without_new_messages_is_already_compacted() 
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(checkpoints[0].tail_message_count, Some(message_count + 1));
     assert_eq!(checkpoints[1].tail_message_count, Some(message_count));
+    assert!(checkpoints[0].tail_sha256.is_some());
+    assert!(checkpoints[1].tail_sha256.is_some());
     assert!(checkpoints[0].tail_start_message_index > checkpoints[1].tail_start_message_index);
     assert_eq!(
         checkpoints[0].previous_checkpoint_id,

@@ -3233,6 +3233,7 @@ X-Config = "yes"
                     .to_string(),
                 tail_start_message_index: 2,
                 tail_message_count: None,
+                tail_sha256: None,
                 source_prefix_sha256: source,
                 system_policy_sha256: policy,
                 prompt_policy_version:

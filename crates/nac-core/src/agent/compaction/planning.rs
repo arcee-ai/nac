@@ -165,15 +165,20 @@ impl CompactionState {
         // Manual compaction is idempotent: when the transcript is exactly the
         // one the active checkpoint was created from, re-summarizing would only
         // re-abstract the existing summary and advance the boundary without
-        // adding any new source material. Legacy checkpoints (NULL
-        // `tail_message_count`) fall back to the boundary-at-end detection
-        // below. Auto compaction is deliberately not gated: a lowered
-        // threshold may still legitimately compact an un-summarized tail.
+        // adding any new source material. The count comparison alone is not
+        // sufficient: a revert that stays past the boundary followed by new
+        // turns can restore the original count with different tail content, so
+        // the recorded tail digest must also match. Legacy checkpoints (NULL
+        // `tail_message_count`, or NULL `tail_sha256` from before the digest
+        // was recorded) fall back to the weaker comparison or the
+        // boundary-at-end detection below. Auto compaction is deliberately not
+        // gated: a lowered threshold may still legitimately compact an
+        // un-summarized tail.
         if reason == CompactionReason::Manual
             && self
                 .active_checkpoint
                 .as_ref()
-                .is_some_and(|checkpoint| checkpoint.tail_message_count == Some(messages.len()))
+                .is_some_and(|checkpoint| checkpoint_matches_transcript(checkpoint, messages))
         {
             return CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted);
         }
@@ -270,6 +275,7 @@ impl CompactionState {
                 summary: installed_summary,
                 tail_start_message_index: candidate.boundary,
                 tail_message_count: Some(messages.len()),
+                tail_sha256: Some(tail_digest(messages, candidate.boundary)),
                 source_prefix_sha256: candidate.source_prefix_sha256,
                 system_policy_sha256: candidate.system_policy_sha256,
                 prompt_policy_version: PROMPT_POLICY_VERSION,
@@ -553,6 +559,31 @@ pub(crate) fn checkpoint_digests(messages: &[Message], boundary: usize) -> ([u8;
         source_prefix_digest(messages, boundary),
         system_policy_digest(messages),
     )
+}
+
+fn checkpoint_matches_transcript(
+    checkpoint: &OrchestratorCompactionCheckpoint,
+    messages: &[Message],
+) -> bool {
+    if checkpoint.tail_message_count != Some(messages.len()) {
+        return false;
+    }
+    // Rows written before the tail digest existed can only compare counts.
+    checkpoint.tail_sha256.is_none_or(|digest| {
+        messages
+            .get(checkpoint.tail_start_message_index..)
+            .is_some_and(|_| digest == tail_digest(messages, checkpoint.tail_start_message_index))
+    })
+}
+
+pub(super) fn tail_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"nac-orchestrator-compaction-tail-v1\0");
+    hasher.update((boundary as u64).to_be_bytes());
+    for message in &messages[boundary..] {
+        update_serialized(&mut hasher, message);
+    }
+    hasher.finalize().into()
 }
 
 fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
