@@ -442,7 +442,12 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
         // not this one's.
         log: [],
       });
-      return "none";
+      // A re-dispatched name already has a persisted episode ending in
+      // thread_finished, and the transcript lines episodes up with dispatch
+      // cards newest-first. Until the refetch brings this dispatch's own
+      // thread_started into that window, the new card inherits the previous
+      // episode's finish and reads as done while the worker is still running.
+      return "snapshot";
     case "thread_finished":
       pushEvent({
         seq,
