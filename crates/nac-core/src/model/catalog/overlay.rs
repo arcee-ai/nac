@@ -450,6 +450,26 @@ struct ModelsDevCost {
     output: Option<f64>,
     cache_read: Option<f64>,
     cache_write: Option<f64>,
+    tiers: Option<Vec<ModelsDevCostTier>>,
+}
+
+/// models.dev `cost.tiers[]` entry. Only `tier.type == "context"` is
+/// mapped; anything else is schema drift — skipped here (the runtime
+/// overlay degrades where the generator hard-errors).
+#[derive(Debug, Deserialize)]
+struct ModelsDevCostTier {
+    tier: ModelsDevTierSelector,
+    input: Option<f64>,
+    output: Option<f64>,
+    cache_read: Option<f64>,
+    cache_write: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsDevTierSelector {
+    #[serde(rename = "type")]
+    kind: String,
+    size: u64,
 }
 
 /// Map a models.dev `api.json` payload into overlay provider records.
@@ -773,7 +793,9 @@ fn map_limits(limit: Option<&ModelsDevLimit>) -> (u64, u64) {
 
 /// Cost rates with the generator's `seed_cost` rules, except a bad rate
 /// skips the model (the generator hard-errors at regen time; the runtime
-/// overlay degrades instead).
+/// overlay degrades instead). Context tiers map with `seed_cost`'s tier
+/// rules: non-context tier types are dropped, and buckets a tier omits
+/// fall back to the base rates so selection stays a wholesale swap.
 fn map_cost(cost: Option<&ModelsDevCost>) -> Result<super::ModelCostRates, String> {
     let rate = |rate: Option<f64>, field: &str| -> Result<f64, String> {
         let rate = rate.unwrap_or(0.0);
@@ -782,12 +804,34 @@ fn map_cost(cost: Option<&ModelsDevCost>) -> Result<super::ModelCostRates, Strin
         }
         Ok(rate)
     };
-    Ok(super::ModelCostRates {
+    let tier_rate = |tier_value: Option<f64>, base: f64, field: &str| -> Result<f64, String> {
+        match tier_value {
+            Some(_) => rate(tier_value, field),
+            None => Ok(base),
+        }
+    };
+    let base = super::ModelCostRates {
         input: rate(cost.and_then(|cost| cost.input), "input")?,
         output: rate(cost.and_then(|cost| cost.output), "output")?,
         cache_read: rate(cost.and_then(|cost| cost.cache_read), "cache_read")?,
         cache_write: rate(cost.and_then(|cost| cost.cache_write), "cache_write")?,
-    })
+        tiers: None,
+    };
+    let mut tiers = Vec::new();
+    for tier in cost.and_then(|cost| cost.tiers.as_deref()).unwrap_or(&[]) {
+        if tier.tier.kind != "context" {
+            continue;
+        }
+        tiers.push(super::CostTier {
+            input_tokens_above: tier.tier.size,
+            input: tier_rate(tier.input, base.input, "input")?,
+            output: tier_rate(tier.output, base.output, "output")?,
+            cache_read: tier_rate(tier.cache_read, base.cache_read, "cache_read")?,
+            cache_write: tier_rate(tier.cache_write, base.cache_write, "cache_write")?,
+        });
+    }
+    let tiers = (!tiers.is_empty()).then_some(tiers);
+    Ok(super::ModelCostRates { tiers, ..base })
 }
 
 /// Thinking maps come from the seed catalog — exact entry, then the

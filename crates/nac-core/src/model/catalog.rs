@@ -49,9 +49,9 @@ pub use anthropic_overlay::spawn_anthropic_model_refresh;
 pub use arcee_overlay::spawn_arcee_model_refresh;
 pub use overlay::spawn_overlay_refresh;
 pub use types::{
-    ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, DefaultLimits, ModelCostRates,
-    ModelEntry, ModelListing, ModelMetadata, ModelSource, ProviderAuth, ProviderListing,
-    ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+    ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, CostTier, DefaultLimits,
+    ModelCostRates, ModelEntry, ModelListing, ModelMetadata, ModelSource, ProviderAuth,
+    ProviderListing, ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -460,7 +460,7 @@ pub fn api_listing() -> ModelListing {
                         display_name: metadata.display_name.clone(),
                         context_window: metadata.context_window,
                         max_tokens: metadata.max_tokens,
-                        cost: metadata.cost,
+                        cost: metadata.cost.clone(),
                         reasoning: metadata.reasoning,
                         supported_efforts: metadata.thinking_level_map.supported_efforts(),
                         source: metadata.source,

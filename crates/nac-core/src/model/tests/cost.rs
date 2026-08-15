@@ -83,6 +83,7 @@ fn calculate_cost_bills_each_bucket_at_its_catalog_rate() {
         output: 25.0,
         cache_read: 0.5,
         cache_write: 6.25,
+        tiers: None,
     };
     let usage = TokenUsage {
         input_tokens: 100,
@@ -110,6 +111,7 @@ fn calculate_cost_rounds_half_up_once_at_the_micro_conversion() {
         output: 1.5,
         cache_read: 0.49,
         cache_write: 0.25,
+        tiers: None,
     };
     let usage = TokenUsage {
         input_tokens: 1,
@@ -154,6 +156,7 @@ fn calculate_cost_saturates_and_treats_hostile_rates_as_zero() {
         output: f64::NAN,
         cache_read: f64::INFINITY,
         cache_write: 1.0,
+        tiers: None,
     };
     let cost = calculate_cost(&hostile, None, &usage);
     assert_eq!(cost.input, 0);
@@ -168,6 +171,7 @@ fn calculate_cost_saturates_and_treats_hostile_rates_as_zero() {
         output: 1_000_000_000.0,
         cache_read: 1_000_000_000.0,
         cache_write: 1_000_000_000.0,
+        tiers: None,
     };
     let cost = calculate_cost(&enormous, None, &usage);
     assert_eq!(cost.input, u64::MAX);
@@ -182,6 +186,7 @@ fn calculate_cost_bills_1h_cache_writes_at_the_1h_rate() {
         output: 25.0,
         cache_read: 0.5,
         cache_write: 6.25,
+        tiers: None,
     };
     let usage = TokenUsage {
         input_tokens: 0,
@@ -202,6 +207,128 @@ fn calculate_cost_bills_1h_cache_writes_at_the_1h_rate() {
     );
     // An explicit zero 1h rate bills zero (not the standard rate).
     assert_eq!(calculate_cost(&rates, Some(0.0), &usage).cache_write, 0);
+}
+
+#[test]
+fn calculate_cost_bills_reasoning_at_the_output_rate() {
+    let rates = catalog::ModelCostRates {
+        input: 5.0,
+        output: 25.0,
+        cache_read: 0.5,
+        cache_write: 6.25,
+        tiers: None,
+    };
+
+    // The OpenAI convention (verified live for deepseek and together's
+    // kimi-k3): output_tokens includes reasoning, so the bill is exactly
+    // the old single multiply over output_tokens.
+    let included = TokenUsage {
+        input_tokens: 0,
+        output_tokens: 50,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 30,
+        orchestrator_context_tokens: 0,
+        cost: TokenCostMicros::default(),
+    };
+    let cost = calculate_cost(&rates, None, &included);
+    assert_eq!(cost.output, 1_250, "50 output tokens at $25/1M");
+
+    // A provider that excludes reasoning from its output count still has
+    // its reasoning billed; the max can never double-count.
+    let excluded = TokenUsage {
+        output_tokens: 20,
+        reasoning_tokens: 30,
+        ..included
+    };
+    let cost = calculate_cost(&rates, None, &excluded);
+    assert_eq!(cost.output, 750, "reasoning outlives the output count");
+
+    // Degenerate provider quirk (reasoning reported larger than output)
+    // bills the reasoning total instead of underflowing.
+    let quirky = TokenUsage {
+        output_tokens: 30,
+        reasoning_tokens: 30,
+        ..included
+    };
+    assert_eq!(calculate_cost(&rates, None, &quirky).output, 750);
+}
+
+#[test]
+fn calculate_cost_selects_the_highest_matching_context_tier() {
+    let rates = catalog::ModelCostRates {
+        input: 2.5,
+        output: 15.0,
+        cache_read: 0.25,
+        cache_write: 0.0,
+        tiers: Some(vec![
+            catalog::CostTier {
+                input_tokens_above: 200_000,
+                input: 5.0,
+                output: 22.5,
+                cache_read: 0.5,
+                cache_write: 0.0,
+            },
+            catalog::CostTier {
+                input_tokens_above: 500_000,
+                input: 10.0,
+                output: 45.0,
+                cache_read: 1.0,
+                cache_write: 0.0,
+            },
+        ]),
+    };
+    let usage = |input, cache_read, output| TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: cache_read,
+        cache_write_tokens: 0,
+        reasoning_tokens: 0,
+        orchestrator_context_tokens: 0,
+        cost: TokenCostMicros::default(),
+    };
+
+    // Below the first tier: base rates.
+    let cost = calculate_cost(&rates, None, &usage(100_000, 0, 1_000));
+    assert_eq!(cost.input, 250_000);
+    assert_eq!(cost.output, 15_000);
+
+    // Tier selection keys on the full prompt size: cache reads count
+    // (pi's inputTokens = input + cacheRead + cacheWrite).
+    let cost = calculate_cost(&rates, None, &usage(150_000, 100_000, 1_000));
+    assert_eq!(cost.input, 750_000, "250k prompt crosses the 200k tier");
+    assert_eq!(cost.output, 22_500);
+    assert_eq!(cost.cache_read, 50_000);
+
+    // Exactly at a threshold the tier does not apply (strict `>`,
+    // matching models.dev's "over N tokens" semantics).
+    let cost = calculate_cost(&rates, None, &usage(200_000, 0, 1_000));
+    assert_eq!(cost.input, 500_000, "at exactly 200k the base rate holds");
+
+    // The highest matching tier wins.
+    let cost = calculate_cost(&rates, None, &usage(600_000, 0, 1_000));
+    assert_eq!(cost.input, 6_000_000);
+    assert_eq!(cost.output, 45_000);
+}
+
+#[test]
+fn old_catalog_rates_without_tiers_still_deserialize() {
+    // The pre-tiers catalog/user-override shape: no `tiers` field.
+    let old = json!({"input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 0.0});
+    let rates: catalog::ModelCostRates = serde_json::from_value(old).unwrap();
+    assert_eq!(rates.input, 3.0);
+    assert_eq!(rates.tiers, None);
+    // Flat pricing behaves as before.
+    let usage = TokenUsage {
+        input_tokens: 300_000,
+        output_tokens: 1_000,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 0,
+        orchestrator_context_tokens: 0,
+        cost: TokenCostMicros::default(),
+    };
+    assert_eq!(calculate_cost(&rates, None, &usage).input, 900_000);
 }
 
 #[test]

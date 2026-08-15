@@ -896,6 +896,69 @@ fn runtime_mapper_maps_api_to_default_base_url_with_baseline_fallback() {
 }
 
 #[test]
+fn runtime_mapper_maps_context_tiers_and_skips_unknown_tier_types() {
+    let baseline = baseline_catalog();
+    let payload = serde_json::json!({
+        "deepseek": {
+            "models": { "deepseek-v9-tier-test": {
+                "name": "Tier Test", "reasoning": false,
+                "limit": { "context": 1_000_000, "output": 64_000 },
+                "cost": {
+                    "input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75,
+                    "tiers": [
+                        { "tier": { "type": "context", "size": 200_000 }, "input": 6.0, "output": 22.5 },
+                        { "tier": { "type": "time_of_day", "size": 1_000 }, "input": 99.0 }
+                    ]
+                }
+            } }
+        }
+    })
+    .to_string();
+
+    let (mut providers, warnings, _) = map_models_dev(&payload, &baseline).expect("payload maps");
+    let mapped = providers.remove(&BackendKind::DeepSeekChat).unwrap();
+    let cost = &mapped.models["deepseek-v9-tier-test"].cost;
+    let tiers = cost.tiers.as_ref().expect("context tier mapped");
+    assert_eq!(tiers.len(), 1, "non-context tier type skipped: {warnings:?}");
+    assert_eq!(tiers[0].input_tokens_above, 200_000);
+    assert_eq!(tiers[0].input, 6.0);
+    assert_eq!(tiers[0].output, 22.5);
+    assert_eq!(tiers[0].cache_read, 0.3, "omitted bucket fills from base");
+    assert_eq!(tiers[0].cache_write, 3.75, "omitted bucket fills from base");
+}
+
+#[test]
+fn runtime_mapper_skips_models_with_bad_tier_rates() {
+    let baseline = baseline_catalog();
+    let payload = serde_json::json!({
+        "deepseek": {
+            "models": { "deepseek-v9-bad-tier": {
+                "name": "Bad Tier", "reasoning": false,
+                "limit": { "context": 1_000_000, "output": 64_000 },
+                "cost": {
+                    "input": 3.0, "output": 15.0,
+                    "tiers": [
+                        { "tier": { "type": "context", "size": 200_000 }, "output": -2.0 }
+                    ]
+                }
+            } }
+        }
+    })
+    .to_string();
+
+    let (mut providers, warnings, _) = map_models_dev(&payload, &baseline).expect("payload maps");
+    let mapped = providers.remove(&BackendKind::DeepSeekChat).unwrap();
+    assert!(!mapped.models.contains_key("deepseek-v9-bad-tier"));
+    assert!(
+        warnings.iter().any(|warning| warning
+            .contains("deepseek-v9-bad-tier")
+            && warning.contains("invalid output rate")
+            && warning.contains("skipped")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
 fn overlay_default_base_url_upgrades_and_never_erases() {
     let home = TempHome::new("overlay-base-url");
 

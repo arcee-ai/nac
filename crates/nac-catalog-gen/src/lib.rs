@@ -98,9 +98,28 @@ struct ModelsDevCost {
     output: Option<f64>,
     cache_read: Option<f64>,
     cache_write: Option<f64>,
+    tiers: Option<Vec<ModelsDevCostTier>>,
     // models.dev also carries a separate `reasoning` rate for some models
     // (e.g. deepseek); reasoning-token pricing is intentionally not mapped
-    // in v1 (S3 computes cost from the four rates above).
+    // (S3 bills reasoning at the output rate, opencode-style).
+}
+
+/// models.dev `cost.tiers[]` entry. Only `tier.type == "context"` is
+/// mapped; anything else is schema drift and a hard error at regen time.
+#[derive(Debug, Deserialize)]
+struct ModelsDevCostTier {
+    tier: ModelsDevTierSelector,
+    input: Option<f64>,
+    output: Option<f64>,
+    cache_read: Option<f64>,
+    cache_write: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsDevTierSelector {
+    #[serde(rename = "type")]
+    kind: String,
+    size: u64,
 }
 
 /// Thinking-control dialects models.dev knows about. Unknown variants are a
@@ -128,6 +147,20 @@ enum ReasoningOption {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CostDoc {
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_write: f64,
+    /// Context-priced rate steps (models.dev `cost.tiers`), complete per
+    /// bucket (omitted buckets filled from the base rates). Absent = flat
+    /// pricing. Deserialized by nac-core as `ModelCostRates::tiers`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tiers: Option<Vec<CostTierDoc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CostTierDoc {
+    pub input_tokens_above: u64,
     pub input: f64,
     pub output: f64,
     pub cache_read: f64,
@@ -414,12 +447,38 @@ fn seed_cost(provider: &str, model: &str, cost: Option<&ModelsDevCost>) -> Resul
         }
         Ok(rate)
     };
-    Ok(CostDoc {
+    let base = CostDoc {
         input: rate(cost.and_then(|cost| cost.input), "input")?,
         output: rate(cost.and_then(|cost| cost.output), "output")?,
         cache_read: rate(cost.and_then(|cost| cost.cache_read), "cache_read")?,
         cache_write: rate(cost.and_then(|cost| cost.cache_write), "cache_write")?,
-    })
+        tiers: None,
+    };
+    let tier_rate = |tier_value: Option<f64>, base: f64, field: &str| -> Result<f64> {
+        match tier_value {
+            Some(_) => rate(tier_value, field),
+            None => Ok(base),
+        }
+    };
+    let mut tiers = Vec::new();
+    for tier in cost.and_then(|cost| cost.tiers.as_deref()).unwrap_or(&[]) {
+        if tier.tier.kind != "context" {
+            bail!(
+                "models.dev provider '{provider}' model '{model}': unknown cost tier type \
+                 '{}' (models.dev schema drift)",
+                tier.tier.kind
+            );
+        }
+        tiers.push(CostTierDoc {
+            input_tokens_above: tier.tier.size,
+            input: tier_rate(tier.input, base.input, "input")?,
+            output: tier_rate(tier.output, base.output, "output")?,
+            cache_read: tier_rate(tier.cache_read, base.cache_read, "cache_read")?,
+            cache_write: tier_rate(tier.cache_write, base.cache_write, "cache_write")?,
+        });
+    }
+    let tiers = (!tiers.is_empty()).then_some(tiers);
+    Ok(CostDoc { tiers, ..base })
 }
 
 fn is_agent_compatible(model: &ModelsDevModel) -> bool {
@@ -461,6 +520,18 @@ fn validate_final_model(provider: &str, model: &str, entry: &ModelDoc) -> Result
     ] {
         if !rate.is_finite() || rate < 0.0 {
             bail!("{provider}/{model}: {field} rate {rate} must be finite and nonnegative after overrides");
+        }
+    }
+    for tier in entry.cost.tiers.as_deref().unwrap_or(&[]) {
+        for (field, rate) in [
+            ("input", tier.input),
+            ("output", tier.output),
+            ("cache_read", tier.cache_read),
+            ("cache_write", tier.cache_write),
+        ] {
+            if !rate.is_finite() || rate < 0.0 {
+                bail!("{provider}/{model}: tier {field} rate {rate} (above {} prompt tokens) must be finite and nonnegative after overrides", tier.input_tokens_above);
+            }
         }
     }
     Ok(())

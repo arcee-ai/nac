@@ -961,6 +961,21 @@ export interface ModelCostRates {
   output: number;
   cache_read: number;
   cache_write: number;
+  /**
+   * Context-priced rate steps (models.dev `cost.tiers`): when a response's
+   * prompt tokens exceed `input_tokens_above`, the tier's rates replace the
+   * base rates for that response. Absent = flat pricing.
+   */
+  tiers?: CostTier[];
+}
+
+/** One context-priced rate step; buckets are complete (base-filled). */
+export interface CostTier {
+  input_tokens_above: number;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
 }
 
 /** The provider `_default` entry an unrecognized model falls back to. */
