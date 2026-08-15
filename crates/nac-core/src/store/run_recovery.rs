@@ -80,22 +80,21 @@ pub(crate) fn clear_active_run(
     Ok(())
 }
 
+/// Retain a matching committed prompt as a durable failed outcome. No match is
+/// expected when the prompt transaction itself failed; it must not roll back
+/// the otherwise independent timing and token bookkeeping in the caller's
+/// run-state transaction. An older failed/interrupted row is left untouched.
 pub(crate) fn mark_active_run_failed(
     transaction: &Transaction<'_>,
     session_id: &str,
     run_id: &str,
 ) -> Result<()> {
-    let changed = transaction.execute(
+    transaction.execute(
         "UPDATE session_run_recovery
          SET status = 'failed'
          WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
         params![session_id, run_id],
     )?;
-    if changed != 1 {
-        return Err(anyhow!(
-            "session '{session_id}' has no matching active durable run '{run_id}' to mark failed"
-        ));
-    }
     Ok(())
 }
 
@@ -603,6 +602,33 @@ mod tests {
     }
 
     #[test]
+    fn failed_run_state_save_without_durable_prompt_still_commits() {
+        let path = temp_store_path("failed_without_prompt");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session-a");
+
+        let mut update = run_state_update("session-a");
+        update.run_state.previous_response_duration_ms = Some(321);
+        update.failed_run_id = Some("undurable-run".to_string());
+        crate::sessions::save_session_run_state(&path, &update).unwrap();
+
+        let connection = open_runtime_connection(&path).unwrap();
+        let previous_response_duration_ms = connection
+            .query_row(
+                "SELECT previous_response_duration_ms
+                 FROM sessions
+                 WHERE session_id = ?1",
+                ["session-a"],
+                |row| row.get::<_, Option<u64>>(0),
+            )
+            .unwrap();
+        assert_eq!(previous_response_duration_ms, Some(321));
+        assert!(load_run_recovery(&path, "session-a").unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn failed_terminal_is_durable_and_next_prompt_supersedes_it() {
         let path = temp_store_path("failed_terminal");
         initialize(&path).unwrap();
@@ -622,6 +648,27 @@ mod tests {
                 .status,
             RunRecoveryStatus::Failed
         );
+
+        let mut undurable_replacement = run_state_update("session-a");
+        undurable_replacement
+            .run_state
+            .previous_response_duration_ms = Some(654);
+        undurable_replacement.failed_run_id = Some("run-2".to_string());
+        crate::sessions::save_session_run_state(&path, &undurable_replacement).unwrap();
+        let retained = load_run_recovery(&path, "session-a").unwrap().unwrap();
+        assert_eq!(retained.run_id, "run-1");
+        assert_eq!(retained.status, RunRecoveryStatus::Failed);
+        let previous_response_duration_ms = open_runtime_connection(&path)
+            .unwrap()
+            .query_row(
+                "SELECT previous_response_duration_ms
+                 FROM sessions
+                 WHERE session_id = ?1",
+                ["session-a"],
+                |row| row.get::<_, Option<u64>>(0),
+            )
+            .unwrap();
+        assert_eq!(previous_response_duration_ms, Some(654));
 
         writer
             .append_run_prompt("session-a", 1, &user("replacement"), "run-2")
