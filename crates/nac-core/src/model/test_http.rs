@@ -60,13 +60,24 @@ impl ScriptedServer {
     where
         F: Fn(usize, &CapturedRequest) + Send + 'static,
     {
+        Self::start_observed_with_timeout(responses, Duration::from_secs(5), observer)
+    }
+
+    pub(crate) fn start_observed_with_timeout<F>(
+        responses: Vec<ScriptedResponse>,
+        timeout: Duration,
+        observer: F,
+    ) -> Self
+    where
+        F: Fn(usize, &CapturedRequest) + Send + 'static,
+    {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind scripted HTTP server");
         listener
             .set_nonblocking(true)
             .expect("set scripted HTTP listener nonblocking");
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let handle = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + timeout;
             let mut requests = Vec::with_capacity(responses.len());
             for (index, response) in responses.into_iter().enumerate() {
                 let mut stream = loop {

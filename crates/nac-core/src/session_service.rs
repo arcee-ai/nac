@@ -5922,7 +5922,7 @@ pub(super) mod tests {
             std::sync::mpsc::sync_channel(1);
         let (release_interrupted_sender, release_interrupted_receiver) =
             std::sync::mpsc::sync_channel(1);
-        let server = ScriptedServer::start_observed(
+        let server = ScriptedServer::start_observed_with_timeout(
             vec![
                 ScriptedResponse::json(
                     "200 OK",
@@ -5952,6 +5952,7 @@ pub(super) mod tests {
                     .to_string(),
                 ),
             ],
+            Duration::from_secs(30),
             move |index, _request| {
                 if index == 1 {
                     interrupted_ready_sender.send(()).unwrap();
