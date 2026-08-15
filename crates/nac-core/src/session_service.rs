@@ -2473,6 +2473,10 @@ impl SessionService {
             },
             (RunOutcome::Failed(message, _), None) => SessionEvent::RunFailed { message },
         };
+        #[cfg(test)]
+        if let SessionEvent::RunFailed { message } = &terminal_event {
+            eprintln!("nac test: unsanitized run failure: {message}");
+        }
         self.event_bus
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
