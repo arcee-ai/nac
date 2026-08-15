@@ -5941,7 +5941,8 @@ pub(super) mod tests {
                         "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
                     })
                     .to_string(),
-                ),
+                )
+                .drop_connection(),
                 ScriptedResponse::json(
                     "200 OK",
                     serde_json::json!({

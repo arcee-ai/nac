@@ -8,6 +8,7 @@ pub(crate) struct ScriptedResponse {
     status: &'static str,
     headers: BTreeMap<String, String>,
     body: String,
+    send_response: bool,
 }
 
 impl ScriptedResponse {
@@ -16,6 +17,7 @@ impl ScriptedResponse {
             status,
             headers: BTreeMap::new(),
             body: body.into(),
+            send_response: true,
         }
     }
 
@@ -28,11 +30,17 @@ impl ScriptedResponse {
             status,
             headers: BTreeMap::from([("Location".to_string(), location.into())]),
             body: body.into(),
+            send_response: true,
         }
     }
 
     pub(crate) fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub(crate) fn drop_connection(mut self) -> Self {
+        self.send_response = false;
         self
     }
 }
@@ -97,7 +105,9 @@ impl ScriptedServer {
                 let request = read_request(&mut stream);
                 observer(index, &request);
                 requests.push(request);
-                write_response(&mut stream, &response);
+                if response.send_response {
+                    write_response(&mut stream, &response);
+                }
             }
             requests
         });
