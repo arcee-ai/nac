@@ -54,6 +54,23 @@ describe("canonical refresh classification", () => {
     ).toBe("none");
   });
 
+  it("refetches the snapshot when a thread starts so a re-dispatch escapes the previous episode", () => {
+    resetRuntime("session-a");
+    expect(
+      applyEnvelope(
+        envelope({
+          type: "agent",
+          event: {
+            type: "thread_started",
+            name: "worker",
+            action: "run",
+            source_threads: [],
+          },
+        }),
+      ),
+    ).toBe("snapshot");
+  });
+
   it("distinguishes normal lifecycle snapshots from destructive fences", () => {
     resetRuntime("session-a");
     expect(
