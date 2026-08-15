@@ -11,17 +11,6 @@ pub enum McpTransportPolicy {
     StreamableHttpOnly,
 }
 
-impl McpTransportPolicy {
-    fn allows(self, transport: &McpTransportConfig) -> bool {
-        match self {
-            Self::All => true,
-            Self::StreamableHttpOnly => {
-                matches!(transport, McpTransportConfig::StreamableHttp { .. })
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpRootPolicy {
     Workspace,
@@ -44,69 +33,95 @@ pub(super) struct NacMcpClientHandler {
     pub(super) roots: Vec<Root>,
 }
 
-/// Servers defined in `config.toml`, or an empty map when the file is absent,
-/// unreadable or invalid — a broken file disables MCP rather than failing
-/// the session.
+/// A configured MCP server that could not be loaded for a worker, and why.
+#[derive(Debug)]
+pub(crate) struct McpSkippedServer {
+    pub name: String,
+    pub reason: String,
+}
+
+/// The result of loading MCP servers: the registry of tools that mounted, plus
+/// every server that was skipped so the caller can surface it.
+pub(crate) struct McpLoadOutcome {
+    pub registry: Option<Arc<McpRegistry>>,
+    pub skipped: Vec<McpSkippedServer>,
+}
+
+/// Servers defined in `config.toml`, plus a synthetic skip when the file is
+/// unreadable or invalid — a broken file disables MCP rather than failing the
+/// session, but the caller still gets a reason to surface.
 fn file_servers_for_policy(
     paths: &PathContext,
     transport_policy: McpTransportPolicy,
-) -> BTreeMap<String, McpServerConfig> {
+) -> (BTreeMap<String, McpServerConfig>, Option<McpSkippedServer>) {
     let Some(path) = default_config_path(paths) else {
-        return BTreeMap::new();
+        return (BTreeMap::new(), None);
     };
     if !path.exists() {
-        return BTreeMap::new();
+        return (BTreeMap::new(), None);
     }
     let raw = match std::fs::read_to_string(&path) {
         Ok(raw) => raw,
         Err(error) => {
+            let reason = format!("could not read config: {error:#}");
             eprintln!(
                 "MCP config at '{}' could not be read; its servers will be skipped: {:#}",
                 path.display(),
                 error
             );
-            return BTreeMap::new();
+            return (
+                BTreeMap::new(),
+                Some(McpSkippedServer {
+                    name: path.display().to_string(),
+                    reason,
+                }),
+            );
         }
     };
     match mcp_config_for_policy(&raw, transport_policy) {
-        Ok(config) => config.mcp_servers,
+        Ok(config) => (config.mcp_servers, None),
         Err(error) => {
+            let reason = format!("invalid config: {error:#}");
             eprintln!(
                 "MCP config at '{}' is invalid; its servers will be skipped: {:#}",
                 path.display(),
                 error
             );
-            BTreeMap::new()
+            (
+                BTreeMap::new(),
+                Some(McpSkippedServer {
+                    name: path.display().to_string(),
+                    reason,
+                }),
+            )
         }
     }
 }
 
 impl McpRegistry {
-    pub async fn load(
-        cwd: &Path,
-        sandbox: Option<&SandboxSession>,
-        paths: &PathContext,
-    ) -> Result<Option<Arc<Self>>> {
-        Self::load_with_policy(
-            cwd,
-            sandbox,
-            paths,
-            McpTransportPolicy::All,
-            McpRootPolicy::Workspace,
-        )
-        .await
-    }
-
-    pub async fn load_with_policy(
+    /// Loads the configured MCP servers and reports every server that was
+    /// skipped and why — including a broken `config.toml`, which is reported
+    /// as a single skip named after the config path — so the caller can
+    /// surface the reason instead of silently dropping the server's tools.
+    pub(crate) async fn load_reporting_skips(
         cwd: &Path,
         sandbox: Option<&SandboxSession>,
         paths: &PathContext,
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
-    ) -> Result<Option<Arc<Self>>> {
-        let servers = file_servers_for_policy(paths, transport_policy);
+    ) -> Result<McpLoadOutcome> {
+        let (servers, config_error) = file_servers_for_policy(paths, transport_policy);
+        if let Some(skipped) = config_error {
+            return Ok(McpLoadOutcome {
+                registry: None,
+                skipped: vec![skipped],
+            });
+        }
         if servers.is_empty() {
-            return Ok(None);
+            return Ok(McpLoadOutcome {
+                registry: None,
+                skipped: Vec::new(),
+            });
         }
 
         let handler = NacMcpClientHandler {
@@ -114,18 +129,12 @@ impl McpRegistry {
         };
 
         let mut tools = HashMap::new();
+        let mut skipped = Vec::new();
         let mut seen_names = HashMap::<String, usize>::new();
         let mut seen_endpoints = HashMap::<String, String>::new();
 
         for (server_name, server_config) in servers {
             if !server_config.enabled {
-                continue;
-            }
-            if !transport_policy.allows(&server_config.transport) {
-                eprintln!(
-                    "Skipping MCP server '{}': transport is disabled by policy",
-                    server_name
-                );
                 continue;
             }
             // Two names for the same endpoint would mount every tool twice
@@ -134,32 +143,47 @@ impl McpRegistry {
             // a later twin.
             let endpoint = endpoint_key(&server_config.transport);
             if let Some(existing) = seen_endpoints.get(&endpoint) {
-                eprintln!(
-                    "Skipping MCP server '{server_name}': same endpoint as server '{existing}'"
-                );
+                let reason = format!("same endpoint as server '{existing}'");
+                eprintln!("Skipping MCP server '{server_name}': {reason}");
+                skipped.push(McpSkippedServer {
+                    name: server_name,
+                    reason,
+                });
                 continue;
             }
 
             let service = match timeout(
                 MCP_CONNECT_TIMEOUT,
-                connect_server(&server_name, &server_config, &handler, cwd, sandbox),
+                connect_server(&server_name, &server_config, &handler, cwd),
             )
             .await
             {
                 Ok(Ok(service)) => Arc::new(service),
                 Ok(Err(error)) => {
+                    let reason = format!("{error:#}");
                     eprintln!(
-                        "MCP server '{}' is unavailable and will be skipped: {:#}",
-                        server_name, error
+                        "MCP server '{}' is unavailable and will be skipped: {reason}",
+                        server_name
                     );
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
                     continue;
                 }
                 Err(_) => {
-                    eprintln!(
-                        "MCP server '{}' timed out during connect after {}s and will be skipped",
-                        server_name,
+                    let reason = format!(
+                        "timed out during connect after {}s",
                         MCP_CONNECT_TIMEOUT.as_secs()
                     );
+                    eprintln!(
+                        "MCP server '{}' {reason} and will be skipped",
+                        server_name
+                    );
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
                     continue;
                 }
             };
@@ -169,18 +193,30 @@ impl McpRegistry {
             {
                 Ok(Ok(tools)) => tools,
                 Ok(Err(error)) => {
+                    let reason = format!("{error:#}");
                     eprintln!(
-                        "MCP server '{}' could not list tools and will be skipped: {:#}",
-                        server_name, error
+                        "MCP server '{}' could not list tools and will be skipped: {reason}",
+                        server_name
                     );
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
                     continue;
                 }
                 Err(_) => {
-                    eprintln!(
-                        "MCP server '{}' timed out while listing tools after {}s and will be skipped",
-                        server_name,
+                    let reason = format!(
+                        "timed out while listing tools after {}s",
                         MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
                     );
+                    eprintln!(
+                        "MCP server '{}' {reason} and will be skipped",
+                        server_name
+                    );
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
                     continue;
                 }
             };
@@ -203,13 +239,15 @@ impl McpRegistry {
             }
         }
 
-        if tools.is_empty() {
-            return Ok(None);
-        }
+        let registry = if tools.is_empty() {
+            None
+        } else {
+            Some(Arc::new(Self {
+                tools: Arc::new(tools),
+            }))
+        };
 
-        Ok(Some(Arc::new(Self {
-            tools: Arc::new(tools),
-        })))
+        Ok(McpLoadOutcome { registry, skipped })
     }
 
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {

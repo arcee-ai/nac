@@ -529,6 +529,13 @@ export type AgentEvent =
   | { type: "error"; thread_name?: string; message: string }
   /** A refusal from the provider, reported verbatim rather than reduced. */
   | { type: "model_error"; thread_name?: string; message: string }
+  /** A configured MCP server the worker could not load, with a bounded reason. */
+  | {
+      type: "mcp_server_skipped";
+      thread_name?: string;
+      server_name: string;
+      reason: string;
+    }
   | { type: "run_finished"; thread_name?: string };
 
 export type AgentEventType = AgentEvent["type"];

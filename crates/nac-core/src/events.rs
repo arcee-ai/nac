@@ -240,6 +240,14 @@ pub enum AgentEvent {
         thread_name: Option<String>,
         message: String,
     },
+    /// A configured MCP server that could not be loaded for a worker, reported
+    /// with a bounded, credential-redacted reason so the user can see why the
+    /// server's tools are missing.
+    McpServerSkipped {
+        thread_name: Option<String>,
+        server_name: String,
+        reason: String,
+    },
     /// A model call the provider itself refused, reported with credentials
     /// redacted.
     ///
@@ -780,6 +788,7 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
         AgentEvent::ModelCallStarted { .. }
         | AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::ThreadLog { .. }
+        | AgentEvent::McpServerSkipped { .. }
         | AgentEvent::ModelError { .. }
         | AgentEvent::OrchestratorSteeringQueued { .. }
         | AgentEvent::OrchestratorSteeringDelivered { .. }
@@ -905,6 +914,15 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
         AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
             thread_name,
             message: "operation failed".to_string(),
+        },
+        AgentEvent::McpServerSkipped {
+            thread_name,
+            server_name,
+            reason,
+        } => AgentEvent::McpServerSkipped {
+            thread_name,
+            server_name,
+            reason: bounded_provider_message(&redact_credentials(&reason, &[])),
         },
         AgentEvent::ModelError {
             thread_name,
@@ -2445,6 +2463,34 @@ mod tests {
         assert!(message.contains("[REDACTED]"), "{message}");
         assert!(message.contains("no credits"), "{message}");
         assert!(message.contains("HTTP 400"), "{message}");
+    }
+
+    #[test]
+    fn mcp_server_skipped_sanitization_redacts_credentials_and_bounds_length() {
+        let long_tail = "x".repeat(700);
+        let event = AgentEvent::McpServerSkipped {
+            thread_name: Some("impl".to_string()),
+            server_name: "github".to_string(),
+            reason: format!(
+                "connect failed: Authorization: Bearer sk-canary-event-12345; x-api-key: sk-canary-event-12345; no credits; {long_tail}"
+            ),
+        };
+        let sanitized = sanitize_external_agent_event(event).unwrap();
+        let AgentEvent::McpServerSkipped { reason, .. } = sanitized else {
+            panic!("expected McpServerSkipped");
+        };
+        assert!(
+            !reason.contains("sk-canary-event-12345"),
+            "credential leaked through sanitization: {reason}"
+        );
+        assert!(reason.contains("[REDACTED]"), "{reason}");
+        assert!(reason.contains("no credits"), "{reason}");
+        assert!(reason.contains("connect failed"), "{reason}");
+        assert!(
+            reason.len() <= MAX_PROVIDER_MESSAGE_BYTES,
+            "reason not bounded: {} bytes",
+            reason.len()
+        );
     }
 
     const MODEL_ERROR_CANARY: &str = "sk-canary-sink-12345";

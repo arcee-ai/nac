@@ -232,17 +232,6 @@ impl SandboxSession {
         }
     }
 
-    pub fn child_process_command(
-        &self,
-        program: &str,
-        args: &[String],
-        envs: &[(String, String)],
-    ) -> tokio::process::Command {
-        match self {
-            Self::Podman(inner) => inner.child_process_command(program, args, envs),
-        }
-    }
-
     pub fn terminal_pty_command(
         &self,
         cwd: Option<&Path>,

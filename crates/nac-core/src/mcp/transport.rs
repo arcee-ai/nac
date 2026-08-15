@@ -5,7 +5,6 @@ pub(super) async fn connect_server(
     config: &McpServerConfig,
     handler: &NacMcpClientHandler,
     cwd: &Path,
-    sandbox: Option<&SandboxSession>,
 ) -> Result<McpService> {
     match config.transport.clone() {
         McpTransportConfig::Stdio { command, args, env } => {
@@ -13,7 +12,7 @@ pub(super) async fn connect_server(
             let args = expand_strings(&args)?;
             let env = expand_map(&env)?;
             let transport =
-                TokioChildProcess::new(build_stdio_command(&command, &args, &env, cwd, sandbox)?)?;
+                TokioChildProcess::new(build_stdio_command(&command, &args, &env, cwd)?)?;
             handler
                 .clone()
                 .serve(transport)
@@ -34,24 +33,17 @@ pub(super) async fn connect_server(
     }
 }
 
+/// Builds the host-side command for a stdio MCP server.
+///
+/// Stdio servers always run on the host, even when the worker is sandboxed:
+/// the sandbox image does not contain the runtimes (`npx`, `node`, `uvx`, ...)
+/// stdio servers typically need, and `cwd` is already the host workspace path.
 fn build_stdio_command(
     program: &str,
     args: &[String],
     envs: &BTreeMap<String, String>,
     cwd: &Path,
-    sandbox: Option<&SandboxSession>,
 ) -> Result<Command> {
-    let env_pairs: Vec<(String, String)> = envs
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-
-    if let Some(sandbox) = sandbox {
-        let mut command = sandbox.child_process_command(program, args, &env_pairs);
-        command.current_dir(cwd);
-        return Ok(command);
-    }
-
     let mut command = Command::new(program);
     command.current_dir(cwd);
     command.args(args);

@@ -393,6 +393,11 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
       // and at that rate they would push everything else out of the events tab.
       pushThreadLog(event.name, event);
       return "none";
+    case "mcp_server_skipped":
+      // A configured server the worker could not load; show it in the thread
+      // log so the missing tools are explained rather than silent.
+      pushThreadLog(event.thread_name, event);
+      return "none";
     case "tool_call_finished": {
       const failed = toolCallFailed(event);
       pushThreadLog(event.thread_name, event);

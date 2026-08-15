@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
-use crate::events::EventSink;
+use crate::events::{AgentEvent, EventSink};
 use crate::light_model::{resolve_light_client, LightModelError, LightModelSettings};
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
@@ -1017,8 +1017,8 @@ pub async fn build_managed_worker_config(
     };
     let workspace_paths = PathContext::new(&workspace_cwd);
     let config_paths = PathContext::new(&config_cwd);
-    let (agents_md_message, mcp, skills) = if ssh_host.is_some() {
-        let mcp = McpRegistry::load_with_policy(
+    let (agents_md_message, mcp_outcome, skills) = if ssh_host.is_some() {
+        let mcp_outcome = McpRegistry::load_reporting_skips(
             &workspace_cwd,
             None,
             &config_paths,
@@ -1027,19 +1027,37 @@ pub async fn build_managed_worker_config(
         )
         .await?;
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
-        (None, mcp, skills)
+        (None, mcp_outcome, skills)
     } else {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &workspace_paths)?;
-        let mcp = McpRegistry::load(&workspace_cwd, sandbox.as_ref(), &workspace_paths).await?;
+        let mcp_outcome = McpRegistry::load_reporting_skips(
+            &workspace_cwd,
+            sandbox.as_ref(),
+            &workspace_paths,
+            McpTransportPolicy::All,
+            McpRootPolicy::Workspace,
+        )
+        .await?;
         let (skill_workspace, visibility) = if sandbox.is_some() {
             (None, SkillPathVisibility::Hidden)
         } else {
             (workspace_dir.as_deref(), SkillPathVisibility::Visible)
         };
         let skills = SkillRegistry::load(skill_workspace, visibility, &workspace_paths)?;
-        (agents_md.system_message(), mcp, skills)
+        (agents_md.system_message(), mcp_outcome, skills)
     };
+    // Surface each skip as a typed event on the worker's stderr channel so the
+    // dashboard shows why a server's tools are missing.
+    let worker_event_sink = EventSink::stderr_prefixed();
+    for skipped in &mcp_outcome.skipped {
+        worker_event_sink.emit(AgentEvent::McpServerSkipped {
+            thread_name: Some(options.dispatch.thread_name.clone()),
+            server_name: skipped.name.clone(),
+            reason: skipped.reason.clone(),
+        });
+    }
+    let mcp = mcp_outcome.registry;
     let working_directory = sandbox
         .as_ref()
         .map(|session| session.workdir_display())
