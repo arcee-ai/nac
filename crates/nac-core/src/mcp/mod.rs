@@ -67,7 +67,7 @@ pub async fn probe_mcp_server(
     };
     let service = timeout(
         MCP_CONNECT_TIMEOUT,
-        connect_server(name, config, &handler, cwd, None),
+        connect_server(name, config, &handler, cwd),
     )
     .await
     .map_err(|_| {
@@ -318,6 +318,19 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     use std::fs;
 
+    async fn load_registry(
+        cwd: &Path,
+        sandbox: Option<&SandboxSession>,
+        paths: &PathContext,
+        transport_policy: McpTransportPolicy,
+        root_policy: McpRootPolicy,
+    ) -> Option<Arc<McpRegistry>> {
+        McpRegistry::load_reporting_skips(cwd, sandbox, paths, transport_policy, root_policy)
+            .await
+            .unwrap()
+            .registry
+    }
+
     #[test]
     fn sanitize_identifier_collapses_symbols() {
         assert_eq!(sanitize_identifier("GitHub.com"), "github_com");
@@ -385,10 +398,26 @@ mod tests {
         }
 
         let cwd = std::env::current_dir().unwrap();
-        let registry = McpRegistry::load(&cwd, None, &PathContext::new(&cwd))
-            .await
-            .unwrap();
-        assert!(registry.is_none());
+        let outcome = McpRegistry::load_reporting_skips(
+            &cwd,
+            None,
+            &PathContext::new(&cwd),
+            McpTransportPolicy::All,
+            McpRootPolicy::Workspace,
+        )
+        .await
+        .unwrap();
+        assert!(outcome.registry.is_none());
+        assert_eq!(outcome.skipped.len(), 1);
+        assert_eq!(
+            outcome.skipped[0].name,
+            nac_home.join("config.toml").display().to_string()
+        );
+        assert!(
+            outcome.skipped[0].reason.starts_with("invalid config:"),
+            "unexpected reason: {}",
+            outcome.skipped[0].reason
+        );
 
         restore_env("NAC_HOME", original_nac_home);
         restore_env("XDG_CONFIG_HOME", original_xdg);
@@ -422,19 +451,129 @@ args = ["-c", {}]
         }
 
         let cwd = std::env::current_dir().unwrap();
-        let registry = McpRegistry::load_with_policy(
+        let registry = load_registry(
             &cwd,
             None,
             &PathContext::new(&cwd),
             McpTransportPolicy::StreamableHttpOnly,
             McpRootPolicy::None,
         )
-        .await
-        .unwrap();
+        .await;
         assert!(registry.is_none());
         assert!(
             !marker.exists(),
             "stdio MCP server was spawned despite HTTP-only policy"
+        );
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
+    #[tokio::test]
+    async fn load_reports_connect_failed_server() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-connect-fail");
+        fs::create_dir_all(&nac_home).unwrap();
+        fs::write(
+            nac_home.join("config.toml"),
+            r#"
+[mcp_servers.local]
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", "true"]
+"#,
+        )
+        .unwrap();
+        unsafe {
+            env::set_var("NAC_HOME", &nac_home);
+        }
+
+        let cwd = std::env::current_dir().unwrap();
+        let outcome = McpRegistry::load_reporting_skips(
+            &cwd,
+            None,
+            &PathContext::new(&cwd),
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .unwrap();
+        assert!(outcome.registry.is_none());
+        assert_eq!(outcome.skipped.len(), 1);
+        assert_eq!(outcome.skipped[0].name, "local");
+        assert!(
+            outcome.skipped[0]
+                .reason
+                .contains("failed to connect stdio MCP server 'local'"),
+            "unexpected reason: {}",
+            outcome.skipped[0].reason
+        );
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
+    #[tokio::test]
+    async fn stdio_server_runs_on_host_when_sandboxed() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-sandbox-stdio");
+        fs::create_dir_all(&nac_home).unwrap();
+        let marker = nac_home.join("stdio-spawned");
+        let shell = format!("printf spawned > {}", shell_single_quote(&marker));
+        fs::write(
+            nac_home.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.local]
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", {}]
+"#,
+                toml_string(&shell)
+            ),
+        )
+        .unwrap();
+        unsafe {
+            env::set_var("NAC_HOME", &nac_home);
+        }
+
+        let sandbox = crate::sandbox::SandboxSession::new_for_test(crate::sandbox::SandboxSpec {
+            backend: crate::sandbox::SandboxBackendType::Podman,
+            image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
+            mounts: vec![crate::sandbox::MountSpec {
+                host: nac_home.clone(),
+                guest: std::path::PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
+                read_only: false,
+            }],
+            workdir: std::path::PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
+            gpu_devices: Vec::new(),
+            shm_size: Some("0".to_string()),
+            cpus: 2,
+            memory_mib: 2048,
+        });
+
+        let registry = load_registry(
+            &nac_home,
+            Some(&sandbox),
+            &PathContext::new(&nac_home),
+            McpTransportPolicy::All,
+            McpRootPolicy::Workspace,
+        )
+        .await;
+        // The fake stdio server is not a real MCP server, so it is skipped once
+        // the connection fails. The assertion that matters is that it was
+        // launched on the host (marker written at an absolute host path) rather
+        // than via `podman exec` inside the sandbox.
+        assert!(registry.is_none());
+        assert!(
+            marker.exists(),
+            "stdio MCP server was not launched on the host in sandbox mode"
         );
 
         restore_env("NAC_HOME", original_nac_home);
@@ -475,7 +614,7 @@ url = {}
         }
 
         let cwd = std::env::current_dir().unwrap();
-        let registry = McpRegistry::load_with_policy(
+        let registry = load_registry(
             &cwd,
             None,
             &PathContext::new(&cwd),
@@ -483,7 +622,6 @@ url = {}
             McpRootPolicy::None,
         )
         .await
-        .unwrap()
         .expect("HTTP MCP server should load");
         let definitions = registry.tool_definitions();
         assert_eq!(definitions.len(), 1);
@@ -537,21 +675,20 @@ url = {}
         }
 
         let cwd = std::env::current_dir().unwrap();
-        let strict_registry = McpRegistry::load_with_policy(
+        let strict_registry = load_registry(
             &cwd,
             None,
             &PathContext::new(&cwd),
             McpTransportPolicy::All,
             McpRootPolicy::None,
         )
-        .await
-        .unwrap();
+        .await;
         assert!(
             strict_registry.is_none(),
             "All policy should preserve whole-file typed deserialization behavior"
         );
 
-        let registry = McpRegistry::load_with_policy(
+        let registry = load_registry(
             &cwd,
             None,
             &PathContext::new(&cwd),
@@ -559,7 +696,6 @@ url = {}
             McpRootPolicy::None,
         )
         .await
-        .unwrap()
         .expect(
             "HTTP-only policy should load valid HTTP server despite malformed non-HTTP entries",
         );
@@ -602,7 +738,7 @@ url = {}
         }
 
         let cwd = std::env::current_dir().unwrap();
-        let registry = McpRegistry::load_with_policy(
+        let registry = load_registry(
             &cwd,
             None,
             &PathContext::new(&cwd),
@@ -610,7 +746,6 @@ url = {}
             McpRootPolicy::None,
         )
         .await
-        .unwrap()
         .expect("saved HTTP server should load");
         let definitions = registry.tool_definitions();
         assert_eq!(definitions.len(), 1);
@@ -652,7 +787,7 @@ url = {url}
         }
 
         let cwd = std::env::current_dir().unwrap();
-        let registry = McpRegistry::load_with_policy(
+        let registry = load_registry(
             &cwd,
             None,
             &PathContext::new(&cwd),
@@ -660,7 +795,6 @@ url = {url}
             McpRootPolicy::None,
         )
         .await
-        .unwrap()
         .expect("the endpoint's tools should load once");
         let definitions = registry.tool_definitions();
         assert_eq!(definitions.len(), 1);

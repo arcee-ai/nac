@@ -175,20 +175,6 @@ impl PodmanSession {
             .with_context(|| "failed to wait for 'podman exec'")
     }
 
-    pub(crate) fn child_process_command(
-        &self,
-        program: &str,
-        args: &[String],
-        envs: &[(String, String)],
-    ) -> Command {
-        let mut command = Command::new("podman");
-        command.args(self.exec_args(program, args, true, false, None, envs));
-        command.stdin(Stdio::piped());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::inherit());
-        command
-    }
-
     pub(crate) fn terminal_pty_command(
         &self,
         cwd: Option<&Path>,

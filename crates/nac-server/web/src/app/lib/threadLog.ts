@@ -94,6 +94,18 @@ export function threadLogLine(
         body: event.line,
         isError: false,
       };
+    case "mcp_server_skipped": {
+      const line = `⚠ MCP server "${event.server_name}" skipped: ${event.reason}`;
+      return {
+        key: `log-${seq}`,
+        text: line,
+        bare: line,
+        mark: null,
+        name: null,
+        body: line,
+        isError: false,
+      };
+    }
     default:
       return null;
   }
