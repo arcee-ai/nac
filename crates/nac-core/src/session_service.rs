@@ -2473,10 +2473,6 @@ impl SessionService {
             },
             (RunOutcome::Failed(message, _), None) => SessionEvent::RunFailed { message },
         };
-        #[cfg(test)]
-        if let SessionEvent::RunFailed { message } = &terminal_event {
-            eprintln!("nac test: unsanitized run failure: {message}");
-        }
         self.event_bus
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
@@ -6037,8 +6033,7 @@ pub(super) mod tests {
         // The survivor acquires the released lease, adopts the peer's
         // completed exchange plus interrupted prompt, and appends after them.
         let mut events = parts.service.subscribe_events();
-        let mut agent_events = parts.service.subscribe_agent_events();
-        parts
+        let survivor_run = parts
             .service
             .try_submit_prompt("survivor prompt".to_string())
             .unwrap();
@@ -6047,29 +6042,23 @@ pub(super) mod tests {
                 .await
                 .expect("timed out waiting for the recovery run's terminal event")
                 .unwrap();
-            if matches!(
-                envelope.event,
-                SessionEvent::RunFailed { .. } | SessionEvent::RunCompleted { .. }
-            ) {
+            if envelope.run_id.as_ref() == Some(&survivor_run.run_id)
+                && matches!(
+                    envelope.event,
+                    SessionEvent::RunFailed { .. } | SessionEvent::RunCompleted { .. }
+                )
+            {
                 break envelope;
             }
         };
-        if !matches!(
-            &terminal.event,
-            SessionEvent::RunCompleted { response, .. } if response == "survivor answer"
-        ) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let mut model_errors = Vec::new();
-            while let Ok(event) = agent_events.try_recv() {
-                if let AgentEvent::ModelError { message, .. } = event {
-                    model_errors.push(message);
-                }
-            }
-            panic!(
-                "the recovery run must complete from the refreshed transcript: {:?}; model errors: {model_errors:?}",
-                terminal.event
-            );
-        }
+        assert!(
+            matches!(
+                &terminal.event,
+                SessionEvent::RunCompleted { response, .. } if response == "survivor answer"
+            ),
+            "the recovery run must complete from the refreshed transcript: {:?}",
+            terminal.event
+        );
         for _ in 0..100 {
             if parts.service.active_run().is_none() {
                 break;
