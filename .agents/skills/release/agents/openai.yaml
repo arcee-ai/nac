@@ -1,0 +1,4 @@
+interface:
+  display_name: "Full Stable Release"
+  short_description: "Cut and verify a stable NAC release"
+  default_prompt: "Use $release to cut and publish a full stable NAC release. Do not manage automated RC releases."
