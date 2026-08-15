@@ -6033,6 +6033,7 @@ pub(super) mod tests {
         // The survivor acquires the released lease, adopts the peer's
         // completed exchange plus interrupted prompt, and appends after them.
         let mut events = parts.service.subscribe_events();
+        let mut agent_events = parts.service.subscribe_agent_events();
         parts
             .service
             .try_submit_prompt("survivor prompt".to_string())
@@ -6049,11 +6050,22 @@ pub(super) mod tests {
                 break envelope;
             }
         };
-        assert!(
-            matches!(&terminal.event, SessionEvent::RunCompleted { response, .. } if response == "survivor answer"),
-            "the recovery run must complete from the refreshed transcript: {:?}",
-            terminal.event
-        );
+        if !matches!(
+            &terminal.event,
+            SessionEvent::RunCompleted { response, .. } if response == "survivor answer"
+        ) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let mut model_errors = Vec::new();
+            while let Ok(event) = agent_events.try_recv() {
+                if let AgentEvent::ModelError { message, .. } = event {
+                    model_errors.push(message);
+                }
+            }
+            panic!(
+                "the recovery run must complete from the refreshed transcript: {:?}; model errors: {model_errors:?}",
+                terminal.event
+            );
+        }
         for _ in 0..100 {
             if parts.service.active_run().is_none() {
                 break;
