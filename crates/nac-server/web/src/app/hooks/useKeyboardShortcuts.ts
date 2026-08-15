@@ -15,9 +15,8 @@ const TYPING_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
 /** Whether the keystroke was meant for a field rather than for the app. */
 function isTyping(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  if (!element || typeof element.tagName !== "string") return false;
-  return TYPING_TAGS.has(element.tagName) || element.isContentEditable;
+  if (!(target instanceof HTMLElement)) return false;
+  return TYPING_TAGS.has(target.tagName) || target.isContentEditable;
 }
 
 /**

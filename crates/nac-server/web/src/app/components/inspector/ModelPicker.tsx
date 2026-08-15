@@ -18,7 +18,7 @@ import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import { modelItems } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import {
   useManagedProviderModels,
@@ -50,6 +50,9 @@ export function ModelPicker({
   const toast = useToast();
   const updateConfig = useUpdateConfig();
 
+  // SAFETY: the backend string is validated by the consumers below
+  // (providerUsesApiKey / useManagedSignIn) against the BackendKind union;
+  // an unknown backend simply matches nothing.
   const backend = (metadata?.backend ?? "") as BackendKind;
   const usesKey = providerUsesApiKey(backend);
   const { provider, signedIn } = useManagedSignIn(backend);
@@ -83,7 +86,7 @@ export function ModelPicker({
       toast.success(`Model switched to ${model}`);
     } catch (error) {
       toast.error(
-        `The model was not switched: ${humanErrorText(error, backend)}`,
+        `The model was not switched: ${humanErrorText(toRunError(error), backend)}`,
       );
     }
   };

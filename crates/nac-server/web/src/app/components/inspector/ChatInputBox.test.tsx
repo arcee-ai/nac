@@ -1,68 +1,43 @@
 /** @vitest-environment jsdom */
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
+import { SessionActionsProvider } from "@/app/providers/SessionActionsProvider";
+import { ToastProvider } from "@/app/providers/ToastProvider";
+import { api } from "@/app/services/api";
+import { queryKeys } from "@/app/services/queries";
 import type { SlashCommandDefinition } from "@/app/types/api";
 
-const mocks = vi.hoisted(() => ({
-  commands: {
-    data: undefined as SlashCommandDefinition[] | undefined,
-    isError: false,
-    refetch: vi.fn(),
-  },
-  compact: vi.fn(),
-  submit: vi.fn(),
-  toastError: vi.fn(),
-  pushLocalEvent: vi.fn(),
-}));
+// The component runs against the real providers, stores, and api object; the
+// network is replaced by spies on the api methods, delegating to these
+// per-test fakes. jsdom lacks matchMedia, so a desktop stub stands in.
+const fakes = {
+  listCommands: vi.fn(),
+  submitRun: vi.fn(),
+  compactSession: vi.fn(),
+  getModelCatalog: vi.fn(),
+  getStore: vi.fn(),
+};
 
-vi.mock("@/app/components/inspector/ModelPicker", () => ({
-  ModelPicker: () => null,
-}));
-
-vi.mock("@/app/hooks/useMediaQuery", () => ({
-  useIsMobile: () => false,
-  useIsTablet: () => false,
-}));
-
-vi.mock("@/app/hooks/useNow", () => ({ useNow: () => 0 }));
-vi.mock("@/app/lib/perfDebug", () => ({ perfRender: vi.fn() }));
-
-vi.mock("@/app/providers/ToastProvider", () => ({
-  errorMessage: (error: unknown) =>
-    error instanceof Error ? error.message : String(error),
-  useToast: () => ({ error: mocks.toastError }),
-}));
-
-vi.mock("@/app/providers/SessionActionsProvider", () => ({
-  useSessionActions: () => ({ settings: vi.fn(), stopRun: vi.fn() }),
-}));
-
-vi.mock("@/app/services/queries", () => ({
-  useCompactSession: () => ({
-    isPending: false,
-    mutateAsync: mocks.compact,
-  }),
-  useModelCatalog: () => ({ data: undefined }),
-  useSlashCommands: () => mocks.commands,
-  useSshConnect: () => ({ isPending: false, mutateAsync: vi.fn() }),
-  useSubmitRun: () => ({ isPending: false, mutateAsync: mocks.submit }),
-}));
-
-vi.mock("@/app/store/runtimeStore", () => ({
-  pushLocalEvent: mocks.pushLocalEvent,
-  useRunning: () => false,
-  useRunUsage: () => null,
-}));
-
-vi.mock("@/app/store/sshConnectionStore", () => ({
-  markSshConnected: vi.fn(),
-  markSshDisconnected: vi.fn(),
-  sshTargetFromSummary: () => null,
-  useSshConnectionStatus: () => "disconnected",
-}));
+vi.spyOn(api, "listCommands").mockImplementation((...args) =>
+  fakes.listCommands(...args),
+);
+vi.spyOn(api, "submitRun").mockImplementation((...args) =>
+  fakes.submitRun(...args),
+);
+vi.spyOn(api, "compactSession").mockImplementation((...args) =>
+  fakes.compactSession(...args),
+);
+vi.spyOn(api, "getModelCatalog").mockImplementation((...args) =>
+  fakes.getModelCatalog(...args),
+);
+vi.spyOn(api, "getStore").mockImplementation((...args) =>
+  fakes.getStore(...args),
+);
 
 const compactDefinition: SlashCommandDefinition = {
   command: "compact",
@@ -71,10 +46,30 @@ const compactDefinition: SlashCommandDefinition = {
   accepts_arguments: false,
 };
 
+/** The slash-command list the next composed editor starts with, if loaded. */
+let commandFixtures: SlashCommandDefinition[] | undefined;
+
 function composer() {
-  render(<ChatInputBox sessionId="session" snapshot={null} entry={null} />);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  if (commandFixtures !== undefined) {
+    client.setQueryData(queryKeys.slashCommands, commandFixtures);
+  }
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ToastProvider>
+          <SessionActionsProvider>
+            <ChatInputBox sessionId="session" snapshot={null} entry={null} />
+          </SessionActionsProvider>
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
   const textarea = screen.getByRole("combobox", { name: "Message" });
   textarea.focus();
+  // SAFETY: the composer renders a single textarea as its combobox input.
   return textarea as HTMLTextAreaElement;
 }
 
@@ -83,22 +78,35 @@ function type(textarea: HTMLTextAreaElement, value: string) {
 }
 
 beforeEach(() => {
-  mocks.commands.data = [compactDefinition];
-  mocks.commands.isError = false;
-  mocks.commands.refetch.mockReset().mockResolvedValue({
-    data: [compactDefinition],
-  });
-  mocks.compact.mockReset().mockResolvedValue({
-    status: "compacted",
-    compaction_id: "compaction",
-  });
-  mocks.submit.mockReset().mockResolvedValue({
+  commandFixtures = [compactDefinition];
+  // Queries that stay pending keep their loading state, matching the previous
+  // module mocks' `data: undefined`.
+  fakes.listCommands.mockReset().mockImplementation(
+    () => new Promise(() => {}),
+  );
+  fakes.submitRun.mockReset().mockResolvedValue({
     run_id: "run",
     client_id: null,
     display_prompt: "prompt",
   });
-  mocks.toastError.mockReset();
-  mocks.pushLocalEvent.mockReset();
+  fakes.compactSession.mockReset().mockResolvedValue({
+    status: "compacted",
+    compaction_id: "compaction",
+  });
+  fakes.getModelCatalog.mockReset().mockImplementation(
+    () => new Promise(() => {}),
+  );
+  fakes.getStore.mockReset().mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }));
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -151,7 +159,7 @@ describe("slash-command suggestions", () => {
 
   it("shows no matches and waits for dismissal before unknown-command submission", async () => {
     const textarea = composer();
-    mocks.submit.mockRejectedValueOnce(
+    fakes.submitRun.mockRejectedValueOnce(
       new Error("unknown slash command: /xyz"),
     );
     type(textarea, "/xyz");
@@ -160,30 +168,27 @@ describe("slash-command suggestions", () => {
       "No matching commands",
     );
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
     expect(textarea.value).toBe("/xyz");
 
     fireEvent.keyDown(textarea, { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
     fireEvent.keyDown(textarea, { key: "Enter" });
     await waitFor(() =>
-      expect(mocks.submit).toHaveBeenCalledWith({
-        id: "session",
-        prompt: "/xyz",
-      }),
+      expect(fakes.submitRun).toHaveBeenCalledWith("session", "/xyz"),
     );
-    expect(mocks.compact).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
     await waitFor(() =>
       // The composer reports through `humanErrorText`, which opens a backend
       // message as a sentence — the server sends this one lower-case.
-      expect(mocks.toastError).toHaveBeenCalledWith(
-        "Failed to send: Unknown slash command: /xyz",
-      ),
+      expect(
+        screen.getByText("Failed to send: Unknown slash command: /xyz"),
+      ).toBeTruthy(),
     );
   });
 
   it("clamps arrow navigation and Tab-completes without execution", () => {
-    mocks.commands.data = [
+    commandFixtures = [
       compactDefinition,
       {
         command: "continue",
@@ -211,8 +216,8 @@ describe("slash-command suggestions", () => {
 
     expect(textarea.value).toBe("/continue");
     expect(screen.queryByRole("listbox")).toBeNull();
-    expect(mocks.compact).not.toHaveBeenCalled();
-    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(textarea);
   });
 
@@ -222,12 +227,14 @@ describe("slash-command suggestions", () => {
 
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(textarea.value).toBe("/compact");
-    expect(mocks.compact).not.toHaveBeenCalled();
-    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
 
     fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith("session"));
-    expect(mocks.submit).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(fakes.compactSession).toHaveBeenCalledWith("session"),
+    );
+    expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 
   it("Send completes an active suggestion before executing it", async () => {
@@ -237,16 +244,18 @@ describe("slash-command suggestions", () => {
 
     fireEvent.click(send);
     expect(textarea.value).toBe("/compact");
-    expect(mocks.compact).not.toHaveBeenCalled();
-    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
 
     fireEvent.click(send);
-    await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith("session"));
-    expect(mocks.submit).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(fakes.compactSession).toHaveBeenCalledWith("session"),
+    );
+    expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 
   it("pointer completion keeps focus and argument commands append one space", () => {
-    mocks.commands.data = [
+    commandFixtures = [
       {
         command: "run",
         name: "run",
@@ -264,8 +273,8 @@ describe("slash-command suggestions", () => {
     expect(textarea.value).toBe("/run ");
     expect(textarea.selectionStart).toBe(5);
     expect(document.activeElement).toBe(textarea);
-    expect(mocks.compact).not.toHaveBeenCalled();
-    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 
   it("keeps Escape and completion dismissed until the value changes", () => {
@@ -295,65 +304,73 @@ describe("slash-command suggestions", () => {
     fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
     expect(textarea.value).toBe("/c");
     expect(screen.getByRole("listbox")).toBeTruthy();
-    expect(mocks.compact).not.toHaveBeenCalled();
-    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
 
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
-    expect(mocks.compact).not.toHaveBeenCalled();
-    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 
   it("deduplicates submits while command metadata is loading", async () => {
-    const pending =
-      Promise.withResolvers<{ data: SlashCommandDefinition[] }>();
-    mocks.commands.data = undefined;
-    mocks.commands.refetch.mockReturnValueOnce(pending.promise);
+    const pending = Promise.withResolvers<SlashCommandDefinition[]>();
+    commandFixtures = undefined;
+    // A failed mount fetch leaves the query idle with no data, so the
+    // component's own refetch is the call that reaches the fake.
+    fakes.listCommands.mockRejectedValue(new Error("mount skipped"));
     const textarea = composer();
+    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalledOnce());
+    fakes.listCommands.mockClear();
+    fakes.listCommands.mockReturnValueOnce(pending.promise);
     type(textarea, "/compact");
     fireEvent.keyDown(textarea, { key: "Escape" });
 
     fireEvent.keyDown(textarea, { key: "Enter" });
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(mocks.commands.refetch).toHaveBeenCalledOnce();
+    expect(fakes.listCommands).toHaveBeenCalledOnce();
 
-    pending.resolve({ data: [compactDefinition] });
-    await waitFor(() => expect(mocks.compact).toHaveBeenCalledOnce());
+    pending.resolve([compactDefinition]);
+    await waitFor(() => expect(fakes.compactSession).toHaveBeenCalledOnce());
   });
 
   it("gates slash submission on metadata but leaves ordinary prompts available", async () => {
-    mocks.commands.data = undefined;
+    commandFixtures = undefined;
+    // A failed mount fetch leaves the query idle with no data, so the
+    // component's own refetch is the call that reaches the fake.
+    fakes.listCommands.mockRejectedValue(new Error("mount skipped"));
     const textarea = composer();
+    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalledOnce());
+    fakes.listCommands.mockClear();
+    fakes.listCommands.mockResolvedValue([compactDefinition]);
     type(textarea, "/compact");
     fireEvent.keyDown(textarea, { key: "Escape" });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    await waitFor(() => expect(mocks.commands.refetch).toHaveBeenCalledOnce());
-    await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith("session"));
+    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(fakes.compactSession).toHaveBeenCalledWith("session"),
+    );
 
     cleanup();
-    mocks.commands.data = undefined;
-    mocks.commands.refetch.mockResolvedValueOnce({ data: undefined });
+    commandFixtures = undefined;
+    fakes.listCommands.mockRejectedValue(new Error("unavailable"));
     const failedTextarea = composer();
+    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalled());
     type(failedTextarea, "/compact");
     fireEvent.keyDown(failedTextarea, { key: "Escape" });
     fireEvent.keyDown(failedTextarea, { key: "Enter" });
     await waitFor(() =>
-      expect(mocks.toastError).toHaveBeenCalledWith(
-        "Unable to load slash commands",
-      ),
+      expect(screen.getByText("Unable to load slash commands")).toBeTruthy(),
     );
-    expect(mocks.compact).toHaveBeenCalledTimes(1);
+    expect(fakes.compactSession).toHaveBeenCalledTimes(1);
 
     cleanup();
-    mocks.commands.data = undefined;
+    commandFixtures = undefined;
     const ordinaryTextarea = composer();
     type(ordinaryTextarea, "ordinary prompt");
     fireEvent.keyDown(ordinaryTextarea, { key: "Enter" });
     await waitFor(() =>
-      expect(mocks.submit).toHaveBeenCalledWith({
-        id: "session",
-        prompt: "ordinary prompt",
-      }),
+      expect(fakes.submitRun).toHaveBeenCalledWith("session", "ordinary prompt"),
     );
   });
 });

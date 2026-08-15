@@ -33,6 +33,7 @@ import {
 } from "@/app/store/sshConnectionStore";
 import type { SshConfigurationRecord, SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { toRunError } from "@/app/lib/providerError";
 
 const CREATE_NEW = "__new__";
 
@@ -281,7 +282,7 @@ export function SshConnectionBox({
       onConnectionChange(parsed, listing.path);
     } catch (connectError) {
       markSshDisconnected(parsed);
-      const message = errorMessage(connectError);
+      const message = errorMessage(toRunError(connectError));
       setError(message);
       toast.error(`SSH connect failed: ${message}`);
     }
@@ -299,7 +300,7 @@ export function SshConnectionBox({
     try {
       await onTest();
     } catch (testError) {
-      const message = errorMessage(testError);
+      const message = errorMessage(toRunError(testError));
       setError(message);
     }
   };

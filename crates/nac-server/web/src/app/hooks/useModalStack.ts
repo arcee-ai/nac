@@ -1,7 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 
+declare const modalIdBrand: unique symbol;
+
+/** Opaque identity token of one dialog instance in the shared stack. */
+export interface ModalId {
+  readonly [modalIdBrand]: true;
+}
+
+/**
+ * Mint a fresh identity token for one dialog instance. The only way to obtain
+ * a `ModalId`, so a token always names a real dialog.
+ */
+export const createModalId = (): ModalId => {
+  // SAFETY: the brand is a type-level-only marker (declared, never emitted), so
+  // a plain object literal is a valid token; the brand only stops other modules
+  // from forging one.
+  return {} as ModalId;
+};
+
 export interface ModalStackItem {
-  id: object;
+  id: ModalId;
 }
 
 let stack: ModalStackItem[] = [];
@@ -16,7 +34,7 @@ const push = (item: ModalStackItem) => {
   notify();
 };
 
-const pop = (id: object) => {
+const pop = (id: ModalId) => {
   stack = stack.filter((item) => item.id !== id);
   notify();
 };
@@ -46,11 +64,11 @@ export const useModalStack = () => {
     push(item);
   }, []);
 
-  const popModal = useCallback((id: object) => {
+  const popModal = useCallback((id: ModalId) => {
     pop(id);
   }, []);
 
-  const isModalOnTop = useCallback((id: object): boolean => {
+  const isModalOnTop = useCallback((id: ModalId): boolean => {
     if (stack.length === 0) return true;
     return stack[stack.length - 1]?.id === id;
   }, []);

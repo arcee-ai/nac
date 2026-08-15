@@ -19,10 +19,10 @@ import {
 } from "@/app/services/queries";
 import type { BackendKind, ManagedAuthProvider } from "@/app/types/api";
 
-const PROVIDER_ICONS: Record<ManagedAuthProvider, IconName> = {
+const PROVIDER_ICONS = {
   arcee: IconName.Arcee,
   codex: IconName.ChatGpt,
-};
+} satisfies Record<ManagedAuthProvider, IconName>;
 
 /**
  * The browser sign-in a managed provider needs in place of an API key. It sits

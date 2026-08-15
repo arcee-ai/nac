@@ -27,7 +27,7 @@ export function rowsFromRecord(map: Record<string, string>): KvRow[] {
  * stored row whose key was renamed still sends null, so the server rejects
  * the save with a clear error instead of silently deleting the secret.
  */
-export function mapFromRows(rows: KvRow[]): Record<string, string | null> {
+export function mapFromRows(rows: KvRow[]) {
   const map: Record<string, string | null> = {};
   for (const row of rows) {
     const key = row.key.trim();
@@ -43,7 +43,7 @@ export function mapFromRows(rows: KvRow[]): Record<string, string | null> {
 
 export function literalsOnly(
   map: Record<string, string | null>,
-): Record<string, string> {
+) {
   const literals: Record<string, string> = {};
   for (const [key, value] of Object.entries(map)) {
     if (value !== null) literals[key] = value;

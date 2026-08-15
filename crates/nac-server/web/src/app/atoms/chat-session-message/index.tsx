@@ -11,28 +11,28 @@ export enum ChatSessionMessageVariant {
   Success = "success",
 }
 
-const variantBorders: Record<ChatSessionMessageVariant, string> = {
+const variantBorders = {
   [ChatSessionMessageVariant.Info]: "border-info-primary text-info-primary",
   [ChatSessionMessageVariant.Error]: "border-error-primary text-error-primary",
   [ChatSessionMessageVariant.Danger]:
     "border-danger-primary text-danger-primary",
   [ChatSessionMessageVariant.Success]:
     "border-success-primary text-success-primary",
-};
+} satisfies Record<ChatSessionMessageVariant, string>;
 
-const variantIcons: Record<ChatSessionMessageVariant, IconName> = {
+const variantIcons = {
   [ChatSessionMessageVariant.Info]: IconName.Info,
   [ChatSessionMessageVariant.Error]: IconName.Close,
   [ChatSessionMessageVariant.Danger]: IconName.Danger,
   [ChatSessionMessageVariant.Success]: IconName.CheckCircle,
-};
+} satisfies Record<ChatSessionMessageVariant, IconName>;
 
-const variantFills: Record<ChatSessionMessageVariant, string> = {
+const variantFills = {
   [ChatSessionMessageVariant.Info]: "var(--color-fill-info-primary)",
   [ChatSessionMessageVariant.Error]: "var(--color-fill-error-primary)",
   [ChatSessionMessageVariant.Danger]: "var(--color-fill-danger-primary)",
   [ChatSessionMessageVariant.Success]: "var(--color-fill-success-primary)",
-};
+} satisfies Record<ChatSessionMessageVariant, string>;
 
 interface ChatSessionMessageProps extends Omit<
   React.HTMLAttributes<HTMLDivElement>,

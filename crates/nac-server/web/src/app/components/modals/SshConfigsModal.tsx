@@ -31,6 +31,7 @@ import {
   useUpdateSshConfig,
 } from "@/app/services/queries";
 import type { SshConfigurationRecord } from "@/app/types/api";
+import { toRunError } from "@/app/lib/providerError";
 
 const DRAFT = "__new__";
 
@@ -187,7 +188,7 @@ function SshConfigForm({
         toast.success("SSH config updated.");
       }
     } catch (error) {
-      toast.error(`Save failed: ${errorMessage(error)}`);
+      toast.error(`Save failed: ${errorMessage(toRunError(error))}`);
     }
   };
 
@@ -198,7 +199,7 @@ function SshConfigForm({
       onDeleted();
       toast.success("SSH config deleted.");
     } catch (error) {
-      toast.error(`Delete failed: ${errorMessage(error)}`);
+      toast.error(`Delete failed: ${errorMessage(toRunError(error))}`);
     }
   };
 

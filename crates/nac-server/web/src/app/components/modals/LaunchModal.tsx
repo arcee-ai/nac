@@ -49,7 +49,7 @@ import {
   nullable,
   serializeExtraHeaders,
 } from "@/app/lib/modelConfig";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
@@ -320,7 +320,7 @@ function LaunchForm({
     try {
       headers = serializeExtraHeaders(extraHeaders, undefined);
     } catch (validationError) {
-      setError({ field: "config", message: errorMessage(validationError) });
+      setError({ field: "config", message: errorMessage(toRunError(validationError)) });
       return;
     }
 
@@ -336,6 +336,7 @@ function LaunchForm({
             ? { ...selection.request, light_model: light.light }
             : selection.request;
         const record = await createModelConfig.mutateAsync(request);
+        // SAFETY: the server echoes the BackendKind wire value it stored.
         backend = record.backend as BackendKind;
         model = record.model;
         baseUrl = record.base_url;
@@ -352,7 +353,7 @@ function LaunchForm({
     } catch (saveError) {
       setError({
         field: "config",
-        message: `The configuration could not be saved: ${humanErrorText(saveError)}`,
+        message: `The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`,
       });
       return;
     }
@@ -419,7 +420,7 @@ function LaunchForm({
           });
         } catch (renameError) {
           toast.error(
-            `Session created, but the title was not saved: ${errorMessage(renameError)}`,
+            `Session created, but the title was not saved: ${errorMessage(toRunError(renameError))}`,
           );
         }
       }
@@ -429,7 +430,7 @@ function LaunchForm({
     } catch (createError) {
       setError({
         field: "config",
-        message: humanErrorText(createError, backend),
+        message: humanErrorText(toRunError(createError), backend),
       });
     }
   };

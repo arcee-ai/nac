@@ -41,6 +41,8 @@ function applyToDOM(): void {
 }
 
 function initialTheme(): Theme {
+  // SAFETY: the stored value is validated against THEMES on the next line, so
+  // a foreign string never escapes as a Theme.
   const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
   if (saved && THEMES.includes(saved)) return saved;
   return prefersDark() ? "dark" : "light";

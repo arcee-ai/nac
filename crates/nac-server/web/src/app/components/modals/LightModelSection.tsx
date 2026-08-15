@@ -200,6 +200,8 @@ export function LightModelSection({
                 onValueChange={(effort) =>
                   setLight({
                     ...effectiveLight,
+                    // SAFETY: the ids are built from the effort options, so
+                    // every value the picker can emit is a ReasoningEffort.
                     effort: effort as ReasoningEffort | "",
                   })
                 }

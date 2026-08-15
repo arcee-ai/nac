@@ -209,10 +209,11 @@ const LogEntryView = memo(function LogEntryView({
 });
 
 /** How a dispatch that produced no handoff ended, as the badge reads it. */
-const FAILED_EPISODE_BADGE: Record<
-  string,
-  { label: string; color: BadgeColor }
-> = {
+interface FailedEpisodeBadgeMap {
+  [reason: string]: { label: string; color: BadgeColor };
+}
+
+const FAILED_EPISODE_BADGE: FailedEpisodeBadgeMap = {
   error: { label: "Failed", color: BadgeColor.Red },
   timed_out: { label: "Timed out", color: BadgeColor.Yellow },
   cancelled: { label: "Cancelled", color: BadgeColor.Yellow },
@@ -278,12 +279,12 @@ function EpisodeTab({
   );
 }
 
-const LIST_KIND_ORDER: Record<ListKind, number> = {
+const LIST_KIND_ORDER = {
   // Last to execute (queued on deps) above currently running, done last.
   pending: 0,
   running: 1,
   done: 2,
-};
+} satisfies Record<ListKind, number>;
 
 /**
  * The log itself: the commands as they were issued, stuck to the bottom for as
@@ -369,8 +370,8 @@ function LogPane({
   loadingOlder: boolean;
   loadingInitial: boolean;
   historyError: string | null;
-  onLoadOlder: () => Promise<unknown>;
-  onRetry: () => Promise<unknown>;
+  onLoadOlder: () => Promise<void>;
+  onRetry: () => Promise<void>;
   className?: string;
 }) {
   const prependAnchor = useRef<{
@@ -515,10 +516,10 @@ function Episodes({
 /** Which half of a thread the detail pane is showing. */
 type ThreadDetailView = "log" | "overview";
 
-const VIEW_LABEL: Record<ThreadDetailView, string> = {
+const VIEW_LABEL = {
   log: "Command Log",
   overview: "Episodes",
-};
+} satisfies Record<ThreadDetailView, string>;
 
 const THREAD_DETAIL_VIEWS: ThreadDetailView[] = ["log", "overview"];
 
@@ -617,7 +618,11 @@ function ThreadViewSelect({
         id: name,
         label: VIEW_LABEL[name],
       }))}
-      onValueChange={(id) => onChange(id as ThreadDetailView)}
+      onValueChange={(id) =>
+        // SAFETY: the ids are built from THREAD_DETAIL_VIEWS above, so every
+        // value the picker can emit is a ThreadDetailView.
+        onChange(id as ThreadDetailView)
+      }
     />
   );
 }
@@ -651,8 +656,8 @@ function Detail({
   loadingOlder: boolean;
   loadingInitial: boolean;
   historyError: string | null;
-  onLoadOlder: () => Promise<unknown>;
-  onRetry: () => Promise<unknown>;
+  onLoadOlder: () => Promise<void>;
+  onRetry: () => Promise<void>;
   view: ThreadDetailView;
   onViewChange: (view: ThreadDetailView) => void;
 }) {
@@ -943,10 +948,13 @@ export function ThreadsView({
           historyError={
             eventPages.error instanceof Error ? eventPages.error.message : null
           }
-          onLoadOlder={() => eventPages.fetchNextPage()}
-          onRetry={() =>
-            eventPages.data ? eventPages.fetchNextPage() : eventPages.refetch()
-          }
+          onLoadOlder={async () => {
+            await eventPages.fetchNextPage();
+          }}
+          onRetry={async () => {
+            if (eventPages.data) await eventPages.fetchNextPage();
+            else await eventPages.refetch();
+          }}
           view={view}
           onViewChange={setView}
         />

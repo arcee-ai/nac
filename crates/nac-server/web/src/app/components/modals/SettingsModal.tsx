@@ -55,7 +55,7 @@ import {
 } from "@/app/lib/modelConfig";
 import { displaySessionTitle } from "@/app/lib/format";
 import { managedAuthLabel } from "@/app/lib/providers";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
 import {
@@ -96,9 +96,11 @@ function parseHeadersJson(
   if (!json) return {};
   try {
     const parsed: unknown = JSON.parse(json);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, string>)
-      : {};
+    if (Object(parsed) !== parsed || Array.isArray(parsed)) return {};
+    // SAFETY: the identity check above admits only non-null JSON objects; the
+    // column is written by this app as a string map, and anything else reads
+    // as "repair me" rather than being trusted.
+    return parsed as Record<string, string>;
   } catch {
     return {};
   }
@@ -380,7 +382,7 @@ function SettingsForm({
       toast.error(
         conflict
           ? "The title was not saved — the session changed in the meantime"
-          : `The title was not saved: ${errorMessage(saveError)}`,
+          : `The title was not saved: ${errorMessage(toRunError(saveError))}`,
       );
     }
   };
@@ -388,16 +390,18 @@ function SettingsForm({
   const submit = async () => {
     if (busy || !selection) return;
 
-    let selected: {
+    interface SelectedModelConfig {
       backend: BackendKind;
       model: string;
       base_url: string;
       api_key_env: string | null;
-    };
+    }
+    let selected: SelectedModelConfig;
     try {
       if (selection.kind === "save") {
         const record = await createModelConfig.mutateAsync(selection.request);
         selected = {
+          // SAFETY: the server echoes the BackendKind wire value it stored.
           backend: record.backend as BackendKind,
           model: record.model,
           base_url: record.base_url,
@@ -408,7 +412,7 @@ function SettingsForm({
       }
     } catch (saveError) {
       setError(
-        `The configuration could not be saved: ${humanErrorText(saveError)}`,
+        `The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`,
       );
       return;
     }
@@ -429,7 +433,7 @@ function SettingsForm({
         initial,
       );
     } catch (validationError) {
-      setError(errorMessage(validationError));
+      setError(errorMessage(toRunError(validationError)));
       return;
     }
 
@@ -471,7 +475,7 @@ function SettingsForm({
       toast.error(
         busyRun
           ? "Session is busy — try again after the run finishes"
-          : `Error: ${humanErrorText(saveError, backend)}`,
+          : `Error: ${humanErrorText(toRunError(saveError), backend)}`,
       );
     }
   };
@@ -571,6 +575,8 @@ function SettingsForm({
           invalid={Boolean(error)}
           errorText={error || undefined}
           initial={{
+            // SAFETY: the metadata backend is one of the BackendKind wire
+            // values the server stores.
             backend: initial.backend as BackendKind,
             model: initial.model,
             base_url: initial.base_url,

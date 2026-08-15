@@ -5,7 +5,11 @@
 export const FALLBACK_ICON = "file";
 
 /** Whole file names, lowercased, such as `dockerfile` or `package.json`. */
-export const ICON_BY_FILE_NAME: Record<string, string> = {
+export interface FileNameIconMap {
+  [name: string]: string;
+}
+
+export const ICON_BY_FILE_NAME: FileNameIconMap = {
   ".buildignore": "settings",
   ".clang-format": "settings",
   ".clang-format-ignore": "settings",
@@ -683,7 +687,11 @@ export const ICON_BY_FILE_NAME: Record<string, string> = {
 };
 
 /** Extensions without the leading dot, lowercased; some span several dots. */
-export const ICON_BY_EXTENSION: Record<string, string> = {
+export interface ExtensionIconMap {
+  [extension: string]: string;
+}
+
+export const ICON_BY_EXTENSION: ExtensionIconMap = {
   "001": "zip",
   "3fr": "image",
   "7z": "zip",

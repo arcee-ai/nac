@@ -26,6 +26,7 @@ import {
   type KvRow,
 } from "@/app/lib/mcpKvRows";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { toRunError } from "@/app/lib/providerError";
 import {
   useCreateMcpServer,
   useDeleteMcpServer,
@@ -165,7 +166,7 @@ export function McpServerForm({
         toast.success("MCP server updated.");
       }
     } catch (error) {
-      toast.error(`Save failed: ${errorMessage(error)}`);
+      toast.error(`Save failed: ${errorMessage(toRunError(error))}`);
     }
   };
 
@@ -176,7 +177,7 @@ export function McpServerForm({
       onDeleted();
       toast.success("MCP server deleted.");
     } catch (error) {
-      toast.error(`Delete failed: ${errorMessage(error)}`);
+      toast.error(`Delete failed: ${errorMessage(toRunError(error))}`);
     }
   };
 
@@ -210,7 +211,7 @@ export function McpServerForm({
         } found.`,
       );
     } catch (error) {
-      toast.error(`Test failed: ${errorMessage(error)}`);
+      toast.error(`Test failed: ${errorMessage(toRunError(error))}`);
     }
   };
 

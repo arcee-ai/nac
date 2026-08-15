@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { api } from "@/app/services/api";
 import {
   queryKeys,
   useLoadOlderMessages,
@@ -24,25 +25,24 @@ import type {
   ThreadEventPage,
 } from "@/app/types/api";
 
-const requests = vi.hoisted(() => ({
+// The real api object is the seam: spies on its methods delegate to the
+// per-test fakes below, so no module mocking is involved. The real perfDebug
+// module is inert unless explicitly enabled.
+const requests = {
   listSessions: vi.fn(),
   getMessages: vi.fn(),
   getThreadEvents: vi.fn(),
-}));
+};
 
-vi.mock("@/app/services/api", () => ({
-  api: {
-    listSessions: requests.listSessions,
-    getMessages: requests.getMessages,
-    getThreadEvents: requests.getThreadEvents,
-  },
-}));
-
-vi.mock("@/app/lib/perfDebug", () => ({
-  perfMark: vi.fn(),
-  perfRender: vi.fn(),
-  perfTime: (_name: string, run: () => unknown) => run(),
-}));
+vi.spyOn(api, "listSessions").mockImplementation((...args) =>
+  requests.listSessions(...args),
+);
+vi.spyOn(api, "getMessages").mockImplementation((...args) =>
+  requests.getMessages(...args),
+);
+vi.spyOn(api, "getThreadEvents").mockImplementation((...args) =>
+  requests.getThreadEvents(...args),
+);
 
 
 function deferred<T>() {
@@ -55,6 +55,8 @@ function session(
   title: string,
   changed?: number,
 ): ManagedSessionSummary {
+  // SAFETY: test fixture — the merge reads only summary.session_id/title and
+  // moves workspace_diff opaquely; the remaining summary fields are omitted.
   return {
     summary: {
       session_id: id,
@@ -94,10 +96,12 @@ async function mount(client: QueryClient): Promise<RenderResult> {
 
 function renderedData(renderer: RenderResult) {
   const content = renderer.getByTestId("sessions").textContent;
-  return content ? JSON.parse(content) as unknown : undefined;
+  return content ? JSON.parse(content) : undefined;
 }
 
 function snapshotWindow(): SessionSnapshotResponse {
+  // SAFETY: test fixture — only the snapshot fields the paged-read fencing
+  // under test reads are populated; the remaining response fields are unused.
   return {
     messages: [
       { role: "user", content: "kept-old" },
@@ -235,6 +239,8 @@ describe("paged read fencing", () => {
     await waitFor(() => expect(requests.getMessages).toHaveBeenCalledOnce());
     fenceSessionSnapshot(id, true);
     await act(async () => {
+      // SAFETY: test fixture — the page carries only the fields the merge
+      // reads; the remaining response fields are omitted.
       stalePage.resolve({
         messages: [{ role: "user", content: "must-not-return" }],
         created_at: [null],

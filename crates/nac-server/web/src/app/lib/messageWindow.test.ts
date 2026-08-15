@@ -14,14 +14,19 @@ import type {
 } from "@/app/types/api";
 
 function user(content: string): Message {
+  // SAFETY: test fixture — the user variant is exactly { role, content }.
   return { role: "user", content } as Message;
 }
 
 function assistant(content: string): Message {
+  // SAFETY: test fixture — the assistant variant's remaining fields are all
+  // optional and unused by the window merge under test.
   return { role: "assistant", content } as Message;
 }
 
 function threadAssistant(name: string, callId: string): Message {
+  // SAFETY: test fixture — the transcript projection only reads role, content,
+  // and tool_calls from an assistant message; the optional fields are omitted.
   return {
     role: "assistant",
     content: null,
@@ -35,10 +40,12 @@ function threadAssistant(name: string, callId: string): Message {
         },
       },
     ],
-  } as unknown as Message;
+  } as Message;
 }
 
 function tool(callId: string): Message {
+  // SAFETY: test fixture — the tool variant is exactly { role, tool_call_id,
+  // content }.
   return {
     role: "tool",
     tool_call_id: callId,
@@ -47,6 +54,8 @@ function tool(callId: string): Message {
 }
 
 function toolStarted(callId: string): AgentEvent {
+  // SAFETY: test fixture — only the tool_call_started fields the projection
+  // reads are populated; the optional event fields are omitted.
   return {
     type: "tool_call_started",
     call_id: callId,
@@ -57,6 +66,7 @@ function toolStarted(callId: string): AgentEvent {
 }
 
 function system(content: string): Message {
+  // SAFETY: test fixture — the system variant is exactly { role, content }.
   return { role: "system", content } as Message;
 }
 
@@ -66,6 +76,9 @@ function snapshot(
   total: number,
   durations: (number | null)[] = [],
 ): SessionSnapshotResponse {
+  // SAFETY: test fixture — only the snapshot fields the window merge and
+  // transcript projection read are populated; the remaining required fields
+  // of the response are unused by the code under test.
   return {
     messages,
     message_created_at: messages.map((_, index) => `t-${start + index}`),
@@ -78,7 +91,7 @@ function snapshot(
     response_timing: { response_durations_ms: durations },
     thread_events: {},
     thread_episodes: {},
-  } as unknown as SessionSnapshotResponse;
+  } as SessionSnapshotResponse;
 }
 
 function page(
@@ -210,6 +223,8 @@ describe("bounded transcript projection", () => {
       54,
       [900],
     );
+    // SAFETY: test fixture — an empty active_run stands in for a run whose
+    // fields the projection does not read.
     value.active_run = {} as SessionSnapshotResponse["active_run"];
 
     const models = buildTranscript(value, {}).filter(
@@ -224,6 +239,8 @@ describe("bounded transcript projection", () => {
       50,
       52,
     );
+    // SAFETY: test fixture — the projection only reads name and
+    // episode_count from a thread summary; the remaining fields are omitted.
     current.threads = [
       { name: "worker", episode_count: 2 },
     ] as SessionSnapshotResponse["threads"];

@@ -15,7 +15,11 @@ const { getState, setState, useStore } = attentionStore;
 
 // Previous run state per session, kept outside the store because it is only an
 // implementation detail of the transition detection.
-let previouslyActive: Record<string, boolean> = {};
+interface ActiveById {
+  [id: string]: boolean;
+}
+
+let previouslyActive: ActiveById = {};
 
 /**
  * Flag every session that stopped running since the last call, except the one

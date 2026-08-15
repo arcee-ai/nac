@@ -36,7 +36,7 @@ import {
   displayPromptFromMessageText,
   formatStoreTime,
 } from "@/app/lib/format";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import type { SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
@@ -280,8 +280,8 @@ export function Transcript({
             `▶ resent: ${response.display_prompt.slice(0, 80)}`,
           );
         } catch (err) {
-          pushLocalEvent("error", `resend failed: ${errorMessage(err)}`, true);
-          toast.error(`Failed to resend: ${humanErrorText(err, backend)}`);
+          pushLocalEvent("error", `resend failed: ${errorMessage(toRunError(err))}`, true);
+          toast.error(`Failed to resend: ${humanErrorText(toRunError(err), backend)}`);
         }
       })();
     },

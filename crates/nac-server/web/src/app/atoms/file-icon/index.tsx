@@ -7,6 +7,8 @@ import {
 
 // Vendored by `npm run sync-file-icons`; the glob is eager so the icons are
 // plain strings in the bundle rather than a hundred separate requests.
+// SAFETY: the eager glob with `?raw` and `import: "default"` always yields
+// string values keyed by the module path.
 const sources = import.meta.glob("./icons/*.svg", {
   eager: true,
   query: "?raw",

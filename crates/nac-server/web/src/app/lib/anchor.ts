@@ -19,7 +19,7 @@ export enum AnchorPlacement {
 export const ANCHOR_GAP = 8;
 
 /** For a box positioned `absolute` inside a `relative` trigger wrapper. */
-export const anchorClasses: Record<AnchorPlacement, string> = {
+export const anchorClasses = {
   [AnchorPlacement.TopRight]: "top-[-8px] left-0 -translate-y-full",
   [AnchorPlacement.TopCenter]:
     "top-[-8px] left-1/2 -translate-y-full -translate-x-1/2",
@@ -32,17 +32,14 @@ export const anchorClasses: Record<AnchorPlacement, string> = {
   [AnchorPlacement.BottomRight]: "bottom-[-8px] left-0 translate-y-full",
   [AnchorPlacement.CenterRight]:
     "top-1/2 left-[calc(100%+8px)] -translate-y-1/2",
-};
+} satisfies Record<AnchorPlacement, string>;
 
 type HorizontalAnchor = "start" | "center" | "end" | "before" | "after";
 type VerticalAnchor = "above" | "below" | "middle";
 
 // The same placements expressed as anchors, for boxes that compute viewport
 // coordinates instead of relying on an offset parent.
-const anchors: Record<
-  AnchorPlacement,
-  { x: HorizontalAnchor; y: VerticalAnchor }
-> = {
+const anchors = {
   [AnchorPlacement.TopRight]: { x: "start", y: "above" },
   [AnchorPlacement.TopCenter]: { x: "center", y: "above" },
   [AnchorPlacement.TopLeft]: { x: "end", y: "above" },
@@ -51,7 +48,10 @@ const anchors: Record<
   [AnchorPlacement.BottomLeft]: { x: "end", y: "below" },
   [AnchorPlacement.CenterLeft]: { x: "before", y: "middle" },
   [AnchorPlacement.CenterRight]: { x: "after", y: "middle" },
-};
+} satisfies Record<
+  AnchorPlacement,
+  { x: HorizontalAnchor; y: VerticalAnchor }
+>;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -144,7 +144,7 @@ export function anchorCoords(
   trigger: DOMRect,
   box: DOMRect,
   within?: AnchorBounds | null,
-): { left: number; top: number } {
+) {
   const anchor = anchors[placement] ?? anchors[AnchorPlacement.TopCenter];
   const left = {
     start: trigger.left,

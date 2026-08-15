@@ -33,7 +33,7 @@ import {
   providerLabel,
   providerUsesApiKey,
 } from "@/app/lib/providers";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import {
   useDeleteModelConfig,
@@ -462,7 +462,7 @@ export function ConfigurationsPanel({
       toast.success(`Configuration ${label} removed`);
     } catch (error) {
       toast.error(
-        `Failed to remove the configuration: ${humanErrorText(error)}`,
+        `Failed to remove the configuration: ${humanErrorText(toRunError(error))}`,
       );
     }
   };
@@ -735,6 +735,8 @@ export function ConfigurationsPanel({
                     items={PROVIDER_ITEMS}
                     value={provider}
                     onValueChange={(id) => {
+                      // SAFETY: the ids are built from PROVIDER_ITEMS, so
+                      // every value the picker can emit is a ProviderChoice.
                       setProvider(id as ProviderChoice);
                       setApiKey("");
                       setDefaultModel("");
@@ -753,7 +755,11 @@ export function ConfigurationsPanel({
                       <SmallSelect
                         items={PROTOCOL_ITEMS}
                         value={protocol}
-                        onValueChange={(id) => setProtocol(id as BackendKind)}
+                        onValueChange={(id) =>
+                          // SAFETY: the ids are built from PROTOCOL_ITEMS, so
+                          // every value the picker can emit is a BackendKind.
+                          setProtocol(id as BackendKind)
+                        }
                       />
                     }
                   />

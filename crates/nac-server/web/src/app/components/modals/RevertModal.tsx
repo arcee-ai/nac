@@ -8,6 +8,7 @@ import {
 } from "@/app/atoms";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useRevertSession } from "@/app/services/queries";
+import { toRunError } from "@/app/lib/providerError";
 
 interface RevertModalProps {
   open: boolean;
@@ -45,7 +46,7 @@ export function RevertModal({
       );
       onClose();
     } catch (error) {
-      toast.error(`Failed to revert: ${errorMessage(error)}`);
+      toast.error(`Failed to revert: ${errorMessage(toRunError(error))}`);
     }
   };
 

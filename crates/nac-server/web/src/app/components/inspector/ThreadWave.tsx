@@ -10,13 +10,13 @@ interface ThreadBoxProps {
   onSelect: (name: string, episodeKey: string) => void;
 }
 
-const STATE_ORDER: Record<ThreadState, number> = {
+const STATE_ORDER = {
   error: 0,
   running: 1,
   pending: 2,
   cancelled: 3,
   done: 4,
-};
+} satisfies Record<ThreadState, number>;
 
 function StateIcon({ state }: { state: ThreadState }) {
   if (state === "running") {

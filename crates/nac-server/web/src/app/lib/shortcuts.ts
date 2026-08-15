@@ -7,7 +7,11 @@ const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 export const MOD = isMac ? "meta" : "ctrl";
 
 /** Names accepted in a shortcut, drawn as the glyph the platform uses. */
-const GLYPHS: Record<string, string> = {
+interface KeyGlyphMap {
+  [name: string]: string;
+}
+
+const GLYPHS: KeyGlyphMap = {
   ctrl: isMac ? "⌘" : "⌃",
   control: isMac ? "⌘" : "⌃",
   cmd: "⌘",

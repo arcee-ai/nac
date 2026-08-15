@@ -14,6 +14,7 @@ import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useUpdatePresentation } from "@/app/services/queries";
 import { ApiError } from "@/app/services/api";
 import type { SessionSummarySnapshot } from "@/app/types/api";
+import { toRunError } from "@/app/lib/providerError";
 
 interface RenameModalProps {
   open: boolean;
@@ -65,7 +66,7 @@ function RenameForm({
       toast.error(
         conflict
           ? "Version conflict — the session changed in the meantime"
-          : `Error: ${errorMessage(error)}`,
+          : `Error: ${errorMessage(toRunError(error))}`,
       );
     }
   };

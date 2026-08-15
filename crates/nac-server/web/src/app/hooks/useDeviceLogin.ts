@@ -5,6 +5,7 @@ import { errorMessage } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
 import type { DeviceLoginStarted, ManagedAuthProvider } from "@/app/types/api";
+import { toRunError } from "@/app/lib/providerError";
 
 /**
  * How often the outcome is collected. The provider is polled by the server at
@@ -54,7 +55,7 @@ export function useDeviceLogin(onSuccess?: () => void) {
       window.open(started.verification_uri, "_blank", "noopener,noreferrer");
     } catch (error) {
       active.current = null;
-      setState({ status: "failed", message: errorMessage(error) });
+      setState({ status: "failed", message: errorMessage(toRunError(error)) });
     }
   }, []);
 
@@ -117,7 +118,7 @@ export function useDeviceLogin(onSuccess?: () => void) {
       } catch (error) {
         if (stopped) return;
         active.current = null;
-        setState({ status: "failed", message: errorMessage(error) });
+        setState({ status: "failed", message: errorMessage(toRunError(error)) });
       }
     };
 

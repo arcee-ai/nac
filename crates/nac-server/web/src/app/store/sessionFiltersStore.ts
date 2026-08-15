@@ -43,7 +43,11 @@ export const RANGE_ITEMS: { id: RangeId; label: string }[] = [
 
 const RANGE_TICK_MS = 60_000;
 
-const RANGE_MS: Record<string, number> = {
+interface RangeMsMap {
+  [range: string]: number | undefined;
+}
+
+const RANGE_MS: RangeMsMap = {
   "24h": 86_400_000,
   "7d": 604_800_000,
   "30d": 2_592_000_000,
@@ -136,7 +140,7 @@ type Comparator = (
   b: SessionSummarySnapshot,
 ) => number;
 
-const comparators: Partial<Record<SortId, Comparator>> = {
+const comparators = {
   // Mirrors the API: pinned grouping is applied by the page; within a group
   // `sort_order` is the custom index, then creation time as a stable tiebreak.
   [SORT_DEFAULT]: (a, b) => {
@@ -152,7 +156,7 @@ const comparators: Partial<Record<SortId, Comparator>> = {
     displaySessionTitle(a).localeCompare(displaySessionTitle(b), undefined, {
       sensitivity: "base",
     }),
-};
+} satisfies Partial<Record<SortId, Comparator>>;
 
 /**
  * Filtered and sorted entries. Pinned grouping stays in the page, which renders

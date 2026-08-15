@@ -54,7 +54,7 @@ import {
   providerLabel,
   providerUsesApiKey,
 } from "@/app/lib/providers";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useCreateModelConfig,
@@ -197,6 +197,8 @@ function ConfigurationForm({
   const updateConfig = useUpdateModelConfig();
   const deleteConfig = useDeleteModelConfig();
 
+  // SAFETY: the record's backend is one of the BackendKind wire values; an
+  // unknown value simply falls back to the default below.
   const stored = record?.backend as BackendKind | undefined;
   const [backend, setBackend] = useState<BackendKind>(
     stored ?? "openai-responses",
@@ -340,7 +342,7 @@ function ConfigurationForm({
     try {
       extraHeaders = serializeExtraHeaders(headers, {});
     } catch (headerError) {
-      setError(errorMessage(headerError));
+      setError(errorMessage(toRunError(headerError)));
       return;
     }
 
@@ -397,7 +399,7 @@ function ConfigurationForm({
         toast.success(`Configuration ${saved.name} created`);
       }
     } catch (saveError) {
-      setError(humanErrorText(saveError, backend));
+      setError(humanErrorText(toRunError(saveError), backend));
     }
   };
 
@@ -408,7 +410,7 @@ function ConfigurationForm({
       onDeleted();
       toast.success(`Configuration ${record.name} removed`);
     } catch (deleteError) {
-      setError(humanErrorText(deleteError));
+      setError(humanErrorText(toRunError(deleteError)));
     }
   };
 
@@ -522,6 +524,8 @@ function ConfigurationForm({
                 items={PROVIDER_ITEMS}
                 value={backend}
                 onValueChange={(id) => {
+                  // SAFETY: the ids are built from PROVIDER_ITEMS, so every
+                  // value the picker can emit is a BackendKind.
                   edit(setBackend)(id as BackendKind);
                   setApiKey("");
                   setModel("");

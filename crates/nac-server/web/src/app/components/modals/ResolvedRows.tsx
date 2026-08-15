@@ -79,7 +79,11 @@ export function ResolvedRows({
           <SmallSelect
             items={PROTOCOL_ITEMS}
             value={backend}
-            onValueChange={(id) => onBackend(id as BackendKind)}
+            onValueChange={(id) =>
+              // SAFETY: the ids are built from PROTOCOL_ITEMS, so every value
+              // the picker can emit is a BackendKind.
+              onBackend(id as BackendKind)
+            }
           />
         }
       />

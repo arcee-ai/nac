@@ -17,7 +17,11 @@ export interface CodeToken {
   className: string | null;
 }
 
-const LANGUAGE_BY_EXTENSION: Record<string, string> = {
+interface LanguageByExtensionMap {
+  [extension: string]: string;
+}
+
+const LANGUAGE_BY_EXTENSION: LanguageByExtensionMap = {
   bash: "bash",
   c: "c",
   cc: "cpp",
@@ -99,10 +103,14 @@ function loadLowlight(): Promise<Lowlight> {
 function flatten(nodes: HastNode[], inherited: string | null, out: CodeToken[]) {
   for (const node of nodes) {
     if (node.type === "text") {
+      // SAFETY: the hast node's type field was just matched, so the text
+      // variant's value property is present.
       out.push({ text: (node as HastText).value, className: inherited });
       continue;
     }
     if (node.type !== "element") continue;
+    // SAFETY: the hast node's type field was just matched, so the element
+    // variant's properties and children are present.
     const element = node as HastElement;
     const own = element.properties?.className;
     const names = Array.isArray(own) ? own.join(" ") : "";

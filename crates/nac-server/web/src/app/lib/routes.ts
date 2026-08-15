@@ -15,12 +15,12 @@ export type SessionPanel = (typeof SESSION_PANELS)[number];
 
 // The `files` panel is called Changes in the design; its route keeps the older
 // name so links that are already out there still land on it.
-export const SESSION_PANEL_LABEL: Record<SessionPanel, string> = {
+export const SESSION_PANEL_LABEL = {
   threads: "Threads",
   files: "Files",
   worksets: "Worksets",
   history: "History",
-};
+} satisfies Record<SessionPanel, string>;
 
 /**
  * Panels the wide side box tabs between. A wide box carries the revisions in
@@ -33,6 +33,8 @@ export const WIDE_SESSION_PANELS = SESSION_PANELS.filter(
 export const DEFAULT_SESSION_PANEL: SessionPanel = "threads";
 
 export function isSessionPanel(value: string | undefined): value is SessionPanel {
+  // SAFETY: the cast only widens the readonly tuple to a mutable array for
+  // `includes`; no element is ever written through it.
   return (SESSION_PANELS as readonly string[]).includes(value ?? "");
 }
 

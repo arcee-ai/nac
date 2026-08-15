@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
-import { useModalStack } from "../../hooks/useModalStack";
+import { createModalId, useModalStack } from "../../hooks/useModalStack";
 import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import CoverBackground from "../cover-background";
@@ -104,7 +104,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   const cardRef = useRef<HTMLDivElement>(null);
   // Identity of this dialog in the shared stack. It is state rather than a ref
   // because the render below compares it against the top of the stack.
-  const [token] = useState(() => ({}));
+  const [token] = useState(() => createModalId());
   const previousPathnameRef = useRef("");
   const location = useLocation();
   const { modalStack, pushModal, popModal, isModalOnTop, getStackLength } =

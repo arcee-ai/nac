@@ -5,7 +5,11 @@ import { cn } from "@/app/lib/cn";
 
 // Modified is yellow and anything newly appearing is blue, the way an editor
 // tints its explorer; a file matching HEAD keeps the ordinary row colour.
-const STATUS_COLOR: Record<string, string> = {
+interface StatusColorMap {
+  [code: string]: string;
+}
+
+const STATUS_COLOR: StatusColorMap = {
   M: "text-danger-primary",
   A: "text-info-primary",
   "?": "text-info-primary",

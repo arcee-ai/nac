@@ -110,6 +110,8 @@ function Chips<T extends string>({
   selected,
   onToggle,
   emptyText,
+  // SAFETY: the default labeler is only used for string options, where the
+  // cast is the identity.
   labelOf = (option: T) => option as string,
   touch,
 }: {
@@ -213,7 +215,11 @@ export function SessionFilters({
           label="Sort by"
           items={SORT_ITEMS}
           value={sort}
-          onValueChange={commit((id: string) => setSort(id as SortId))}
+          onValueChange={commit((id: string) =>
+            // SAFETY: the ids are built from SORT_ITEMS, so every value the
+            // picker can emit is a SortId.
+            setSort(id as SortId),
+          )}
           stacked={mobile}
         />
         <FilterRow
@@ -221,6 +227,8 @@ export function SessionFilters({
           items={RANGE_ITEMS}
           value={createdRange}
           onValueChange={commit((id: string) =>
+            // SAFETY: the ids are built from RANGE_ITEMS, so every value the
+            // picker can emit is a RangeId.
             setCreatedRange(id as RangeId),
           )}
           stacked={mobile}
@@ -230,6 +238,8 @@ export function SessionFilters({
           items={RANGE_ITEMS}
           value={modifiedRange}
           onValueChange={commit((id: string) =>
+            // SAFETY: the ids are built from RANGE_ITEMS, so every value the
+            // picker can emit is a RangeId.
             setModifiedRange(id as RangeId),
           )}
           stacked={mobile}

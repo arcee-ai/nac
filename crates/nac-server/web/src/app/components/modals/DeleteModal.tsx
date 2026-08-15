@@ -12,6 +12,7 @@ import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useDeleteSession } from "@/app/services/queries";
 import type { SessionSummarySnapshot } from "@/app/types/api";
+import { toRunError } from "@/app/lib/providerError";
 
 interface DeleteModalProps {
   open: boolean;
@@ -37,7 +38,7 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
       toast.success("Session deleted");
       onClose();
     } catch (error) {
-      toast.error(`Failed to delete: ${errorMessage(error)}`);
+      toast.error(`Failed to delete: ${errorMessage(toRunError(error))}`);
     }
   };
 

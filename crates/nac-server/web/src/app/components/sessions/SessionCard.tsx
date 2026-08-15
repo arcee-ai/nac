@@ -259,6 +259,8 @@ export function SessionCard({
         // Inner controls own their pressed state, so the card surface stays calm.
         if (
           e.button === 0 &&
+          // SAFETY: a pointer event's target is always an element in practice;
+          // the cast only widens the EventTarget the DOM event types declare.
           !(e.target as HTMLElement).closest("button, a, input, textarea")
         ) {
           setPressed(true);
