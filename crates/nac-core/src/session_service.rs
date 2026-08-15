@@ -2005,27 +2005,42 @@ impl SessionService {
                 }
             })?;
             drop(agent);
-            if let Some(durable_blob) = durable_blob {
-                // Reconcile the cached snapshot with the durable blob after
-                // every refresh, not only when this admission rewrote the
-                // blob itself: a prior admission may have repaired the blob
-                // and then failed before patching this copy (e.g. snapshot
-                // lock contention), and the retry sees nothing left to
-                // repair. Without the reconcile, store-backed transcript
-                // reads would serve the discarded dangling turn from the
-                // stale pre-repair snapshot for the rest of the process
-                // lifetime (mirrors the resume path in runtime.rs).
+            if let (Some(session_id), Some(durable_blob)) =
+                (self.metadata.session_id.as_deref(), durable_blob)
+            {
+                // Reconcile every run-state field that the next completion
+                // persists, not only the transcript blob. A peer may have
+                // committed token and timing history before releasing the
+                // lease; retaining the stale cached values would make this
+                // process overwrite that history at its next run end.
+                //
+                // Load after transcript repair so `durable_blob` and the
+                // persisted run state describe the same lease-held store
+                // state. Keep cached identity/configuration fields: cwd is
+                // runtime-canonicalized, and the config revision was checked
+                // above.
+                let durable_snapshot =
+                    sessions::load_session(&self.metadata.store_path, session_id).map_err(
+                        |error| OperationAdmissionPreparationError::Coordination {
+                            message: SessionCoordinationError::store(format!(
+                                "failed to refresh durable session run state: {error:#}"
+                            )),
+                        },
+                    )?;
                 let mut snapshot = self.session_snapshot.try_lock().map_err(|_| {
                     OperationAdmissionPreparationError::Coordination {
                         message: SessionCoordinationError::local_agent_busy(),
                     }
                 })?;
                 if let Some(snapshot) = snapshot.as_mut() {
-                    // The blob is write-once and repairs only truncate it,
-                    // so an equal length means this copy is already current.
-                    if snapshot.messages.len() != durable_blob.len() {
-                        snapshot.messages = durable_blob;
-                    }
+                    snapshot.messages = durable_blob;
+                    snapshot.last_response_duration_ms = durable_snapshot.last_response_duration_ms;
+                    snapshot.previous_response_duration_ms =
+                        durable_snapshot.previous_response_duration_ms;
+                    snapshot.response_durations_ms = durable_snapshot.response_durations_ms;
+                    snapshot.token_usages = durable_snapshot.token_usages;
+                    snapshot.unattributed_token_usage = durable_snapshot.unattributed_token_usage;
+                    snapshot.updated_at = durable_snapshot.updated_at;
                 }
             }
         }
@@ -5813,73 +5828,137 @@ pub(super) mod tests {
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
-    /// Peer process for
-    /// `shared_store_recovery_after_peer_crash_preserves_committed_transcript`:
-    /// plays the run owner on a shared store — acquires the session
-    /// operation lease, commits its run's transcript rows, signals
-    /// readiness, then sleeps holding the lease until the parent SIGKILLs it
-    /// (process death releases the lease).
-    #[test]
-    fn shared_store_peer_process_helper() {
+    /// Subprocess for
+    /// `shared_store_recovery_after_peer_crash_preserves_committed_transcript`.
+    /// In `run` mode it completes one real service run, starts a second run,
+    /// and waits in model I/O while holding the operation lease. In `inspect`
+    /// mode it restores the durable transcript as a freshly started process
+    /// and writes that view for the parent to compare.
+    #[tokio::test]
+    async fn shared_store_peer_process_helper() {
         let Some(store_path) = std::env::var_os("NAC_TEST_SHARED_STORE_STORE") else {
             return;
         };
-        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_SHARED_STORE_READY").unwrap());
+        let store_path = PathBuf::from(store_path);
         let session_id = std::env::var("NAC_TEST_SHARED_STORE_SESSION").unwrap();
-        let _lease =
-            sessions::SessionOperationLease::try_acquire(Path::new(&store_path), &session_id)
+        let base_url = std::env::var("NAC_TEST_SHARED_STORE_BASE_URL").unwrap();
+        let mode =
+            std::env::var("NAC_TEST_SHARED_STORE_MODE").unwrap_or_else(|_| "run".to_string());
+        let client = ModelClient::new_for_test_server(base_url);
+        let mut agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::load_session(&store_path, &session_id).unwrap();
+        agent
+            .restore_messages_merging_log_tail(snapshot.messages.clone(), None)
+            .await
+            .unwrap();
+
+        if mode == "inspect" {
+            let output_path =
+                PathBuf::from(std::env::var_os("NAC_TEST_SHARED_STORE_OUTPUT").unwrap());
+            std::fs::write(output_path, serde_json::to_vec(&agent.messages).unwrap()).unwrap();
+            return;
+        }
+
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id,
+                store_path,
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_git: Some(GitTarget::local("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        let mut events = parts.service.subscribe_events();
+        parts
+            .service
+            .try_submit_prompt("peer completed prompt".to_string())
+            .unwrap();
+        loop {
+            let envelope = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("timed out waiting for the peer's completed run")
                 .unwrap();
-        let writer = crate::store::TranscriptLogWriter::new(Path::new(&store_path)).unwrap();
-        writer
-            .append(
-                &session_id,
-                1,
-                &Message::User {
-                    content: "peer prompt".to_string(),
-                },
-            )
+            if matches!(
+                &envelope.event,
+                SessionEvent::RunCompleted { response, .. } if response == "peer answer"
+            ) {
+                break;
+            }
+        }
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+
+        parts
+            .service
+            .try_submit_prompt("peer interrupted prompt".to_string())
             .unwrap();
-        writer
-            .append(
-                &session_id,
-                2,
-                &Message::Assistant {
-                    content: Some("peer answer".to_string()),
-                    reasoning_text: None,
-                    reasoning_details: None,
-                    tool_calls: None,
-                    duration_ms: None,
-                    model_origin: None,
-                    reasoning_field: None,
-                },
-            )
-            .unwrap();
-        std::fs::write(ready_path, b"ready").unwrap();
-        std::thread::sleep(Duration::from_secs(30));
+        tokio::time::sleep(Duration::from_secs(30)).await;
     }
 
-    /// Regression test for issue #146 (shared-store recovery): two `nac-web`
-    /// processes share one SQLite store. The peer (child process) commits
-    /// transcript rows under the operation lease and is killed; this
-    /// service's long-lived cached agent still holds the pre-peer in-memory
-    /// transcript. Accepting the recovery submission must refresh the stale
-    /// transcript under the released lease: the run must succeed, and no
-    /// committed row may be deleted.
+    /// Regression test for issue #146 (shared-store recovery): a child
+    /// process completes one real run, starts another, and is SIGKILLed while
+    /// its model request holds the session operation lease. A survivor with a
+    /// stale cached service must adopt every committed transcript row and
+    /// persisted run-state field before running. A fresh post-recovery
+    /// process must then restore the same transcript, with counters and
+    /// SQLite integrity intact.
     #[tokio::test]
     async fn shared_store_recovery_after_peer_crash_preserves_committed_transcript() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
         let store_path = test_store_path("shared_store_recovery");
         let session_id = "session-shared-store".to_string();
-        let server = ScriptedServer::start(vec![ScriptedResponse::json(
-            "200 OK",
-            serde_json::json!({
-                "status": "completed",
-                "output": [{"type": "message", "content": [{"type": "output_text", "text": "survivor answer"}]}],
-                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-            })
-            .to_string(),
-        )]);
+        let (interrupted_ready_sender, interrupted_ready_receiver) =
+            std::sync::mpsc::sync_channel(1);
+        let (release_interrupted_sender, release_interrupted_receiver) =
+            std::sync::mpsc::sync_channel(1);
+        let server = ScriptedServer::start_observed(
+            vec![
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "peer answer"}]}],
+                        "usage": {"input_tokens": 101, "output_tokens": 11, "total_tokens": 112}
+                    })
+                    .to_string(),
+                ),
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "killed answer"}]}],
+                        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                    })
+                    .to_string(),
+                ),
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "survivor answer"}]}],
+                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                    })
+                    .to_string(),
+                ),
+            ],
+            move |index, _request| {
+                if index == 1 {
+                    interrupted_ready_sender.send(()).unwrap();
+                    release_interrupted_receiver.recv().unwrap();
+                }
+            },
+        );
         let client = ModelClient::new_for_test_server(server.base_url.clone());
         let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
         let snapshot = sessions::new_snapshot(
@@ -5910,14 +5989,19 @@ pub(super) mod tests {
             workspace_git: Some(GitTarget::local("/repo")),
             resume_base_cwd: PathBuf::from("/repo"),
         });
-        // The survivor's cached agent is stale from the start: it holds only
-        // the creation-time transcript (one system message).
+        // The survivor's cached agent and run accounting predate both peer
+        // runs.
         assert_eq!(parts.service.agent.lock().await.messages.len(), 1);
+        assert!(parts
+            .service
+            .session_snapshot
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .token_usages
+            .is_empty());
 
-        // The peer process commits its run's transcript rows under the
-        // operation lease, then is killed mid-ownership (SIGKILL): the OS
-        // releases the lease.
-        let ready_path = store_path.parent().unwrap().join("peer-ready");
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -5925,30 +6009,27 @@ pub(super) mod tests {
                 "--nocapture",
             ])
             .env("NAC_TEST_SHARED_STORE_STORE", &store_path)
-            .env("NAC_TEST_SHARED_STORE_READY", &ready_path)
             .env("NAC_TEST_SHARED_STORE_SESSION", &session_id)
+            .env("NAC_TEST_SHARED_STORE_BASE_URL", &server.base_url)
+            .env("NAC_TEST_SHARED_STORE_MODE", "run")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        for _ in 0..200 {
-            if ready_path.exists() {
-                break;
-            }
-            assert!(
-                child.try_wait().unwrap().is_none(),
-                "peer helper exited early"
-            );
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(ready_path.exists(), "peer helper never became ready");
+        interrupted_ready_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("peer never reached its interrupted model request");
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "peer helper exited before SIGKILL"
+        );
         child.kill().unwrap();
         child.wait().unwrap();
+        release_interrupted_sender.send(()).unwrap();
 
-        // The survivor accepts the recovery submission. Admission acquires
-        // the released lease and must refresh the stale in-memory
-        // transcript from the durable store before the run appends.
+        // The survivor acquires the released lease, adopts the peer's
+        // completed exchange plus interrupted prompt, and appends after them.
         let mut events = parts.service.subscribe_events();
         parts
             .service
@@ -5967,7 +6048,7 @@ pub(super) mod tests {
             }
         };
         assert!(
-            matches!(terminal.event, SessionEvent::RunCompleted { ref response, .. } if response == "survivor answer"),
+            matches!(&terminal.event, SessionEvent::RunCompleted { response, .. } if response == "survivor answer"),
             "the recovery run must complete from the refreshed transcript: {:?}",
             terminal.event
         );
@@ -5979,38 +6060,98 @@ pub(super) mod tests {
         }
         assert!(parts.service.active_run().is_none());
 
-        // No committed row was deleted: the peer's prompt and answer, then
-        // the survivor's prompt and answer, are all durable and contiguous.
         let log = crate::store::TranscriptLogWriter::new(&store_path)
             .unwrap()
             .read_from(&session_id, 0)
             .unwrap();
-        assert_eq!(log.len(), 4);
+        assert_eq!(log.len(), 5);
         assert_eq!(log[0].0, 1);
-        assert!(matches!(log[0].1, Message::User { ref content } if content == "peer prompt"));
+        assert!(
+            matches!(&log[0].1, Message::User { content } if content == "peer completed prompt")
+        );
         assert_eq!(log[1].0, 2);
         assert!(
-            matches!(log[1].1, Message::Assistant { content: Some(ref text), .. } if text == "peer answer")
+            matches!(&log[1].1, Message::Assistant { content: Some(text), .. } if text == "peer answer")
         );
         assert_eq!(log[2].0, 3);
-        assert!(matches!(log[2].1, Message::User { ref content } if content == "survivor prompt"));
-        assert_eq!(log[3].0, 4);
         assert!(
-            matches!(log[3].1, Message::Assistant { content: Some(ref text), .. } if text == "survivor answer")
+            matches!(&log[2].1, Message::User { content } if content == "peer interrupted prompt")
+        );
+        assert_eq!(log[3].0, 4);
+        assert!(matches!(&log[3].1, Message::User { content } if content == "survivor prompt"));
+        assert_eq!(log[4].0, 5);
+        assert!(
+            matches!(&log[4].1, Message::Assistant { content: Some(text), .. } if text == "survivor answer")
         );
 
-        // Both processes now serve the same complete transcript: the
-        // survivor's in-memory transcript matches the durable store.
         let agent = parts.service.agent.lock().await;
-        assert_eq!(agent.messages.len(), 5);
+        assert_eq!(agent.messages.len(), 6);
         for (idx, message) in &log {
             assert_eq!(
                 serde_json::to_vec(message).unwrap(),
                 serde_json::to_vec(&agent.messages[*idx as usize]).unwrap()
             );
         }
+        let survivor_messages = serde_json::to_vec(&agent.messages).unwrap();
         drop(agent);
 
+        // The recovery run must append its accounting to the peer's durable
+        // history rather than overwriting that history from the survivor's
+        // stale cached snapshot.
+        let loaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(loaded.token_usages.len(), 2);
+        assert_eq!(loaded.token_usages[0].as_ref().unwrap().input_tokens, 101);
+        assert_eq!(loaded.token_usages[1].as_ref().unwrap().input_tokens, 10);
+        let durations = loaded.response_durations_ms.as_ref().unwrap();
+        assert_eq!(durations.len(), 2);
+        assert!(durations[0].is_some());
+        assert!(durations[1].is_some());
+
+        let summary = sessions::list_sessions(&store_path)
+            .unwrap()
+            .into_iter()
+            .find(|summary| summary.session_id == session_id)
+            .unwrap();
+        assert_eq!(summary.visible_message_count, 5);
+        assert_eq!(summary.last_user_prompt.as_deref(), Some("survivor prompt"));
+        assert_eq!(summary.run_count, 3);
+        let connection = crate::store::open_connection(&store_path).unwrap();
+        let integrity: String = connection
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+        drop(connection);
+
+        // A new process after recovery must restore the same complete
+        // transcript as the still-live survivor.
+        let restarted_output = store_path
+            .parent()
+            .unwrap()
+            .join("restarted-transcript.json");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "session_service::tests::shared_store_peer_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_TEST_SHARED_STORE_STORE", &store_path)
+            .env("NAC_TEST_SHARED_STORE_SESSION", &session_id)
+            .env("NAC_TEST_SHARED_STORE_BASE_URL", &server.base_url)
+            .env("NAC_TEST_SHARED_STORE_MODE", "inspect")
+            .env("NAC_TEST_SHARED_STORE_OUTPUT", &restarted_output)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "restarted peer helper failed");
+        assert_eq!(
+            std::fs::read(&restarted_output).unwrap(),
+            survivor_messages,
+            "restarted and surviving processes must serve the same transcript"
+        );
+
+        assert_eq!(server.finish().len(), 3);
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
