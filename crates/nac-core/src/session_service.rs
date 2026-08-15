@@ -6,12 +6,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{mpsc, Mutex},
+    sync::{mpsc, watch, Mutex},
     task::JoinHandle,
 };
 use uuid::Uuid;
 
-use crate::agent::Agent;
+use crate::agent::{Agent, RunPromptCommitStatus};
 use crate::commands::{self, PreparedPrompt, PreparedUserInput};
 use crate::events::{
     AgentEvent, CompactionFailure, CompactionReason, EventSink, SessionEvent, SessionEventBoundary,
@@ -310,6 +310,11 @@ pub struct ThreadEventDecodeDiagnostic {
 }
 
 const MAX_THREAD_EVENT_DIAGNOSTICS: usize = 64;
+const INTERRUPTED_RUN_WARNING: &str =
+    "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue.";
+const FAILED_RUN_WARNING: &str =
+    "The previous run failed before producing a complete response. Resubmit the prompt to continue.";
+const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
 
 struct DecodedThreadEvents {
     events: HashMap<String, Vec<AgentEvent>>,
@@ -324,6 +329,7 @@ struct FrontendSnapshotBlockingLoad {
     thread_event_boundary: SessionEventBoundary,
     thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     worksets: WorksetsSnapshot,
+    run_recovery_warning: Option<String>,
     workspace: WorkspaceSnapshot,
 }
 
@@ -412,14 +418,11 @@ impl SessionClientHandle {
 
     pub fn subscribe_events_with_replay(
         &self,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
     ) -> SessionEventReplaySubscription {
-        self.service.subscribe_events_for_client_with_replay(
-            self.client_id.clone(),
-            after_sequence_id,
-            limit,
-        )
+        self.service
+            .subscribe_events_for_client_with_replay(self.client_id.clone(), cursor, limit)
     }
 
     pub async fn attach(&self) -> Result<SessionClientAttachment> {
@@ -500,7 +503,11 @@ pub struct SessionService {
     workspace_git: Option<GitTarget>,
     config_version: Option<i64>,
     session_snapshot: Arc<Mutex<Option<SessionSnapshot>>>,
-    transcript_recovery_warning: Arc<Option<String>>,
+    transcript_recovery_warning: Arc<StdMutex<Option<String>>>,
+    /// Durable recovery row already merged into this cached service. The store
+    /// remains authoritative; this only avoids re-reading the same transcript
+    /// on every snapshot while an interrupted/failed warning remains visible.
+    reconciled_recovery_run_id: Arc<StdMutex<Option<String>>>,
     /// Shared transcript log writer (orchestrator sessions only). Read paths
     /// go through the same connection as the agent's appends, so store-backed
     /// transcript reads serialize against commit points (step 3).
@@ -549,6 +556,7 @@ struct ActiveRunState {
     started_at: Instant,
     finishing: bool,
     task: Option<JoinHandle<()>>,
+    prompt_commit: watch::Sender<RunPromptCommitStatus>,
     /// Visible-response count of the store transcript at run start,
     /// captured by the run task before its first append (step 4,
     /// never-fold): the diff base for the run-end token/timing bookkeeping.
@@ -573,6 +581,12 @@ struct CancellingRun {
 enum RunOutcome {
     Completed(String, Option<crate::model::TokenUsage>),
     Failed(String, Option<crate::model::TokenUsage>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurableRunTerminal {
+    Canonical,
+    Failed,
 }
 
 enum OperationAdmissionPreparationError {
@@ -660,6 +674,15 @@ impl SessionService {
         run_config
             .agent
             .set_event_sink(EventSink::bus(event_bus.clone()));
+        if let Some(run_id) = run_config.agent.take_interrupted_run_recovery() {
+            event_bus.emit_with_context(
+                SessionEvent::RunFailed {
+                    message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                },
+                Some(SessionRunId::from_stored(run_id)),
+                None,
+            );
+        }
 
         let workspace_git = run_config.workspace_git;
         let metadata = SessionMetadata {
@@ -700,7 +723,8 @@ impl SessionService {
             workspace_git,
             config_version,
             session_snapshot: Arc::new(Mutex::new(session_snapshot)),
-            transcript_recovery_warning: Arc::new(transcript_recovery_warning),
+            transcript_recovery_warning: Arc::new(StdMutex::new(transcript_recovery_warning)),
+            reconciled_recovery_run_id: Arc::new(StdMutex::new(None)),
             transcript_log,
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
@@ -740,10 +764,10 @@ impl SessionService {
 
     pub fn recent_events(
         &self,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
-    ) -> Vec<SessionEventEnvelope> {
-        self.event_bus.recent_events(after_sequence_id, limit)
+    ) -> (SessionEventBoundary, Vec<SessionEventEnvelope>) {
+        self.event_bus.recent_events(cursor, limit)
     }
 
     pub fn subscribe_events_for_client(
@@ -756,11 +780,11 @@ impl SessionService {
     pub fn subscribe_events_for_client_with_replay(
         &self,
         client_id: SessionClientId,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
     ) -> SessionEventReplaySubscription {
         self.event_bus
-            .subscribe_for_client_with_replay(client_id, after_sequence_id, limit)
+            .subscribe_for_client_with_replay(client_id, cursor, limit)
     }
 
     pub fn subscribe_agent_events(&self) -> AgentEventReceiver {
@@ -1001,6 +1025,7 @@ impl SessionService {
             thread_events,
             thread_event_boundary,
             thread_steering,
+            run_recovery_warning,
             worksets,
         ) = {
             let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
@@ -1027,6 +1052,19 @@ impl SessionService {
                 })
                 .transpose()?
                 .unwrap_or_default();
+            let run_recovery_warning = session_id
+                .map(|session_id| {
+                    crate::store::load_run_recovery_with_connection(&conn, session_id)
+                })
+                .transpose()?
+                .flatten()
+                .and_then(|record| match record.status {
+                    crate::store::RunRecoveryStatus::Active => None,
+                    crate::store::RunRecoveryStatus::Interrupted => {
+                        Some(INTERRUPTED_RUN_WARNING.to_string())
+                    }
+                    crate::store::RunRecoveryStatus::Failed => Some(FAILED_RUN_WARNING.to_string()),
+                });
             (
                 sessions,
                 threads,
@@ -1034,6 +1072,7 @@ impl SessionService {
                 thread_events,
                 thread_event_boundary,
                 thread_steering,
+                run_recovery_warning,
                 worksets,
             )
         };
@@ -1044,6 +1083,7 @@ impl SessionService {
             thread_events,
             thread_event_boundary,
             thread_steering,
+            run_recovery_warning,
             worksets,
             workspace,
         })
@@ -1221,11 +1261,25 @@ impl SessionService {
         };
         let mut metadata = self.metadata();
         metadata.extra_headers.clear();
+        let transcript_warning = self
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transcript_recovery_warning = match (
+            blocking.run_recovery_warning.as_deref(),
+            transcript_warning.as_deref(),
+        ) {
+            (Some(run_warning), Some(transcript_warning)) => {
+                Some(format!("{run_warning}\n\n{transcript_warning}"))
+            }
+            (Some(run_warning), None) => Some(run_warning.to_string()),
+            (None, warning) => warning.map(str::to_owned),
+        };
         let snapshot = SessionFrontendSnapshot {
             metadata,
             messages: loaded_messages.messages,
             message_created_at: loaded_messages.created_at,
-            transcript_recovery_warning: (*self.transcript_recovery_warning).clone(),
+            transcript_recovery_warning,
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
@@ -1759,6 +1813,86 @@ impl SessionService {
         self.store_backed_transcript().await
     }
 
+    pub fn has_unreconciled_durable_run_recovery(&self) -> Result<bool> {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(false);
+        };
+        let record = crate::store::load_run_recovery(&self.metadata.store_path, session_id)?;
+        let reconciled = self
+            .reconciled_recovery_run_id
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str())))
+    }
+
+    /// Reconcile a durable run left by another process and refresh this cached
+    /// service's transcript while the caller holds the session operation lease.
+    /// This preserves the existing event bus/subscribers instead of replacing
+    /// the service after a cross-process handoff.
+    pub async fn reconcile_durable_run_recovery(
+        &self,
+        operation_lease: &sessions::SessionOperationLease,
+    ) -> Result<crate::store::ActiveRunReconciliation> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("run recovery requires a persisted session"))?;
+        if self.has_active_operation() {
+            return Err(anyhow::anyhow!(
+                "cannot reconcile durable run recovery while a local operation is active"
+            ));
+        }
+        operation_lease
+            .validate(&self.metadata.store_path, session_id)
+            .map_err(anyhow::Error::new)?;
+        let recovery = crate::store::reconcile_active_run(&self.metadata.store_path, session_id)?;
+        let mut snapshot = sessions::load_session(&self.metadata.store_path, session_id)?;
+        if Some(snapshot.config_version) != self.config_version {
+            return Err(anyhow::anyhow!(
+                "session '{session_id}' configuration changed before run recovery"
+            ));
+        }
+
+        let (transcript_scan, transcript_warning) = {
+            let mut agent = self.agent.lock().await;
+            if let Some(refreshed_blob) = agent
+                .restore_messages_merging_log_tail(snapshot.messages.clone(), Some(operation_lease))
+                .await?
+            {
+                snapshot.messages = refreshed_blob;
+            }
+            (
+                TranscriptScanCache::from_transcript(&agent.messages),
+                agent.transcript_recovery_warning().map(str::to_owned),
+            )
+        };
+        *self.session_snapshot.lock().await = Some(snapshot);
+        *self.lock_transcript_scan() = transcript_scan;
+        *self
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = transcript_warning;
+        let reconciled_run_id =
+            crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
+                .map(|record| record.run_id);
+        *self
+            .reconciled_recovery_run_id
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = reconciled_run_id;
+
+        if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = &recovery {
+            self.event_bus.emit_with_context(
+                SessionEvent::RunFailed {
+                    message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                },
+                Some(SessionRunId::from_stored(run_id.clone())),
+                None,
+            );
+        }
+        Ok(recovery)
+    }
+
     /// Pages the merged store transcript without cloning or decoding
     /// messages outside the requested visible window. Callers remain
     /// responsible for any transport-specific maximum; a zero limit retains
@@ -1887,6 +2021,30 @@ impl SessionService {
         &self,
         run_id: &SessionRunId,
     ) -> std::result::Result<(), SessionCancelError> {
+        let Some(prompt_commit) = self.run_prompt_commit(run_id) else {
+            return Err(SessionCancelError::NotActive {
+                run_id: run_id.clone(),
+            });
+        };
+        let mut prompt_commit = prompt_commit.subscribe();
+        loop {
+            let status = *prompt_commit.borrow();
+            match status {
+                RunPromptCommitStatus::Pending => {
+                    if prompt_commit.changed().await.is_err() {
+                        return Err(SessionCancelError::NotActive {
+                            run_id: run_id.clone(),
+                        });
+                    }
+                }
+                RunPromptCommitStatus::Committed => break,
+                RunPromptCommitStatus::Failed => {
+                    return Err(SessionCancelError::NotActive {
+                        run_id: run_id.clone(),
+                    });
+                }
+            }
+        }
         let Some(cancelling_run) = self.mark_run_cancelling(run_id) else {
             return Err(SessionCancelError::NotActive {
                 run_id: run_id.clone(),
@@ -1936,6 +2094,7 @@ impl SessionService {
                 transcript_baseline,
                 None,
                 cancel_usage,
+                DurableRunTerminal::Canonical,
             )
             .await
         {
@@ -1978,6 +2137,9 @@ impl SessionService {
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
+        let prompt_commit = self
+            .run_prompt_commit(&run_id)
+            .expect("newly admitted run must own its prompt commit channel");
         let event_bus = self.event_bus.clone();
         let service = self.clone();
         let task = tokio::spawn(async move {
@@ -2003,7 +2165,7 @@ impl SessionService {
                 ));
                 agent.set_steering_dispatch_id(Some(task_run_id.to_string()));
                 let result = agent
-                    .send(&expanded_prompt)
+                    .send_session_run(&expanded_prompt, &task_run_id, prompt_commit)
                     .await
                     .map_err(|error| error.to_string());
                 agent.set_event_sink(EventSink::bus(event_bus));
@@ -2044,7 +2206,11 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        self.try_begin_run_inner(client_id, expanded_prompt, None, false)
+        let active = self.try_begin_run_inner(client_id, expanded_prompt, None, false)?;
+        self.run_prompt_commit(&active.run_id)
+            .expect("test run admission must own a prompt commit channel")
+            .send_replace(RunPromptCommitStatus::Committed);
+        Ok(active)
     }
 
     fn try_begin_run_with_lease(
@@ -2105,6 +2271,22 @@ impl SessionService {
 
         if enforce_coordination {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
+                let recovery =
+                    crate::store::reconcile_active_run(&self.metadata.store_path, session_id)
+                        .map_err(|error| SessionSubmitError::Coordination {
+                            message: SessionCoordinationError::store(format!(
+                                "failed to reconcile interrupted run state: {error:#}"
+                            )),
+                        })?;
+                if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = recovery {
+                    self.event_bus.emit_with_context(
+                        SessionEvent::RunFailed {
+                            message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                        },
+                        Some(SessionRunId::from_stored(run_id)),
+                        None,
+                    );
+                }
                 let mut expired =
                     crate::store::expire_session_steering(&self.metadata.store_path, session_id)
                         .map_err(|error| SessionSubmitError::Coordination {
@@ -2146,11 +2328,14 @@ impl SessionService {
             submitted_user_message: Some(submitted_user_message),
             started_at_epoch_ms: submitted_at_epoch_ms,
         };
+        let (prompt_commit, _prompt_commit_receiver) =
+            watch::channel(RunPromptCommitStatus::Pending);
         *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
             snapshot: active_run.clone(),
             started_at: Instant::now(),
             finishing: false,
             task: None,
+            prompt_commit,
             transcript_baseline: None,
             _operation_lease: operation_lease,
         }));
@@ -2188,12 +2373,18 @@ impl SessionService {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
         };
+        let durable_terminal = if matches!(outcome, RunOutcome::Failed(..)) {
+            DurableRunTerminal::Failed
+        } else {
+            DurableRunTerminal::Canonical
+        };
         let persistence_error = match self
             .persist_run_snapshot(
                 &finishing_run.snapshot,
                 finishing_run.transcript_baseline,
                 completed_duration_ms,
                 completed_usage,
+                durable_terminal,
             )
             .await
         {
@@ -2379,6 +2570,17 @@ impl SessionService {
         })
     }
 
+    fn run_prompt_commit(
+        &self,
+        run_id: &SessionRunId,
+    ) -> Option<watch::Sender<RunPromptCommitStatus>> {
+        let guard = self.lock_active_operation();
+        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_ref() else {
+            return None;
+        };
+        (&active_run.snapshot.run_id == run_id).then(|| active_run.prompt_commit.clone())
+    }
+
     fn set_run_task(&self, run_id: &SessionRunId, task: JoinHandle<()>) {
         let mut guard = self.lock_active_operation();
         let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
@@ -2443,6 +2645,7 @@ impl SessionService {
         transcript_baseline: Option<usize>,
         completed_duration_ms: Option<u64>,
         completed_usage: Option<crate::model::TokenUsage>,
+        durable_terminal: DurableRunTerminal,
     ) -> Result<()> {
         {
             let snapshot = self.session_snapshot.lock().await;
@@ -2452,7 +2655,7 @@ impl SessionService {
         }
         self.update_transcript_scan().await?;
         let current_response_count = self.lock_transcript_scan().visible_response_count;
-        let update = {
+        let mut update = {
             let mut snapshot = self.session_snapshot.lock().await;
             let Some(snapshot) = snapshot.as_mut() else {
                 return Ok(());
@@ -2487,7 +2690,14 @@ impl SessionService {
                 unattributed_token_usage,
             })
         };
-
+        match durable_terminal {
+            DurableRunTerminal::Canonical => {
+                update.finished_run_id = Some(active_run.run_id.to_string());
+            }
+            DurableRunTerminal::Failed => {
+                update.failed_run_id = Some(active_run.run_id.to_string());
+            }
+        }
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
         tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
@@ -3883,6 +4093,13 @@ pub(super) mod tests {
 
         let snapshot = parts.service.frontend_snapshot().await.unwrap();
         assert!(snapshot.active_run.is_some());
+        assert_eq!(
+            crate::store::load_run_recovery(&store_path, &session_id)
+                .unwrap()
+                .unwrap()
+                .run_id,
+            handle.run_id.as_str()
+        );
         let roles: Vec<&str> = snapshot
             .messages
             .iter()
@@ -3914,6 +4131,12 @@ pub(super) mod tests {
         assert_eq!(snapshot.messages.len(), 5);
         assert!(
             matches!(&snapshot.messages[4], Message::Assistant { content: Some(text), .. } if text == "done")
+        );
+        assert!(
+            crate::store::load_run_recovery(&store_path, &session_id)
+                .unwrap()
+                .is_none(),
+            "the canonical terminal save clears the active marker atomically"
         );
 
         // The live trigger fired once per commit point across the run.
@@ -4072,6 +4295,8 @@ pub(super) mod tests {
             .unwrap_err();
         assert!(no_run.to_string().contains("no active run"));
 
+        let (prompt_commit, _prompt_commit_receiver) =
+            watch::channel(RunPromptCommitStatus::Pending);
         *service
             .active_operation
             .lock()
@@ -4087,6 +4312,7 @@ pub(super) mod tests {
                 started_at: Instant::now(),
                 finishing: false,
                 task: None,
+                prompt_commit,
                 transcript_baseline: None,
                 _operation_lease: None,
             }));
@@ -4885,6 +5111,126 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn recovered_session_continues_without_model_bookkeeping_and_clears_warning() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let store_path = test_store_path("recovered_continuation");
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            serde_json::json!({
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "continued"}]
+                }],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+            .to_string(),
+        )]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "recovered-continuation".to_string();
+        let agent = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_git: Some(GitTarget::local("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        let interrupted_run_id = SessionRunId::new();
+        parts
+            .service
+            .agent
+            .lock()
+            .await
+            .push_and_log_run_prompt_for_test(
+                Message::User {
+                    content: "prompt before restart".to_string(),
+                },
+                &interrupted_run_id,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            crate::store::reconcile_active_run(&store_path, &session_id).unwrap(),
+            crate::store::ActiveRunReconciliation::Interrupted { .. }
+        ));
+        assert_eq!(
+            parts
+                .service
+                .frontend_snapshot()
+                .await
+                .unwrap()
+                .transcript_recovery_warning
+                .as_deref(),
+            Some(INTERRUPTED_RUN_WARNING)
+        );
+
+        let mut events = parts.service.subscribe_events();
+        let handle = parts
+            .service
+            .try_submit_prompt("continue after restart".to_string())
+            .unwrap();
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+        drop(handle);
+        let published =
+            std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<SessionEventEnvelope>>();
+        assert!(published.iter().any(|envelope| {
+            matches!(
+                &envelope.event,
+                SessionEvent::RunCompleted { response, .. } if response == "continued"
+            )
+        }));
+
+        let requests = server.finish();
+        assert_eq!(requests.len(), 1);
+        let request_body = String::from_utf8(requests[0].body.clone()).unwrap();
+        assert!(request_body.contains("prompt before restart"));
+        assert!(request_body.contains("continue after restart"));
+        assert!(!request_body.contains(INTERRUPTED_RUN_WARNING));
+        assert!(!request_body.contains(interrupted_run_id.as_str()));
+        assert!(parts
+            .service
+            .frontend_snapshot()
+            .await
+            .unwrap()
+            .transcript_recovery_warning
+            .is_none());
+        assert!(crate::store::load_run_recovery(&store_path, &session_id)
+            .unwrap()
+            .is_none());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
     async fn finish_run_persists_token_usage() {
         let store_path = test_store_path("active_finish_token_usage");
         let client = ModelClient::new_for_test();
@@ -5041,9 +5387,12 @@ pub(super) mod tests {
         {
             let mut agent = parts.service.agent.lock().await;
             agent
-                .push_and_log_for_test(Message::User {
-                    content: "prompt".to_string(),
-                })
+                .push_and_log_run_prompt_for_test(
+                    Message::User {
+                        content: "prompt".to_string(),
+                    },
+                    &active.run_id,
+                )
                 .await
                 .unwrap();
         }
@@ -5561,6 +5910,7 @@ pub(super) mod tests {
         let terminal_events = parts
             .service
             .recent_events(None, 32)
+            .1
             .into_iter()
             .filter(|envelope| {
                 matches!(
@@ -5767,6 +6117,7 @@ pub(super) mod tests {
                 finishing.transcript_baseline,
                 Some(42),
                 None,
+                DurableRunTerminal::Canonical,
             )
             .await
             .unwrap();
@@ -5854,6 +6205,7 @@ pub(super) mod tests {
         let terminal_events = parts
             .service
             .recent_events(None, 16)
+            .1
             .into_iter()
             .filter(|envelope| {
                 matches!(
@@ -6002,9 +6354,12 @@ pub(super) mod tests {
         {
             let mut agent = parts.service.agent.lock().await;
             agent
-                .push_and_log_for_test(Message::User {
-                    content: "failed prompt".to_string(),
-                })
+                .push_and_log_run_prompt_for_test(
+                    Message::User {
+                        content: "failed prompt".to_string(),
+                    },
+                    &active.run_id,
+                )
                 .await
                 .unwrap();
         }
@@ -6051,6 +6406,84 @@ pub(super) mod tests {
             transcript.last(),
             Some(Message::User { content }) if content == "failed prompt"
         ));
+        let recovery = crate::store::load_run_recovery(&store_path, &session_id)
+            .unwrap()
+            .expect("failed run must retain a durable terminal outcome");
+        assert_eq!(recovery.run_id, active.run_id.as_str());
+        assert_eq!(recovery.status, crate::store::RunRecoveryStatus::Failed);
+        assert_eq!(
+            parts
+                .service
+                .frontend_snapshot()
+                .await
+                .unwrap()
+                .transcript_recovery_warning
+                .as_deref(),
+            Some(FAILED_RUN_WARNING)
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn cancellation_waits_for_the_atomic_prompt_commit() {
+        let (parts, store_path) =
+            test_active_service("cancel_prompt_barrier", "cancel-prompt-barrier");
+        let active = parts
+            .service
+            .try_begin_run_inner(None, "cancel prompt", None, false)
+            .unwrap();
+        let prompt_commit = parts.service.run_prompt_commit(&active.run_id).unwrap();
+        let cancel_service = parts.service.clone();
+        let cancel_run_id = active.run_id.clone();
+        let cancel =
+            tokio::spawn(async move { cancel_service.request_cancel(&cancel_run_id).await });
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !cancel.is_finished(),
+            "cancellation must not claim the run before its user turn is durable"
+        );
+
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent
+                .push_and_log_run_prompt_for_test(
+                    Message::User {
+                        content: "cancel prompt".to_string(),
+                    },
+                    &active.run_id,
+                )
+                .await
+                .unwrap();
+        }
+        prompt_commit.send_replace(RunPromptCommitStatus::Committed);
+        cancel.await.unwrap().unwrap();
+
+        let transcript = crate::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .read_from("cancel-prompt-barrier", 0)
+            .unwrap();
+        assert_eq!(transcript.len(), 2);
+        assert!(matches!(
+            &transcript[0].1,
+            Message::User { content } if content == "cancel prompt"
+        ));
+        assert!(matches!(
+            &transcript[1].1,
+            Message::Assistant {
+                content: Some(content),
+                tool_calls,
+                ..
+            } if content == crate::agent::RUN_CANCELLED_MARKER
+                && tool_calls.as_ref().is_none_or(Vec::is_empty)
+        ));
+        assert!(
+            crate::store::load_run_recovery(&store_path, "cancel-prompt-barrier")
+                .unwrap()
+                .is_none()
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -6114,9 +6547,12 @@ pub(super) mod tests {
         {
             let mut agent = parts.service.agent.lock().await;
             agent
-                .push_and_log_for_test(Message::User {
-                    content: "cancel prompt".to_string(),
-                })
+                .push_and_log_run_prompt_for_test(
+                    Message::User {
+                        content: "cancel prompt".to_string(),
+                    },
+                    &active.run_id,
+                )
                 .await
                 .unwrap();
             agent.last_usage = Some(crate::model::TokenUsage {
@@ -6173,6 +6609,12 @@ pub(super) mod tests {
         assert_eq!(cancelled.run_id.as_ref(), Some(&active.run_id));
         assert_eq!(cancelled.event, SessionEvent::RunCancelled);
         assert!(parts.service.active_run().is_none());
+        assert!(
+            crate::store::load_run_recovery(&store_path, &session_id)
+                .unwrap()
+                .is_none(),
+            "the cancellation marker and run-state save clear the durable active marker"
+        );
         assert!(parts.service.active_thread_names().await.is_empty());
         assert!(crate::store::list_thread_steering(&store_path, &session_id)
             .unwrap()

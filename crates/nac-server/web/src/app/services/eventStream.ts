@@ -1,9 +1,8 @@
 // Typed wrapper around the session SSE endpoint.
 //
-// EventSource reconnects on its own while the connection merely drops, but it
-// gives up for good once the server answers an error status, so a manual retry
-// with backoff sits on top. Reconnects resume from the last sequence id seen,
-// which the backend replays from, so no event is lost across a gap.
+// The wrapper owns retries so every new connection URL carries the latest
+// complete epoch/sequence cursor. Native EventSource retries would reuse a
+// stale immutable URL.
 
 import { perfEpoch, perfMark } from "@/app/lib/perfDebug";
 import { api } from "@/app/services/api";
@@ -13,6 +12,7 @@ import type {
   ReplayBoundaryEvent,
   ReplayGapEvent,
   SessionEventEnvelope,
+  SessionEventBoundary,
 } from "@/app/types/api";
 
 export type StreamStatus =
@@ -54,7 +54,7 @@ export function subscribeToSessionEvents(
   let source: EventSource | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryDelay = INITIAL_RETRY_MS;
-  let lastSequenceId: number | null = null;
+  let lastCursor: SessionEventBoundary | null = null;
   let closed = false;
   let everOpened = false;
   let failedAttempts = 0;
@@ -65,13 +65,15 @@ export function subscribeToSessionEvents(
 
   const connect = () => {
     if (closed) return;
-    setStatus(lastSequenceId === null ? "connecting" : "reconnecting");
+    setStatus(lastCursor === null ? "connecting" : "reconnecting");
 
     const base = api.eventStreamUrl(sessionId);
-    const url =
-      lastSequenceId === null
-        ? base
-        : `${base}?after_sequence_id=${lastSequenceId}`;
+    const params = new URLSearchParams();
+    if (lastCursor !== null) {
+      params.set("after_epoch_id", lastCursor.epoch_id);
+      params.set("after_sequence_id", String(lastCursor.sequence_id));
+    }
+    const url = params.size === 0 ? base : `${base}?${params.toString()}`;
     source = new EventSource(url);
 
     source.onopen = () => {
@@ -86,7 +88,10 @@ export function subscribeToSessionEvents(
         event as MessageEvent<string>,
       );
       if (!envelope) return;
-      lastSequenceId = envelope.sequence_id;
+      lastCursor = {
+        epoch_id: envelope.epoch_id,
+        sequence_id: envelope.sequence_id,
+      };
       perfMark("sse:session_event", {
         fields: { type: envelope.event.type },
         throttleMs: 0,
@@ -114,7 +119,14 @@ export function subscribeToSessionEvents(
       const parsed = parseEvent<ReplayBoundaryEvent>(
         event as MessageEvent<string>,
       );
-      if (parsed) handlers.onReplayBoundary?.(parsed);
+      if (!parsed) return;
+      if (lastCursor !== null && lastCursor.epoch_id !== parsed.epoch_id) {
+        lastCursor = {
+          epoch_id: parsed.epoch_id,
+          sequence_id: parsed.replay_boundary_sequence_id,
+        };
+      }
+      handlers.onReplayBoundary?.(parsed);
     });
 
     source.addEventListener("replay_gap", (event) => {
@@ -137,13 +149,15 @@ export function subscribeToSessionEvents(
         return;
       }
       setStatus("reconnecting");
-      // CONNECTING means EventSource is retrying by itself; CLOSED means it
-      // hit an error status and will never retry, so reconnect manually.
-      if (source?.readyState !== EventSource.CLOSED) return;
-      source.close();
+      source?.close();
       source = null;
-      retryTimer = setTimeout(connect, retryDelay);
-      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+      if (retryTimer === null) {
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          connect();
+        }, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+      }
     };
   };
 

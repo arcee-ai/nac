@@ -1,11 +1,12 @@
 use super::*;
 
-// 13 adds the light-model columns (`light_model_json` on both `sessions` and
-// `model_configurations`) — `open_runtime_connection` returns early whenever
-// the stored version already equals this one. (12 carries the same schema as
-// 11, which added episodes.status; 10 added the ssh_configurations table; 9
-// the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 13;
+// 14 adds the bounded interrupted-run recovery row. 13 added the light-model
+// columns (`light_model_json` on both `sessions` and `model_configurations`) —
+// `open_runtime_connection` returns early whenever the stored version already
+// equals this one. (12 carries the same schema as 11, which added
+// episodes.status; 10 added the ssh_configurations table; 9 the per-session ssh
+// port and key columns.)
+const STORE_SCHEMA_VERSION: i64 = 14;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -142,10 +143,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -219,6 +220,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
         "TEXT",
     )?;
     create_ssh_configurations_table(&transaction)?;
+    create_session_run_recovery_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -657,6 +659,22 @@ fn create_ssh_configurations_table(conn: &Connection) -> Result<()> {
     )?;
     Ok(())
 }
+/// One content-free recovery obligation per session. The submitted transcript
+/// row remains the unique source for the prompt; this table only says which
+/// run owns it and whether that run is active, interrupted, or failed.
+fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_run_recovery (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
+             submitted_message_id INTEGER NOT NULL
+                 REFERENCES thread_events(id) ON DELETE CASCADE,
+             status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed'))
+         );",
+    )?;
+    Ok(())
+}
 
 /// Same bound the per-session column enforces, so a saved default can never
 /// describe a session the sessions table would refuse.
@@ -770,6 +788,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "thread_events",
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
+        "session_run_recovery",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

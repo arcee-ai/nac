@@ -488,7 +488,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
             .as_array()
             .is_some_and(|tools| !tools.is_empty())
     }));
-    let published = parts.service.recent_events(None, 100);
+    let published = parts.service.recent_events(None, 100).1;
     // The first request is below threshold, then returns a response large enough
     // to push a fresh serialized estimate over it. Keeping the provider's sampled
     // total (39) across admission means the second request also stays below.
@@ -604,8 +604,8 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     assert_eq!(persisted_after.1, persisted_before_state.1); // last_response_duration_ms
     assert_eq!(persisted_after.2, persisted_before_state.2); // previous_response_duration_ms
     assert_eq!(persisted_after.3, persisted_before_state.3); // response_durations_ms_json
-    // token_usages_json now includes the compaction's projected context
-    // as unattributed_usage (the context gauge override).
+                                                             // token_usages_json now includes the compaction's projected context
+                                                             // as unattributed_usage (the context gauge override).
     assert_ne!(persisted_after.4, persisted_before_state.4);
     assert!(persisted_after
         .4
@@ -845,6 +845,7 @@ async fn abort_after_manual_compaction_commit_cannot_supersede_completion() {
     let lifecycle = parts
         .service
         .recent_events(None, 16)
+        .1
         .into_iter()
         .filter(|envelope| {
             matches!(

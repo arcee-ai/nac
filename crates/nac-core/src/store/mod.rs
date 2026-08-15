@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod render;
+mod run_recovery;
 mod schema;
 mod ssh_configurations;
 mod steering;
@@ -19,6 +20,7 @@ mod workspace_revisions;
 
 pub use model_configurations::*;
 pub use render::*;
+pub(crate) use run_recovery::*;
 pub use schema::{default_store_path, initialize};
 pub use ssh_configurations::*;
 pub use steering::*;

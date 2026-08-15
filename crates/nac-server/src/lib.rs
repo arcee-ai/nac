@@ -51,7 +51,8 @@ use nac_core::{
         slash_command_definitions, PreparedUserInput, SlashCommand, SlashCommandDefinition,
     },
     events::{
-        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventEnvelope, SessionReplayGap,
+        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventBoundary,
+        SessionEventEnvelope, SessionReplayGap,
     },
     light_model::{LightModelError, LightModelSettings},
     model::{
@@ -755,6 +756,7 @@ pub struct ThreadSteeringResponse {
 #[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct EventsQuery {
+    pub after_epoch_id: Option<String>,
     pub after_sequence_id: Option<u64>,
     pub limit: Option<usize>,
 }
@@ -848,6 +850,7 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct RecentEventsResponse {
+    pub boundary: SessionEventBoundary,
     pub events: Vec<SessionEventEnvelope>,
 }
 
@@ -1486,7 +1489,23 @@ impl SessionManager {
             {
                 let version = self.session_config(session_id)?.config_version;
                 if service.config_version() == Some(version) {
-                    return Ok(service);
+                    let has_recovery = service.has_unreconciled_durable_run_recovery()?;
+                    if !has_recovery || service.has_active_operation() {
+                        return Ok(service);
+                    }
+                    match sessions::SessionOperationLease::try_acquire(
+                        &self.inner.store_path,
+                        session_id,
+                    ) {
+                        Ok(lease) => {
+                            service.reconcile_durable_run_recovery(&lease).await?;
+                            return Ok(service);
+                        }
+                        Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                            return Ok(service);
+                        }
+                        Err(error) => return Err(anyhow::Error::new(error)),
+                    }
                 }
                 let mut active = self.inner.active_sessions.write().await;
                 if active
@@ -1580,6 +1599,11 @@ impl SessionManager {
             self.attach_session_locked(session_id, Some(operation_lease))
                 .await?
         };
+        if service.has_unreconciled_durable_run_recovery()? && !service.has_active_operation() {
+            service
+                .reconcile_durable_run_recovery(operation_lease)
+                .await?;
+        }
         Ok(service)
     }
 
@@ -1935,19 +1959,18 @@ impl SessionManager {
     pub async fn recent_events(
         &self,
         session_id: &str,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
-    ) -> Result<Vec<SessionEventEnvelope>> {
+    ) -> Result<(SessionEventBoundary, Vec<SessionEventEnvelope>)> {
         Ok(self
             .attach_session(session_id)
             .await?
-            .recent_events(after_sequence_id, limit))
+            .recent_events(cursor, limit))
     }
-
     pub async fn subscribe_events(
         &self,
         session_id: &str,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
     ) -> Result<(
         String,
@@ -1960,7 +1983,7 @@ impl SessionManager {
         let service = self.attach_session(session_id).await?;
         let subscription = service
             .connect_client()
-            .subscribe_events_with_replay(after_sequence_id, limit);
+            .subscribe_events_with_replay(cursor, limit);
         Ok((
             subscription.epoch_id,
             subscription.replay_boundary_sequence_id,
@@ -4029,6 +4052,22 @@ async fn queue_thread_steering_handler(
     ))
 }
 
+fn event_cursor(
+    query: &EventsQuery,
+) -> std::result::Result<Option<SessionEventBoundary>, ApiError> {
+    match (&query.after_epoch_id, query.after_sequence_id) {
+        (None, None) => Ok(None),
+        (Some(epoch_id), Some(sequence_id)) => Ok(Some(SessionEventBoundary {
+            epoch_id: epoch_id.clone(),
+            sequence_id,
+        })),
+        _ => Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "after_epoch_id and after_sequence_id must be supplied together".to_string(),
+        }),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/sessions/{session_id}/events",
@@ -4042,14 +4081,15 @@ async fn recent_events(
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<EventsQuery>,
 ) -> std::result::Result<Json<RecentEventsResponse>, ApiError> {
-    let events = manager
+    let cursor = event_cursor(&query)?;
+    let (boundary, events) = manager
         .recent_events(
             &session_id,
-            query.after_sequence_id,
+            cursor.as_ref(),
             query.limit.unwrap_or(DEFAULT_REPLAY_LIMIT),
         )
         .await?;
-    Ok(Json(RecentEventsResponse { events }))
+    Ok(Json(RecentEventsResponse { boundary, events }))
 }
 
 #[utoipa::path(
@@ -4068,6 +4108,7 @@ async fn stream_events(
     Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>,
     ApiError,
 > {
+    let cursor = event_cursor(&query)?;
     let (
         epoch_id,
         replay_boundary_sequence_id,
@@ -4078,7 +4119,7 @@ async fn stream_events(
     ) = manager
         .subscribe_events(
             &session_id,
-            query.after_sequence_id,
+            cursor.as_ref(),
             query.limit.unwrap_or(DEFAULT_REPLAY_LIMIT),
         )
         .await?;
@@ -4874,6 +4915,39 @@ mod tests {
         ("PUT", "/sessions/order"),
         ("PUT", "/sessions/{session_id}/presentation"),
     ];
+
+    #[test]
+    fn event_cursor_requires_both_epoch_and_sequence() {
+        assert!(event_cursor(&EventsQuery {
+            after_epoch_id: None,
+            after_sequence_id: None,
+            limit: None,
+        })
+        .unwrap()
+        .is_none());
+        assert!(event_cursor(&EventsQuery {
+            after_epoch_id: Some("epoch".to_string()),
+            after_sequence_id: Some(7),
+            limit: None,
+        })
+        .unwrap()
+        .is_some());
+        for query in [
+            EventsQuery {
+                after_epoch_id: Some("epoch".to_string()),
+                after_sequence_id: None,
+                limit: None,
+            },
+            EventsQuery {
+                after_epoch_id: None,
+                after_sequence_id: Some(7),
+                limit: None,
+            },
+        ] {
+            let error = event_cursor(&query).unwrap_err();
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        }
+    }
 
     fn concrete_api_path(path: &str) -> String {
         path.replace("{provider}", "arcee")
@@ -6902,6 +6976,260 @@ thread_timeout_secs = 7200
     }
 
     #[tokio::test]
+    async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch() {
+        let root = temp_root("interrupted_run_restart");
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("restart-test-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let writer = nac_core::store::TranscriptLogWriter::new(&store_path).unwrap();
+        writer
+            .append_run_prompt(
+                "session",
+                0,
+                &nac_core::types::Message::User {
+                    content: "persisted before process death".to_string(),
+                },
+                "run-before-restart",
+            )
+            .unwrap();
+
+        let first_manager = test_manager(&root);
+        let first = first_manager.snapshot("session").await.unwrap();
+        assert_eq!(
+            first.transcript_recovery_warning.as_deref(),
+            Some(
+                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
+            )
+        );
+        assert_eq!(
+            first
+                .messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    nac_core::types::Message::User { content }
+                        if content == "persisted before process death"
+                ))
+                .count(),
+            1
+        );
+        let first_recovery_events = first_manager
+            .recent_events("session", None, 64)
+            .await
+            .unwrap()
+            .1;
+        assert_eq!(
+            first_recovery_events
+                .iter()
+                .filter(|envelope| {
+                    envelope.run_id.as_ref().map(|run_id| run_id.as_str())
+                        == Some("run-before-restart")
+                        && matches!(
+                            envelope.event,
+                            nac_core::events::SessionEvent::RunFailed { .. }
+                        )
+                })
+                .count(),
+            1
+        );
+        let first_epoch = first.thread_event_boundary.epoch_id;
+        drop(first_manager);
+
+        let second_manager = test_manager(&root);
+        let second = second_manager.snapshot("session").await.unwrap();
+        assert_eq!(
+            second.transcript_recovery_warning,
+            first.transcript_recovery_warning
+        );
+        assert_ne!(second.thread_event_boundary.epoch_id, first_epoch);
+        assert!(
+            second_manager
+                .recent_events("session", None, 64)
+                .await
+                .unwrap()
+                .1
+                .iter()
+                .all(|envelope| !matches!(
+                    envelope.event,
+                    nac_core::events::SessionEvent::RunFailed { .. }
+                )),
+            "idempotent rebuild must not synthesize another terminal event"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn cached_manager_snapshot_reconciles_peer_interruption_once() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cached_peer_snapshot");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("cached-snapshot-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+        let cached = manager.attach_session("session").await.unwrap();
+
+        let peer_lease =
+            sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                "session",
+                0,
+                &nac_core::types::Message::User {
+                    content: "committed by peer".to_string(),
+                },
+                "peer-run",
+            )
+            .unwrap();
+        drop(peer_lease);
+
+        let recovered = manager.snapshot("session").await.unwrap();
+        assert_eq!(
+            recovered.transcript_recovery_warning.as_deref(),
+            Some(
+                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
+            )
+        );
+        assert!(matches!(
+            recovered.messages.last(),
+            Some(nac_core::types::Message::User { content }) if content == "committed by peer"
+        ));
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&mapped, &cached));
+        assert!(
+            !cached
+                .has_unreconciled_durable_run_recovery()
+                .expect("recovery lookup should succeed"),
+            "the cached service must not rehydrate the same recovery row again"
+        );
+
+        let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+        assert_eq!(
+            recovery_events
+                .iter()
+                .filter(|envelope| {
+                    envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("peer-run")
+                        && matches!(
+                            envelope.event,
+                            nac_core::events::SessionEvent::RunFailed { .. }
+                        )
+                })
+                .count(),
+            1
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn cached_manager_reconciles_peer_interruption_before_resubmission() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cached_peer_interruption");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("cached-recovery-key"));
+        seed_editable_session(&root, "session");
+        let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+        let cached = manager.attach_session("session").await.unwrap();
+
+        let peer_lease =
+            sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                "session",
+                0,
+                &nac_core::types::Message::User {
+                    content: "committed by peer".to_string(),
+                },
+                "peer-run",
+            )
+            .unwrap();
+        drop(peer_lease);
+
+        let submitted = manager
+            .submit_prompt(
+                "session",
+                SubmitPromptRequest {
+                    prompt: "continue after peer".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let mut continued = false;
+        for _ in 0..100 {
+            let messages = cached.messages_snapshot().await.unwrap();
+            if messages.iter().any(|message| {
+                matches!(
+                    message,
+                    nac_core::types::Message::User { content }
+                        if content == "continue after peer"
+                )
+            }) {
+                continued = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(continued, "replacement prompt never committed");
+        assert_eq!(
+            cached.active_run().unwrap().run_id.as_str(),
+            submitted.run_id
+        );
+        let mapped = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get("session")
+            .cloned()
+            .unwrap();
+        assert!(
+            Arc::ptr_eq(&mapped, &cached),
+            "recovery must preserve the cached service's event bus and subscribers"
+        );
+        let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+        assert_eq!(
+            recovery_events
+                .iter()
+                .filter(|envelope| {
+                    envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("peer-run")
+                        && matches!(
+                            envelope.event,
+                            nac_core::events::SessionEvent::RunFailed { .. }
+                        )
+                })
+                .count(),
+            1
+        );
+        assert!(
+            cached
+                .has_unreconciled_durable_run_recovery()
+                .expect("recovery lookup should succeed"),
+            "the replacement run must own a new durable recovery row"
+        );
+
+        manager.cancel_active_run("session").await.unwrap();
+        endpoint.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionally_repairable() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("repair_incomplete_settings");
@@ -7339,6 +7667,7 @@ thread_timeout_secs = 7200
 
         let terminal_events = service
             .recent_events(None, 64)
+            .1
             .into_iter()
             .filter(|envelope| {
                 matches!(

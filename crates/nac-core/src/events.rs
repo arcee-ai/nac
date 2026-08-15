@@ -86,6 +86,10 @@ impl SessionRunId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub(crate) fn from_stored(value: String) -> Self {
+        Self(value)
+    }
 }
 
 impl Default for SessionRunId {
@@ -557,26 +561,36 @@ impl SessionEventBus {
     pub fn subscribe_for_client_with_replay(
         &self,
         client_id: SessionClientId,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
     ) -> SessionEventReplaySubscription {
+        let epoch_matches = cursor.is_none_or(|cursor| cursor.epoch_id == self.epoch_id);
+        let after_sequence_id = cursor.map(|cursor| cursor.sequence_id);
         let state = self.lock_state();
         let replay_boundary_sequence_id = state.published_sequence_id;
         let oldest_retained_sequence_id =
             state.recent.front().map(|entry| entry.envelope.sequence_id);
         let newest_retained_sequence_id =
             state.recent.back().map(|entry| entry.envelope.sequence_id);
-        let replayed_events = recent_events_from_state(
-            &state,
-            after_sequence_id,
-            Some(replay_boundary_sequence_id),
-            limit,
-        );
-        let replay_gap = replay_gap_for(
-            after_sequence_id,
-            replay_boundary_sequence_id,
-            &replayed_events,
-        );
+        let replayed_events = if epoch_matches {
+            recent_events_from_state(
+                &state,
+                after_sequence_id,
+                Some(replay_boundary_sequence_id),
+                limit,
+            )
+        } else {
+            Vec::new()
+        };
+        let replay_gap = if epoch_matches {
+            replay_gap_for(
+                after_sequence_id,
+                replay_boundary_sequence_id,
+                &replayed_events,
+            )
+        } else {
+            None
+        };
         let receiver = self.sender.subscribe();
         let assistant_deltas = self.delta_sender.subscribe();
         SessionEventReplaySubscription {
@@ -684,11 +698,20 @@ impl SessionEventBus {
 
     pub fn recent_events(
         &self,
-        after_sequence_id: Option<u64>,
+        cursor: Option<&SessionEventBoundary>,
         limit: usize,
-    ) -> Vec<SessionEventEnvelope> {
+    ) -> (SessionEventBoundary, Vec<SessionEventEnvelope>) {
         let state = self.lock_state();
-        recent_events_from_state(&state, after_sequence_id, None, limit)
+        let boundary = SessionEventBoundary {
+            epoch_id: self.epoch_id.clone(),
+            sequence_id: state.published_sequence_id,
+        };
+        let events = if cursor.is_none_or(|cursor| cursor.epoch_id == self.epoch_id) {
+            recent_events_from_state(&state, cursor.map(|cursor| cursor.sequence_id), None, limit)
+        } else {
+            Vec::new()
+        };
+        (boundary, events)
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -1566,10 +1589,17 @@ mod tests {
         for envelope in &envelopes {
             assert!(serialized_envelope_len(envelope, SESSION_EVENT_BUS_REPLAY_BYTE_CAP).is_some());
         }
-        assert_eq!(bus.recent_events(None, events.len()), envelopes);
+        assert_eq!(bus.recent_events(None, events.len()).1, envelopes);
 
-        let subscription =
-            bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(0), events.len());
+        let cursor = SessionEventBoundary {
+            epoch_id: envelopes[0].epoch_id.clone(),
+            sequence_id: 0,
+        };
+        let subscription = bus.subscribe_for_client_with_replay(
+            SessionClientId::new(),
+            Some(&cursor),
+            events.len(),
+        );
         assert_eq!(subscription.replay_gap, None);
         assert_eq!(subscription.replayed_events, envelopes);
     }
@@ -1601,6 +1631,7 @@ mod tests {
         .is_empty());
         assert_eq!(
             bus.recent_events(None, events.len())
+                .1
                 .into_iter()
                 .map(|envelope| match envelope.event {
                     SessionEvent::Agent { event } => event,
@@ -1673,10 +1704,54 @@ mod tests {
         });
 
         assert_eq!(
-            bus.recent_events(None, 10),
+            bus.recent_events(None, 10).1,
             vec![first.clone(), second.clone()]
         );
-        assert_eq!(bus.recent_events(Some(first.sequence_id), 10), vec![second]);
+        let cursor = SessionEventBoundary {
+            epoch_id: first.epoch_id.clone(),
+            sequence_id: first.sequence_id,
+        };
+        assert_eq!(bus.recent_events(Some(&cursor), 10).1, vec![second]);
+    }
+
+    #[test]
+    fn replay_cursor_sequence_is_fenced_by_epoch() {
+        let bus = SessionEventBus::with_capacity(Some("session-a".to_string()), 8);
+        let first = bus.emit(SessionEvent::RunFailed {
+            message: "one".to_string(),
+        });
+        let second = bus.emit(SessionEvent::RunFailed {
+            message: "two".to_string(),
+        });
+
+        let same_epoch_cursor = SessionEventBoundary {
+            epoch_id: first.epoch_id.clone(),
+            sequence_id: first.sequence_id,
+        };
+        let same_epoch = bus.subscribe_for_client_with_replay(
+            SessionClientId::new(),
+            Some(&same_epoch_cursor),
+            8,
+        );
+        assert_eq!(same_epoch.replayed_events, vec![second.clone()]);
+
+        let old_epoch_cursor = SessionEventBoundary {
+            epoch_id: "previous-process".to_string(),
+            sequence_id: u64::MAX,
+        };
+        let old_epoch = bus.subscribe_for_client_with_replay(
+            SessionClientId::new(),
+            Some(&old_epoch_cursor),
+            8,
+        );
+        assert_eq!(old_epoch.epoch_id, first.epoch_id);
+        assert!(old_epoch.replayed_events.is_empty());
+        assert_eq!(old_epoch.replay_gap, None);
+
+        let (boundary, recent) = bus.recent_events(Some(&old_epoch_cursor), 8);
+        assert_eq!(boundary.epoch_id, first.epoch_id);
+        assert_eq!(boundary.sequence_id, second.sequence_id);
+        assert!(recent.is_empty());
     }
 
     #[test]
@@ -1703,22 +1778,34 @@ mod tests {
 
         assert_eq!(first.sequence_id, 1);
         assert_eq!(
-            bus.recent_events(None, 10),
+            bus.recent_events(None, 10).1,
             vec![second.clone(), third.clone()]
         );
+        let first_cursor = SessionEventBoundary {
+            epoch_id: first.epoch_id.clone(),
+            sequence_id: first.sequence_id,
+        };
         assert_eq!(
-            bus.recent_events(Some(1), 10),
+            bus.recent_events(Some(&first_cursor), 10).1,
             vec![second.clone(), third.clone()]
         );
+        let second_cursor = SessionEventBoundary {
+            epoch_id: second.epoch_id.clone(),
+            sequence_id: second.sequence_id,
+        };
         assert_eq!(
-            bus.recent_events(Some(second.sequence_id), 10),
+            bus.recent_events(Some(&second_cursor), 10).1,
             vec![third.clone()]
         );
-        assert_eq!(bus.recent_events(None, 1), vec![third.clone()]);
-        assert!(bus.recent_events(None, 0).is_empty());
+        assert_eq!(bus.recent_events(None, 1).1, vec![third.clone()]);
+        assert!(bus.recent_events(None, 0).1.is_empty());
 
+        let zero_cursor = SessionEventBoundary {
+            epoch_id: first.epoch_id.clone(),
+            sequence_id: 0,
+        };
         let subscription =
-            bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(0), 10);
+            bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(&zero_cursor), 10);
         assert_eq!(
             subscription.oldest_retained_sequence_id,
             Some(second.sequence_id)
@@ -1767,7 +1854,7 @@ mod tests {
 
         assert_eq!(first.sequence_id, 1);
         assert_eq!(second.sequence_id, 2);
-        assert_eq!(bus.recent_events(None, 10), vec![second]);
+        assert_eq!(bus.recent_events(None, 10).1, vec![second]);
     }
 
     #[tokio::test]
@@ -1780,7 +1867,7 @@ mod tests {
             duration_ms: None,
         });
 
-        assert!(bus.recent_events(None, 10).is_empty());
+        assert!(bus.recent_events(None, 10).1.is_empty());
         assert_eq!(subscriber.recv().await.unwrap(), emitted);
     }
 
@@ -1882,10 +1969,11 @@ mod tests {
         assert_eq!(subscription.replayed_events, vec![before]);
         assert_eq!(subscription.receiver.recv().await.unwrap(), oversize);
         assert_eq!(subscription.receiver.recv().await.unwrap(), after.clone());
-        assert_eq!(
-            bus.recent_events(Some(subscription.replay_boundary_sequence_id), 10),
-            vec![after]
-        );
+        let cursor = SessionEventBoundary {
+            epoch_id: after.epoch_id.clone(),
+            sequence_id: subscription.replay_boundary_sequence_id,
+        };
+        assert_eq!(bus.recent_events(Some(&cursor), 10).1, vec![after]);
     }
 
     #[tokio::test]
@@ -1906,11 +1994,12 @@ mod tests {
             })
             .unwrap();
 
-        let mut subscription = bus.subscribe_for_client_with_replay(
-            SessionClientId::new(),
-            Some(first.sequence_id),
-            10,
-        );
+        let cursor = SessionEventBoundary {
+            epoch_id: first.epoch_id.clone(),
+            sequence_id: first.sequence_id,
+        };
+        let mut subscription =
+            bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(&cursor), 10);
         let third = bus.emit(SessionEvent::RunFailed {
             message: "three".to_string(),
         });
@@ -2018,7 +2107,7 @@ mod tests {
 
         assert!(receiver.try_recv().is_err());
         assert!(bus_receiver.try_recv().is_err());
-        assert!(bus.recent_events(None, 10).is_empty());
+        assert!(bus.recent_events(None, 10).1.is_empty());
     }
 
     #[test]
@@ -2155,7 +2244,7 @@ mod tests {
         assert!(serialized.contains("operation failed"));
         assert!(serialized.contains("thread dispatched"));
         assert!(serialized.contains("thread timed out"));
-        let replay = serde_json::to_string(&bus.recent_events(None, 20)).unwrap();
+        let replay = serde_json::to_string(&bus.recent_events(None, 20).1).unwrap();
         assert!(!replay.contains("CANARY"));
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -2211,6 +2300,7 @@ mod tests {
         assert_eq!(broadcast_ids, (1..=total as u64).collect::<Vec<_>>());
         let replay_ids = bus
             .recent_events(None, total)
+            .1
             .into_iter()
             .map(|event| event.sequence_id)
             .collect::<Vec<_>>();
@@ -2258,7 +2348,7 @@ mod tests {
             .unwrap();
         assert_eq!(failed.sequence_id, 1);
         assert!(receiver.try_recv().is_err());
-        assert!(bus.recent_events(None, 10).is_empty());
+        assert!(bus.recent_events(None, 10).1.is_empty());
         let (boundary, records) = bus
             .thread_event_boundary(|| {
                 crate::store::load_all_thread_events(&path, "session-writer-failure", 10)
@@ -2372,7 +2462,7 @@ mod tests {
         let bus = SessionEventBus::new(Some("session-redaction".to_string()));
         EventSink::bus(bus.clone()).emit(credential_bearing_model_error());
 
-        let events = bus.recent_events(None, 10);
+        let events = bus.recent_events(None, 10).1;
         assert_eq!(events.len(), 1);
         let SessionEvent::Agent {
             event: AgentEvent::ModelError { message, .. },
