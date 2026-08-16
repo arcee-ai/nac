@@ -18,9 +18,10 @@ const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 
 class FakeApi {
-  constructor({ releases = [], refs = {} } = {}) {
+  constructor({ releases = [], refs = {}, comparisons = {} } = {}) {
     this.releases = structuredClone(releases);
     this.refs = new Map(Object.entries(refs));
+    this.comparisons = new Map(Object.entries(comparisons));
     this.assets = new Map();
     this.created = 0;
     this.published = 0;
@@ -28,6 +29,10 @@ class FakeApi {
 
   async listReleases() {
     return structuredClone(this.releases);
+  }
+
+  async compareCommits(base, head) {
+    return this.comparisons.get(`${base}...${head}`) || (base === head ? "identical" : "ahead");
   }
 
   async resolveTagOrNull(tag) {
@@ -93,7 +98,6 @@ function rc(tag, { draft = false } = {}) {
 
 function input(overrides = {}) {
   return {
-    base: "0.1.2",
     sha: SHA_B,
     runNumber: 42,
     runAttempt: 1,
@@ -112,26 +116,31 @@ test("canonical tag parsers reject malformed prereleases and rc.0", () => {
   assert.equal(parseRcTag("v0.1.2-rc.10")?.number, 10);
 });
 
-test("prepare creates the first candidate and permits run-number gaps", async () => {
-  const api = new FakeApi({ releases: [stable("v0.1.1")], refs: { "v0.1.1": SHA_A } });
+test("prepare creates the next patch candidate from the greatest stable release", async () => {
+  const api = new FakeApi({
+    releases: [stable("v0.1.1"), stable("v0.1.2")],
+    refs: { "v0.1.1": SHA_A, "v0.1.2": SHA_A },
+  });
   const result = await prepareCandidate(input({ runNumber: 900 }), api);
   assert.deepEqual(result, {
     run: true,
     resume: false,
     sha: SHA_B,
-    base: "0.1.2",
-    version: "0.1.2-rc.900",
-    tag: "v0.1.2-rc.900",
+    base: "0.1.3",
+    version: "0.1.3-rc.900",
+    tag: "v0.1.3-rc.900",
+    latestStableTag: "v0.1.2",
+    latestStableSha: SHA_A,
   });
 });
 
 test("prepare orders RC numbers numerically and skips an unchanged SHA", async () => {
   const api = new FakeApi({
-    releases: [stable("v0.1.1"), rc("v0.1.2-rc.10"), rc("v0.1.2-rc.2")],
+    releases: [stable("v0.1.2"), rc("v0.1.3-rc.10"), rc("v0.1.3-rc.2")],
     refs: {
-      "v0.1.1": SHA_A,
-      "v0.1.2-rc.2": SHA_A,
-      "v0.1.2-rc.10": SHA_B,
+      "v0.1.2": SHA_A,
+      "v0.1.3-rc.2": SHA_A,
+      "v0.1.3-rc.10": SHA_B,
     },
   });
   const result = await prepareCandidate(input({ runNumber: 11 }), api);
@@ -142,35 +151,55 @@ test("prepare orders RC numbers numerically and skips an unchanged SHA", async (
 test("prepare accepts changed source while ignoring malformed release tags", async () => {
   const api = new FakeApi({
     releases: [
-      stable("v0.1.1"),
-      rc("v0.1.2-rc.2"),
-      rc("v0.1.2-beta.9"),
-      rc("v0.1.2-rc.0"),
-      rc("v0.1.2-rc.01"),
+      stable("v0.1.2"),
+      rc("v0.1.3-rc.2"),
+      rc("v0.1.3-beta.9"),
+      rc("v0.1.3-rc.0"),
+      rc("v0.1.3-rc.01"),
     ],
-    refs: { "v0.1.1": SHA_A, "v0.1.2-rc.2": SHA_A },
+    refs: { "v0.1.2": SHA_A, "v0.1.3-rc.2": SHA_A },
   });
   const result = await prepareCandidate(input({ runNumber: 10 }), api);
   assert.equal(result.run, true);
-  assert.equal(result.tag, "v0.1.2-rc.10");
+  assert.equal(result.tag, "v0.1.3-rc.10");
 });
 
-test("prepare skips when the stable target tag exists", async () => {
-  const api = new FakeApi({ releases: [stable("v0.1.1")], refs: { "v0.1.2": SHA_A } });
+test("prepare skips when the next stable target tag already exists", async () => {
+  const api = new FakeApi({
+    releases: [stable("v0.1.2")],
+    refs: { "v0.1.2": SHA_A, "v0.1.3": SHA_A },
+  });
   const result = await prepareCandidate(input(), api);
   assert.equal(result.run, false);
   assert.match(result.reason, /already exists/);
 });
 
-test("prepare rejects a base that is not ahead of the greatest stable release", async () => {
-  const api = new FakeApi({ releases: [stable("v0.1.2"), stable("v0.1.1")] });
-  await assert.rejects(prepareCandidate(input(), api), /greater than latest stable 0\.1\.2/);
+test("prepare skips when the latest stable already publishes the scheduled source", async () => {
+  const api = new FakeApi({
+    releases: [stable("v0.1.2"), stable("v0.1.1")],
+    refs: { "v0.1.2": SHA_B, "v0.1.1": SHA_A },
+  });
+  const result = await prepareCandidate(input(), api);
+  assert.equal(result.run, false);
+  assert.match(result.reason, /v0\.1\.2 already publishes/);
+});
+
+test("prepare rejects a scheduled source that does not descend from the latest stable", async () => {
+  const api = new FakeApi({
+    releases: [stable("v0.1.2")],
+    refs: { "v0.1.2": SHA_A },
+    comparisons: { [`${SHA_A}...${SHA_B}`]: "diverged" },
+  });
+  await assert.rejects(prepareCandidate(input(), api), /diverged relative to latest stable/);
 });
 
 test("prepare resumes only a matching same-run draft on a rerun", async () => {
-  const draft = rc("v0.1.2-rc.42", { draft: true });
+  const draft = rc("v0.1.3-rc.42", { draft: true });
   draft.target_commitish = SHA_B;
-  const api = new FakeApi({ releases: [stable("v0.1.1"), draft] });
+  const api = new FakeApi({
+    releases: [stable("v0.1.2"), draft],
+    refs: { "v0.1.2": SHA_A },
+  });
   await assert.rejects(prepareCandidate(input(), api), /only be resumed by a rerun/);
   const result = await prepareCandidate(input({ runAttempt: 2 }), api);
   assert.equal(result.run, true);
@@ -179,8 +208,8 @@ test("prepare resumes only a matching same-run draft on a rerun", async () => {
 
 test("prepare defers a matching hidden draft to the write-scoped rerun", async () => {
   const api = new FakeApi({
-    releases: [stable("v0.1.1")],
-    refs: { "v0.1.2-rc.42": SHA_B },
+    releases: [stable("v0.1.2")],
+    refs: { "v0.1.2": SHA_A, "v0.1.3-rc.42": SHA_B },
   });
   await assert.rejects(prepareCandidate(input(), api), /standalone tag/);
   const result = await prepareCandidate(input({ runAttempt: 2 }), api);
@@ -189,7 +218,10 @@ test("prepare defers a matching hidden draft to the write-scoped rerun", async (
 });
 
 test("prepare rejects a conflicting occupied target tag", async () => {
-  const api = new FakeApi({ releases: [stable("v0.1.1")], refs: { "v0.1.2-rc.42": SHA_A } });
+  const api = new FakeApi({
+    releases: [stable("v0.1.2")],
+    refs: { "v0.1.2": SHA_A, "v0.1.3-rc.42": SHA_A },
+  });
   await assert.rejects(prepareCandidate(input(), api), /standalone tag/);
 });
 
@@ -221,6 +253,9 @@ test("GitHub API follows paginated releases and peels annotated tags", async () 
     if (path === "https://api.github.test/page-2") {
       return { data: [rc("v0.1.2-rc.1")], response: { headers: { get: () => null } } };
     }
+    if (String(path).includes("/compare/")) {
+      return { data: { status: "ahead" }, response: {} };
+    }
     if (String(path).includes("/git/ref/tags/")) {
       return { data: { object: { type: "tag", sha: SHA_A } }, response: {} };
     }
@@ -231,7 +266,8 @@ test("GitHub API follows paginated releases and peels annotated tags", async () 
   };
   assert.equal((await api.listReleases()).length, 2);
   assert.equal(await api.resolveTag("v0.1.2-rc.1"), SHA_B);
-  assert.equal(calls.length, 4);
+  assert.equal(await api.compareCommits(SHA_A, SHA_B), "ahead");
+  assert.equal(calls.length, 5);
 });
 
 async function assetDirectory() {
@@ -243,25 +279,34 @@ async function assetDirectory() {
 function publishInput(assetDir, overrides = {}) {
   return {
     sha: SHA_B,
-    tag: "v0.1.2-rc.42",
+    tag: "v0.1.3-rc.42",
     runNumber: 42,
     runAttempt: 1,
     assetDir,
+    latestStableTag: "v0.1.2",
+    latestStableSha: SHA_A,
     ...overrides,
   };
 }
 
+function publishingApi({ releases = [], refs = {} } = {}) {
+  return new FakeApi({
+    releases: [stable("v0.1.2"), ...releases],
+    refs: { "v0.1.2": SHA_A, ...refs },
+  });
+}
+
 test("publication creates a draft, verifies both assets, then publishes", async () => {
-  const api = new FakeApi();
+  const api = publishingApi();
   const result = await publishCandidate(publishInput(await assetDirectory()), api);
   assert.equal(result.alreadyPublished, false);
   assert.equal(api.created, 1);
   assert.equal(api.published, 1);
   assert.deepEqual(
-    api.releases[0].assets.map((asset) => asset.name).sort(),
+    result.release.assets.map((asset) => asset.name).sort(),
     [...EXPECTED_ASSETS].sort(),
   );
-  assert.equal(api.refs.get("v0.1.2-rc.42"), SHA_B);
+  assert.equal(api.refs.get("v0.1.3-rc.42"), SHA_B);
 });
 
 test("pre-draft artifact failure creates no tag or release", async () => {
@@ -276,19 +321,22 @@ test("a partial matching draft resumes without clobbering its asset", async () =
   const directory = await assetDirectory();
   const firstName = EXPECTED_ASSETS[0];
   const bytes = await readFile(join(directory, firstName));
-  const release = rc("v0.1.2-rc.42", { draft: true });
+  const release = rc("v0.1.3-rc.42", { draft: true });
   release.id = 7;
   release.assets = [{ id: 8, name: firstName }];
-  const api = new FakeApi({ releases: [release], refs: { [release.tag_name]: SHA_B } });
+  const api = publishingApi({
+    releases: [release],
+    refs: { [release.tag_name]: SHA_B },
+  });
   api.assets.set(8, bytes);
   await publishCandidate(publishInput(directory, { runAttempt: 2 }), api);
   assert.equal(api.created, 0);
   assert.equal(api.published, 1);
-  assert.equal(api.releases[0].assets.length, 2);
+  assert.equal(api.releases.find((candidate) => candidate.id === release.id).assets.length, 2);
 });
 
 test("publication rejects a matching standalone tag without a draft", async () => {
-  const api = new FakeApi({ refs: { "v0.1.2-rc.42": SHA_B } });
+  const api = publishingApi({ refs: { "v0.1.3-rc.42": SHA_B } });
   await assert.rejects(
     publishCandidate(publishInput(await assetDirectory(), { runAttempt: 2 }), api),
     /standalone tag blocks publication/,
@@ -298,12 +346,32 @@ test("publication rejects a matching standalone tag without a draft", async () =
 });
 
 test("a published rerun exits without modifying assets", async () => {
-  const release = rc("v0.1.2-rc.42");
+  const release = rc("v0.1.3-rc.42");
   release.id = 9;
   release.assets = EXPECTED_ASSETS.map((name, index) => ({ id: index + 1, name }));
-  const api = new FakeApi({ releases: [release], refs: { [release.tag_name]: SHA_B } });
+  const api = publishingApi({
+    releases: [release],
+    refs: { [release.tag_name]: SHA_B },
+  });
   const result = await publishCandidate(publishInput(await assetDirectory(), { runAttempt: 2 }), api);
   assert.equal(result.alreadyPublished, true);
   assert.equal(api.created, 0);
+  assert.equal(api.published, 0);
+});
+
+test("publication stops if a newer stable release appears during the run", async () => {
+  const api = publishingApi({ refs: { "v0.2.0": SHA_B } });
+  const initialReleases = structuredClone(api.releases);
+  let listCalls = 0;
+  api.listReleases = async () => {
+    listCalls += 1;
+    return listCalls === 1
+      ? structuredClone(initialReleases)
+      : [...structuredClone(initialReleases), stable("v0.2.0")];
+  };
+  await assert.rejects(
+    publishCandidate(publishInput(await assetDirectory()), api),
+    /latest stable changed after candidate preparation/,
+  );
   assert.equal(api.published, 0);
 });
