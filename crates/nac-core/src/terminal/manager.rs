@@ -654,8 +654,8 @@ mod tests {
     use super::*;
     use crate::paths::PathContext;
     use crate::sandbox::{
-        select_execution_backend, SandboxBackendType, SandboxSession, SandboxSpec, SshConnection,
-        DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+        select_execution_backend, SandboxSession, SandboxSpec, SshConnection,
+        DEFAULT_SANDBOX_IMAGE,
     };
 
     fn backend() -> Arc<ExecutionBackend> {
@@ -1297,17 +1297,12 @@ mod tests {
             .unwrap_or_else(|_| DEFAULT_SANDBOX_IMAGE.to_string());
         let sandbox = SandboxSession::create(
             SandboxSpec {
-                backend: SandboxBackendType::Podman,
                 image,
-                mounts: Vec::new(),
-                workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                gpu_devices: Vec::new(),
-                shm_size: None,
-                cpus: 2,
-                memory_mib: 2048,
+                ..Default::default()
             },
             format!("output-artifacts-test-{}", uuid::Uuid::new_v4()),
             true,
+            "output-artifacts-test".to_string(),
         )
         .await
         .unwrap();

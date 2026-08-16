@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     io::{self, IsTerminal, Write},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
@@ -379,6 +380,14 @@ struct SandboxArgs {
     #[arg(long = "mount-ro")]
     mounts_ro: Vec<String>,
 
+    /// Lossless internal read-write mount pair used by worker subprocesses.
+    #[arg(long = "sandbox-mount", hide = true, num_args = 2)]
+    sandbox_mounts: Vec<OsString>,
+
+    /// Lossless internal read-only mount pair used by worker subprocesses.
+    #[arg(long = "sandbox-mount-ro", hide = true, num_args = 2)]
+    sandbox_mounts_ro: Vec<OsString>,
+
     /// Sandbox image to use when --sandbox is enabled.
     #[arg(long)]
     sandbox_image: Option<String>,
@@ -573,6 +582,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         None if cli.ssh_host.is_some() => launch_cwd.clone(),
         None => workspace_cwd.clone(),
     };
+    let internal_mounts = internal_sandbox_mounts(&cli.sandbox)?;
     let config = load_managed_worker_runtime_config(&config_cwd)?;
     let options = ManagedWorkerOptions {
         workspace_cwd,
@@ -611,6 +621,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             no_mount_cwd: cli.sandbox.no_mount_cwd,
             mounts: cli.sandbox.mounts,
             mounts_ro: cli.sandbox.mounts_ro,
+            internal_mounts,
             sandbox_image: cli.sandbox.sandbox_image,
             sandbox_gpus: cli.sandbox.sandbox_gpus,
             sandbox_shm_size: cli.sandbox.sandbox_shm_size,
@@ -619,6 +630,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             sandbox_backend: cli.sandbox.sandbox_backend,
             sandbox_cpus: cli.sandbox.sandbox_cpus,
             sandbox_mem: cli.sandbox.sandbox_mem,
+            sandbox_activity_key: None,
         },
         ssh: runtime::SshOptions {
             host: cli.ssh_host,
@@ -627,6 +639,29 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         },
     };
     runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
+}
+fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, bool)>> {
+    let mut mounts = Vec::new();
+    for (values, read_only) in [
+        (&args.sandbox_mounts, false),
+        (&args.sandbox_mounts_ro, true),
+    ] {
+        for pair in values.chunks_exact(2) {
+            let host = PathBuf::from(pair[0].clone());
+            let guest = PathBuf::from(pair[1].clone());
+            if !host.exists() {
+                return Err(anyhow!("mount source '{}' does not exist", host.display()));
+            }
+            if !guest.is_absolute() {
+                return Err(anyhow!(
+                    "mount target '{}' must be an absolute path inside the sandbox",
+                    guest.display()
+                ));
+            }
+            mounts.push((host, guest, read_only));
+        }
+    }
+    Ok(mounts)
 }
 
 async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
@@ -860,6 +895,36 @@ thread_timeout_secs = 7200
         .expect("malformed worker headers must be rejected")
         .to_string();
         assert!(error.contains("expected a JSON object"), "{error}");
+    }
+
+    #[test]
+    fn worker_cli_parses_lossless_internal_mount_pairs() {
+        let host = std::env::temp_dir().join(format!("nac:worker-mount-{}", std::process::id()));
+        std::fs::create_dir_all(&host).unwrap();
+        let args = vec![
+            OsString::from("nac-web"),
+            OsString::from("__worker"),
+            OsString::from("--session-id"),
+            OsString::from("session"),
+            OsString::from("--thread-name"),
+            OsString::from("thread"),
+            OsString::from("--dispatch-id"),
+            OsString::from("dispatch-123"),
+            OsString::from("--action"),
+            OsString::from("work"),
+            OsString::from("--sandbox-mount"),
+            host.as_os_str().to_owned(),
+            OsString::from("/workspace"),
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
+            panic!("expected managed worker command");
+        };
+        assert_eq!(
+            internal_sandbox_mounts(&worker.sandbox).unwrap(),
+            vec![(host.clone(), PathBuf::from("/workspace"), false)]
+        );
+        std::fs::remove_dir_all(host).unwrap();
     }
 
     #[test]

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 mod git;
 mod revisions;
+pub(crate) mod worktree;
 
 pub use git::GitTarget;
 pub use revisions::{capture, forget, restore, rewind_ref, RevisionCapture};

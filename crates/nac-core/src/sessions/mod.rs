@@ -714,14 +714,9 @@ mod tests {
             BackendKind::FireworksChat,
             None,
             Some(SandboxSpec {
-                backend: SandboxBackendType::Podman,
                 image: "python:3.13".to_string(),
-                workdir: PathBuf::from("/workspace"),
-                mounts: Vec::new(),
-                gpu_devices: Vec::new(),
                 shm_size: Some("0".to_string()),
-                cpus: 2,
-                memory_mib: 2048,
+                ..Default::default()
             }),
             None,
             vec![
@@ -903,14 +898,15 @@ mod tests {
             "2026-01-01 00:00:01.000000000",
         );
         snapshot.sandbox_spec = Some(SandboxSpec {
-            backend: SandboxBackendType::Podman,
-            image: "python:3.13-bookworm".to_string(),
-            workdir: PathBuf::from("/workspace"),
-            mounts: Vec::new(),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            worktree: Some(crate::sandbox::SandboxWorktree {
+                repo_root: PathBuf::from("/repo"),
+                path: PathBuf::from("/nac/worktrees/key123"),
+                scratch_root: PathBuf::from("/nac/worktrees"),
+                branch: "nac/key123".to_string(),
+                fork_point: "abc123".to_string(),
+            }),
+            ..Default::default()
         });
         create_session(&store_path, &snapshot).unwrap();
 
@@ -918,6 +914,7 @@ mod tests {
         let spec = loaded.sandbox_spec.expect("podman sandbox must survive");
         assert_eq!(spec.backend, SandboxBackendType::Podman);
         assert_eq!(spec.image, "python:3.13-bookworm");
+        assert_eq!(spec.worktree, snapshot.sandbox_spec.unwrap().worktree);
 
         let summaries = list_sessions(&store_path).unwrap();
         assert_eq!(summaries.len(), 1);

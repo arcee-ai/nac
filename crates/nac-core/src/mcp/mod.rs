@@ -552,6 +552,7 @@ args = ["-c", {}]
                 read_only: false,
             }],
             workdir: std::path::PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
+            worktree: None,
             gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
             cpus: 2,

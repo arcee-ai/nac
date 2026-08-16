@@ -108,18 +108,13 @@ mod tests {
 
     fn sandbox_runtime_at(host_cwd: PathBuf, read_only: bool) -> ToolRuntime {
         let sandbox = crate::sandbox::SandboxSession::new_for_test(crate::sandbox::SandboxSpec {
-            backend: crate::sandbox::SandboxBackendType::Podman,
-            image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![crate::sandbox::MountSpec {
                 host: host_cwd.clone(),
                 guest: PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
                 read_only,
             }],
-            workdir: PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
         let mut runtime = test_runtime();
         runtime.workspace_cwd = host_cwd.clone();
@@ -331,18 +326,14 @@ mod tests {
         let host_file = dir.join("file.txt");
         std::fs::write(&host_file, "before\n").unwrap();
         let sandbox = crate::sandbox::SandboxSession::new_for_test(crate::sandbox::SandboxSpec {
-            backend: crate::sandbox::SandboxBackendType::Podman,
-            image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
             mounts: vec![crate::sandbox::MountSpec {
                 host: host_file.clone(),
                 guest: PathBuf::from("/workspace/file.txt"),
                 read_only: false,
             }],
             workdir: PathBuf::from("/workspace"),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
         let mut runtime = test_runtime();
         runtime.workspace_cwd = dir.clone();

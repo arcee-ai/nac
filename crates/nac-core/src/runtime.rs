@@ -16,14 +16,19 @@ use crate::model::{
     ModelClient, ModelConfigurationError, ModelMetadata, ReasoningEffort,
 };
 use crate::paths::PathContext;
+pub use crate::sandbox::session_worktree::cleanup_session_worktree;
 /// Public because callers outside this crate build the connections that sessions
 /// and git targets are created from.
 pub use crate::sandbox::SshConnection;
 use crate::sandbox::{
-    browse_remote_directory, build_sandbox_spec, parse_mount_spec, MountSpec, SandboxBackendType,
-    SandboxSession, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+    browse_remote_directory, build_sandbox_spec, parse_mount_spec, session_worktree, MountSpec,
+    SandboxBackendType, SandboxSession, SandboxSpec, DEFAULT_SANDBOX_IMAGE,
+    DEFAULT_SANDBOX_WORKDIR,
 };
-pub use crate::sandbox::{RemoteBrowseError, RemoteEntry, RemoteListing};
+pub use crate::sandbox::{
+    current_activity, probe_availability, RemoteBrowseError, RemoteEntry, RemoteListing,
+    SandboxActivity, SandboxAvailability,
+};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
@@ -343,6 +348,7 @@ pub struct SandboxOptions {
     pub no_mount_cwd: bool,
     pub mounts: Vec<String>,
     pub mounts_ro: Vec<String>,
+    pub internal_mounts: Vec<(PathBuf, PathBuf, bool)>,
     pub sandbox_image: Option<String>,
     pub sandbox_gpus: Vec<String>,
     pub sandbox_shm_size: Option<String>,
@@ -351,6 +357,10 @@ pub struct SandboxOptions {
     pub sandbox_backend: Option<String>,
     pub sandbox_cpus: Option<u8>,
     pub sandbox_mem: Option<u32>,
+    /// Client-generated launch id used to key sandbox setup activity so a
+    /// launching UI can poll its own progress. Not a sandbox config flag:
+    /// it neither enables the sandbox nor marks explicit configuration.
+    pub sandbox_activity_key: Option<String>,
 }
 
 impl SandboxOptions {
@@ -505,6 +515,7 @@ pub struct EffectiveSandboxOptions {
     pub no_mount_cwd: bool,
     pub mounts: Vec<String>,
     pub mounts_ro: Vec<String>,
+    pub internal_mounts: Vec<MountSpec>,
     pub sandbox_image: Option<String>,
     pub sandbox_gpus: Vec<String>,
     pub sandbox_shm_size: Option<String>,
@@ -513,6 +524,7 @@ pub struct EffectiveSandboxOptions {
     pub sandbox_backend: crate::sandbox::SandboxBackendType,
     pub sandbox_cpus: u8,
     pub sandbox_mem: u32,
+    pub sandbox_activity_key: Option<String>,
     pub explicit_sandbox_config_flags_present: bool,
 }
 
@@ -620,6 +632,15 @@ pub(crate) fn effective_sandbox_options(
         no_mount_cwd: options.no_mount_cwd,
         mounts: options.mounts,
         mounts_ro: options.mounts_ro,
+        internal_mounts: options
+            .internal_mounts
+            .into_iter()
+            .map(|(host, guest, read_only)| MountSpec {
+                host,
+                guest,
+                read_only,
+            })
+            .collect(),
         sandbox_image: options
             .sandbox_image
             .or_else(|| config.sandbox.image.clone()),
@@ -630,6 +651,7 @@ pub(crate) fn effective_sandbox_options(
         sandbox_backend,
         sandbox_cpus,
         sandbox_mem,
+        sandbox_activity_key: options.sandbox_activity_key,
         explicit_sandbox_config_flags_present,
     }
 }
@@ -903,7 +925,13 @@ pub async fn build_run_config(
 
     let workspace_cwd = options.workspace_cwd;
     let paths = PathContext::new(&workspace_cwd);
+    let mut worktree_rollback: session_worktree::RollbackGuard;
     let sandbox = build_sandbox_session(&sandbox_options, &workspace_cwd).await?;
+    worktree_rollback = session_worktree::RollbackGuard::new(
+        sandbox
+            .as_ref()
+            .and_then(|session| session.spec().worktree.clone()),
+    );
     let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
     let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
     let (skill_workspace, visibility) = if sandbox.is_some() {
@@ -971,6 +999,7 @@ pub async fn build_run_config(
     session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
     session_snapshot.light_model = light_model;
     sessions::create_session(&store_path, &session_snapshot)?;
+    worktree_rollback.disarm();
 
     Ok(OrchestratorRunConfig {
         agent,
@@ -1405,7 +1434,23 @@ async fn build_resume_config_from_snapshot(
     } else {
         match snapshot.sandbox_spec.clone() {
             Some(spec) => {
-                Some(SandboxSession::create(spec, Uuid::new_v4().to_string(), true).await?)
+                let materialize = match &spec.worktree {
+                    Some(worktree) => session_worktree::restore(
+                        worktree,
+                        session_worktree::checkout_in_container(&spec),
+                    )?,
+                    None => false,
+                };
+                let session_key = Uuid::new_v4().to_string();
+                let session =
+                    SandboxSession::create(spec, session_key.clone(), true, session_key).await?;
+                if materialize {
+                    session.materialize_worktree().await?;
+                    if let Some(worktree) = session.spec().worktree.as_ref() {
+                        session_worktree::mark_materialized(worktree)?;
+                    }
+                }
+                Some(session)
             }
             None => None,
         }
@@ -1520,10 +1565,24 @@ fn normalize_snapshot_paths(
     } else {
         resume_base_cwd.join(&snapshot.cwd)
     };
-    let cwd = raw_cwd
-        .canonicalize()
-        .with_context(|| format!("failed to resolve session cwd {}", raw_cwd.display()))?;
-    snapshot.cwd = cwd;
+    snapshot.cwd = match raw_cwd.canonicalize() {
+        Ok(cwd) => cwd,
+        Err(_)
+            if snapshot
+                .sandbox_spec
+                .as_ref()
+                .is_some_and(|spec| spec.worktree.is_some()) =>
+        {
+            // The live checkout may have switched to a branch where this
+            // subdirectory is absent. The persisted sandbox mounts still
+            // identify the session worktree, which remains resumable.
+            raw_cwd
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to resolve session cwd {}", raw_cwd.display()));
+        }
+    };
     Ok(snapshot)
 }
 
@@ -1550,62 +1609,97 @@ pub async fn build_sandbox_session(
         return Ok(None);
     }
 
-    let mut mounts = Vec::new();
-    if !options.no_mount_cwd {
-        mounts.push(parse_mount_spec(
-            &format!("{}:{}", cwd.display(), DEFAULT_SANDBOX_WORKDIR),
-            false,
-            cwd,
-        )?);
-    }
-    for mount in &options.mounts {
-        mounts.push(parse_mount_spec(mount, false, cwd)?);
-    }
-    for mount in &options.mounts_ro {
-        mounts.push(parse_mount_spec(mount, true, cwd)?);
-    }
-
-    let workdir = options
-        .sandbox_workdir
-        .clone()
-        .unwrap_or_else(|| DEFAULT_SANDBOX_WORKDIR.to_string());
-    let skills_workspace_dir = workspace_dir_from_mounts(&mounts, PathBuf::from(&workdir))
-        .unwrap_or_else(|| cwd.to_path_buf());
-    mounts.extend(skills::auto_mounts(
-        &skills_workspace_dir,
-        &mounts,
-        &PathContext::new(cwd),
-    )?);
-
-    let spec = build_sandbox_spec(
-        options.sandbox_backend,
-        options
-            .sandbox_image
-            .as_deref()
-            .unwrap_or(DEFAULT_SANDBOX_IMAGE)
-            .to_string(),
-        workdir,
-        mounts,
-        options
-            .sandbox_gpus
-            .iter()
-            .map(|device| normalize_gpu_device(device))
-            .collect(),
-        Some(
-            options
-                .sandbox_shm_size
-                .clone()
-                .unwrap_or_else(|| "0".to_string()),
-        ),
-        options.sandbox_cpus,
-        options.sandbox_mem,
-    )?;
     let owner = options.sandbox_session_key.is_none();
     let session_key = options
         .sandbox_session_key
         .clone()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let session = SandboxSession::create(spec, session_key, owner).await?;
+
+    // Everything between the fork (inside `cwd_mount`) and `launch_session`
+    // is fallible, and `launch_session`'s rollback only covers
+    // `SandboxSession::create` failing. A forked worktree predates the
+    // session row, so nothing else would ever clean it up: roll it back here
+    // when any intermediate step fails.
+    let mut forked_worktree = None;
+    let mut inferred_workdir = PathBuf::from(DEFAULT_SANDBOX_WORKDIR);
+    let spec = (|| -> Result<SandboxSpec> {
+        let mut mounts = Vec::new();
+        if !options.no_mount_cwd {
+            let cwd_mount = session_worktree::cwd_mount(cwd, &session_key, owner)?;
+            mounts.extend(cwd_mount.git_dir_mounts);
+            inferred_workdir = cwd_mount.workdir;
+            forked_worktree = cwd_mount.worktree;
+            mounts.push(MountSpec {
+                host: cwd_mount.host,
+                guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                read_only: false,
+            });
+        }
+        mounts.extend(options.internal_mounts.clone());
+        for mount in &options.mounts {
+            mounts.push(parse_mount_spec(mount, false, cwd)?);
+        }
+        for mount in &options.mounts_ro {
+            mounts.push(parse_mount_spec(mount, true, cwd)?);
+        }
+
+        let workdir = options.sandbox_workdir.clone().unwrap_or_else(|| {
+            inferred_workdir
+                .to_str()
+                .expect("sandbox worktree paths are validated as UTF-8")
+                .to_string()
+        });
+        let skills_workspace_dir = workspace_dir_from_mounts(&mounts, PathBuf::from(&workdir))
+            .unwrap_or_else(|| cwd.to_path_buf());
+        mounts.extend(skills::auto_mounts(
+            &skills_workspace_dir,
+            &mounts,
+            &PathContext::new(cwd),
+        )?);
+
+        build_sandbox_spec(
+            options.sandbox_backend,
+            options
+                .sandbox_image
+                .as_deref()
+                .unwrap_or(DEFAULT_SANDBOX_IMAGE)
+                .to_string(),
+            workdir,
+            mounts,
+            options
+                .sandbox_gpus
+                .iter()
+                .map(|device| normalize_gpu_device(device))
+                .collect(),
+            Some(
+                options
+                    .sandbox_shm_size
+                    .clone()
+                    .unwrap_or_else(|| "0".to_string()),
+            ),
+            options.sandbox_cpus,
+            options.sandbox_mem,
+        )
+    })();
+    let mut spec = match spec {
+        Ok(spec) => spec,
+        Err(error) => {
+            if let Some(worktree) = &forked_worktree {
+                session_worktree::rollback(worktree);
+            }
+            return Err(error);
+        }
+    };
+    spec.worktree = forked_worktree;
+    // A launching UI polls setup activity under its own client-generated key;
+    // without one, the session key is the correlation id. Bounded so a
+    // caller cannot grow the activity map with unbounded keys.
+    let activity_key = options
+        .sandbox_activity_key
+        .clone()
+        .filter(|key| !key.is_empty() && key.len() <= 128)
+        .unwrap_or_else(|| session_key.clone());
+    let session = session_worktree::launch_session(spec, session_key, owner, activity_key).await?;
     Ok(Some(session))
 }
 
@@ -2390,6 +2484,70 @@ mod tests {
         );
         assert_eq!(overridden.sandbox_image(), Some("cli-image"));
         assert!(overridden.explicit_sandbox_config_flags_present());
+    }
+
+    #[tokio::test]
+    async fn sandbox_spec_failure_after_fork_rolls_back_the_worktree() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = std::env::var_os("NAC_HOME");
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let repo = crate::workspace::worktree::test_harness::TestRepo::new("spec-rollback");
+        let nac_home = repo.base.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        unsafe {
+            std::env::set_var("NAC_HOME", &nac_home);
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        repo.commit_file("a.txt", "a");
+
+        // The fork succeeds, then this mount fails validation: the worktree
+        // and its branch must be rolled back rather than orphaned.
+        let options = EffectiveSandboxOptions {
+            sandbox: true,
+            no_mount_cwd: false,
+            mounts: vec!["/definitely-missing-nac-test-path:/data".to_string()],
+            mounts_ro: Vec::new(),
+            internal_mounts: Vec::new(),
+            sandbox_image: None,
+            sandbox_gpus: Vec::new(),
+            sandbox_shm_size: None,
+            sandbox_session_key: None,
+            sandbox_workdir: None,
+            sandbox_backend: SandboxBackendType::Podman,
+            sandbox_cpus: 0,
+            sandbox_mem: 0,
+            sandbox_activity_key: None,
+            explicit_sandbox_config_flags_present: false,
+        };
+        let result = build_sandbox_session(&options, &repo.root).await;
+
+        assert!(
+            result.is_err(),
+            "a missing mount source must fail the launch"
+        );
+        let branches = String::from_utf8_lossy(
+            &std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo.root)
+                .args(["branch", "--list", "nac/*"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        assert_eq!(
+            branches, "",
+            "the forked worktree branch must be rolled back"
+        );
+        let worktrees = nac_home.join("worktrees");
+        assert!(
+            !worktrees.exists() || std::fs::read_dir(&worktrees).unwrap().next().is_none(),
+            "the forked worktree directory must be rolled back"
+        );
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
     }
 
     #[test]
@@ -3422,16 +3580,7 @@ X-Config = "yes"
             "https://api.openai.com/v1".to_string(),
             BackendKind::OpenAiResponses,
             None,
-            Some(SandboxSpec {
-                backend: crate::sandbox::SandboxBackendType::Podman,
-                image: DEFAULT_SANDBOX_IMAGE.to_string(),
-                mounts: Vec::new(),
-                workdir: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                gpu_devices: Vec::new(),
-                shm_size: None,
-                cpus: 2,
-                memory_mib: 2048,
-            }),
+            Some(SandboxSpec::default()),
             Some(SshConnection::new("build-box")),
             Vec::new(),
             Some("OPENAI_API_KEY".to_string()),
@@ -3528,6 +3677,37 @@ X-Config = "yes"
             error.to_string().contains("failed to resolve session cwd"),
             "local sessions must keep failing on a missing cwd, got: {error:#}"
         );
+    }
+
+    #[test]
+    fn normalize_snapshot_paths_keeps_missing_live_cwd_for_worktree_sessions() {
+        let missing_live_cwd = PathBuf::from("/missing/live/repo/subdir");
+        let sandbox = SandboxSpec {
+            worktree: Some(crate::sandbox::SandboxWorktree {
+                repo_root: PathBuf::from("/missing/live/repo"),
+                path: PathBuf::from("/nac/worktrees/session"),
+                scratch_root: PathBuf::from("/nac/worktrees"),
+                branch: "nac/session".to_string(),
+                fork_point: "abc123".to_string(),
+            }),
+            ..Default::default()
+        };
+        let snapshot = sessions::new_snapshot(
+            "sandbox-session".to_string(),
+            missing_live_cwd.clone(),
+            "model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            Some(sandbox),
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+
+        let normalized = normalize_snapshot_paths(snapshot, Path::new("/")).unwrap();
+        assert_eq!(normalized.cwd, missing_live_cwd);
     }
 
     #[tokio::test]

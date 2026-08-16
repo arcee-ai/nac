@@ -876,6 +876,9 @@ impl SessionService {
             if let Err(error) = sandbox.destroy().await {
                 eprintln!("nac: failed to destroy sandbox during deletion: {error:#}");
             }
+            if let Some(worktree) = &sandbox.spec().worktree {
+                crate::sandbox::session_worktree::cleanup_session_worktree(worktree);
+            }
         }
     }
 
@@ -3492,6 +3495,7 @@ pub(super) mod tests {
                         image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
                         mounts: Vec::new(),
                         workdir: PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
+                        worktree: None,
                         gpu_devices: Vec::new(),
                         shm_size: None,
                         cpus: 2,

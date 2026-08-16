@@ -2131,14 +2131,9 @@ mod tests {
             std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
         }
         let sandbox = crate::sandbox::SandboxSession::new_for_test(crate::sandbox::SandboxSpec {
-            backend: crate::sandbox::SandboxBackendType::Podman,
-            image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
-            mounts: Vec::new(),
             workdir: workspace.clone(),
-            gpu_devices: Vec::new(),
             shm_size: Some("0".to_string()),
-            cpus: 2,
-            memory_mib: 2048,
+            ..Default::default()
         });
         let mut runtime = crate::tools::test_runtime();
         runtime.workspace_cwd = workspace.clone();
