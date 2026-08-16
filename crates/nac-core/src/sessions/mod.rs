@@ -902,6 +902,7 @@ mod tests {
             worktree: Some(crate::sandbox::SandboxWorktree {
                 repo_root: PathBuf::from("/repo"),
                 path: PathBuf::from("/nac/worktrees/key123"),
+                scratch_root: PathBuf::from("/nac/worktrees"),
                 branch: "nac/key123".to_string(),
                 fork_point: "abc123".to_string(),
             }),

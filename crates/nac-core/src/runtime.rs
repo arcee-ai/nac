@@ -16,14 +16,15 @@ use crate::model::{
     ModelClient, ModelConfigurationError, ModelMetadata, ReasoningEffort,
 };
 use crate::paths::PathContext;
+pub use crate::sandbox::session_worktree::cleanup_session_worktree;
 /// Public because callers outside this crate build the connections that sessions
 /// and git targets are created from.
 pub use crate::sandbox::SshConnection;
 use crate::sandbox::{
     browse_remote_directory, build_sandbox_spec, parse_mount_spec, session_worktree, MountSpec,
-    SandboxBackendType, SandboxSession, SandboxSpec, DEFAULT_SANDBOX_IMAGE, DEFAULT_SANDBOX_WORKDIR,
+    SandboxBackendType, SandboxSession, SandboxSpec, DEFAULT_SANDBOX_IMAGE,
+    DEFAULT_SANDBOX_WORKDIR,
 };
-pub use crate::sandbox::session_worktree::cleanup_session_worktree;
 pub use crate::sandbox::{
     current_activity, probe_availability, RemoteBrowseError, RemoteEntry, RemoteListing,
     SandboxActivity, SandboxAvailability,
@@ -347,6 +348,7 @@ pub struct SandboxOptions {
     pub no_mount_cwd: bool,
     pub mounts: Vec<String>,
     pub mounts_ro: Vec<String>,
+    pub internal_mounts: Vec<(PathBuf, PathBuf, bool)>,
     pub sandbox_image: Option<String>,
     pub sandbox_gpus: Vec<String>,
     pub sandbox_shm_size: Option<String>,
@@ -513,6 +515,7 @@ pub struct EffectiveSandboxOptions {
     pub no_mount_cwd: bool,
     pub mounts: Vec<String>,
     pub mounts_ro: Vec<String>,
+    pub internal_mounts: Vec<MountSpec>,
     pub sandbox_image: Option<String>,
     pub sandbox_gpus: Vec<String>,
     pub sandbox_shm_size: Option<String>,
@@ -629,6 +632,15 @@ pub(crate) fn effective_sandbox_options(
         no_mount_cwd: options.no_mount_cwd,
         mounts: options.mounts,
         mounts_ro: options.mounts_ro,
+        internal_mounts: options
+            .internal_mounts
+            .into_iter()
+            .map(|(host, guest, read_only)| MountSpec {
+                host,
+                guest,
+                read_only,
+            })
+            .collect(),
         sandbox_image: options
             .sandbox_image
             .or_else(|| config.sandbox.image.clone()),
@@ -913,7 +925,13 @@ pub async fn build_run_config(
 
     let workspace_cwd = options.workspace_cwd;
     let paths = PathContext::new(&workspace_cwd);
+    let mut worktree_rollback: session_worktree::RollbackGuard;
     let sandbox = build_sandbox_session(&sandbox_options, &workspace_cwd).await?;
+    worktree_rollback = session_worktree::RollbackGuard::new(
+        sandbox
+            .as_ref()
+            .and_then(|session| session.spec().worktree.clone()),
+    );
     let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
     let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
     let (skill_workspace, visibility) = if sandbox.is_some() {
@@ -981,6 +999,7 @@ pub async fn build_run_config(
     session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
     session_snapshot.light_model = light_model;
     sessions::create_session(&store_path, &session_snapshot)?;
+    worktree_rollback.disarm();
 
     Ok(OrchestratorRunConfig {
         agent,
@@ -1415,11 +1434,23 @@ async fn build_resume_config_from_snapshot(
     } else {
         match snapshot.sandbox_spec.clone() {
             Some(spec) => {
-                if let Some(worktree) = &spec.worktree {
-                    session_worktree::restore(worktree)?;
-                }
+                let materialize = match &spec.worktree {
+                    Some(worktree) => session_worktree::restore(
+                        worktree,
+                        session_worktree::checkout_in_container(&spec),
+                    )?,
+                    None => false,
+                };
                 let session_key = Uuid::new_v4().to_string();
-                Some(SandboxSession::create(spec, session_key.clone(), true, session_key).await?)
+                let session =
+                    SandboxSession::create(spec, session_key.clone(), true, session_key).await?;
+                if materialize {
+                    session.materialize_worktree().await?;
+                    if let Some(worktree) = session.spec().worktree.as_ref() {
+                        session_worktree::mark_materialized(worktree)?;
+                    }
+                }
+                Some(session)
             }
             None => None,
         }
@@ -1534,10 +1565,24 @@ fn normalize_snapshot_paths(
     } else {
         resume_base_cwd.join(&snapshot.cwd)
     };
-    let cwd = raw_cwd
-        .canonicalize()
-        .with_context(|| format!("failed to resolve session cwd {}", raw_cwd.display()))?;
-    snapshot.cwd = cwd;
+    snapshot.cwd = match raw_cwd.canonicalize() {
+        Ok(cwd) => cwd,
+        Err(_)
+            if snapshot
+                .sandbox_spec
+                .as_ref()
+                .is_some_and(|spec| spec.worktree.is_some()) =>
+        {
+            // The live checkout may have switched to a branch where this
+            // subdirectory is absent. The persisted sandbox mounts still
+            // identify the session worktree, which remains resumable.
+            raw_cwd
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to resolve session cwd {}", raw_cwd.display()));
+        }
+    };
     Ok(snapshot)
 }
 
@@ -1576,18 +1621,21 @@ pub async fn build_sandbox_session(
     // session row, so nothing else would ever clean it up: roll it back here
     // when any intermediate step fails.
     let mut forked_worktree = None;
+    let mut inferred_workdir = PathBuf::from(DEFAULT_SANDBOX_WORKDIR);
     let spec = (|| -> Result<SandboxSpec> {
         let mut mounts = Vec::new();
         if !options.no_mount_cwd {
-            let cwd_mount = session_worktree::cwd_mount(cwd, &session_key, owner);
-            mounts.extend(cwd_mount.git_dir_mount);
+            let cwd_mount = session_worktree::cwd_mount(cwd, &session_key, owner)?;
+            mounts.extend(cwd_mount.git_dir_mounts);
+            inferred_workdir = cwd_mount.workdir;
             forked_worktree = cwd_mount.worktree;
-            mounts.push(parse_mount_spec(
-                &format!("{}:{}", cwd_mount.host.display(), DEFAULT_SANDBOX_WORKDIR),
-                false,
-                cwd,
-            )?);
+            mounts.push(MountSpec {
+                host: cwd_mount.host,
+                guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
+                read_only: false,
+            });
         }
+        mounts.extend(options.internal_mounts.clone());
         for mount in &options.mounts {
             mounts.push(parse_mount_spec(mount, false, cwd)?);
         }
@@ -1595,10 +1643,12 @@ pub async fn build_sandbox_session(
             mounts.push(parse_mount_spec(mount, true, cwd)?);
         }
 
-        let workdir = options
-            .sandbox_workdir
-            .clone()
-            .unwrap_or_else(|| DEFAULT_SANDBOX_WORKDIR.to_string());
+        let workdir = options.sandbox_workdir.clone().unwrap_or_else(|| {
+            inferred_workdir
+                .to_str()
+                .expect("sandbox worktree paths are validated as UTF-8")
+                .to_string()
+        });
         let skills_workspace_dir = workspace_dir_from_mounts(&mounts, PathBuf::from(&workdir))
             .unwrap_or_else(|| cwd.to_path_buf());
         mounts.extend(skills::auto_mounts(
@@ -2457,6 +2507,7 @@ mod tests {
             no_mount_cwd: false,
             mounts: vec!["/definitely-missing-nac-test-path:/data".to_string()],
             mounts_ro: Vec::new(),
+            internal_mounts: Vec::new(),
             sandbox_image: None,
             sandbox_gpus: Vec::new(),
             sandbox_shm_size: None,
@@ -2470,7 +2521,10 @@ mod tests {
         };
         let result = build_sandbox_session(&options, &repo.root).await;
 
-        assert!(result.is_err(), "a missing mount source must fail the launch");
+        assert!(
+            result.is_err(),
+            "a missing mount source must fail the launch"
+        );
         let branches = String::from_utf8_lossy(
             &std::process::Command::new("git")
                 .arg("-C")
@@ -2482,7 +2536,10 @@ mod tests {
         )
         .trim()
         .to_string();
-        assert_eq!(branches, "", "the forked worktree branch must be rolled back");
+        assert_eq!(
+            branches, "",
+            "the forked worktree branch must be rolled back"
+        );
         let worktrees = nac_home.join("worktrees");
         assert!(
             !worktrees.exists() || std::fs::read_dir(&worktrees).unwrap().next().is_none(),
@@ -3620,6 +3677,37 @@ X-Config = "yes"
             error.to_string().contains("failed to resolve session cwd"),
             "local sessions must keep failing on a missing cwd, got: {error:#}"
         );
+    }
+
+    #[test]
+    fn normalize_snapshot_paths_keeps_missing_live_cwd_for_worktree_sessions() {
+        let missing_live_cwd = PathBuf::from("/missing/live/repo/subdir");
+        let sandbox = SandboxSpec {
+            worktree: Some(crate::sandbox::SandboxWorktree {
+                repo_root: PathBuf::from("/missing/live/repo"),
+                path: PathBuf::from("/nac/worktrees/session"),
+                scratch_root: PathBuf::from("/nac/worktrees"),
+                branch: "nac/session".to_string(),
+                fork_point: "abc123".to_string(),
+            }),
+            ..Default::default()
+        };
+        let snapshot = sessions::new_snapshot(
+            "sandbox-session".to_string(),
+            missing_live_cwd.clone(),
+            "model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            Some(sandbox),
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+
+        let normalized = normalize_snapshot_paths(snapshot, Path::new("/")).unwrap();
+        assert_eq!(normalized.cwd, missing_live_cwd);
     }
 
     #[tokio::test]

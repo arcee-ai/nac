@@ -285,15 +285,12 @@ impl PodmanSession {
 
         for mount in &self.spec.mounts {
             args.push(OsString::from(if mount.read_only {
-                "--mount-ro"
+                "--sandbox-mount-ro"
             } else {
-                "--mount"
+                "--sandbox-mount"
             }));
-            args.push(OsString::from(format!(
-                "{}:{}",
-                mount.host.display(),
-                mount.guest.display()
-            )));
+            args.push(mount.host.as_os_str().to_owned());
+            args.push(mount.guest.as_os_str().to_owned());
         }
         if let Some(shm_size) = &self.spec.shm_size {
             args.push(OsString::from("--sandbox-shm-size"));
@@ -338,6 +335,24 @@ impl PodmanSession {
             .wait_with_output()
             .await
             .with_context(|| "failed to wait for 'podman exec'")
+    }
+
+    pub(crate) async fn materialize_worktree(&self) -> Result<()> {
+        let args = vec![
+            "-C".to_string(),
+            self.spec.workdir.display().to_string(),
+            "reset".to_string(),
+            "--hard".to_string(),
+            "HEAD".to_string(),
+        ];
+        let output = self.exec("git", &args, None).await?;
+        if !output.status.success() {
+            bail!(
+                "failed to materialize restored sandbox worktree in container: {}",
+                first_stderr_line(&output.stderr)
+            );
+        }
+        Ok(())
     }
 
     pub(crate) fn terminal_pty_command(
@@ -463,7 +478,7 @@ impl PodmanSession {
 
     async fn create_container(&self) -> Result<()> {
         let mut command = Command::new("podman");
-        command.args(self.create_container_args());
+        command.args(self.create_container_args()?);
         let output = command
             .output()
             .await
@@ -497,7 +512,7 @@ impl PodmanSession {
         Ok(())
     }
 
-    fn create_container_args(&self) -> Vec<OsString> {
+    fn create_container_args(&self) -> Result<Vec<OsString>> {
         let mut args = vec![
             OsString::from("run"),
             OsString::from("-d"),
@@ -516,8 +531,8 @@ impl PodmanSession {
         }
 
         for mount in &self.spec.mounts {
-            args.push(OsString::from("-v"));
-            args.push(OsString::from(volume_arg(mount)));
+            args.push(OsString::from("--mount"));
+            args.push(bind_mount_arg(mount)?);
         }
 
         if let Some(shm_size) = &self.spec.shm_size {
@@ -544,7 +559,7 @@ impl PodmanSession {
             "mkdir -p '{}' && exec sleep infinity",
             shell_escape_path(&self.spec.workdir)
         )));
-        args
+        Ok(args)
     }
 
     /// Explicitly destroy the sandbox container, regardless of remaining
@@ -631,14 +646,24 @@ pub(crate) fn make_sandbox_pidfile() -> String {
     format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())
 }
 
-fn volume_arg(mount: &MountSpec) -> String {
-    let mode = if mount.read_only { "ro" } else { "rw" };
-    format!(
-        "{}:{}:{}",
-        mount.host.display(),
-        mount.guest.display(),
-        mode
-    )
+fn bind_mount_arg(mount: &MountSpec) -> Result<OsString> {
+    for (kind, path) in [("host", &mount.host), ("guest", &mount.guest)] {
+        if path.as_os_str().as_encoded_bytes().contains(&b',') {
+            bail!(
+                "podman bind-mount {kind} path '{}' contains ','; \
+                 move the path before launching the sandbox",
+                path.display()
+            );
+        }
+    }
+    let mut arg = OsString::from("type=bind,src=");
+    arg.push(mount.host.as_os_str());
+    arg.push(",dst=");
+    arg.push(mount.guest.as_os_str());
+    if mount.read_only {
+        arg.push(",ro=true");
+    }
+    Ok(arg)
 }
 
 pub(crate) fn sanitize_name(input: &str) -> String {
@@ -752,21 +777,24 @@ mod tests {
         assert!(rendered.contains(&"--sandbox".to_string()));
         assert!(rendered.contains(&"--no-mount-cwd".to_string()));
         assert!(rendered.contains(&"--sandbox-session-key".to_string()));
-        assert!(rendered.contains(&"/tmp/project:/workspace".to_string()));
+        assert!(rendered.contains(&"--sandbox-mount".to_string()));
+        assert!(rendered.contains(&"/tmp/project".to_string()));
+        assert!(rendered.contains(&"/workspace".to_string()));
+        assert!(!rendered.contains(&"/tmp/project:/workspace".to_string()));
         assert!(rendered.contains(&"--sandbox-shm-size".to_string()));
         assert!(rendered.contains(&"0".to_string()));
     }
 
     #[test]
     fn create_container_args_include_mounts_and_command() {
-        let args = sample_session().create_container_args();
+        let args = sample_session().create_container_args().unwrap();
         let rendered: Vec<String> = args
             .into_iter()
             .map(|value| value.to_string_lossy().to_string())
             .collect();
         assert!(rendered.starts_with(&["run".to_string(), "-d".to_string(), "--rm".to_string(),]));
-        assert!(rendered.contains(&"-v".to_string()));
-        assert!(rendered.contains(&"/tmp/project:/workspace:rw".to_string()));
+        assert!(rendered.contains(&"--mount".to_string()));
+        assert!(rendered.contains(&"type=bind,src=/tmp/project,dst=/workspace".to_string()));
         assert!(rendered.contains(&"--shm-size".to_string()));
         assert!(rendered.contains(&"0".to_string()));
         assert_eq!(
@@ -783,6 +811,46 @@ mod tests {
     }
 
     #[test]
+    fn create_container_args_preserve_colons_in_typed_mount_paths() {
+        let mut session = sample_session();
+        session.spec.mounts[0].host = PathBuf::from("/tmp/nac:home/worktree");
+        let rendered: Vec<String> = session
+            .create_container_args()
+            .unwrap()
+            .into_iter()
+            .map(|value| value.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            rendered.contains(&"type=bind,src=/tmp/nac:home/worktree,dst=/workspace".to_string())
+        );
+        let worker_args = session.worker_cli_args();
+        assert!(worker_args.windows(3).any(|args| {
+            args == [
+                OsString::from("--sandbox-mount"),
+                OsString::from("/tmp/nac:home/worktree"),
+                OsString::from("/workspace"),
+            ]
+        }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_cli_args_preserve_non_utf_mount_paths() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let host = PathBuf::from(OsString::from_vec(b"/tmp/nac-\xff-worktree".to_vec()));
+        let mut session = sample_session();
+        session.spec.mounts[0].host = host.clone();
+
+        let args = session.worker_cli_args();
+        assert!(args.windows(3).any(|args| {
+            args[0] == OsString::from("--sandbox-mount")
+                && args[1] == host.as_os_str()
+                && args[2] == OsString::from("/workspace")
+        }));
+    }
+
+    #[test]
     fn create_container_args_skip_user_without_rw_mounts() {
         let session = PodmanSession::new(
             SandboxSpec {
@@ -795,6 +863,7 @@ mod tests {
         );
         let rendered: Vec<String> = session
             .create_container_args()
+            .unwrap()
             .into_iter()
             .map(|value| value.to_string_lossy().to_string())
             .collect();
@@ -818,6 +887,7 @@ mod tests {
         );
         let rendered: Vec<String> = session
             .create_container_args()
+            .unwrap()
             .into_iter()
             .map(|value| value.to_string_lossy().to_string())
             .collect();

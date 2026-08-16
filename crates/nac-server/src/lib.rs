@@ -2052,23 +2052,24 @@ impl SessionManager {
         let _operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         self.require_persisted_operation_session(session_id)?;
-        if let Some(service) = service {
-            // Explicitly destroy the sandbox even if SSE handlers retain the service.
-            service.destroy_sandbox().await;
-        } else {
-            // No live service (the server restarted since the session ran):
-            // the container is already ownerless, but the persisted spec
-            // still holds the worktree metadata needed to remove the fork.
-            if let Ok(snapshot) = sessions::load_session(&self.inner.store_path, session_id) {
-                if let Some(worktree) = snapshot.sandbox_spec.and_then(|spec| spec.worktree) {
-                    runtime::cleanup_session_worktree(&worktree);
-                }
-            }
-        }
-
+        let persisted_worktree = sessions::load_session(&self.inner.store_path, session_id)
+            .ok()
+            .and_then(|snapshot| snapshot.sandbox_spec)
+            .and_then(|spec| spec.worktree);
         // The revision rows cascade with the session, but the git objects they
-        // pinned only become collectable once the ref is gone.
-        if let Ok(target) = self.workspace_root(session_id).await {
+        // pinned only become collectable once the ref is gone. A missing
+        // sandbox checkout must not hide the repository recorded in durable
+        // worktree metadata.
+        let revision_target = persisted_worktree
+            .as_ref()
+            .map(|worktree| GitTarget::Local {
+                root: worktree.repo_root.clone(),
+            });
+        let revision_target = match revision_target {
+            Some(target) => Some(target),
+            None => self.workspace_root(session_id).await.ok(),
+        };
+        if let Some(target) = revision_target {
             if let Err(error) = workspace::forget(&target, session_id) {
                 eprintln!("nac: failed to drop workspace revisions: {error:#}");
             }
@@ -2080,6 +2081,15 @@ impl SessionManager {
             return Err(anyhow!("session '{}' was not found", session_id));
         }
         self.inner.active_sessions.write().await.remove(session_id);
+        if let Some(service) = service {
+            // Explicitly destroy the sandbox even if SSE handlers retained the service.
+            service.destroy_sandbox().await;
+        } else if let Some(worktree) = persisted_worktree {
+            // No live service (the server restarted since the session ran):
+            // the container is already ownerless, but the persisted spec
+            // supplied the worktree metadata needed to remove the fork.
+            runtime::cleanup_session_worktree(&worktree);
+        }
         Ok(())
     }
 
@@ -4557,6 +4567,7 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
         no_mount_cwd: request.no_mount_cwd,
         mounts: request.mounts,
         mounts_ro: request.mounts_ro,
+        internal_mounts: Vec::new(),
         sandbox_image: request.image,
         sandbox_gpus: request.gpus,
         sandbox_shm_size: request.shm_size,

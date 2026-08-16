@@ -226,6 +226,10 @@ pub struct SandboxWorktree {
     pub repo_root: PathBuf,
     /// The worktree root on the host.
     pub path: PathBuf,
+    /// Resolved nac-owned scratch directory. Persisting the absolute path keeps
+    /// a relative `NAC_HOME` anchored to the launch cwd during later cleanup.
+    #[serde(default)]
+    pub scratch_root: PathBuf,
     /// The session branch (`nac/<key-prefix>`) the worktree has checked out.
     pub branch: String,
     /// The commit the branch forked from; compared against at cleanup to tell
@@ -234,21 +238,15 @@ pub struct SandboxWorktree {
 }
 
 impl SandboxWorktree {
-    /// Whether the recorded path sits inside nac's worktree scratch dir. The
-    /// path comes from the session record — potentially attacker- or
-    /// bug-controlled — so it is checked against the scratch root resolved
-    /// fresh from the environment and canonicalized, never against the
-    /// record itself. Anything that cannot be resolved cleanly (a missing
-    /// scratch dir, a `..` component, a symlink escaping the root) fails
-    /// closed: no deletion.
+    /// Whether the recorded path sits inside the nac-owned worktree scratch
+    /// directory resolved at launch. Both values come from the session record,
+    /// so canonicalization and strict descendant checks prevent `..` or symlink
+    /// escapes. Missing legacy metadata fails closed.
     pub(crate) fn path_in_scratch_dir(&self) -> bool {
-        let Some(scratch_root) = crate::paths::nac_home_dir().map(|dir| dir.join("worktrees"))
-        else {
+        if self.scratch_root.as_os_str().is_empty() {
             return false;
-        };
-        let Ok(scratch_root) = scratch_root.canonicalize() else {
-            // No scratch dir means nac never forked a worktree here, so the
-            // recorded path cannot be nac's to delete.
+        }
+        let Ok(scratch_root) = self.scratch_root.canonicalize() else {
             return false;
         };
         canonicalize_existing(&self.path)
@@ -337,6 +335,12 @@ impl SandboxSession {
     pub async fn ensure_ready(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.ensure_ready().await,
+        }
+    }
+
+    pub(crate) async fn materialize_worktree(&self) -> Result<()> {
+        match self {
+            Self::Podman(inner) => inner.materialize_worktree().await,
         }
     }
 
@@ -697,6 +701,11 @@ mod tests {
         SandboxWorktree {
             repo_root: PathBuf::from("/repo"),
             path,
+            scratch_root: crate::paths::nac_home_dir()
+                .unwrap()
+                .join("worktrees")
+                .canonicalize()
+                .unwrap(),
             branch: "nac/key".to_string(),
             fork_point: "abc123".to_string(),
         }

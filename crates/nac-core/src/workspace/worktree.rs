@@ -6,10 +6,11 @@
 //! CLI — the sandbox layer creates and destroys these, and the branch a
 //! session leaves behind is how its committed work is handed back.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Output, Stdio};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 use super::first_stderr_line;
 
@@ -26,51 +27,71 @@ pub struct RepoInfo {
     pub head: String,
 }
 
+/// The checkout identity Git records for a linked worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorktreeCheckout {
+    Branch(String),
+    Detached(String),
+}
+
+impl WorktreeCheckout {
+    pub fn display(&self) -> &str {
+        match self {
+            Self::Branch(branch) | Self::Detached(branch) => branch,
+        }
+    }
+}
+
 /// Locates the repository containing `cwd`. Returns `None` for directories
 /// outside any repository and for repositories without commits (an unborn HEAD
 /// has nothing to fork from); both fall back to mounting the live directory.
 pub fn find_repo(cwd: &Path) -> Result<Option<RepoInfo>> {
-    let output = run_git(cwd, &["rev-parse", "--show-toplevel", "--git-common-dir"])
-        .context("failed to execute 'git rev-parse'")?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut lines = stdout.lines();
-    let (Some(root), Some(common)) = (lines.next(), lines.next()) else {
-        return Ok(None);
+    let root = match rev_parse_path(cwd, "--show-toplevel")? {
+        Some(path) => absolutize(cwd, &path)?,
+        None => return Ok(None),
     };
-    // --git-common-dir may print relative to the cwd it was queried from.
-    let common_git_dir = absolutize(cwd, common)?;
-    // Both paths are canonicalized so callers can strip_prefix one from a
-    // canonicalized cwd even behind symlinks (macOS /tmp, for one).
-    let root = absolutize(cwd, root)?;
+    let common_git_dir = match rev_parse_path(cwd, "--git-common-dir")? {
+        Some(path) => absolutize(cwd, &path)?,
+        None => return Ok(None),
+    };
     let head = run_git(cwd, &["rev-parse", "--verify", "HEAD"])
         .context("failed to execute 'git rev-parse'")?;
     if !head.status.success() {
         return Ok(None);
     }
+    let head = String::from_utf8(head.stdout)
+        .context("git returned a non-UTF-8 commit id")?
+        .trim()
+        .to_string();
     Ok(Some(RepoInfo {
         root,
         common_git_dir,
-        head: String::from_utf8_lossy(&head.stdout).trim().to_string(),
+        head,
     }))
 }
 
-/// Forks `branch` from HEAD into a new worktree at `path`.
+#[cfg(test)]
+/// Forks `branch` from HEAD into a new, populated worktree at `path`.
 pub fn create(repo_root: &Path, path: &Path, branch: &str) -> Result<()> {
-    let output = run_git(
-        repo_root,
-        &[
-            "worktree",
-            "add",
-            &path.display().to_string(),
-            "-b",
-            branch,
-            "HEAD",
-        ],
-    )
-    .context("failed to execute 'git worktree add'")?;
+    create_inner(repo_root, path, branch, false)
+}
+
+/// Registers `branch` at `path` without checking files out on the host.
+pub fn create_without_checkout(repo_root: &Path, path: &Path, branch: &str) -> Result<()> {
+    create_inner(repo_root, path, branch, true)
+}
+
+fn create_inner(repo_root: &Path, path: &Path, branch: &str, no_checkout: bool) -> Result<()> {
+    let mut command = git_command(repo_root);
+    command.args(["worktree", "add"]);
+    if no_checkout {
+        command.arg("--no-checkout");
+    }
+    let output = command
+        .arg(path)
+        .args(["-b", branch, "HEAD"])
+        .output()
+        .context("failed to execute 'git worktree add'")?;
     if !output.status.success() {
         bail!(
             "failed to create session worktree '{}': {}",
@@ -81,63 +102,77 @@ pub fn create(repo_root: &Path, path: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
-/// Re-attaches an existing session branch at `path`. Used when a session is
-/// resumed after its worktree directory was deleted out from under it.
-/// `--force` overrides the stale administrative entry such a deletion leaves
-/// registered (plain `add` refuses a "missing but already registered" path).
-pub fn re_add(repo_root: &Path, path: &Path, branch: &str) -> Result<()> {
-    let output = run_git(
-        repo_root,
-        &[
-            "worktree",
-            "add",
-            "--force",
-            &path.display().to_string(),
-            branch,
-        ],
-    )
-    .context("failed to execute 'git worktree add'")?;
+/// Re-attaches an existing checkout at `path`. `--force` overrides the stale
+/// administrative entry an externally deleted directory leaves behind.
+pub fn re_add(
+    repo_root: &Path,
+    path: &Path,
+    checkout: &WorktreeCheckout,
+    no_checkout: bool,
+) -> Result<()> {
+    let mut command = git_command(repo_root);
+    command.args(["worktree", "add", "--force"]);
+    if no_checkout {
+        command.arg("--no-checkout");
+    }
+    if matches!(checkout, WorktreeCheckout::Detached(_)) {
+        command.arg("--detach");
+    }
+    let output = command
+        .arg(path)
+        .arg(checkout.display())
+        .output()
+        .context("failed to execute 'git worktree add'")?;
     if !output.status.success() {
         bail!(
-            "failed to restore session worktree '{}' from branch '{}': {}",
+            "failed to restore session worktree '{}' at '{}': {}",
             path.display(),
-            branch,
+            checkout.display(),
             first_stderr_line(&output.stderr)
         );
     }
     Ok(())
 }
 
-/// Whether `path` is a working worktree right now — false when the directory
-/// or its administrative entry under the common git dir was removed
-/// externally, in which case a resume should re-attach rather than trust it.
-pub fn is_usable(path: &Path) -> bool {
-    path.exists()
-        && run_git(path, &["rev-parse", "--git-dir"])
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+/// Whether `path` is a working worktree right now. Process failures are not
+/// staleness: callers must preserve the error rather than deleting data.
+pub fn is_usable(path: &Path) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let output =
+        run_git(path, &["rev-parse", "--git-dir"]).context("failed to inspect git worktree")?;
+    Ok(output.status.success())
 }
 
-/// Removes a session worktree, best-effort: a path that is already gone is a
-/// success.
-pub fn remove(repo_root: &Path, path: &Path) -> Result<()> {
-    if !path.exists() {
-        // A directory deleted externally leaves a stale administrative entry
-        // that still counts the session branch as checked out, which blocks
-        // deleting that branch. `remove --force` clears such an entry; it
-        // fails when nothing was ever registered at `path`, which is equally
-        // fine — either way nothing there holds the branch anymore.
-        let _ = run_git(
-            repo_root,
-            &["worktree", "remove", "--force", &path.display().to_string()],
+/// Lets Git repair the `.git` pointer/admin linkage without replacing files.
+pub fn repair(repo_root: &Path, path: &Path) -> Result<()> {
+    let output = git_command(repo_root)
+        .args(["worktree", "repair"])
+        .arg(path)
+        .output()
+        .context("failed to execute 'git worktree repair'")?;
+    if !output.status.success() {
+        bail!(
+            "failed to repair session worktree '{}': {}",
+            path.display(),
+            first_stderr_line(&output.stderr)
         );
+    }
+    Ok(())
+}
+
+/// Removes a registered session worktree. An unregistered path is left alone;
+/// the session layer owns the stricter scratch-directory decision for it.
+pub fn remove(repo_root: &Path, path: &Path) -> Result<()> {
+    if registered_checkout(repo_root, path)?.is_none() {
         return Ok(());
     }
-    let output = run_git(
-        repo_root,
-        &["worktree", "remove", "--force", &path.display().to_string()],
-    )
-    .context("failed to execute 'git worktree remove'")?;
+    let output = git_command(repo_root)
+        .args(["worktree", "remove", "--force"])
+        .arg(path)
+        .output()
+        .context("failed to execute 'git worktree remove'")?;
     if !output.status.success() {
         bail!(
             "failed to remove session worktree '{}': {}",
@@ -148,6 +183,80 @@ pub fn remove(repo_root: &Path, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The branch or detached commit currently recorded for `path`.
+pub fn registered_checkout(repo_root: &Path, path: &Path) -> Result<Option<WorktreeCheckout>> {
+    let output = run_git(repo_root, &["worktree", "list", "--porcelain", "-z"])
+        .context("failed to execute 'git worktree list'")?;
+    if !output.status.success() {
+        bail!(
+            "failed to inspect registered worktrees: {}",
+            first_stderr_line(&output.stderr)
+        );
+    }
+
+    let mut record_path: Option<PathBuf> = None;
+    let mut head = None;
+    let mut branch = None;
+    let mut detached = false;
+    for field in output.stdout.split(|byte| *byte == 0) {
+        if field.is_empty() {
+            if record_path
+                .as_ref()
+                .is_some_and(|registered| paths_match(registered, path))
+            {
+                return match (branch.take(), detached, head.take()) {
+                    (Some(branch), _, _) => Ok(Some(WorktreeCheckout::Branch(branch))),
+                    (None, true, Some(head)) => Ok(Some(WorktreeCheckout::Detached(head))),
+                    _ => Err(anyhow!(
+                        "registered worktree '{}' has no checkout identity",
+                        path.display()
+                    )),
+                };
+            }
+            record_path = None;
+            head = None;
+            branch = None;
+            detached = false;
+            continue;
+        }
+        if let Some(raw) = field.strip_prefix(b"worktree ") {
+            record_path = Some(path_from_git_bytes(raw)?);
+        } else if let Some(raw) = field.strip_prefix(b"HEAD ") {
+            head = Some(
+                String::from_utf8(raw.to_vec())
+                    .context("git returned a non-UTF-8 worktree HEAD")?,
+            );
+        } else if let Some(raw) = field.strip_prefix(b"branch refs/heads/") {
+            branch = Some(
+                String::from_utf8(raw.to_vec()).context("git returned a non-UTF-8 branch name")?,
+            );
+        } else if field == b"detached" {
+            detached = true;
+        }
+    }
+    Ok(None)
+}
+
+fn paths_match(left: &Path, right: &Path) -> bool {
+    canonicalize_with_missing(left)
+        .zip(canonicalize_with_missing(right))
+        .is_some_and(|(left, right)| left == right)
+}
+
+fn canonicalize_with_missing(path: &Path) -> Option<PathBuf> {
+    let mut current = path;
+    let mut missing = Vec::new();
+    while !current.exists() {
+        missing.push(current.file_name()?.to_os_string());
+        current = current.parent()?;
+    }
+    let mut canonical = current.canonicalize().ok()?;
+    for component in missing.iter().rev() {
+        canonical.push(component);
+    }
+    Some(canonical)
+}
+
 /// The commit a branch points at, or `None` when the branch is gone.
 pub fn branch_head(repo_root: &Path, branch: &str) -> Option<String> {
     let reference = format!("refs/heads/{branch}");
@@ -155,8 +264,23 @@ pub fn branch_head(repo_root: &Path, branch: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let head = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let head = String::from_utf8(output.stdout).ok()?.trim().to_string();
     (!head.is_empty()).then_some(head)
+}
+
+/// Moves a session recovery branch to a detached commit.
+pub fn update_branch(repo_root: &Path, branch: &str, head: &str) -> Result<()> {
+    let reference = format!("refs/heads/{branch}");
+    let output = run_git(repo_root, &["update-ref", &reference, head])
+        .context("failed to execute 'git update-ref'")?;
+    if !output.status.success() {
+        bail!(
+            "failed to preserve detached session commit on '{}': {}",
+            branch,
+            first_stderr_line(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 /// Deletes a session branch, best-effort.
@@ -173,31 +297,63 @@ pub fn delete_branch(repo_root: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
+/// Administrative git directory for a linked worktree.
+pub fn git_dir(path: &Path) -> Result<PathBuf> {
+    let raw = rev_parse_path(path, "--git-dir")?
+        .ok_or_else(|| anyhow!("'{}' is not a git worktree", path.display()))?;
+    absolutize(path, &raw)
+}
+
+fn rev_parse_path(cwd: &Path, flag: &str) -> Result<Option<PathBuf>> {
+    let output = run_git(cwd, &["rev-parse", flag]).context("failed to execute 'git rev-parse'")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let bytes = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
+    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    Ok(Some(path_from_git_bytes(bytes)?))
+}
+
 fn run_git(cwd: &Path, args: &[&str]) -> std::io::Result<Output> {
-    // Hooks are disabled on nac's own git invocations: the sandbox shares the
-    // repository's git dir with the container, so a hook planted there must
-    // never execute on the host with the user's privileges (worktree add runs
-    // post-checkout).
-    StdCommand::new("git")
+    git_command(cwd).args(args).output()
+}
+
+fn git_command(cwd: &Path) -> StdCommand {
+    // Hooks are disabled on nac's own git invocations: the sandbox shares
+    // selected repository metadata with the container, so a hook planted
+    // there must never execute on the host with the user's privileges.
+    let mut command = StdCommand::new("git");
+    command
         .arg("-c")
         .arg("core.hooksPath=/dev/null")
         .arg("-C")
         .arg(cwd)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
+        .stdin(Stdio::null());
+    command
 }
 
-fn absolutize(base: &Path, path: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(path);
+fn absolutize(base: &Path, path: &Path) -> Result<PathBuf> {
     let joined = if path.is_absolute() {
-        path
+        path.to_path_buf()
     } else {
         base.join(path)
     };
     joined
         .canonicalize()
         .with_context(|| format!("failed to resolve git dir '{}'", joined.display()))
+}
+
+#[cfg(unix)]
+fn path_from_git_bytes(bytes: &[u8]) -> Result<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
+}
+
+#[cfg(not(unix))]
+fn path_from_git_bytes(bytes: &[u8]) -> Result<PathBuf> {
+    Ok(PathBuf::from(
+        String::from_utf8(bytes.to_vec()).context("git returned a non-UTF-8 path")?,
+    ))
 }
 
 #[cfg(test)]
@@ -366,11 +522,14 @@ mod tests {
         // leaves the administrative entry registered, which plain
         // `worktree add` refuses; re_add must override it.
         std::fs::remove_dir_all(&worktree).unwrap();
-        assert!(!is_usable(&worktree));
-
-        re_add(&info.root, &worktree, "nac/test456").unwrap();
+        assert!(!is_usable(&worktree).unwrap());
+        let checkout = registered_checkout(&info.root, &worktree)
+            .unwrap()
+            .expect("stale entry retains its checkout");
+        remove(&info.root, &worktree).unwrap();
+        re_add(&info.root, &worktree, &checkout, false).unwrap();
         assert!(worktree.join("b.txt").exists());
-        assert!(is_usable(&worktree));
+        assert!(is_usable(&worktree).unwrap());
         assert_eq!(branch_head(&info.root, "nac/test456"), Some(committed));
 
         remove(&info.root, &worktree).unwrap();
