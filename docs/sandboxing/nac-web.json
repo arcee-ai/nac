@@ -1,0 +1,121 @@
+{
+  "extends": null,
+  "meta": {
+    "name": "nac-web",
+    "version": "1.0.0",
+    "description": "Runtime-discovered path profile for nac-web",
+    "author": null
+  },
+  "security": {
+    "signal_mode": null,
+    "process_info_mode": null,
+    "ipc_mode": null,
+    "capability_elevation": null,
+    "wsl2_proxy_policy": null
+  },
+  "groups": {
+    "include": [],
+    "exclude": []
+  },
+  "commands": {
+    "allow": [
+      "/usr/bin/open"
+    ],
+    "deny": []
+  },
+  "filesystem": {
+    "allow": ["$WORKDIR"],
+    "read": [
+      "/usr/libexec/swift",
+      "~/.gitconfig"
+    ],
+    "write": [
+      "~/.config/nac/model-catalog"
+    ],
+    "allow_file": [
+      "~/.config/nac/config.toml",
+      "~/.config/nac/model-catalog/overlay.json",
+      "~/.config/nac/model-catalog/arcee-overlay.json"
+    ],
+    "read_file": [
+      "~/.config/nac/arcee_auth.json",
+      "~/bin/nac-web",
+      "~/.config/nac/model-catalog/overlay.etag"
+    ],
+    "write_file": [],
+    "unix_socket": [],
+    "unix_socket_bind": [],
+    "unix_socket_dir": [],
+    "unix_socket_dir_bind": [],
+    "unix_socket_subtree": [],
+    "unix_socket_subtree_bind": [],
+    "deny": [
+      "$HOME/.ssh",
+      "$HOME/.aws",
+      "$HOME/.gnupg"
+    ],
+    "bypass_protection": [],
+    "suppress_save_prompt": [
+      "~/bin",
+      "~/"
+    ]
+  },
+  "network": {
+    "block": false,
+    "allow_http2": false,
+    "network_profile": "developer",
+    "allow_domain": [
+      "api.arcee.ai",
+      "api.anthropic.com",
+      "api.deepseek.com",
+      "api.fireworks.ai",
+      "api.openai.com",
+      "api.together.xyz",
+      "mcp.grep.app",
+      "mcp.exa.ai",
+      "mcp.context7.com"
+    ],
+    "deny_domain": [],
+    "open_port": [
+      3210
+    ],
+    "open_port_range": [],
+    "listen_port": [],
+    "listen_port_range": [],
+    "connect_port": [],
+    "no_proxy": [],
+    "custom_credentials": {},
+    "tls_intercept": null,
+    "upstream_proxy": null,
+    "upstream_bypass": []
+  },
+  "diagnostics": {
+    "suppress_system_services": []
+  },
+  "linux": {
+    "af_unix_mediation": null,
+    "sandbox_policy": null
+  },
+  "env_credentials": {},
+  "credential_capture": {},
+  "credential_providers": {},
+  "credential_routes": [],
+  "workdir": { 
+    "access": "readwrite" 
+  },
+  "hooks": {},
+  "session_hooks": {},
+  "rollback": {
+    "exclude_patterns": [],
+    "exclude_globs": []
+  },
+  "open_urls": {
+    "allow_origins": [],
+    "allow_localhost": true
+  },
+  "interactive": false,
+  "skipdirs": [],
+  "packs": [],
+  "command_args": [],
+  "unsafe_macos_seatbelt_rules": []
+}
