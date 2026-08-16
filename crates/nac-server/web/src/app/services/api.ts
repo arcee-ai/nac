@@ -192,11 +192,9 @@ export const api = {
   // the launch id sent with the create request, so concurrent launches never
   // show each other's phase.
   getSandboxActivity: (key: string, signal?: AbortSignal) =>
-    request<SandboxActivity | null>(
-      "GET",
-      `/sandbox/activity?${new URLSearchParams({ key })}`,
-      { signal },
-    ),
+    request<SandboxActivity | null>("GET", `/sandbox/activity?${new URLSearchParams({ key })}`, {
+      signal,
+    }),
 
   // Credentials are write-only: the value is sent to the server and never
   // read back, so the UI only ever learns which names have a key stored.

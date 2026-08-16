@@ -655,8 +655,7 @@ mod tests {
     use super::*;
     use crate::paths::PathContext;
     use crate::sandbox::{
-        select_execution_backend, SandboxSession, SandboxSpec, SshConnection,
-        DEFAULT_SANDBOX_IMAGE,
+        select_execution_backend, SandboxSession, SandboxSpec, SshConnection, DEFAULT_SANDBOX_IMAGE,
     };
 
     fn backend() -> Arc<ExecutionBackend> {

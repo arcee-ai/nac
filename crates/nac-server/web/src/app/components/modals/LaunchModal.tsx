@@ -189,9 +189,7 @@ function LaunchForm({
     if (!sandboxLaunching) return;
     const timer = setInterval(() => {
       setLaunchElapsed(
-        activitySince
-          ? Math.max(0, Math.floor((Date.now() - activitySince) / 1000))
-          : 0,
+        activitySince ? Math.max(0, Math.floor((Date.now() - activitySince) / 1000)) : 0,
       );
     }, 1000);
     return () => clearInterval(timer);
@@ -505,9 +503,7 @@ function LaunchForm({
           <p className="pt-1 text-micro text-basic-muted">
             {MODES.find((item) => item.id === mode)?.description}
           </p>
-          {mode === "sandbox" &&
-          sandboxAvailability &&
-          sandboxAvailability.status !== "ready" ? (
+          {mode === "sandbox" && sandboxAvailability && sandboxAvailability.status !== "ready" ? (
             <div className="pt-1">
               <p className="text-error-primary text-micro">
                 {sandboxAvailability.status === "missing"
@@ -746,17 +742,11 @@ function LaunchForm({
         ) : null}
 
         {sandboxLaunching ? (
-          <div
-            className="flex items-center gap-2"
-            role="status"
-            aria-live="polite"
-          >
+          <div className="flex items-center gap-2" role="status" aria-live="polite">
             <span className="text-micro text-basic-primary">
               {sandboxActivity?.phase ?? "Creating the sandbox…"}
             </span>
-            <span className="text-micro text-basic-muted">
-              {launchElapsed}s
-            </span>
+            <span className="text-micro text-basic-muted">{launchElapsed}s</span>
           </div>
         ) : null}
       </div>
