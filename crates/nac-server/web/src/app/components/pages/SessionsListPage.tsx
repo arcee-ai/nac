@@ -56,6 +56,7 @@ import {
   useVisibleSessions,
 } from "@/app/store/sessionFiltersStore";
 import type { ManagedSessionSummary } from "@/app/types/api";
+import { toRunError } from "@/app/lib/providerError";
 
 // Columns are 360px at minimum and stretch to fill the row, so the design's
 // 3-up layout falls out naturally at the 1520px reference width and wider
@@ -248,7 +249,7 @@ export default function SessionsListPage() {
           targetIndex,
         });
       } catch (err) {
-        toast.error(`Failed to reorder sessions: ${errorMessage(err)}`);
+        toast.error(`Failed to reorder sessions: ${errorMessage(toRunError(err))}`);
       } finally {
         clearDrag();
       }

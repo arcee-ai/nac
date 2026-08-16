@@ -10,6 +10,7 @@ import React, {
 import { createPortal } from "react-dom";
 
 import Toast, { ToastVariant } from "@/app/atoms/toast/Toast";
+import type { RunError } from "@/app/lib/providerError";
 
 export { ToastVariant };
 
@@ -174,7 +175,7 @@ export function useToast(): ToastApi {
   return ctx;
 }
 
-/** Format an unknown rejection for display in a toast. */
-export function errorMessage(error: unknown): string {
+/** Format a rejection for display in a toast. */
+export function errorMessage(error: RunError): string {
   return error instanceof Error ? error.message : String(error);
 }

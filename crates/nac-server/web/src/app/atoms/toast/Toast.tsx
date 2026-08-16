@@ -16,19 +16,19 @@ interface ToastProps {
   onClose: () => void;
 }
 
-const VARIANT_STYLES: Record<ToastVariant, string> = {
+const VARIANT_STYLES = {
   [ToastVariant.Info]: "bg-info-inverse",
   [ToastVariant.Success]: "bg-success-inverse",
   [ToastVariant.Error]: "bg-error-inverse",
   [ToastVariant.Danger]: "bg-danger-inverse",
-};
+} satisfies Record<ToastVariant, string>;
 
-const VARIANT_ICONS: Record<ToastVariant, IconName> = {
+const VARIANT_ICONS = {
   [ToastVariant.Info]: IconName.Info,
   [ToastVariant.Success]: IconName.CheckCircle,
   [ToastVariant.Error]: IconName.Danger,
   [ToastVariant.Danger]: IconName.Danger,
-};
+} satisfies Record<ToastVariant, IconName>;
 
 const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) => {
   const [mounted, setMounted] = useState(false);

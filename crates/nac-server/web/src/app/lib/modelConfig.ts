@@ -2,6 +2,8 @@
 // backends with a fixed base URL, credential modes, light-model credential
 // inheritance, reasoning-effort clearing and extra-header validation.
 
+import type { JsonObject } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import type {
   BackendKind,
   LightModelSettings,
@@ -59,7 +61,11 @@ export function sameLightModel(
   );
 }
 
-export const MANAGED_LAUNCH_BASE_URLS: Record<string, string> = {
+interface ManagedLaunchBaseUrlMap {
+  [backend: string]: string;
+}
+
+export const MANAGED_LAUNCH_BASE_URLS: ManagedLaunchBaseUrlMap = {
   "arcee-auth": "https://api.arcee.ai/api/v1",
   "chatgpt-codex-responses": "https://chatgpt.com/backend-api",
 };
@@ -144,17 +150,21 @@ export function serializeExtraHeaders<T>(
   } catch {
     throw new Error("Extra Headers must be valid JSON");
   }
-  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+  if (parsed === null || Array.isArray(parsed) || Object(parsed) !== parsed) {
     throw new Error(
       "Extra Headers must be a JSON object with string keys and string values",
     );
   }
-  for (const [key, headerValue] of Object.entries(parsed)) {
-    if (typeof headerValue !== "string") {
+  // SAFETY: the identity check above admits only non-null JSON objects, and
+  // the loop below verifies every value is a string before the cast.
+  const record = parsed as JsonObject;
+  for (const [key, headerValue] of Object.entries(record)) {
+    if (!isString(headerValue)) {
       throw new Error(`Extra Headers value for "${key}" must be a string`);
     }
   }
-  return parsed as Record<string, string>;
+  // SAFETY: every value was just verified to be a string.
+  return record as Record<string, string>;
 }
 
 function requiredSettingsString(value: string, label: string): string {

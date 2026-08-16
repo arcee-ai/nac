@@ -16,6 +16,7 @@ import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCancelRun, useTogglePin } from "@/app/services/queries";
 import { pushLocalEvent } from "@/app/store/runtimeStore";
 import type { SessionSummarySnapshot } from "@/app/types/api";
+import { toRunError } from "@/app/lib/providerError";
 
 interface SessionActions {
   launch: () => void;
@@ -68,7 +69,7 @@ export function SessionActionsProvider({
         try {
           await togglePin(summary);
         } catch (error) {
-          toast.error(`Failed to update pin: ${errorMessage(error)}`);
+          toast.error(`Failed to update pin: ${errorMessage(toRunError(error))}`);
         }
       },
       stopRun: async (summary) => {
@@ -77,7 +78,7 @@ export function SessionActionsProvider({
           pushLocalEvent("run", "■ run cancellation requested");
           toast.success("Run cancellation requested");
         } catch (error) {
-          toast.error(`Failed to stop run: ${errorMessage(error)}`);
+          toast.error(`Failed to stop run: ${errorMessage(toRunError(error))}`);
         }
       },
     }),

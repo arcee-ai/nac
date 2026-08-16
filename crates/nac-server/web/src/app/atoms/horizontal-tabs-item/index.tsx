@@ -13,10 +13,10 @@ interface HorizontalTabsItemProps extends React.ButtonHTMLAttributes<HTMLButtonE
   variant?: HorizontalTabsItemVariant;
 }
 
-const ACTIVE_CLASS: Record<HorizontalTabsItemVariant, string> = {
+const ACTIVE_CLASS = {
   [HorizontalTabsItemVariant.Accent]: "horizontal-tab-item-active btn-ghost-accent",
   [HorizontalTabsItemVariant.Neutral]: "horizontal-tab-item-active btn-ghost-highlighted",
-};
+} satisfies Record<HorizontalTabsItemVariant, string>;
 
 /** Horizontal tab item with an underline for the active state. */
 const HorizontalTabsItem: React.FC<HorizontalTabsItemProps> & {

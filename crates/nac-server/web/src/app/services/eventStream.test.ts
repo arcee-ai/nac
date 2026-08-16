@@ -4,17 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { subscribeToSessionEvents } from "@/app/services/eventStream";
 
-vi.mock("@/app/services/api", () => ({
-  api: {
-    eventStreamUrl: (sessionId: string) => `/sessions/${sessionId}/events/stream`,
-  },
-}));
-
-vi.mock("@/app/lib/perfDebug", () => ({
-  perfEpoch: vi.fn(),
-  perfMark: vi.fn(),
-}));
-
+// The real api module is import-safe (its eventStreamUrl is a pure function)
+// and the real perfDebug is inert unless enabled, so the only fake the stream
+// needs is the EventSource global, which jsdom does not implement.
 class FakeEventSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -33,11 +25,16 @@ class FakeEventSource {
   }
 
   addEventListener(name: string, listener: EventListenerOrEventListenerObject) {
+    // SAFETY: the fake only ever emits MessageEvents, so a listener registered
+    // for one is invoked with exactly that shape.
     this.listeners.set(name, listener as (event: MessageEvent<string>) => void);
   }
 
-  emit(name: string, value: unknown) {
-    this.listeners.get(name)?.({ data: JSON.stringify(value) } as MessageEvent<string>);
+  emit<T>(name: string, value: T) {
+    const event = new MessageEvent<string>(name, {
+      data: JSON.stringify(value),
+    });
+    this.listeners.get(name)?.(event);
   }
 
   close() {

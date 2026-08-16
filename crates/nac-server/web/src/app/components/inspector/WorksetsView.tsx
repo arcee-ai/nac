@@ -14,7 +14,11 @@ import type {
   WorksetSnapshot,
 } from "@/app/types/api";
 
-const STATUS_TONE: Record<string, string> = {
+interface StatusToneMap {
+  [status: string]: string;
+}
+
+const STATUS_TONE: StatusToneMap = {
   done: "text-success-primary",
   completed: "text-success-primary",
   finished: "text-success-primary",

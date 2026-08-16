@@ -1,12 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-vi.mock("@/app/lib/perfDebug", () => ({
-  perfEpoch: vi.fn(),
-  perfMark: vi.fn(),
-  perfRender: vi.fn(),
-  perfTime: (_name: string, run: () => unknown) => run(),
-}));
-
+// The real perfDebug module is inert unless explicitly enabled, so the store
+// under test runs against the real thing.
 import { mergeWorkspaceStats } from "@/app/services/queries";
 import {
   applyEnvelope,
@@ -15,10 +10,13 @@ import {
 } from "@/app/store/runtimeStore";
 import type {
   ManagedSessionSummary,
+  SessionEvent,
   SessionEventEnvelope,
 } from "@/app/types/api";
 
-function envelope(event: unknown): SessionEventEnvelope {
+function envelope(event: SessionEvent): SessionEventEnvelope {
+  // SAFETY: test fixture — the store under test reads only the event payload
+  // the fixtures provide; the remaining envelope fields are omitted.
   return { sequence_id: 1, event } as SessionEventEnvelope;
 }
 
@@ -27,13 +25,20 @@ function summary(
   title: string,
   changed?: number,
 ): ManagedSessionSummary {
-  return {
+  // SAFETY: test fixture — the merge reads only summary.session_id/title and
+  // moves workspace_diff opaquely; the remaining summary fields are omitted.
+  const fixture = {
     summary: { session_id: id, title } as ManagedSessionSummary["summary"],
     active: false,
-    ...(changed === undefined
-      ? {}
-      : { workspace_diff: { added: changed, removed: 0 } }),
   } as ManagedSessionSummary;
+  if (changed !== undefined) {
+    fixture.workspace_diff = {
+      total_additions: changed,
+      total_deletions: 0,
+      error: null,
+    };
+  }
+  return fixture;
 }
 
 describe("canonical refresh classification", () => {
@@ -48,7 +53,7 @@ describe("canonical refresh classification", () => {
       applyEnvelope(
         envelope({
           type: "agent",
-          event: { type: "assistant_message", content_preview: "done" },
+          event: { type: "assistant_message", content: "done" },
         }),
       ),
     ).toBe("none");
@@ -85,7 +90,8 @@ describe("canonical refresh classification", () => {
           type: "agent",
           event: {
             type: "orchestrator_compaction_completed",
-            summary_tokens: 10,
+            compaction_id: "compaction-1",
+            reason: "auto",
           },
         }),
       ),
@@ -96,7 +102,9 @@ describe("canonical refresh classification", () => {
 describe("run cancellation", () => {
   it("stops live threads without erasing finished history or reporting failure", () => {
     resetRuntime("session-a");
-    applyEnvelope(envelope({ type: "run_started", prompt_preview: "work" }));
+    applyEnvelope(
+      envelope({ type: "run_started", prompt_preview: "work", started_at_epoch_ms: 0 }),
+    );
     for (const name of ["finished", "worker-a", "worker-b"]) {
       applyEnvelope(
         envelope({
@@ -145,7 +153,9 @@ describe("run cancellation", () => {
 
   it("finishes live threads when the run completes without their finish events", () => {
     resetRuntime("session-a");
-    applyEnvelope(envelope({ type: "run_started", prompt_preview: "work" }));
+    applyEnvelope(
+      envelope({ type: "run_started", prompt_preview: "work", started_at_epoch_ms: 0 }),
+    );
     applyEnvelope(
       envelope({
         type: "agent",
@@ -175,7 +185,9 @@ describe("run cancellation", () => {
 
   it("keeps provider failures visible for failed runs", () => {
     resetRuntime("session-a");
-    applyEnvelope(envelope({ type: "run_started", prompt_preview: "work" }));
+    applyEnvelope(
+      envelope({ type: "run_started", prompt_preview: "work", started_at_epoch_ms: 0 }),
+    );
     applyEnvelope(
       envelope({
         type: "agent",
@@ -202,7 +214,7 @@ describe("workspace statistics merge", () => {
       "second",
     ]);
     expect(merged.map((entry) => entry.workspace_diff)).toEqual([
-      { added: 7, removed: 0 },
+      { total_additions: 7, total_deletions: 0, error: null },
       undefined,
     ]);
     expect(merged.map((entry) => entry.summary.session_id)).toEqual(["a", "b"]);

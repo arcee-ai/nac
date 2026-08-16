@@ -18,6 +18,8 @@ import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
 import { normalizeMath } from "@/app/lib/math-source";
 import { perfRender } from "@/app/lib/perfDebug";
+import { isNumber, isString } from "@/app/lib/primitive";
+import type { RunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import {
   classifyMarkdownHref,
@@ -101,8 +103,8 @@ function loadMathPlugins(): Promise<MathPlugins> {
 
 /** Text of a fenced block, for the clipboard. Nested spans carry the tokens. */
 function textOf(node: ReactNode): string {
-  if (typeof node === "string") return node;
-  if (typeof node === "number") return String(node);
+  if (isString(node)) return node;
+  if (isNumber(node)) return String(node);
   if (Array.isArray(node)) return node.map(textOf).join("");
   if (isValidElement<{ children?: ReactNode }>(node)) {
     return textOf(node.props.children);
@@ -206,7 +208,7 @@ function MarkdownLink({
           event.preventDefault();
           void api
             .openWorkspacePath(sessionId, kind.path)
-            .catch((error: unknown) => {
+            .catch((error: RunError) => {
               // Remote / sandbox sessions cannot open a host path; the Files
               // panel is the next-best place to land.
               const message =
@@ -269,7 +271,7 @@ function buildComponents(streaming: boolean) {
     // turn produces one per block, every message another copy. Naming them
     // lets React hoist them into the head and keep one of each instead.
     style: ({ children }: ComponentPropsWithoutRef<"style">) => {
-      const css = typeof children === "string" ? children : "";
+      const css = isString(children) ? children : "";
       if (!css) return null;
       return (
         <style href={`mathjax-${fingerprint(css)}`} precedence="mathjax">
@@ -326,6 +328,8 @@ function Parsed({
   const withoutMath = (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
+      // SAFETY: the plugin tuple types are not exported by the remark/rehype
+      // packages; the array holds only valid unified plugins.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
       rehypePlugins={rehypePlugins as any}
       urlTransform={markdownUrlTransform}

@@ -13,6 +13,10 @@
  * flattened into a generic apology; only the envelope around it is stripped.
  */
 
+import { isJsonObject } from "@/app/lib/json";
+import type { JsonValue } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
+
 /** What the surface showing the error can offer to do about it. */
 export interface ErrorFix {
   label: string;
@@ -27,13 +31,40 @@ export interface HumanError {
   fix?: ErrorFix;
 }
 
+/**
+ * A failure as it reaches the UI: an `Error`, prose, or a payload carrying a
+ * status code. `null`/`undefined` stand for "no failure".
+ */
+export type RunError =
+  | Error
+  | string
+  | { status?: unknown }
+  | null
+  | undefined;
+
+/**
+ * Decode a caught value into the failure domain at the catch boundary, so the
+ * rest of the app never has to branch on an unparsed `unknown`.
+ */
+export function toRunError(cause: unknown): RunError {
+  if (cause instanceof Error) return cause;
+  if (cause === null || cause === undefined) return cause;
+  if (isString(cause)) return cause;
+  if (Object(cause) === cause) {
+    // SAFETY: this branch is reached only when cause is a non-null object
+    // (Object() is the identity on objects and boxes primitives), so reading
+    // its optional status property is sound.
+    return { status: (cause as { status?: unknown }).status };
+  }
+  return String(cause);
+}
+
 /** Wallet page of the platform, where credits are topped up. */
 const WALLET_PATH = "/api/wallet";
 const WORKSPACE_SETTINGS_PATH = "/admin/workspace/workspace-settings";
 const PLATFORM_HOST = "platform.arcee.ai";
 
-function rawMessage(error: unknown): string {
-  if (typeof error === "string") return error;
+function rawMessage(error: RunError): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }
@@ -116,18 +147,19 @@ function truncatedMessage(body: string): string | null {
   );
   if (!found) return null;
   try {
+    // SAFETY: the capture is the inside of a JSON string literal, so wrapping
+    // it back in quotes and parsing always yields the original string.
     return JSON.parse(`"${found[1]}"`) as string;
   } catch {
     return found[1];
   }
 }
 
-function nestedMessage(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (value === null || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
+function nestedMessage(value: JsonValue): string | null {
+  if (isString(value)) return value;
+  if (!isJsonObject(value)) return null;
   for (const key of ["message", "detail", "error", "error_description"]) {
-    const found = nestedMessage(record[key]);
+    const found = nestedMessage(value[key]);
     if (found !== null) return found;
   }
   return null;
@@ -147,7 +179,7 @@ const SIGN_IN_AGAIN: HumanError = {
  * session is not known.
  */
 export function humanError(
-  error: unknown,
+  error: RunError,
   backend?: string | null,
 ): HumanError {
   const raw = rawMessage(error);
@@ -339,7 +371,7 @@ export function humanError(
 
 /** One line for a toast, footer, or hint, where there is no room for a fix. */
 export function humanErrorText(
-  error: unknown,
+  error: RunError,
   backend?: string | null,
 ): string {
   const { title, description } = humanError(error, backend);
@@ -351,10 +383,16 @@ function sentence(text: string): string {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
-function hasStatus(error: unknown): error is { status: number } {
+function isStatusPayload(error: RunError): error is { status?: unknown } {
   return (
-    typeof error === "object" &&
     error !== null &&
-    typeof (error as { status?: unknown }).status === "number"
+    error !== undefined &&
+    !(error instanceof Error) &&
+    !isString(error)
   );
+}
+
+function hasStatus(error: RunError): error is { status: number } {
+  if (!isStatusPayload(error)) return false;
+  return Number.isFinite(error.status);
 }

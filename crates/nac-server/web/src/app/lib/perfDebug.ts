@@ -5,6 +5,8 @@
 // It is also off by default in dev — turn it on from the console with
 // `__perf.on()`, run a prompt, then `__perf.report()`.
 
+import { isNumber } from "@/app/lib/primitive";
+
 const DEV = import.meta.env.DEV;
 const STORAGE_KEY = "nac.perf";
 
@@ -65,6 +67,11 @@ export interface PerfOptions {
   slowMs?: number;
 }
 
+/** True for the numeric half of a perf field; strings print but never sum. */
+function isNumericField(value: number | string): value is number {
+  return isNumber(value);
+}
+
 /** Record one occurrence of `tag` and, subject to throttling, print it. */
 export function perfMark(tag: string, options: PerfOptions = {}): void {
   if (!DEV || !enabled) return;
@@ -85,7 +92,7 @@ export function perfMark(tag: string, options: PerfOptions = {}): void {
     entry.maxMs = Math.max(entry.maxMs, options.ms);
   }
   for (const [key, value] of Object.entries(options.fields ?? {})) {
-    if (typeof value === "number") {
+    if (isNumericField(value)) {
       entry.sums[key] = (entry.sums[key] ?? 0) + value;
     }
   }
@@ -159,18 +166,24 @@ function reset(): void {
 }
 
 if (DEV) {
-  enabled = localStorage.getItem(STORAGE_KEY) === "1";
+  // The console handle is a browser convenience; under a Node test runner
+  // there is no localStorage or window, so instrumentation stays off and the
+  // handle hangs off the global object instead.
+  enabled = globalThis.localStorage?.getItem(STORAGE_KEY) === "1";
   if (enabled) startedAt = performance.now();
-  (window as unknown as { __perf: unknown }).__perf = {
+  // SAFETY: the console handle is an app-owned extension of the global object;
+  // the optional property is absent in production builds, where this block is
+  // compiled away entirely.
+  (globalThis as { __perf?: unknown }).__perf = {
     on() {
       enabled = true;
-      localStorage.setItem(STORAGE_KEY, "1");
+      globalThis.localStorage?.setItem(STORAGE_KEY, "1");
       reset();
       console.log("[perf] on — run a prompt, then __perf.report()");
     },
     off() {
       enabled = false;
-      localStorage.removeItem(STORAGE_KEY);
+      globalThis.localStorage?.removeItem(STORAGE_KEY);
     },
     report,
     reset,

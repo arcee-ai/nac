@@ -4,7 +4,7 @@
 
 import type { BackendKind, ManagedAuthProvider } from "@/app/types/api";
 
-const PROVIDER_LABELS: Record<BackendKind, string> = {
+const PROVIDER_LABELS = {
   "openai-responses": "OpenAI Responses",
   "chatgpt-codex-responses": "ChatGPT Codex Responses",
   "anthropic-messages": "Anthropic Messages",
@@ -13,7 +13,7 @@ const PROVIDER_LABELS: Record<BackendKind, string> = {
   "together-chat": "Together Chat",
   "arcee-auth": "Arcee API (Sign in)",
   "arcee-api": "Arcee API (Key)",
-};
+} satisfies Record<BackendKind, string>;
 
 /** Display order shared by every provider list in the UI. */
 export const PROVIDER_KINDS: BackendKind[] = [
@@ -29,6 +29,8 @@ export const PROVIDER_KINDS: BackendKind[] = [
 
 /** Stable rank for sorting provider lists; unknown backends sink to the end. */
 export function providerOrder(backend: string): number {
+  // SAFETY: indexOf only compares the value against the known kinds; a backend
+  // outside the enum yields -1, which the length fallback below handles.
   const index = PROVIDER_KINDS.indexOf(backend as BackendKind);
   return index === -1 ? PROVIDER_KINDS.length : index;
 }
@@ -56,27 +58,32 @@ export function providerUsesApiKey(backend: BackendKind): boolean {
  * The browser login a backend authenticates through. Mirrors
  * `ManagedAuthProvider::for_backend` in `crates/nac-core/src/model/mod.rs`.
  */
-const MANAGED_AUTH_PROVIDERS: Partial<
-  Record<BackendKind, ManagedAuthProvider>
-> = {
+interface ManagedAuthProviderByBackend {
+  [backend: string]: ManagedAuthProvider | undefined;
+}
+
+const MANAGED_AUTH_PROVIDERS = {
   "arcee-auth": "arcee",
   "chatgpt-codex-responses": "codex",
-};
+} satisfies Partial<Record<BackendKind, ManagedAuthProvider>>;
 
 export function managedAuthProvider(
   backend: string,
 ): ManagedAuthProvider | null {
-  return MANAGED_AUTH_PROVIDERS[backend as BackendKind] ?? null;
+  // SAFETY: the satisfies above constrains the map's keys to BackendKind, so
+  // the string-indexed read yields ManagedAuthProvider or undefined.
+  const providers = MANAGED_AUTH_PROVIDERS as ManagedAuthProviderByBackend;
+  return providers[backend] ?? null;
 }
 
 /**
  * The account a browser login signs into, named the way the provider's own
  * sign-in page names it rather than after the backend it unlocks.
  */
-const MANAGED_AUTH_LABELS: Record<ManagedAuthProvider, string> = {
+const MANAGED_AUTH_LABELS = {
   arcee: "Arcee",
   codex: "ChatGPT",
-};
+} satisfies Record<ManagedAuthProvider, string>;
 
 export function managedAuthLabel(provider: ManagedAuthProvider): string {
   return MANAGED_AUTH_LABELS[provider];

@@ -79,6 +79,8 @@ const Popover: React.FC<PopoverProps> & {
   useEffect(() => {
     if (!open || !closeOnOutsideClick || asSheet) return undefined;
     const onDown = (event: MouseEvent) => {
+      // SAFETY: a mousedown target is always a Node; the cast only widens the
+      // EventTarget the DOM event types declare.
       const target = event.target as Node;
       // The panel is checked separately: when portalled it is not a descendant
       // of the trigger wrapper.

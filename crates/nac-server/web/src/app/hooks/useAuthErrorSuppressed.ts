@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { managedAuthProvider } from "@/app/lib/providers";
-import { humanError } from "@/app/lib/providerError";
+import { humanError, type RunError } from "@/app/lib/providerError";
 import {
   queryKeys,
   useManagedAuth,
@@ -29,7 +29,7 @@ import {
  */
 export function useAuthErrorSuppressed(
   backend: string | null,
-  error: unknown,
+  error: RunError,
 ): boolean {
   const asksForLogin =
     error != null && humanError(error, backend).fix?.kind === "login";

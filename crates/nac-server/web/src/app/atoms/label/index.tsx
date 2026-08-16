@@ -14,17 +14,17 @@ export interface HoverHintConfig {
   description?: string;
 }
 
-const iconSizeFor: Record<LabelSize, number> = {
+const iconSizeFor = {
   [LabelSize.Micro]: 16,
   [LabelSize.Small]: 20,
   [LabelSize.Medium]: 24,
-};
+} satisfies Record<LabelSize, number>;
 
-const hintSizeFor: Record<LabelSize, HoverHintSize> = {
+const hintSizeFor = {
   [LabelSize.Micro]: HoverHintSize.Small,
   [LabelSize.Small]: HoverHintSize.Small,
   [LabelSize.Medium]: HoverHintSize.Medium,
-};
+} satisfies Record<LabelSize, HoverHintSize>;
 
 interface LabelProps {
   children: React.ReactNode;

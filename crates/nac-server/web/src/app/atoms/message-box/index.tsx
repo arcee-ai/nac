@@ -15,7 +15,7 @@ export enum MessageBoxSize {
   Large = "large",
 }
 
-const variantClasses: Record<MessageBoxVariant, string> = {
+const variantClasses = {
   [MessageBoxVariant.Info]:
     "bg-info-primary text-info-primary border-info-primary",
   [MessageBoxVariant.Error]:
@@ -24,45 +24,45 @@ const variantClasses: Record<MessageBoxVariant, string> = {
     "bg-danger-primary text-danger-primary border-danger-primary",
   [MessageBoxVariant.Success]:
     "bg-success-primary text-success-primary border-success-primary",
-};
+} satisfies Record<MessageBoxVariant, string>;
 
-const variantIcons: Record<MessageBoxVariant, IconName> = {
+const variantIcons = {
   [MessageBoxVariant.Info]: IconName.Info,
   [MessageBoxVariant.Error]: IconName.Danger,
   [MessageBoxVariant.Danger]: IconName.Danger,
   [MessageBoxVariant.Success]: IconName.CheckCircle,
-};
+} satisfies Record<MessageBoxVariant, IconName>;
 
-const variantFills: Record<MessageBoxVariant, string> = {
+const variantFills = {
   [MessageBoxVariant.Info]: "var(--color-fill-info-primary)",
   [MessageBoxVariant.Error]: "var(--color-fill-error-primary)",
   [MessageBoxVariant.Danger]: "var(--color-fill-danger-primary)",
   [MessageBoxVariant.Success]: "var(--color-fill-success-primary)",
-};
+} satisfies Record<MessageBoxVariant, string>;
 
-const sizeClasses: Record<MessageBoxSize, string> = {
+const sizeClasses = {
   [MessageBoxSize.Small]: "p-2 gap-2",
   [MessageBoxSize.Medium]: "p-3 gap-2",
   [MessageBoxSize.Large]: "p-4 gap-3",
-};
+} satisfies Record<MessageBoxSize, string>;
 
-const titleClasses: Record<MessageBoxSize, string> = {
+const titleClasses = {
   [MessageBoxSize.Small]: "label-micro",
   [MessageBoxSize.Medium]: "label-small",
   [MessageBoxSize.Large]: "label-medium",
-};
+} satisfies Record<MessageBoxSize, string>;
 
-const bodyClasses: Record<MessageBoxSize, string> = {
+const bodyClasses = {
   [MessageBoxSize.Small]: "text-micro",
   [MessageBoxSize.Medium]: "text-small",
   [MessageBoxSize.Large]: "text-medium",
-};
+} satisfies Record<MessageBoxSize, string>;
 
-const iconSizes: Record<MessageBoxSize, number> = {
+const iconSizes = {
   [MessageBoxSize.Small]: 16,
   [MessageBoxSize.Medium]: 20,
   [MessageBoxSize.Large]: 24,
-};
+} satisfies Record<MessageBoxSize, number>;
 
 interface MessageBoxProps extends Omit<
   React.HTMLAttributes<HTMLDivElement>,

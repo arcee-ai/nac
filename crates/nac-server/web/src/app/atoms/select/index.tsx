@@ -40,11 +40,11 @@ interface SelectProps {
   panelClassName?: string;
 }
 
-const tabSizeFor: Record<ButtonSize, TabButtonSize> = {
+const tabSizeFor = {
   [ButtonSize.Small]: TabButtonSize.Small,
   [ButtonSize.Medium]: TabButtonSize.Medium,
   [ButtonSize.Large]: TabButtonSize.Large,
-};
+} satisfies Record<ButtonSize, TabButtonSize>;
 
 /** Dropdown select: a `Popover` whose panel is a list of single-choice rows. */
 const Select: React.FC<SelectProps> = ({

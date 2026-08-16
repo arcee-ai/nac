@@ -56,7 +56,7 @@ export function displaySessionTitle(
   summary: SessionSummarySnapshot | null | undefined,
 ): string {
   if (!summary) return "";
-  if (typeof summary.title === "string" && summary.title.trim()) {
+  if (summary.title != null && summary.title.trim()) {
     return summary.title.trim();
   }
   const prompt = (summary.last_user_prompt ?? "").trim();

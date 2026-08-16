@@ -16,15 +16,15 @@ interface ModelPillProps extends React.HTMLAttributes<HTMLDivElement> {
   active?: boolean;
 }
 
-const sizeIconPx: Record<ModelPillSize, number> = {
+const sizeIconPx = {
   [ModelPillSize.Medium]: 16,
   [ModelPillSize.Small]: 18,
-};
+} satisfies Record<ModelPillSize, number>;
 
-const sizeLoaderSize: Record<ModelPillSize, LoaderSize> = {
+const sizeLoaderSize = {
   [ModelPillSize.Medium]: LoaderSize.Large,
   [ModelPillSize.Small]: LoaderSize.Small,
-};
+} satisfies Record<ModelPillSize, LoaderSize>;
 
 /** Round avatar for the orchestrator, shown beside every model message. */
 const ModelPill: React.FC<ModelPillProps> & { Size: typeof ModelPillSize } = ({

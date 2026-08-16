@@ -2,7 +2,7 @@ import { useCallback } from "react";
 
 import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
 import { managedAuthProvider } from "@/app/lib/providers";
-import { humanError, type ErrorFix } from "@/app/lib/providerError";
+import { humanError, type ErrorFix, type RunError } from "@/app/lib/providerError";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 
 export interface ErrorNotice {
@@ -27,7 +27,7 @@ export function useErrorNotice(
   const provider = backend ? managedAuthProvider(backend) : null;
 
   return useCallback(
-    (error: unknown, retry?: () => void): ErrorNotice => {
+    (error: RunError, retry?: () => void): ErrorNotice => {
       const { title, description, fix } = humanError(error, backend);
       return {
         title,

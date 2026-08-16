@@ -16,11 +16,11 @@ interface NumberInputProps {
   "aria-label"?: string;
 }
 
-const buttonSizeFor: Record<InputSize, ButtonSize> = {
+const buttonSizeFor = {
   [InputSize.Small]: ButtonSize.Small,
   [InputSize.Medium]: ButtonSize.Medium,
   [InputSize.Large]: ButtonSize.Large,
-};
+} satisfies Record<InputSize, ButtonSize>;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);

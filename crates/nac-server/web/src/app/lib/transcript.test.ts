@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTranscript, type TranscriptThread } from "@/app/lib/transcript";
+import {
+  buildTranscript,
+  dispatchThreadName,
+  partitionThreadCalls,
+  type TranscriptThread,
+} from "@/app/lib/transcript";
 import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
@@ -35,6 +40,14 @@ function dispatchToolCall(spec: DispatchSpec): ToolCall {
     id: spec.callId,
     type: "function",
     function: { name: "thread", arguments: JSON.stringify(args) },
+  };
+}
+
+function rawThreadCall(argumentsJson: string): ToolCall {
+  return {
+    id: "raw-call",
+    type: "function",
+    function: { name: "thread", arguments: argumentsJson },
   };
 }
 
@@ -228,5 +241,22 @@ describe("re-dispatched thread cards", () => {
     const dependent = cards.find((card) => card.name === "dependent");
     expect(source?.state).toBe("running");
     expect(dependent?.state).toBe("pending");
+  });
+});
+
+describe("thread call decoding", () => {
+  it("falls back when a decoded name is not a string", () => {
+    const call = rawThreadCall('{"name":{"toString":null},"action":"x"}');
+
+    expect(dispatchThreadName(call)).toBe("thread");
+  });
+
+  it("ignores non-string dependency entries", () => {
+    const first = rawThreadCall('{"name":"first","action":"x"}');
+    const second = rawThreadCall(
+      '{"name":"second","action":"y","threads":[{"toString":null}]}',
+    );
+
+    expect(partitionThreadCalls([first, second])).toEqual([[first, second]]);
   });
 });

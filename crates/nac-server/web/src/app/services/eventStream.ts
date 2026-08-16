@@ -37,6 +37,9 @@ const MAX_ATTEMPTS_BEFORE_OPEN = 4;
 
 function parseEvent<T>(event: MessageEvent<string>): T | null {
   try {
+    // SAFETY: the stream contract is one JSON payload per event; callers treat
+    // a parse failure (null) as a skipped event, so a malformed payload is
+    // never trusted as T.
     return JSON.parse(event.data) as T;
   } catch {
     return null;
@@ -84,9 +87,8 @@ export function subscribeToSessionEvents(
     };
 
     source.addEventListener("session_event", (event) => {
-      const envelope = parseEvent<SessionEventEnvelope>(
-        event as MessageEvent<string>,
-      );
+      if (!(event instanceof MessageEvent)) return;
+      const envelope = parseEvent<SessionEventEnvelope>(event);
       if (!envelope) return;
       lastCursor = {
         epoch_id: envelope.epoch_id,
@@ -100,9 +102,8 @@ export function subscribeToSessionEvents(
     });
 
     source.addEventListener("assistant_delta", (event) => {
-      const parsed = parseEvent<AssistantStreamDelta>(
-        event as MessageEvent<string>,
-      );
+      if (!(event instanceof MessageEvent)) return;
+      const parsed = parseEvent<AssistantStreamDelta>(event);
       if (!parsed) return;
       perfEpoch();
       perfMark("sse:assistant_delta", {
@@ -116,9 +117,8 @@ export function subscribeToSessionEvents(
     });
 
     source.addEventListener("replay_boundary", (event) => {
-      const parsed = parseEvent<ReplayBoundaryEvent>(
-        event as MessageEvent<string>,
-      );
+      if (!(event instanceof MessageEvent)) return;
+      const parsed = parseEvent<ReplayBoundaryEvent>(event);
       if (!parsed) return;
       if (lastCursor !== null && lastCursor.epoch_id !== parsed.epoch_id) {
         lastCursor = {
@@ -130,12 +130,14 @@ export function subscribeToSessionEvents(
     });
 
     source.addEventListener("replay_gap", (event) => {
-      const parsed = parseEvent<ReplayGapEvent>(event as MessageEvent<string>);
+      if (!(event instanceof MessageEvent)) return;
+      const parsed = parseEvent<ReplayGapEvent>(event);
       if (parsed) handlers.onReplayGap?.(parsed);
     });
 
     source.addEventListener("lagged", (event) => {
-      const parsed = parseEvent<LaggedEvent>(event as MessageEvent<string>);
+      if (!(event instanceof MessageEvent)) return;
+      const parsed = parseEvent<LaggedEvent>(event);
       if (parsed) handlers.onLagged?.(parsed);
     });
 

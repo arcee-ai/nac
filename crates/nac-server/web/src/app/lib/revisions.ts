@@ -44,6 +44,8 @@ export function revisionsByTurn(
   let next = 0;
   for (const turn of turns) {
     if (turn.kind !== "model") continue;
+    // SAFETY: the turn's kind field was just matched, so the model variant's
+    // messageIndex is present.
     const start = (turn as ModelTurn).messageIndex;
     if (start == null) continue;
     while (next < ordered.length && ordered[next].transcript_len! <= start) {

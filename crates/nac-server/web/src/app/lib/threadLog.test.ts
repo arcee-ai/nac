@@ -14,10 +14,14 @@ import type {
 } from "@/app/types/api";
 
 function logEvent(line: string): AgentEvent {
+  // SAFETY: test fixture — the merge logic under test only reads `type` and
+  // `line` from thread_log events, so the remaining fields are omitted.
   return { type: "thread_log", line } as AgentEvent;
 }
 
 function callEvent(callId: string): AgentEvent {
+  // SAFETY: test fixture — only the tool_call_started fields the merge logic
+  // reads are populated; the optional event fields are omitted.
   return {
     type: "tool_call_started",
     call_id: callId,

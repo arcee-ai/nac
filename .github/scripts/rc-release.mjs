@@ -184,16 +184,17 @@ export class GitHubApi {
     { body, accept = "application/vnd.github+json", raw = false } = {},
   ) {
     const url = path.startsWith("http") ? path : `${this.apiBase}${path}`;
+    const headers = {
+      Accept: accept,
+      Authorization: `Bearer ${this.token}`,
+      "User-Agent": "nac-nightly-release",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
     const response = await fetch(url, {
       method,
       redirect: "follow",
-      headers: {
-        Accept: accept,
-        Authorization: `Bearer ${this.token}`,
-        "User-Agent": "nac-nightly-release",
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok) {
@@ -235,7 +236,7 @@ export class GitHubApi {
     ).data.object;
     const seen = new Set();
     for (let depth = 0; depth < 16; depth += 1) {
-      if (!object || typeof object.sha !== "string") throw new Error(`${tag} has an invalid Git ref`);
+      if (!object || String(object.sha) !== object.sha) throw new Error(`${tag} has an invalid Git ref`);
       if (object.type === "commit") return requireSha(object.sha, tag);
       if (object.type !== "tag") throw new Error(`${tag} points to unsupported ${object.type || "object"}`);
       if (seen.has(object.sha)) throw new Error(`${tag} contains an annotated-tag cycle`);

@@ -5,41 +5,71 @@ import { act, render, type RenderResult } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSessionStream } from "@/app/hooks/useSessionStream";
-import type { SessionStreamHandlers } from "@/app/services/eventStream";
+import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
 import { resetRuntime } from "@/app/store/runtimeStore";
 import type {
   Message,
+  MessagePageMetadata,
   MessagesPageResponse,
+  ResponseTimingSnapshot,
   SessionEventEnvelope,
   SessionSnapshotResponse,
 } from "@/app/types/api";
 
-const stream = vi.hoisted(() => ({
+// The hook runs against the real event stream and api modules; the only fakes
+// are the EventSource global, which jsdom does not implement, and the page
+// fetch, which a spy on the real api object delegates to.
+class FakeEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  static instances: FakeEventSource[] = [];
 
-  handlers: null as SessionStreamHandlers | null,
+  readonly url: string;
+  readyState = FakeEventSource.CONNECTING;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  private listeners = new Map<string, (event: MessageEvent<string>) => void>();
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, listener: EventListenerOrEventListenerObject) {
+    // SAFETY: the fake only ever emits MessageEvents, so a listener registered
+    // for one is invoked with exactly that shape.
+    this.listeners.set(name, listener as (event: MessageEvent<string>) => void);
+  }
+
+  emit<T>(name: string, value: T) {
+    // A closed source stops delivering events, like a real EventSource.
+    if (this.readyState === FakeEventSource.CLOSED) return;
+    const event = new MessageEvent<string>(name, {
+      data: JSON.stringify(value),
+    });
+    this.listeners.get(name)?.(event);
+  }
+
+  close() {
+    this.readyState = FakeEventSource.CLOSED;
+  }
+}
+
+function source(): FakeEventSource {
+  const instance = FakeEventSource.instances.at(-1);
+  if (!instance) throw new Error("expected an open event stream");
+  return instance;
+}
+
+const stream = {
   getPage: vi.fn(),
-  disposed: vi.fn(),
-}));
+};
 
-vi.mock("@/app/services/eventStream", () => ({
-  subscribeToSessionEvents: (_id: string, handlers: SessionStreamHandlers) => {
-    stream.handlers = handlers;
-    return stream.disposed;
-  },
-}));
-
-vi.mock("@/app/services/api", () => ({
-  api: {
-    getMessages: stream.getPage,
-  },
-}));
-
-vi.mock("@/app/lib/perfDebug", () => ({
-  perfMark: vi.fn(),
-  perfRender: vi.fn(),
-  perfTime: (_name: string, run: () => unknown) => run(),
-}));
+vi.spyOn(api, "getMessages").mockImplementation((...args) =>
+  stream.getPage(...args),
+);
 
 const SESSION_ID = "stream-test";
 
@@ -55,23 +85,32 @@ async function flushAsyncWork() {
   }
 }
 function user(content: string): Message {
+  // SAFETY: test fixture — the user variant is exactly { role, content }.
   return { role: "user", content } as Message;
 }
 
 function snapshot(messages: Message[], total = messages.length): SessionSnapshotResponse {
+  const messagePage: MessagePageMetadata = {
+    start: 0,
+    end: messages.length,
+    total,
+    has_older: false,
+  };
+  const timing: ResponseTimingSnapshot = {
+    last_response_duration_ms: null,
+    previous_response_duration_ms: null,
+    response_durations_ms: [],
+  };
+  // SAFETY: test fixture — only the snapshot fields the stream coordination
+  // under test reads are populated; the remaining response fields are unused.
   return {
     messages,
     message_created_at: messages.map((_, index) => `t-${index}`),
-    message_page: {
-      start: 0,
-      end: messages.length,
-      total,
-      has_older: false,
-    },
-    response_timing: { response_durations_ms: [] },
+    message_page: messagePage,
+    response_timing: timing,
     thread_events: {},
     thread_episodes: {},
-  } as unknown as SessionSnapshotResponse;
+  } as SessionSnapshotResponse;
 }
 
 function page(messages: Message[], total = messages.length): MessagesPageResponse {
@@ -88,6 +127,8 @@ function page(messages: Message[], total = messages.length): MessagesPageRespons
 }
 
 function transcriptEnvelope(sequenceId: number): SessionEventEnvelope {
+  // SAFETY: test fixture — the hook reads only sequence_id and the event
+  // payload the fixture provides; the remaining envelope fields are omitted.
   return {
     sequence_id: sequenceId,
     event: { type: "transcript_appended", transcript_len: sequenceId + 1 },
@@ -110,14 +151,15 @@ async function mount(client: QueryClient): Promise<RenderResult> {
 }
 beforeEach(() => {
   vi.useFakeTimers();
-  stream.handlers = null;
+  FakeEventSource.instances = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
   stream.getPage.mockReset();
-  stream.disposed.mockReset();
   resetRuntime(SESSION_ID);
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("session stream request coordination", () => {
@@ -152,11 +194,11 @@ describe("session stream request coordination", () => {
         return value;
       });
     const renderer = await mount(client);
-    expect(stream.handlers).not.toBeNull();
+    const stream_source = source();
 
     await act(async () => {
       for (let sequence = 1; sequence <= 100; sequence += 1) {
-        stream.handlers?.onEnvelope(transcriptEnvelope(sequence));
+        stream_source.emit("session_event", transcriptEnvelope(sequence));
       }
       await vi.advanceTimersByTimeAsync(250);
     });
@@ -186,9 +228,9 @@ describe("session stream request coordination", () => {
     expect(invalidate).not.toHaveBeenCalled();
 
     renderer.unmount();
-    stream.handlers?.onEnvelope(transcriptEnvelope(101));
+    stream_source.emit("session_event", transcriptEnvelope(101));
     expect(stream.getPage).toHaveBeenCalledTimes(2);
-    expect(stream.disposed).toHaveBeenCalledOnce();
+    expect(stream_source.readyState).toBe(FakeEventSource.CLOSED);
   });
 
   it("keeps a superseding snapshot active before draining a queued tail", async () => {
@@ -204,17 +246,17 @@ describe("session stream request coordination", () => {
       .mockImplementationOnce(async () => secondSnapshot.promise);
     stream.getPage.mockResolvedValue(page([user("old"), user("new")], 4));
     const renderer = await mount(client);
-    expect(stream.handlers).not.toBeNull();
+    const stream_source = source();
 
     await act(async () => {
-      stream.handlers?.onReplayBoundary?.({ epoch_id: "one" } as never);
-      stream.handlers?.onReplayBoundary?.({ epoch_id: "two" } as never);
+      stream_source.emit("replay_boundary", { epoch_id: "one" });
+      stream_source.emit("replay_boundary", { epoch_id: "two" });
       await vi.advanceTimersByTimeAsync(250);
     });
     expect(invalidate).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      stream.handlers?.onReplayBoundary?.({ epoch_id: "three" } as never);
+      stream_source.emit("replay_boundary", { epoch_id: "three" });
       await vi.advanceTimersByTimeAsync(250);
     });
     expect(invalidate).toHaveBeenCalledTimes(2);
@@ -225,7 +267,7 @@ describe("session stream request coordination", () => {
     expect(invalidate).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      stream.handlers?.onEnvelope(transcriptEnvelope(3));
+      stream_source.emit("session_event", transcriptEnvelope(3));
     });
     expect(stream.getPage).not.toHaveBeenCalled();
 
@@ -251,10 +293,10 @@ describe("session stream request coordination", () => {
     const late = deferred<MessagesPageResponse>();
     stream.getPage.mockImplementation(() => late.promise);
     const renderer = await mount(client);
-    expect(stream.handlers).not.toBeNull();
+    const stream_source = source();
 
     await act(async () => {
-      stream.handlers?.onEnvelope(transcriptEnvelope(1));
+      stream_source.emit("session_event", transcriptEnvelope(1));
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
@@ -262,7 +304,7 @@ describe("session stream request coordination", () => {
     expect(stream.getPage).toHaveBeenCalledOnce();
 
     await act(async () => {
-      stream.handlers?.onReplayGap?.({ missing_from_sequence_id: 1 } as never);
+      stream_source.emit("replay_gap", { missing_from_sequence_id: 1 });
     });
     expect(client.getQueryData(queryKeys.threadEvents(SESSION_ID, "worker"))).toBeUndefined();
 

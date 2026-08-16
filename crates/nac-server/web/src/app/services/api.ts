@@ -3,6 +3,8 @@
 // Requests are always same-origin: in production nac-web serves this bundle
 // itself, and in development the Vite proxy forwards the API routes to it.
 
+import type { JsonObject } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import type {
   BranchList,
   BrowseListing,
@@ -96,12 +98,11 @@ async function errorDetail(res: Response): Promise<string> {
     if (!text) return res.statusText;
     try {
       const parsed: unknown = JSON.parse(text);
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        typeof (parsed as { error?: unknown }).error === "string"
-      ) {
-        return (parsed as { error: string }).error;
+      if (Object(parsed) === parsed && !Array.isArray(parsed)) {
+        // SAFETY: the identity check above admits only non-null JSON objects.
+        const record = parsed as JsonObject;
+        const error = record.error;
+        if (isString(error)) return error;
       }
     } catch {
       // Not JSON; the raw body is the best detail available.
@@ -129,12 +130,19 @@ async function request<T>(
   }
 
   // Several mutations answer 200/202 with an empty body.
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) {
+    // SAFETY: a 204 has no body by definition, so the caller's T must accept
+    // undefined for this endpoint.
+    return undefined as T;
+  }
   const contentType = res.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     const text = await res.text();
+    // SAFETY: non-JSON endpoints answer with plain text (or nothing); the
+    // caller's T is the text contract for that endpoint.
     return (text ? text : undefined) as T;
   }
+  // SAFETY: the endpoint's JSON body is the caller's T by contract.
   return (await res.json()) as T;
 }
 

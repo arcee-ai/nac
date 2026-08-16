@@ -27,8 +27,8 @@ export function createStore<S extends object>(
   const getState = () => state;
 
   const setState = (patch: Patch<S>) => {
-    const next = typeof patch === "function" ? patch(state) : patch;
-    if (!next || (next as unknown) === (state as unknown)) return;
+    const next = patch instanceof Function ? patch(state) : patch;
+    if (!next || next === state) return;
     state = { ...state, ...next };
     perfMark(`store:${name}.notify`, {
       fields: { keys: Object.keys(next).join("+"), listeners: listeners.size },
@@ -44,9 +44,11 @@ export function createStore<S extends object>(
     };
   };
 
-  const identity = (s: S) => s as unknown;
+  const identity = (s: S): S => s;
 
   const useStore = <T = S>(selector?: (state: S) => T): T => {
+    // SAFETY: when no selector is given, T defaults to S and identity returns
+    // the state itself, so the cast only widens the no-selector branch.
     const select = (selector ?? identity) as (state: S) => T;
     // Both snapshots read the same live state, so the server snapshot used
     // during hydration cannot diverge from the client one.

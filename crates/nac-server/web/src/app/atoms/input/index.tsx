@@ -22,46 +22,46 @@ export enum InputTrailing {
   Button = "button",
 }
 
-const buttonSizeFor: Record<InputSize, ButtonSize> = {
+const buttonSizeFor = {
   [InputSize.Small]: ButtonSize.Small,
   [InputSize.Medium]: ButtonSize.Medium,
   [InputSize.Large]: ButtonSize.Large,
-};
-const iconSizeFor: Record<InputSize, number> = {
+} satisfies Record<InputSize, ButtonSize>;
+const iconSizeFor = {
   [InputSize.Small]: 16,
   [InputSize.Medium]: 20,
   [InputSize.Large]: 24,
-};
-const padLeft: Record<InputSize, string> = {
+} satisfies Record<InputSize, number>;
+const padLeft = {
   [InputSize.Small]: "pl-1",
   [InputSize.Medium]: "pl-2",
   [InputSize.Large]: "pl-3",
-};
-const padRight: Record<InputSize, string> = {
+} satisfies Record<InputSize, string>;
+const padRight = {
   [InputSize.Small]: "pr-1",
   [InputSize.Medium]: "pr-2",
   [InputSize.Large]: "pr-3",
-};
-const padLeftIcon: Record<InputSize, string> = {
+} satisfies Record<InputSize, string>;
+const padLeftIcon = {
   [InputSize.Small]: "pl-6",
   [InputSize.Medium]: "pl-9",
   [InputSize.Large]: "pl-12",
-};
-const padRightIcon: Record<InputSize, string> = {
+} satisfies Record<InputSize, string>;
+const padRightIcon = {
   [InputSize.Small]: "pr-7",
   [InputSize.Medium]: "pr-11",
   [InputSize.Large]: "pr-14",
-};
-const leadingIconPos: Record<InputSize, string> = {
+} satisfies Record<InputSize, string>;
+const leadingIconPos = {
   [InputSize.Small]: "top-1 left-1",
   [InputSize.Medium]: "top-2 left-2",
   [InputSize.Large]: "top-3 left-3",
-};
-const trailingIconPos: Record<InputSize, string> = {
+} satisfies Record<InputSize, string>;
+const trailingIconPos = {
   [InputSize.Small]: "top-1 right-1",
   [InputSize.Medium]: "top-2 right-2",
   [InputSize.Large]: "top-3 right-3",
-};
+} satisfies Record<InputSize, string>;
 
 interface InputProps
   extends Omit<React.ComponentPropsWithRef<"input">, "size"> {

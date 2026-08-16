@@ -154,12 +154,12 @@ interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
 
 const DEFAULT_VIEW_BOX = "0 0 24 24";
 
-const getGlyph = (iconName: IconName): { d: string; viewBox: string } => {
+const getGlyph = (iconName: IconName) => {
   const entry = iconPaths[iconName];
-  if (typeof entry === "string") {
-    return { d: entry, viewBox: DEFAULT_VIEW_BOX };
+  if (entry?.kind === "glyph") {
+    return entry;
   }
-  return entry ?? { d: "", viewBox: DEFAULT_VIEW_BOX };
+  return { d: entry?.d ?? "", viewBox: DEFAULT_VIEW_BOX };
 };
 
 /**
@@ -198,6 +198,8 @@ export const mapIconName = (
   for (const [key, value] of Object.entries(IconName)) {
     const normalizedEnumValue = normalizeIconName(value);
     if (normalized === normalizedEnumValue) {
+      // SAFETY: the key came from Object.entries of the enum itself, so it is
+      // one of the enum's own member names.
       return IconName[key as keyof typeof IconName];
     }
   }

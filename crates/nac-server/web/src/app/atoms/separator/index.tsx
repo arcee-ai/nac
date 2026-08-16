@@ -69,11 +69,9 @@ const Separator: React.FC<SeparatorProps> & {
 
     if (orientation === SeparatorOrientation.Vertical) {
       // Vertical separator
-      const verticalStyle: React.CSSProperties = {
-        ...style,
-        ...(height ? { height } : {}),
-        ...(width ? { width } : {}),
-      };
+      const verticalStyle: React.CSSProperties = { ...style };
+      if (height) verticalStyle.height = height;
+      if (width) verticalStyle.width = width;
 
       return (
         <div
@@ -87,11 +85,9 @@ const Separator: React.FC<SeparatorProps> & {
     // Horizontal separator
     if (label) {
       // Horizontal separator with label
-      const horizontalStyle: React.CSSProperties = {
-        ...style,
-        ...(width ? { width } : {}),
-        ...(height ? { height } : {}),
-      };
+      const horizontalStyle: React.CSSProperties = { ...style };
+      if (width) horizontalStyle.width = width;
+      if (height) horizontalStyle.height = height;
 
       return (
         <div
@@ -110,11 +106,9 @@ const Separator: React.FC<SeparatorProps> & {
     }
 
     // Horizontal separator without label
-    const horizontalStyle: React.CSSProperties = {
-      ...style,
-      ...(width ? { width } : {}),
-      ...(height ? { height } : {}),
-    };
+    const horizontalStyle: React.CSSProperties = { ...style };
+    if (width) horizontalStyle.width = width;
+    if (height) horizontalStyle.height = height;
 
     return (
       <div

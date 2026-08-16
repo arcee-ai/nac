@@ -2,12 +2,12 @@ import { Icon, IconName } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
 
-const TAB: Record<SessionPanel, { label: string; iconName: IconName }> = {
+const TAB = {
   threads: { label: "Threads", iconName: IconName.Flow },
   files: { label: "Files", iconName: IconName.Folders },
   worksets: { label: "Worksets", iconName: IconName.Checklist },
   history: { label: "History", iconName: IconName.History },
-};
+} satisfies Record<SessionPanel, { label: string; iconName: IconName }>;
 
 /**
  * The phone's panel switcher: a floating pill pinned to the bottom of the

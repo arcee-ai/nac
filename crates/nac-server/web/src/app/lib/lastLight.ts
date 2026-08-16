@@ -2,6 +2,8 @@
 // with, so turning dual mode on again does not mean re-picking it.
 // Presentation state only — the server never sees this key.
 
+import type { JsonObject } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import type { LightModelSettings } from "@/app/types/api";
 
 const STORAGE_KEY = "nac.last-light-model";
@@ -12,11 +14,16 @@ export function loadLastLight(): LightModelSettings | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const light = parsed as Record<string, unknown>;
-    if (typeof light.model !== "string" || typeof light.backend !== "string") {
+    if (Object(parsed) !== parsed || Array.isArray(parsed)) return null;
+    // SAFETY: the identity check above admits only non-null JSON objects, and
+    // the field checks below verify the two fields the app reads.
+    const light = parsed as JsonObject;
+    if (!isString(light.model) || !isString(light.backend)) {
       return null;
     }
+    // SAFETY: model and backend were just verified to be strings on the
+    // object above, and the remaining optional fields are all string-or-null
+    // in the stored shape; the assertion re-labels the still-unparsed value.
     return parsed as LightModelSettings;
   } catch {
     return null;

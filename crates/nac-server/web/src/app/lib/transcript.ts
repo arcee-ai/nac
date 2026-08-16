@@ -6,6 +6,8 @@
 // in-batch `threads` deps split that package into stacked DAG rows.
 
 import { displayPromptFromMessageText } from "@/app/lib/format";
+import type { JsonObject, JsonValue } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
 import {
   mergeThreadLog,
@@ -122,19 +124,21 @@ export interface StreamedOutput {
   reasoning: string;
 }
 
-function parseArguments(call: ToolCall): Record<string, unknown> {
+function parseArguments(call: ToolCall): JsonObject {
   try {
     const parsed: unknown = JSON.parse(call.function?.arguments || "{}");
-    return parsed && typeof parsed === "object"
-      ? (parsed as Record<string, unknown>)
-      : {};
+    // SAFETY: JSON.parse only ever yields JSON values, and the identity check
+    // below rejects primitives (Object() boxes them) while admitting objects
+    // and arrays, which is exactly the original typeof === "object" contract.
+    return Object(parsed) === parsed ? (parsed as JsonObject) : {};
   } catch {
     return {};
   }
 }
 
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
+/** String fields only; any other JSON value reads as "". */
+function text(value: JsonValue | undefined): string {
+  return isString(value) ? value : "";
 }
 
 interface BuildContext {
@@ -162,7 +166,7 @@ function splitEpisodes(events: AgentEvent[]): AgentEvent[][] {
 
 function threadEpisodes(
   events: Record<string, AgentEvent[]>,
-): Record<string, AgentEvent[][]> {
+) {
   const episodes: Record<string, AgentEvent[][]> = {};
   Object.entries(events).forEach(([name, list]) => {
     episodes[name] = splitEpisodes(list);
@@ -172,7 +176,7 @@ function threadEpisodes(
 
 function countThreadDispatches(
   messages: SessionSnapshotResponse["messages"],
-): Record<string, number> {
+) {
   const counts: Record<string, number> = {};
   messages.forEach((message) => {
     if (message.role !== "assistant") return;
@@ -201,7 +205,7 @@ export function dispatchThreadName(call: ToolCall): string {
  */
 export function dispatchActions(
   messages: SessionSnapshotResponse["messages"],
-): Record<string, string> {
+) {
   const actions: Record<string, string> = {};
   messages.forEach((message) => {
     if (message.role !== "assistant") return;
@@ -218,7 +222,7 @@ export function dispatchActions(
 function sourceThreads(call: ToolCall): string[] {
   const value = parseArguments(call).threads;
   if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
+  return value.filter(isString);
 }
 
 /**

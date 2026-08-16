@@ -43,7 +43,7 @@ import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { usePromptHistoryPreview } from "@/app/hooks/usePromptHistoryPreview";
 import { perfRender } from "@/app/lib/perfDebug";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
@@ -176,7 +176,7 @@ function StatBadge({
 function contextGauge(
   used: number | null,
   resolved: ResolvedCatalogModel,
-): { value: string; title: string } {
+) {
   const tokens = formatTokensCompact(used);
   const window = resolved.contextWindow;
   if (!window || used == null) {
@@ -402,7 +402,7 @@ export function ChatInputBox({
       markSshConnected(sshTarget);
     } catch (error) {
       markSshDisconnected(sshTarget);
-      toast.error(`SSH reconnect failed: ${errorMessage(error)}`);
+      toast.error(`SSH reconnect failed: ${errorMessage(toRunError(error))}`);
     }
   }, [sshTarget, connectSsh, toast]);
 
@@ -446,10 +446,10 @@ export function ChatInputBox({
           } catch (error) {
             pushLocalEvent(
               "error",
-              `compact failed: ${errorMessage(error)}`,
+              `compact failed: ${errorMessage(toRunError(error))}`,
               true,
             );
-            toast.error(`Failed to compact: ${humanErrorText(error, backend)}`);
+            toast.error(`Failed to compact: ${humanErrorText(toRunError(error), backend)}`);
           }
           return;
         }
@@ -464,10 +464,10 @@ export function ChatInputBox({
         } catch (error) {
           pushLocalEvent(
             "error",
-            `submit failed: ${errorMessage(error)}`,
+            `submit failed: ${errorMessage(toRunError(error))}`,
             true,
           );
-          toast.error(`Failed to send: ${humanErrorText(error, backend)}`);
+          toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
         }
       } finally {
         submitInFlight.current = false;
