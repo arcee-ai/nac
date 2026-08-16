@@ -107,8 +107,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   const [token] = useState(() => createModalId());
   const previousPathnameRef = useRef("");
   const location = useLocation();
-  const { modalStack, pushModal, popModal, isModalOnTop, getStackLength } =
-    useModalStack();
+  const { modalStack, pushModal, popModal, isModalOnTop, getStackLength } = useModalStack();
 
   // Mobile keeps the panel mounted through the exit slide; desktop unmounts
   // immediately because the enter animation is a one-shot fade.
@@ -171,16 +170,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
         root?.removeAttribute("inert");
       }
     };
-  }, [
-    open,
-    onClose,
-    isMobile,
-    token,
-    pushModal,
-    popModal,
-    isModalOnTop,
-    getStackLength,
-  ]);
+  }, [open, onClose, isMobile, token, pushModal, popModal, isModalOnTop, getStackLength]);
 
   // Move focus into the dialog and trap Tab within it. The card itself takes
   // the focus rather than the first field: landing in a text input pops up the
@@ -189,8 +179,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     if (!open) return undefined;
     const card = cardRef.current;
     if (!card) return undefined;
-    const focusables = () =>
-      Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const focusables = () => Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE));
     card.focus();
 
     const onKey = (e: KeyboardEvent) => {
@@ -232,8 +221,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   // A phone gets the same full-bleed chrome as `flush`, because a padded card
   // makes no sense once the dialog covers the whole screen.
   const chrome = flush || isMobile;
-  const onTop =
-    modalStack.length === 0 || modalStack[modalStack.length - 1]?.id === token;
+  const onTop = modalStack.length === 0 || modalStack[modalStack.length - 1]?.id === token;
   // On a phone the scrim never dismisses — only the back/close control does.
   const overlayCloses = closeOnOverlay && !isMobile;
 
@@ -263,8 +251,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   const closeLeads = isMobile;
   // Chromeless still needs a way out once it covers the screen; regular chrome
   // already puts Close in the header row.
-  const chromelessClose =
-    chromeless && (isFullScreen || isMobile) && onClose && !hideClose;
+  const chromelessClose = chromeless && (isFullScreen || isMobile) && onClose && !hideClose;
 
   const headerRow = (
     <div
@@ -276,10 +263,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     >
       {closeLeads && onClose ? closeButton(mobileCloseIcon, true) : null}
       <div
-        className={cn(
-          "flex-1 min-w-0 text-basic-primary",
-          chrome ? "header-md" : "header-medium",
-        )}
+        className={cn("flex-1 min-w-0 text-basic-primary", chrome ? "header-md" : "header-medium")}
       >
         {title}
       </div>
@@ -326,8 +310,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           "fixed inset-0 z-[100] flex pointer-events-none",
           // A phone panel is the viewport itself, so it never gets the inset
           // the desktop card sits in.
-          !isMobile &&
-            (isFullScreen ? "p-2" : "items-center justify-center p-4"),
+          !isMobile && (isFullScreen ? "p-2" : "items-center justify-center p-4"),
         )}
       >
         <div
@@ -363,14 +346,11 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
             // its own sizing has to win: it comes after `className`, which is
             // where tailwind-merge resolves the conflict, and the min/max pair
             // clamps anything the caller adds on top.
-            isMobile &&
-              "w-full h-[100dvh] min-w-full min-h-[100dvh] max-w-full max-h-[100dvh]",
+            isMobile && "w-full h-[100dvh] min-w-full min-h-[100dvh] max-w-full max-h-[100dvh]",
           )}
         >
           {chromelessClose ? (
-            <div className="absolute top-1 right-2 z-10">
-              {closeButton(IconName.Close, false)}
-            </div>
+            <div className="absolute top-1 right-2 z-10">{closeButton(IconName.Close, false)}</div>
           ) : null}
           {header}
           <div

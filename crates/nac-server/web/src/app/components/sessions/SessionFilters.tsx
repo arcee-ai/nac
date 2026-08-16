@@ -45,13 +45,7 @@ function Divider() {
   return <div className="h-px w-full bg-divider-muted shrink-0" />;
 }
 
-function Section({
-  children,
-  gap,
-}: {
-  children: React.ReactNode;
-  gap: string;
-}) {
+function Section({ children, gap }: { children: React.ReactNode; gap: string }) {
   return <div className={cn("flex flex-col px-4 py-6", gap)}>{children}</div>;
 }
 
@@ -71,17 +65,11 @@ function FilterRow({
 }) {
   return (
     <div
-      className={cn(
-        stacked
-          ? "flex flex-col gap-1"
-          : "flex items-center justify-between gap-3",
-      )}
+      className={cn(stacked ? "flex flex-col gap-1" : "flex items-center justify-between gap-3")}
     >
       <div
         className={cn(
-          stacked
-            ? "label-medium text-basic-primary"
-            : "label-small text-basic-secondary shrink-0",
+          stacked ? "label-medium text-basic-primary" : "label-small text-basic-secondary shrink-0",
         )}
       >
         {label}
@@ -128,9 +116,7 @@ function Chips<T extends string>({
     <div className="flex flex-col gap-3">
       <div
         className={cn(
-          touch
-            ? "label-medium text-basic-primary"
-            : "label-small text-basic-secondary",
+          touch ? "label-medium text-basic-primary" : "label-small text-basic-secondary",
         )}
       >
         {label}
@@ -145,11 +131,7 @@ function Chips<T extends string>({
               // The 36px chip already carries the design's 16px padding.
               size={touch ? ButtonSize.Medium : ButtonSize.Small}
               content={ButtonContent.Text}
-              variant={
-                selected.includes(option)
-                  ? ButtonVariant.Primary
-                  : ButtonVariant.Secondary
-              }
+              variant={selected.includes(option) ? ButtonVariant.Primary : ButtonVariant.Secondary}
               onClick={() => onToggle(option)}
               aria-pressed={selected.includes(option)}
               style={touch ? undefined : CHIP_PADDING}

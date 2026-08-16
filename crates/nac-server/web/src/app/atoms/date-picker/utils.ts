@@ -17,8 +17,7 @@ const monthFormatter = new Intl.DateTimeFormat(LOCALE, {
 });
 const weekdayFormatter = new Intl.DateTimeFormat(LOCALE, { weekday: "short" });
 
-export const startOfMonth = (date: Date) =>
-  new Date(date.getFullYear(), date.getMonth(), 1);
+export const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
 
 export const addMonths = (date: Date, count: number) =>
   new Date(date.getFullYear(), date.getMonth() + count, 1);
@@ -39,9 +38,7 @@ export const isToday = (date: Date) => isSameDay(date, new Date());
 
 export const isWithin = (date: Date, from: Date, to: Date) => {
   const value = startOfDay(date).getTime();
-  return (
-    value >= startOfDay(from).getTime() && value <= startOfDay(to).getTime()
-  );
+  return value >= startOfDay(from).getTime() && value <= startOfDay(to).getTime();
 };
 
 export const isOutOfBounds = (date: Date, min?: Date, max?: Date) => {
@@ -56,24 +53,17 @@ export const monthLabel = (date: Date) => monthFormatter.format(date);
 /** Sunday first, matching the order `Date.getDay()` returns. */
 export const weekdayLabels = (): string[] => {
   const sunday = new Date(2021, 7, 1);
-  return Array.from({ length: 7 }, (_, offset) =>
-    weekdayFormatter.format(addDays(sunday, offset)),
-  );
+  return Array.from({ length: 7 }, (_, offset) => weekdayFormatter.format(addDays(sunday, offset)));
 };
 
 /** A key stable across re-renders, used to find a day button to focus. */
-export const dayKey = (date: Date) =>
-  `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+export const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 
 /** Whole weeks covering `month`, padded from the months on either side. */
 export function monthGrid(month: Date): CalendarDay[] {
   const first = startOfMonth(month);
   const lead = first.getDay();
-  const daysInMonth = new Date(
-    month.getFullYear(),
-    month.getMonth() + 1,
-    0,
-  ).getDate();
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
 
   const days: CalendarDay[] = [];
   for (let offset = -lead; offset < 0; offset += 1) {

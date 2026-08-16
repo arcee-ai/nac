@@ -57,9 +57,7 @@ const Checkbox: React.FC<CheckboxProps> = ({
         />
       ) : null}
     </span>
-    {children ? (
-      <span className="label-small text-basic-primary">{children}</span>
-    ) : null}
+    {children ? <span className="label-small text-basic-primary">{children}</span> : null}
   </label>
 );
 

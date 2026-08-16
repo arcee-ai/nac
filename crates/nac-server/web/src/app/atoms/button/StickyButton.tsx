@@ -4,8 +4,7 @@ import { cn } from "../../lib/cn";
 import Loader, { LoaderSize } from "../loader";
 import { ButtonContent, ButtonVariant, loaderVariant } from "./index";
 
-interface StickyButtonProps
-  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "size"> {
+interface StickyButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "size"> {
   variant?: ButtonVariant;
   content?: ButtonContent;
   children: React.ReactNode;
@@ -29,8 +28,7 @@ const StickyButton: React.FC<StickyButtonProps> & {
   type = "button",
   ...props
 }) => {
-  const stretches =
-    className.includes("flex-grow") || className.includes("flex-1");
+  const stretches = className.includes("flex-grow") || className.includes("flex-1");
 
   return (
     <div

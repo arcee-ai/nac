@@ -17,14 +17,7 @@ export type BackendKind =
   | "arcee-api";
 
 /** `nac_core::model::types::ReasoningEffort`, serialized lowercase. */
-export type ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max";
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Dispatch weight class when a light model is configured, serialized lowercase. */
 export type DispatchWeight = "light" | "heavy";
@@ -348,18 +341,9 @@ export type WorkspaceDiffStage = "staged" | "unstaged" | "untracked";
 
 // The backend serialises these as plain strings; the unions document the known
 // values without rejecting anything new the server may start sending.
-export type WorkspaceDiffStatus =
-  | "added"
-  | "deleted"
-  | "modified"
-  | "untracked"
-  | (string & {});
+export type WorkspaceDiffStatus = "added" | "deleted" | "modified" | "untracked" | (string & {});
 /** Beware: the backend says insert/delete, not addition/deletion. */
-export type WorkspaceDiffLineKind =
-  | "context"
-  | "delete"
-  | "insert"
-  | (string & {});
+export type WorkspaceDiffLineKind = "context" | "delete" | "insert" | (string & {});
 
 export interface WorkspaceDiffLine {
   kind: WorkspaceDiffLineKind;

@@ -10,10 +10,7 @@ import rehypeMathjaxChtml from "rehype-mathjax/chtml";
 import remarkMath from "remark-math";
 
 /** Single dollars are on, which is what the `math-source` normalizer emits. */
-export const remarkMathPlugin = [
-  remarkMath,
-  { singleDollarTextMath: true },
-] as const;
+export const remarkMathPlugin = [remarkMath, { singleDollarTextMath: true }] as const;
 
 /**
  * CHTML rather than SVG: the glyphs stay real text in real fonts, so a formula

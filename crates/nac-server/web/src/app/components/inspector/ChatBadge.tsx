@@ -58,11 +58,7 @@ export function ChatBadge({
         className={cn(
           "group flex items-center py-2 rounded-[4px] max-w-full",
           collapsible ? "gap-[6px] pl-4 pr-2" : "gap-4 px-4",
-          !interactive
-            ? "cursor-default"
-            : highlighted
-              ? "btn-ghost-highlighted"
-              : "btn-ghost",
+          !interactive ? "cursor-default" : highlighted ? "btn-ghost-highlighted" : "btn-ghost",
         )}
         disabled={!interactive}
         aria-expanded={collapsible ? open : undefined}

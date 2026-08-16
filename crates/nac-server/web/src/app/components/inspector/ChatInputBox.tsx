@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -25,10 +18,7 @@ import {
 } from "@/app/atoms";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { SshBadge } from "@/app/components/SshBadge";
-import {
-  resolveCatalogModel,
-  type ResolvedCatalogModel,
-} from "@/app/lib/catalog";
+import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
   displayPromptFromMessageText,
@@ -54,11 +44,7 @@ import {
   useSlashCommands,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
-import {
-  pushLocalEvent,
-  useRunUsage,
-  useRunning,
-} from "@/app/store/runtimeStore";
+import { pushLocalEvent, useRunUsage, useRunning } from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -107,9 +93,7 @@ function submittedSlashCommand(
   const argumentsText = nameEnd === -1 ? "" : body.slice(nameEnd).trim();
   return (
     definitions.find(
-      (definition) =>
-        definition.name === name &&
-        (definition.accepts_arguments || !argumentsText),
+      (definition) => definition.name === name && (definition.accepts_arguments || !argumentsText),
     ) ?? null
   );
 }
@@ -151,12 +135,7 @@ function StatBadge({
 }) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter}>
-      <div
-        className={cn(
-          "flex items-center gap-[2px] py-1 whitespace-nowrap",
-          className,
-        )}
-      >
+      <div className={cn("flex items-center gap-[2px] py-1 whitespace-nowrap", className)}>
         {prefix ? (
           <span className={labelClassName}>{prefix}</span>
         ) : showIcon && iconName ? (
@@ -173,10 +152,7 @@ function StatBadge({
  * catalog knows, and the same with an "est." marker and no percentage when the
  * window is only the provider's default — the figure itself is a guess then.
  */
-function contextGauge(
-  used: number | null,
-  resolved: ResolvedCatalogModel,
-) {
+function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
   const tokens = formatTokensCompact(used);
   const window = resolved.contextWindow;
   if (!window || used == null) {
@@ -199,11 +175,7 @@ function contextGauge(
  * Message field plus the run status bar that replaced the old metrics grid:
  * model, environment, cumulative token usage and the run timer.
  */
-export function ChatInputBox({
-  sessionId,
-  snapshot,
-  entry,
-}: ChatInputBoxProps) {
+export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
   perfRender("ChatInputBox");
   const [value, setValue] = useState("");
   const isMobile = useIsMobile();
@@ -214,15 +186,11 @@ export function ChatInputBox({
   // A phone keeps the message on one truncated line until the field is focused,
   // then grows the pill over the transcript.
   const [focused, setFocused] = useState(false);
-  const [dismissedSuggestionValue, setDismissedSuggestionValue] = useState<
-    string | null
-  >(null);
+  const [dismissedSuggestionValue, setDismissedSuggestionValue] = useState<string | null>(null);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   // The pointer's row is held apart from the keyboard's so that leaving the list
   // takes the highlight with it instead of stranding it on the last row crossed.
-  const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(
-    null,
-  );
+  const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(null);
   const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
@@ -249,16 +217,10 @@ export function ChatInputBox({
   const catalog = useModelCatalog();
   const context = contextGauge(
     metrics.usage?.total_tokens ?? null,
-    resolveCatalogModel(
-      catalog.data,
-      snapshot?.metadata?.backend,
-      metrics.model,
-    ),
+    resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
   );
   const now = useNow(1000, running);
-  const elapsedMs = metrics.startedAt
-    ? now - metrics.startedAt
-    : metrics.lastResponseMs;
+  const elapsedMs = metrics.startedAt ? now - metrics.startedAt : metrics.lastResponseMs;
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
   const sshStatus = useSshConnectionStatus(sshTarget);
@@ -311,13 +273,9 @@ export function ChatInputBox({
       definition.name.toLocaleLowerCase().startsWith(prefix),
     );
   }, [commandDefinitions, commandQuery]);
-  const suggestionsOpen =
-    focused && commandQuery !== null && dismissedSuggestionValue !== value;
+  const suggestionsOpen = focused && commandQuery !== null && dismissedSuggestionValue !== value;
   // A narrower query can leave the keyboard's highlight past the last row.
-  const keyboardSuggestion = Math.min(
-    activeSuggestion,
-    Math.max(filteredCommands.length - 1, 0),
-  );
+  const keyboardSuggestion = Math.min(activeSuggestion, Math.max(filteredCommands.length - 1, 0));
   // What Tab and Enter would take, which is whatever is lit: the pointer
   // outranks the keyboard while it is in the list.
   const suggestionIndex =
@@ -435,20 +393,14 @@ export function ChatInputBox({
           }
         }
 
-        const command = definitions
-          ? submittedSlashCommand(text, definitions)
-          : null;
+        const command = definitions ? submittedSlashCommand(text, definitions) : null;
         if (command?.command === "compact") {
           try {
             await compactSession.mutateAsync(sessionId);
             pushLocalEvent("compaction", "▶ compacting context…");
             clearField();
           } catch (error) {
-            pushLocalEvent(
-              "error",
-              `compact failed: ${errorMessage(toRunError(error))}`,
-              true,
-            );
+            pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(error))}`, true);
             toast.error(`Failed to compact: ${humanErrorText(toRunError(error), backend)}`);
           }
           return;
@@ -462,11 +414,7 @@ export function ChatInputBox({
           pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
           clearField();
         } catch (error) {
-          pushLocalEvent(
-            "error",
-            `submit failed: ${errorMessage(toRunError(error))}`,
-            true,
-          );
+          pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(error))}`, true);
           toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
         }
       } finally {
@@ -490,10 +438,7 @@ export function ChatInputBox({
 
   // A starter prompt goes out on its own; it is already a whole instruction,
   // and the field is where it would otherwise have to be confirmed.
-  useEffect(
-    () => consumePromptRequests((prompt) => void submit(prompt)),
-    [submit],
-  );
+  useEffect(() => consumePromptRequests((prompt) => void submit(prompt)), [submit]);
 
   const stop = useCallback(async () => {
     const summary = entry?.summary;
@@ -565,12 +510,7 @@ export function ChatInputBox({
       )}
     >
       <div className="relative flex-1 min-w-0">
-        <span
-          className="sr-only"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
+        <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {suggestionsOpen
             ? commandDefinitions === undefined
               ? commandsFailed
@@ -647,10 +587,7 @@ export function ChatInputBox({
                 // own last position.
                 setActiveSuggestion(
                   e.key === "ArrowDown"
-                    ? Math.min(
-                        suggestionIndex + 1,
-                        filteredCommands.length - 1,
-                      )
+                    ? Math.min(suggestionIndex + 1, filteredCommands.length - 1)
                     : Math.max(suggestionIndex - 1, 0),
                 );
                 setHoveredSuggestion(null);
@@ -679,8 +616,7 @@ export function ChatInputBox({
         {history.active ? (
           <>
             <span id={previewHelpId} className="sr-only">
-              Press Tab to take this prompt, Escape to leave it, or start typing
-              to dismiss it
+              Press Tab to take this prompt, Escape to leave it, or start typing to dismiss it
             </span>
             {/* The preview is drawn here rather than left to the native
                 placeholder, which cannot be measured — this way the key that
@@ -694,10 +630,7 @@ export function ChatInputBox({
           </>
         ) : null}
         {collapsed ? (
-          <div
-            className="absolute inset-0 flex items-center px-4 cursor-text"
-            onClick={focusEnd}
-          >
+          <div className="absolute inset-0 flex items-center px-4 cursor-text" onClick={focusEnd}>
             <span
               className={cn(
                 "w-full truncate text-medium",
@@ -739,33 +672,25 @@ export function ChatInputBox({
             tabIndex={-1}
             className={cn(
               "flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left",
-              index === suggestionIndex
-                ? "btn-ghost-highlighted"
-                : "btn-ghost",
+              index === suggestionIndex ? "btn-ghost-highlighted" : "btn-ghost",
             )}
             onPointerDown={(event) => event.preventDefault()}
             // Move rather than enter: a list that opens under a still pointer
             // keeps the highlight the keyboard put on the first row.
             onPointerMove={() => setHoveredSuggestion(index)}
             onPointerLeave={() =>
-              setHoveredSuggestion((current) =>
-                current === index ? null : current,
-              )
+              setHoveredSuggestion((current) => (current === index ? null : current))
             }
             onClick={() => completeCommand(definition)}
           >
-            <span className="code code-small shrink-0 text-basic-primary">
-              /{definition.name}
-            </span>
+            <span className="code code-small shrink-0 text-basic-primary">/{definition.name}</span>
             <span className="min-w-0 text-small text-basic-secondary">
               {definition.description}
             </span>
           </button>
         ))
       ) : (
-        <div className="px-3 py-2 text-small text-basic-secondary">
-          No matching commands
-        </div>
+        <div className="px-3 py-2 text-small text-basic-secondary">No matching commands</div>
       )}
     </div>
   );
@@ -800,9 +725,7 @@ export function ChatInputBox({
       style={isMobile ? GROUND_FADE_UP : undefined}
       onSubmit={(e) => {
         e.preventDefault();
-        const selected = suggestionsOpen
-          ? filteredCommands[activeSuggestion]
-          : undefined;
+        const selected = suggestionsOpen ? filteredCommands[activeSuggestion] : undefined;
         if (selected) {
           completeCommand(selected);
           return;
@@ -879,9 +802,7 @@ export function ChatInputBox({
                   {metrics.usage.cache_read_tokens > 0 ? (
                     <StatBadge
                       prefix="C"
-                      value={formatTokensCompact(
-                        metrics.usage.cache_read_tokens,
-                      )}
+                      value={formatTokensCompact(metrics.usage.cache_read_tokens)}
                       className="text-info-secondary opacity-75"
                       title="Cache read tokens"
                       labelClassName="tag-label"
@@ -931,9 +852,7 @@ export function ChatInputBox({
               ) : (
                 <Icon iconName={IconName.History} size={16} />
               )}
-              <span className="block w-[40px] text-center">
-                {formatClock(elapsedMs)}
-              </span>
+              <span className="block w-[40px] text-center">{formatClock(elapsedMs)}</span>
             </div>
           </Tooltip>
         </div>

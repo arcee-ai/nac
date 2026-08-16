@@ -17,9 +17,7 @@ interface SessionIllustrationProps {
   className?: string;
 }
 
-const SessionIllustration: React.FC<SessionIllustrationProps> = ({
-  className = "",
-}) => (
+const SessionIllustration: React.FC<SessionIllustrationProps> = ({ className = "" }) => (
   <svg
     width={95}
     height={96}

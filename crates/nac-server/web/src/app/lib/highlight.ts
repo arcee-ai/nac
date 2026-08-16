@@ -132,10 +132,7 @@ function splitLines(tokens: CodeToken[]): CodeToken[][] {
 }
 
 /** Tokens per line, or null when the result would not reproduce the input. */
-async function highlightBlock(
-  language: string,
-  text: string,
-): Promise<CodeToken[][] | null> {
+async function highlightBlock(language: string, text: string): Promise<CodeToken[][] | null> {
   const lowlight = await loadLowlight();
   if (!lowlight.registered(language)) return null;
 
@@ -170,10 +167,7 @@ export async function highlightSource(
  * the tokenizer sees everything it needs and only an unknown language or the
  * integrity check above can turn the colours off.
  */
-export async function highlightCode(
-  path: string,
-  text: string,
-): Promise<CodeToken[][] | null> {
+export async function highlightCode(path: string, text: string): Promise<CodeToken[][] | null> {
   const language = languageFromPath(path);
   if (!language) return null;
   return highlightBlock(language, text);
@@ -199,10 +193,7 @@ export async function highlightDiff(
       for (const side of [OLD_SIDE, NEW_SIDE]) {
         const lines = hunk.lines.filter((line) => side.has(line.kind));
         if (lines.length === 0) continue;
-        const tokens = await highlightBlock(
-          language,
-          lines.map((line) => line.content).join("\n"),
-        );
+        const tokens = await highlightBlock(language, lines.map((line) => line.content).join("\n"));
         if (!tokens || tokens.length !== lines.length) continue;
         lines.forEach((line, index) => highlighted.set(line, tokens[index]));
       }

@@ -1,13 +1,6 @@
 import { useState } from "react";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonVariant,
-  Input,
-  Modal,
-  ModalSize,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { displaySessionTitle } from "@/app/lib/format";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -26,14 +19,7 @@ interface RenameModalProps {
 export function RenameModal({ open, onClose, summary }: RenameModalProps) {
   const mounted = useExitTransition(open);
   if (!mounted || !summary) return null;
-  return (
-    <RenameForm
-      key={summary.session_id}
-      open={open}
-      summary={summary}
-      onClose={onClose}
-    />
-  );
+  return <RenameForm key={summary.session_id} open={open} summary={summary} onClose={onClose} />;
 }
 
 function RenameForm({

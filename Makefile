@@ -1,4 +1,4 @@
-.PHONY: all build dev release install test test-rust test-assets check fmt clippy clean help
+.PHONY: all build dev release install test test-rust test-assets check lint format-check fmt clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -16,9 +16,6 @@ endif
 
 export DEV_BIND DEV_URL BROWSER_OPEN
 
-# The workspace is not clippy-clean yet, so lints are advisory by default.
-# Run `make clippy CLIPPY_ARGS='-D warnings'` to fail on them.
-CLIPPY_ARGS ?=
 
 # Matches the location used by scripts/install.sh ($(INSTALL_ROOT)/bin).
 INSTALL_ROOT ?= $(HOME)/.local
@@ -88,13 +85,20 @@ test-assets:
 check:
 	$(CARGO) check --workspace --locked
 
-## Format Rust sources
-fmt:
-	$(CARGO) fmt --all
+## Lint frontend and production Rust targets
+lint:
+	npm --prefix $(WEB_DIR) run lint
+	$(CARGO) clippy --workspace --locked --lib --bins -- -D warnings
 
-## Lint with clippy
-clippy:
-	$(CARGO) clippy --workspace --locked --all-targets -- $(CLIPPY_ARGS)
+## Check frontend and Rust formatting
+format-check:
+	npm --prefix $(WEB_DIR) run format:check
+	$(CARGO) fmt --all -- --check
+
+## Format frontend and Rust sources
+fmt:
+	npm --prefix $(WEB_DIR) run format
+	$(CARGO) fmt --all
 
 ## Remove build artifacts
 clean:
@@ -114,7 +118,8 @@ help:
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  check        Run cargo check --workspace --locked' \
-		'  fmt          Run rustfmt' \
-		'  clippy       Run clippy (CLIPPY_ARGS=-D warnings to fail on lints)' \
+		'  lint         Lint frontend and production Rust targets' \
+		'  format-check Check frontend and Rust formatting' \
+		'  fmt          Format frontend and Rust sources' \
 		'  clean        Remove target/ artifacts' \
 		'  help         Show this help'

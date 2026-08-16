@@ -9,11 +9,7 @@ import { displayPromptFromMessageText } from "@/app/lib/format";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
-import {
-  mergeThreadLog,
-  persistedThreadLog,
-  type ThreadLogLine,
-} from "@/app/lib/threadLog";
+import { mergeThreadLog, persistedThreadLog, type ThreadLogLine } from "@/app/lib/threadLog";
 import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
@@ -37,19 +33,9 @@ const TOOL_CALL_CANCELLED_MARKER = "[tool call cancelled by user]";
  * A badge for them is noise, so the transcript keeps the steps that changed
  * something — dispatches, worksets, deletions — and drops the lookups.
  */
-const SILENT_TOOLS = new Set([
-  "threads",
-  "thread_read",
-  "workset_read",
-  "workset_list",
-]);
+const SILENT_TOOLS = new Set(["threads", "thread_read", "workset_read", "workset_list"]);
 
-export type ThreadState =
-  | "running"
-  | "pending"
-  | "done"
-  | "cancelled"
-  | "error";
+export type ThreadState = "running" | "pending" | "done" | "cancelled" | "error";
 
 export interface TranscriptThread {
   /**
@@ -165,9 +151,7 @@ function splitEpisodes(events: AgentEvent[]): AgentEvent[][] {
   return episodes;
 }
 
-function threadEpisodes(
-  events: Record<string, AgentEvent[]>,
-) {
+function threadEpisodes(events: Record<string, AgentEvent[]>) {
   const episodes: Record<string, AgentEvent[][]> = {};
   Object.entries(events).forEach(([name, list]) => {
     episodes[name] = splitEpisodes(list);
@@ -175,9 +159,7 @@ function threadEpisodes(
   return episodes;
 }
 
-function countThreadDispatches(
-  messages: SessionSnapshotResponse["messages"],
-) {
+function countThreadDispatches(messages: SessionSnapshotResponse["messages"]) {
   const counts: Record<string, number> = {};
   messages.forEach((message) => {
     if (message.role !== "assistant") return;
@@ -204,9 +186,7 @@ export function dispatchThreadName(call: ToolCall): string {
  * calls. The live `thread_started` event cannot serve this: event sanitization
  * replaces the action with a fixed placeholder before it reaches the stream.
  */
-export function dispatchActions(
-  messages: SessionSnapshotResponse["messages"],
-) {
+export function dispatchActions(messages: SessionSnapshotResponse["messages"]) {
   const actions: Record<string, string> = {};
   messages.forEach((message) => {
     if (message.role !== "assistant") return;
@@ -353,16 +333,12 @@ function describeThread(
   const args = parseArguments(call);
   const action = text(args.action);
   const rawWeight = text(args.weight);
-  const weight =
-    rawWeight === "light" || rawWeight === "heavy" ? rawWeight : null;
+  const weight = rawWeight === "light" || rawWeight === "heavy" ? rawWeight : null;
   const result = results.get(call.id) ?? null;
   // The stream is keyed by name and only ever describes the dispatch running
   // now, which is the newest one. Handing it to the earlier cards of that name
   // would replay this episode's commands on them and mark them failed with it.
-  const live =
-    episode === (ctx.dispatchCounts[name] ?? 1) - 1
-      ? ctx.liveThreads[name]
-      : undefined;
+  const live = episode === (ctx.dispatchCounts[name] ?? 1) - 1 ? ctx.liveThreads[name] : undefined;
 
   const waitingOnBatchDep = sourceThreads(call).some(
     (source) => batchNames.has(source) && !finishedNames.has(source),
@@ -381,8 +357,7 @@ function describeThread(
       : episodeEvents?.some((event) => event.type === "thread_finished");
   const finishedLive = live?.status === "finished";
   const cancelled =
-    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
-    Boolean(live?.cancelled);
+    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true || Boolean(live?.cancelled);
   const state: ThreadState = cancelled
     ? "cancelled"
     : live?.isError
@@ -401,10 +376,7 @@ function describeThread(
     summary: result || action,
     // The persisted events are what a reload falls back on, and the stream is
     // what carries the commands issued since the last snapshot.
-    log: mergeThreadLog(
-      persistedThreadLog(episodeEvents),
-      live?.log ?? [],
-    ),
+    log: mergeThreadLog(persistedThreadLog(episodeEvents), live?.log ?? []),
     state,
   };
 }
@@ -412,19 +384,12 @@ function describeThread(
 /**
  * Newest block of a kind, which is the only one streamed output could belong to.
  */
-function lastBlockText(
-  blocks: TranscriptBlock[],
-  kind: "text" | "thoughts",
-): string | null {
+function lastBlockText(blocks: TranscriptBlock[], kind: "text" | "thoughts"): string | null {
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index];
     if (
       block.kind === kind &&
-      !(
-        kind === "text" &&
-        block.kind === "text" &&
-        block.text.trim() === RUN_CANCELLED_MARKER
-      )
+      !(kind === "text" && block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER)
     ) {
       return block.text;
     }
@@ -441,14 +406,8 @@ function lastBlockText(
  * replacing it, which is what lets an expanded reasoning badge stay open
  * across the commit.
  */
-function nextOrdinal(
-  blocks: TranscriptBlock[],
-  kind: TranscriptBlock["kind"],
-): number {
-  return blocks.reduce(
-    (total, block) => (block.kind === kind ? total + 1 : total),
-    0,
-  );
+function nextOrdinal(blocks: TranscriptBlock[], kind: TranscriptBlock["kind"]): number {
+  return blocks.reduce((total, block) => (block.kind === kind ? total + 1 : total), 0);
 }
 
 /**
@@ -536,20 +495,14 @@ export function buildTranscript(
 
   const windowDispatchCounts = countThreadDispatches(messages);
   const persistedDispatchCounts = new Map(
-    (snapshot?.threads ?? []).map((thread) => [
-      thread.name,
-      thread.episode_count,
-    ]),
+    (snapshot?.threads ?? []).map((thread) => [thread.name, thread.episode_count]),
   );
   const activeNames = new Set(snapshot?.active_threads ?? []);
   const dispatchCounts: Record<string, number> = {};
   const dispatchesSeen: Record<string, number> = {};
   for (const [name, visibleCount] of Object.entries(windowDispatchCounts)) {
     const persistedCount = persistedDispatchCounts.get(name) ?? 0;
-    const totalCount = Math.max(
-      visibleCount,
-      persistedCount + (activeNames.has(name) ? 1 : 0),
-    );
+    const totalCount = Math.max(visibleCount, persistedCount + (activeNames.has(name) ? 1 : 0));
     dispatchCounts[name] = totalCount;
     dispatchesSeen[name] = Math.max(0, totalCount - visibleCount);
   }
@@ -693,8 +646,7 @@ export function buildTranscript(
   });
 
   let durationIndex = durations.length - 1;
-  let skipActiveTurn =
-    Boolean(snapshot?.active_run) && turns[turns.length - 1]?.kind === "model";
+  let skipActiveTurn = Boolean(snapshot?.active_run) && turns[turns.length - 1]?.kind === "model";
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (turn.kind !== "model") continue;

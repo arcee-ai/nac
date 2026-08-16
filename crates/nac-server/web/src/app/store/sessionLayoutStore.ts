@@ -160,10 +160,8 @@ export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
 export const useSidePanelExpanded = () => useStore((s) => s.expanded);
 export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
-export const useSelectedThreadEpisode = () =>
-  useStore((s) => s.selectedThreadEpisode);
-export const useSelectedThreadRunning = () =>
-  useStore((s) => s.selectedThreadRunning);
+export const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
+export const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);

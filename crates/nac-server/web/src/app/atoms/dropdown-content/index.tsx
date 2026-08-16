@@ -60,12 +60,7 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
 
   // Auto-scroll to bottom on content height change (independent of isOpen)
   useEffect(() => {
-    if (
-      !isScrollable ||
-      !scrollToBottom ||
-      !containerRef.current ||
-      !contentRef.current
-    ) {
+    if (!isScrollable || !scrollToBottom || !containerRef.current || !contentRef.current) {
       return;
     }
 

@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   Button,
@@ -27,33 +20,18 @@ import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { ManagedAuthCallout } from "@/app/components/modals/ManagedAuthCallout";
-import {
-  LightModelSection,
-  type LightSelection,
-} from "@/app/components/modals/LightModelSection";
-import {
-  REASONING_OPTIONS,
-  reasoningOptionsFor,
-} from "@/app/components/modals/options";
+import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
+import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
-import {
-  KEY_DEBOUNCE_MS,
-  MASKED_KEY,
-  modelItems,
-  type Validation,
-} from "@/app/lib/apiKey";
+import { KEY_DEBOUNCE_MS, MASKED_KEY, modelItems, type Validation } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { CLEAR_EFFORT, serializeExtraHeaders } from "@/app/lib/modelConfig";
-import {
-  PROVIDER_KINDS,
-  providerLabel,
-  providerUsesApiKey,
-} from "@/app/lib/providers";
+import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
@@ -94,25 +72,13 @@ const DRAFT = "__new__";
  *
  * Remounted on every open so a half-finished edit never survives a close.
  */
-export function ConfigurationsModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export function ConfigurationsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const mounted = useExitTransition(open);
   if (!mounted) return null;
   return <ConfigurationsManager open={open} onClose={onClose} />;
 }
 
-function ConfigurationsManager({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+function ConfigurationsManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const isMobile = useIsMobile();
   const { data, isLoading } = useModelConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
@@ -122,8 +88,7 @@ function ConfigurationsManager({
   // list arrives. The server orders by creation, hence the last entry.
   const [picked, setPicked] = useState<string | null>(null);
   const selected = picked ?? configurations.at(-1)?.config_id ?? DRAFT;
-  const record =
-    configurations.find((entry) => entry.config_id === selected) ?? null;
+  const record = configurations.find((entry) => entry.config_id === selected) ?? null;
 
   return (
     <Modal
@@ -200,14 +165,10 @@ function ConfigurationForm({
   // SAFETY: the record's backend is one of the BackendKind wire values; an
   // unknown value simply falls back to the default below.
   const stored = record?.backend as BackendKind | undefined;
-  const [backend, setBackend] = useState<BackendKind>(
-    stored ?? "openai-responses",
-  );
+  const [backend, setBackend] = useState<BackendKind>(stored ?? "openai-responses");
   // Null follows the suggestion below, which tracks the provider until the
   // user writes a name of their own.
-  const [nameDraft, setNameDraft] = useState<string | null>(
-    record?.name ?? null,
-  );
+  const [nameDraft, setNameDraft] = useState<string | null>(record?.name ?? null);
   const [baseUrl, setBaseUrl] = useState(record?.base_url ?? "");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(record?.model ?? "");
@@ -218,12 +179,8 @@ function ConfigurationForm({
   // Track whether the compaction value was auto-suggested (vs. user-entered)
   // so model changes don't clobber a manual value. The ref mirrors the state
   // so the auto-suggest effect can read it without depending on the state.
-  const compactionRef = useRef(
-    record?.orchestrator_compaction_threshold?.toString() ?? "",
-  );
-  const compactionAutoRef = useRef(
-    record?.orchestrator_compaction_threshold == null,
-  );
+  const compactionRef = useRef(record?.orchestrator_compaction_threshold?.toString() ?? "");
+  const compactionAutoRef = useRef(record?.orchestrator_compaction_threshold == null);
   const [headers, setHeaders] = useState(() =>
     record && Object.keys(record.extra_headers).length
       ? JSON.stringify(record.extra_headers, null, 2)
@@ -299,26 +256,15 @@ function ConfigurationForm({
             }
           : { status: "validating" };
 
-  const models =
-    keyQuery.data?.models ??
-    loginQuery.data?.models ??
-    savedQuery.data?.models ??
-    [];
-  const chosenModel = models.some((entry) => entry.id === model)
-    ? model
-    : (model ?? "");
+  const models = keyQuery.data?.models ?? loginQuery.data?.models ?? savedQuery.data?.models ?? [];
+  const chosenModel = models.some((entry) => entry.id === model) ? model : (model ?? "");
 
   // A saved key is present but unreadable, so the field stands in for it and
   // only reports a status once the user starts replacing it.
   const keyStatus: Validation["status"] =
-    validation.status !== "idle"
-      ? validation.status
-      : record?.api_key_env
-        ? "ready"
-        : "idle";
+    validation.status !== "idle" ? validation.status : record?.api_key_env ? "ready" : "idle";
 
-  const busy =
-    createConfig.isPending || updateConfig.isPending || deleteConfig.isPending;
+  const busy = createConfig.isPending || updateConfig.isPending || deleteConfig.isPending;
 
   const edit =
     <T,>(setter: (value: T) => void) =>
@@ -348,9 +294,7 @@ function ConfigurationForm({
 
     const threshold = compaction.trim() ? Number(compaction.trim()) : 0;
     if (!Number.isSafeInteger(threshold) || threshold < 0) {
-      setError(
-        "The compaction threshold must be a whole number, or 0 to disable it.",
-      );
+      setError("The compaction threshold must be a whole number, or 0 to disable it.");
       return;
     }
 
@@ -509,10 +453,7 @@ function ConfigurationForm({
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
       <div
-        className={cn(
-          "flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
-          isMobile && "pb-[88px]",
-        )}
+        className={cn("flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0", isMobile && "pb-[88px]")}
       >
         <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
           <ConfigRow
@@ -567,11 +508,7 @@ function ConfigurationForm({
                     className="w-full md:w-[280px]"
                     type="password"
                     autoComplete="off"
-                    placeholder={
-                      record?.api_key_env
-                        ? MASKED_KEY
-                        : "Paste the provider key"
-                    }
+                    placeholder={record?.api_key_env ? MASKED_KEY : "Paste the provider key"}
                     leadingSlot={<KeyStatus status={keyStatus} />}
                     validation={validation.status === "error"}
                     value={apiKey}
@@ -655,17 +592,12 @@ function ConfigurationForm({
                     setCompaction(event.target.value);
                   }}
                 />
-                <span className="shrink-0 text-micro text-basic-muted">
-                  tokens
-                </span>
+                <span className="shrink-0 text-micro text-basic-muted">tokens</span>
               </div>
             }
           />
           <Separator />
-          <LightModelSection
-            initial={record?.light_model ?? null}
-            onChange={setLight}
-          />
+          <LightModelSection initial={record?.light_model ?? null} onChange={setLight} />
           <Separator />
           <TextArea
             label="Extra headers (JSON object)"
@@ -686,9 +618,7 @@ function ConfigurationForm({
           />
         </div>
         <ManagedAuthCallout backend={backend} className="mt-2" />
-        {error ? (
-          <p className="label-micro text-error-primary pt-2">{error}</p>
-        ) : null}
+        {error ? <p className="label-micro text-error-primary pt-2">{error}</p> : null}
         <p className="text-micro text-basic-muted pt-2">* Required fields</p>
       </div>
     </div>

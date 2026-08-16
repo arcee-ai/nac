@@ -14,10 +14,8 @@ export enum ChatSessionMessageVariant {
 const variantBorders = {
   [ChatSessionMessageVariant.Info]: "border-info-primary text-info-primary",
   [ChatSessionMessageVariant.Error]: "border-error-primary text-error-primary",
-  [ChatSessionMessageVariant.Danger]:
-    "border-danger-primary text-danger-primary",
-  [ChatSessionMessageVariant.Success]:
-    "border-success-primary text-success-primary",
+  [ChatSessionMessageVariant.Danger]: "border-danger-primary text-danger-primary",
+  [ChatSessionMessageVariant.Success]: "border-success-primary text-success-primary",
 } satisfies Record<ChatSessionMessageVariant, string>;
 
 const variantIcons = {
@@ -34,10 +32,7 @@ const variantFills = {
   [ChatSessionMessageVariant.Success]: "var(--color-fill-success-primary)",
 } satisfies Record<ChatSessionMessageVariant, string>;
 
-interface ChatSessionMessageProps extends Omit<
-  React.HTMLAttributes<HTMLDivElement>,
-  "title"
-> {
+interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
   title: React.ReactNode;
   variant?: ChatSessionMessageVariant;
   /** Optional second line explaining the title. */
@@ -79,9 +74,7 @@ const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
         />
         <p className="flex-1 min-w-0 header-sm break-words !my-0">{title}</p>
       </div>
-      {children ? (
-        <p className="w-full text-small break-words">{children}</p>
-      ) : null}
+      {children ? <p className="w-full text-small break-words">{children}</p> : null}
       {action ? (
         <Button
           size={ButtonSize.Small}

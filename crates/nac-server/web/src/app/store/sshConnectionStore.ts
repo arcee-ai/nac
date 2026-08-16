@@ -40,11 +40,16 @@ export function useSshConnectionStatus(target: SshTarget | null): SshConnectionS
   });
 }
 
-export function sshTargetFromSummary(summary: {
-  ssh_host: string | null;
-  ssh_port?: number;
-  ssh_identity_file?: string;
-} | null | undefined): SshTarget | null {
+export function sshTargetFromSummary(
+  summary:
+    | {
+        ssh_host: string | null;
+        ssh_port?: number;
+        ssh_identity_file?: string;
+      }
+    | null
+    | undefined,
+): SshTarget | null {
   if (!summary?.ssh_host) return null;
   return {
     ssh_host: summary.ssh_host,

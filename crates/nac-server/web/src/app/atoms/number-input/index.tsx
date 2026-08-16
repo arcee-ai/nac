@@ -22,8 +22,7 @@ const buttonSizeFor = {
   [InputSize.Large]: ButtonSize.Large,
 } satisfies Record<InputSize, ButtonSize>;
 
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max);
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 /**
  * Stepper for a bounded number. Typing is free-form until blur or Enter, so a

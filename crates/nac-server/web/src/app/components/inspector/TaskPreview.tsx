@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   Button,
@@ -40,10 +34,7 @@ function TaskLabel({
       <Icon
         iconName={IconName.Info}
         size={large ? 20 : 16}
-        className={cn(
-          "shrink-0",
-          active ? "text-basic-primary" : "text-btn-secondary",
-        )}
+        className={cn("shrink-0", active ? "text-basic-primary" : "text-btn-secondary")}
       />
       <span
         className={cn(
@@ -85,11 +76,7 @@ function TaskPopover({
       panelClassName="p-4 max-h-[260px] overflow-auto"
       sheetClassName="max-h-[70vh] overflow-auto"
       className="shrink-0"
-      content={
-        <Markdown className="text-basic-primary px-4 md:px-0">
-          {action}
-        </Markdown>
-      }
+      content={<Markdown className="text-basic-primary px-4 md:px-0">{action}</Markdown>}
     >
       {children}
     </Popover>
@@ -210,9 +197,7 @@ export function TaskPreviewHoverHint({
       className="shrink-0"
       content={
         <div onMouseEnter={show} onMouseLeave={scheduleHide}>
-          <Markdown className="task-preview text-basic-primary">
-            {action}
-          </Markdown>
+          <Markdown className="task-preview text-basic-primary">{action}</Markdown>
         </div>
       }
     >

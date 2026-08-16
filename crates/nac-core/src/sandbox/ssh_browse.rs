@@ -304,7 +304,7 @@ fn parse_listing(
         .collect();
     // Sorted here rather than on the host so the order matches the local
     // picker's, whatever the remote locale would have done.
-    entries.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    entries.sort_by_key(|left| left.name.to_lowercase());
 
     Ok(RemoteListing {
         path,

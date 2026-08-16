@@ -21,10 +21,7 @@ import { providerLabel } from "@/app/lib/providers";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { SessionCardActions } from "@/app/components/sessions/SessionCardActions";
-import type {
-  ManagedSessionSummary,
-  SessionSummarySnapshot,
-} from "@/app/types/api";
+import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 // Figma ChatSessionCard has a full-bleed "Surface" layer below the content that
 // carries the interaction state. Tokens are applied as CSS variables because the
@@ -64,9 +61,7 @@ function Metrics({ summary }: { summary: SessionSummarySnapshot }) {
   return (
     <div className="flex items-center gap-2.5 shrink-0 min-w-0">
       {costLabel ? (
-        <span className="text-micro text-basic-primary whitespace-nowrap">
-          {costLabel}
-        </span>
+        <span className="text-micro text-basic-primary whitespace-nowrap">{costLabel}</span>
       ) : null}
       <span className="text-micro text-info-primary whitespace-nowrap truncate">
         {summary.run_count} {summary.run_count === 1 ? "Run" : "Runs"}
@@ -79,13 +74,9 @@ function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
   const provider = providerLabel(summary.backend);
   return (
     <div className="flex flex-wrap items-center gap-2.5 min-w-0 whitespace-nowrap">
-      <span className="label-micro text-basic-tertiary">
-        {sessionEnvLabel(summary)}
-      </span>
+      <span className="label-micro text-basic-tertiary">{sessionEnvLabel(summary)}</span>
       {provider ? (
-        <span className="text-micro text-basic-muted truncate md:max-w-[128px]">
-          {provider}
-        </span>
+        <span className="text-micro text-basic-muted truncate md:max-w-[128px]">{provider}</span>
       ) : null}
     </div>
   );
@@ -190,11 +181,7 @@ export function SessionCard({
 
   const now = useNow(1000, running);
   const clock = running
-    ? formatClock(
-        activeRun?.started_at_epoch_ms
-          ? now - activeRun.started_at_epoch_ms
-          : 0,
-      )
+    ? formatClock(activeRun?.started_at_epoch_ms ? now - activeRun.started_at_epoch_ms : 0)
     : null;
 
   const isMobile = useIsMobile();
@@ -310,10 +297,7 @@ export function SessionCard({
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
           <div className="flex items-center gap-1.5 w-full">
             {summary.pinned ? (
-              <Icon
-                iconName={IconName.Pin}
-                className="text-basic-secondary shrink-0"
-              />
+              <Icon iconName={IconName.Pin} className="text-basic-secondary shrink-0" />
             ) : null}
             <div
               className={cn(
@@ -329,24 +313,17 @@ export function SessionCard({
                 position={TooltipPosition.BottomRight}
                 sticky
               >
-                <Icon
-                  iconName={IconName.Repair}
-                  className="text-error-primary shrink-0"
-                />
+                <Icon iconName={IconName.Repair} className="text-error-primary shrink-0" />
               </Tooltip>
             ) : null}
             {running ? (
               <div className="flex items-center gap-1 shrink-0">
-                <span className="text-basic-primary text-sm leading-5">
-                  {clock}
-                </span>
+                <span className="text-basic-primary text-sm leading-5">{clock}</span>
                 <Loader size={LoaderSize.Small} />
               </div>
             ) : null}
           </div>
-          <div className="code code-micro text-basic-tertiary truncate w-full">
-            {summary.cwd}
-          </div>
+          <div className="code code-micro text-basic-tertiary truncate w-full">{summary.cwd}</div>
         </div>
       </div>
       {!isDesktop ? <Provenance summary={summary} /> : null}

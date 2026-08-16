@@ -27,13 +27,11 @@ function blockedReason(
     return "A revision is open; go back to the working tree to commit.";
   }
   if (running) return "A run is in flight; wait for it to finish.";
-  if (changedCount === 0)
-    return "Nothing to commit: the checkout matches HEAD.";
+  if (changedCount === 0) return "Nothing to commit: the checkout matches HEAD.";
   return null;
 }
 
-const plural = (count: number, noun: string) =>
-  `${count} ${noun}${count === 1 ? "" : "s"}`;
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
  * The Commit button in the Changes toolbar, opening a message field over the
@@ -59,14 +57,8 @@ export function CommitPopover({
   const commit = useCommitWorkspace(sessionId);
 
   const reason = blockedReason(running, revision, changed.length);
-  const additions = changed.reduce(
-    (sum, file) => sum + (file.additions ?? 0),
-    0,
-  );
-  const deletions = changed.reduce(
-    (sum, file) => sum + (file.deletions ?? 0),
-    0,
-  );
+  const additions = changed.reduce((sum, file) => sum + (file.additions ?? 0), 0);
+  const deletions = changed.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
 
   const close = () => {
     setOpen(false);
@@ -122,18 +114,12 @@ export function CommitPopover({
             <span className="flex-1 min-w-0 truncate">
               Staging {plural(changed.length, "file")}
             </span>
-            <span className="code code-small text-success-primary">
-              +{additions}
-            </span>
-            <span className="code code-small text-error-primary">
-              -{deletions}
-            </span>
+            <span className="code code-small text-success-primary">+{additions}</span>
+            <span className="code code-small text-error-primary">-{deletions}</span>
           </div>
 
           {commit.error ? (
-            <div className="p-1 label-micro text-error-primary">
-              {errorMessage(commit.error)}
-            </div>
+            <div className="p-1 label-micro text-error-primary">{errorMessage(commit.error)}</div>
           ) : null}
 
           <Button

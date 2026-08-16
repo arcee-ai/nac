@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useMemo,
-  useState,
-  type KeyboardEvent,
-  type RefObject,
-} from "react";
+import { useCallback, useMemo, useState, type KeyboardEvent, type RefObject } from "react";
 
 /** How much of an earlier prompt the placeholder shows before it trails off. */
 const PREVIEW_MAX_CHARS = 40;

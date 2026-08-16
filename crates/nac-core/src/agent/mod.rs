@@ -1373,9 +1373,10 @@ impl Agent {
         // task must stay within this process's own commits.
         let pre_submission_committed = self.committed_log_len;
         self.committed_log_len = self.committed_log_len.max(idx + 1);
-        let appended = tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
-            .await
-            .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        let appended =
+            tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
+                .await
+                .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
         match appended {
             Ok(()) => {
                 // Live trigger (step 3): see log_transcript_batch.

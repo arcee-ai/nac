@@ -46,8 +46,7 @@ const emptyDir = (name: string, path: string): MutableDir => ({
   files: [],
 });
 
-const byName = (a: { name: string }, b: { name: string }) =>
-  a.name.localeCompare(b.name);
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 
 function freeze(dir: MutableDir): FileTreeDir {
   let current = dir;
@@ -58,16 +57,13 @@ function freeze(dir: MutableDir): FileTreeDir {
     current = child;
   }
   const dirs = [...current.dirs.values()].map(freeze).sort(byName);
-  const files = current.files
-    .slice()
-    .sort((a, b) => a.path.localeCompare(b.path));
+  const files = current.files.slice().sort((a, b) => a.path.localeCompare(b.path));
   return {
     name,
     path: current.path,
     dirs,
     files,
-    hasChanges:
-      files.some((file) => file.status) || dirs.some((child) => child.hasChanges),
+    hasChanges: files.some((file) => file.status) || dirs.some((child) => child.hasChanges),
   };
 }
 
@@ -100,9 +96,7 @@ export function buildFileTree(files: FileNode[]): FileTreeDir {
     path: "",
     dirs,
     files: rootFiles,
-    hasChanges:
-      rootFiles.some((file) => file.status) ||
-      dirs.some((child) => child.hasChanges),
+    hasChanges: rootFiles.some((file) => file.status) || dirs.some((child) => child.hasChanges),
   };
 }
 

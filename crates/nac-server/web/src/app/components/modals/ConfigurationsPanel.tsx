@@ -28,11 +28,7 @@ import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, modelItems, type Validation } from "@/app/lib/apiKey";
 import { type CatalogPick, defaultCatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
-import {
-  PROVIDER_KINDS,
-  providerLabel,
-  providerUsesApiKey,
-} from "@/app/lib/providers";
+import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import {
@@ -142,9 +138,7 @@ export function ConfigurationsPanel({
   const [filePath, setFilePath] = useState("");
   const [picking, setPicking] = useState(false);
   // Layered over a resolved configuration; null follows what was saved.
-  const [backendOverride, setBackendOverride] = useState<BackendKind | null>(
-    null,
-  );
+  const [backendOverride, setBackendOverride] = useState<BackendKind | null>(null);
   const [baseUrlOverride, setBaseUrlOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
 
@@ -216,23 +210,17 @@ export function ConfigurationsPanel({
   const isMobile = useIsMobile();
   const { signedIn } = useManagedSignIn(backend);
 
-  const catalogProvider =
-    catalog.data?.providers.find((entry) => entry.id === backend) ?? null;
+  const catalogProvider = catalog.data?.providers.find((entry) => entry.id === backend) ?? null;
   /**
    * Whether the server can already authenticate as the picked provider. A
    * managed one answers from the live sign-in rather than the catalog snapshot,
    * which still reads `no_credential` for the seconds after a login lands.
    */
-  const catalogCredential = needsKey
-    ? catalogProvider?.auth_status === "ready"
-    : signedIn;
+  const catalogCredential = needsKey ? catalogProvider?.auth_status === "ready" : signedIn;
   // Only an API-key provider can be fixed from here; a managed one needs its
   // browser login, which the sign-in callout below the box owns.
   const catalogNeedsKey =
-    source.kind === "catalog" &&
-    Boolean(catalogPick) &&
-    needsKey &&
-    !catalogCredential;
+    source.kind === "catalog" && Boolean(catalogPick) && needsKey && !catalogCredential;
 
   const validates = (source.kind === "new" && discovers) || catalogNeedsKey;
   const keyQuery = useProviderModels(backend, debouncedKey, null, validates);
@@ -263,12 +251,9 @@ export function ConfigurationsPanel({
 
   const resolvedTarget = Boolean(configId ?? configFile);
   const resolving = resolvedTarget && configQuery.isFetching;
-  const resolved =
-    resolvedTarget && !configQuery.error ? (configQuery.data ?? null) : null;
+  const resolved = resolvedTarget && !configQuery.error ? (configQuery.data ?? null) : null;
   const resolveError =
-    resolvedTarget && configQuery.error
-      ? humanErrorText(configQuery.error, backend)
-      : "";
+    resolvedTarget && configQuery.error ? humanErrorText(configQuery.error, backend) : "";
 
   // A saved setup is a starting point rather than a lock: these follow what the
   // server resolved until the user changes them for the session being created.
@@ -428,7 +413,6 @@ export function ConfigurationsPanel({
     source.kind,
     initial,
     preservesInitial,
-    picked,
     catalogPick,
     catalogCredential,
     catalogProvider,
@@ -461,9 +445,7 @@ export function ConfigurationsPanel({
       if (configId === id) switchSource(null);
       toast.success(`Configuration ${label} removed`);
     } catch (error) {
-      toast.error(
-        `Failed to remove the configuration: ${humanErrorText(toRunError(error))}`,
-      );
+      toast.error(`Failed to remove the configuration: ${humanErrorText(toRunError(error))}`);
     }
   };
 
@@ -493,23 +475,16 @@ export function ConfigurationsPanel({
   const modelListError = loginQuery.isError
     ? humanErrorText(loginQuery.error, backend)
     : (resolved?.models_error ?? "");
-  const boxInvalid =
-    invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
+  const boxInvalid = invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
   // The sign-in callout already shows the failure (and offers signing in again)
   // for a managed provider whose model index refused; keep the footer for
   // resolve / key / API key listing errors that have no other home.
   const authOwnsError =
     loginQuery.isError ||
-    Boolean(
-      resolved &&
-      !providerUsesApiKey(resolved.backend) &&
-      resolved.models_error,
-    );
+    Boolean(resolved && !providerUsesApiKey(resolved.backend) && resolved.models_error);
   const message =
     errorText ??
-    (keyInvalid
-      ? validation.message
-      : resolveError || (authOwnsError ? "" : modelListError));
+    (keyInvalid ? validation.message : resolveError || (authOwnsError ? "" : modelListError));
   // Resolve failures are always worth asking again. A saved setup whose model
   // index failed is too — unless the sign-in callout already offers a retry.
   const retry = resolveError
@@ -609,9 +584,7 @@ export function ConfigurationsPanel({
                     verticalOnMobile
                     control={
                       <Input
-                        inputSize={
-                          isMobile ? InputSize.Large : InputSize.Medium
-                        }
+                        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                         className={CONTROL_WIDTH}
                         value={catalogPick.baseUrl}
                         isDisabled
@@ -633,9 +606,7 @@ export function ConfigurationsPanel({
                                 iconName={IconName.CheckCircle}
                                 className="text-success-primary"
                               />
-                              <span className="label-small text-success-primary">
-                                Detected
-                              </span>
+                              <span className="label-small text-success-primary">Detected</span>
                             </div>
                           }
                         />
@@ -648,14 +619,10 @@ export function ConfigurationsPanel({
                             hint="How this setup is listed the next time a session is created."
                             control={
                               <Input
-                                inputSize={
-                                  isMobile ? InputSize.Large : InputSize.Medium
-                                }
+                                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                                 className={CONTROL_WIDTH}
                                 value={name}
-                                onChange={(event) =>
-                                  setNameDraft(event.target.value)
-                                }
+                                onChange={(event) => setNameDraft(event.target.value)}
                               />
                             }
                           />
@@ -672,21 +639,15 @@ export function ConfigurationsPanel({
                             }
                             control={
                               <Input
-                                inputSize={
-                                  isMobile ? InputSize.Large : InputSize.Medium
-                                }
+                                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                                 className={CONTROL_WIDTH}
                                 type="password"
                                 autoComplete="off"
                                 placeholder="Paste the provider key"
-                                leadingSlot={
-                                  <KeyStatus status={validation.status} />
-                                }
+                                leadingSlot={<KeyStatus status={validation.status} />}
                                 validation={keyInvalid}
                                 value={apiKey}
-                                onChange={(event) =>
-                                  setApiKey(event.target.value)
-                                }
+                                onChange={(event) => setApiKey(event.target.value)}
                               />
                             }
                           />
@@ -831,9 +792,7 @@ export function ConfigurationsPanel({
                         className={CONTROL_WIDTH}
                         placeholder="https://api.openai.com/v1"
                         value={baseUrlDraft}
-                        onChange={(event) =>
-                          setBaseUrlDraft(event.target.value)
-                        }
+                        onChange={(event) => setBaseUrlDraft(event.target.value)}
                       />
                     }
                   />
@@ -894,9 +853,7 @@ export function ConfigurationsPanel({
               onBaseUrl={setBaseUrlOverride}
               model={chosenModel}
               onModel={(value) =>
-                resolved?.models.length
-                  ? setDefaultModel(value)
-                  : setModelOverride(value)
+                resolved?.models.length ? setDefaultModel(value) : setModelOverride(value)
               }
               failed={Boolean(resolveError)}
             />
@@ -911,15 +868,11 @@ export function ConfigurationsPanel({
         </div>
       </div>
 
-      {authBackend ? (
-        <ManagedAuthCallout backend={authBackend} className="mt-1" />
-      ) : null}
+      {authBackend ? <ManagedAuthCallout backend={authBackend} className="mt-1" /> : null}
 
       {message ? (
         <div className="flex items-start gap-2">
-          <p className="label-micro text-error-primary flex-1 min-w-0">
-            {message}
-          </p>
+          <p className="label-micro text-error-primary flex-1 min-w-0">{message}</p>
           {retry ? (
             <Button
               variant={ButtonVariant.Ghost}

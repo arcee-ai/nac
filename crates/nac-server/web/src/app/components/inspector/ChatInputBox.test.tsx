@@ -23,21 +23,11 @@ const fakes = {
   getStore: vi.fn(),
 };
 
-vi.spyOn(api, "listCommands").mockImplementation((...args) =>
-  fakes.listCommands(...args),
-);
-vi.spyOn(api, "submitRun").mockImplementation((...args) =>
-  fakes.submitRun(...args),
-);
-vi.spyOn(api, "compactSession").mockImplementation((...args) =>
-  fakes.compactSession(...args),
-);
-vi.spyOn(api, "getModelCatalog").mockImplementation((...args) =>
-  fakes.getModelCatalog(...args),
-);
-vi.spyOn(api, "getStore").mockImplementation((...args) =>
-  fakes.getStore(...args),
-);
+vi.spyOn(api, "listCommands").mockImplementation((...args) => fakes.listCommands(...args));
+vi.spyOn(api, "submitRun").mockImplementation((...args) => fakes.submitRun(...args));
+vi.spyOn(api, "compactSession").mockImplementation((...args) => fakes.compactSession(...args));
+vi.spyOn(api, "getModelCatalog").mockImplementation((...args) => fakes.getModelCatalog(...args));
+vi.spyOn(api, "getStore").mockImplementation((...args) => fakes.getStore(...args));
 
 const compactDefinition: SlashCommandDefinition = {
   command: "compact",
@@ -81,9 +71,7 @@ beforeEach(() => {
   commandFixtures = [compactDefinition];
   // Queries that stay pending keep their loading state, matching the previous
   // module mocks' `data: undefined`.
-  fakes.listCommands.mockReset().mockImplementation(
-    () => new Promise(() => {}),
-  );
+  fakes.listCommands.mockReset().mockImplementation(() => new Promise(() => {}));
   fakes.submitRun.mockReset().mockResolvedValue({
     run_id: "run",
     client_id: null,
@@ -93,9 +81,7 @@ beforeEach(() => {
     status: "compacted",
     compaction_id: "compaction",
   });
-  fakes.getModelCatalog.mockReset().mockImplementation(
-    () => new Promise(() => {}),
-  );
+  fakes.getModelCatalog.mockReset().mockImplementation(() => new Promise(() => {}));
   fakes.getStore.mockReset().mockImplementation(() => new Promise(() => {}));
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
@@ -140,9 +126,7 @@ describe("slash-command suggestions", () => {
     expect(textarea.getAttribute("aria-expanded")).toBe("true");
     expect(textarea.getAttribute("aria-controls")).toBe(listbox.id);
     expect(textarea.getAttribute("aria-activedescendant")).toBe(option.id);
-    expect(screen.getByRole("status").textContent).toContain(
-      "1 slash command available",
-    );
+    expect(screen.getByRole("status").textContent).toContain("1 slash command available");
 
     type(textarea, "  /CO");
     expect(screen.getByRole("option", { name: /compact/i })).toBeTruthy();
@@ -159,14 +143,10 @@ describe("slash-command suggestions", () => {
 
   it("shows no matches and waits for dismissal before unknown-command submission", async () => {
     const textarea = composer();
-    fakes.submitRun.mockRejectedValueOnce(
-      new Error("unknown slash command: /xyz"),
-    );
+    fakes.submitRun.mockRejectedValueOnce(new Error("unknown slash command: /xyz"));
     type(textarea, "/xyz");
 
-    expect(screen.getByRole("listbox").textContent).toContain(
-      "No matching commands",
-    );
+    expect(screen.getByRole("listbox").textContent).toContain("No matching commands");
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(fakes.submitRun).not.toHaveBeenCalled();
     expect(textarea.value).toBe("/xyz");
@@ -174,16 +154,12 @@ describe("slash-command suggestions", () => {
     fireEvent.keyDown(textarea, { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
     fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() =>
-      expect(fakes.submitRun).toHaveBeenCalledWith("session", "/xyz"),
-    );
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledWith("session", "/xyz"));
     expect(fakes.compactSession).not.toHaveBeenCalled();
     await waitFor(() =>
       // The composer reports through `humanErrorText`, which opens a backend
       // message as a sentence — the server sends this one lower-case.
-      expect(
-        screen.getByText("Failed to send: Unknown slash command: /xyz"),
-      ).toBeTruthy(),
+      expect(screen.getByText("Failed to send: Unknown slash command: /xyz")).toBeTruthy(),
     );
   });
 
@@ -201,17 +177,13 @@ describe("slash-command suggestions", () => {
     type(textarea, "/c");
 
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
-    expect(
-      screen.getByRole("option", { name: /continue/i }).getAttribute(
-        "aria-selected",
-      ),
-    ).toBe("true");
+    expect(screen.getByRole("option", { name: /continue/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
-    expect(
-      screen.getByRole("option", { name: /continue/i }).getAttribute(
-        "aria-selected",
-      ),
-    ).toBe("true");
+    expect(screen.getByRole("option", { name: /continue/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     fireEvent.keyDown(textarea, { key: "Tab" });
 
     expect(textarea.value).toBe("/continue");
@@ -231,9 +203,7 @@ describe("slash-command suggestions", () => {
     expect(fakes.submitRun).not.toHaveBeenCalled();
 
     fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() =>
-      expect(fakes.compactSession).toHaveBeenCalledWith("session"),
-    );
+    await waitFor(() => expect(fakes.compactSession).toHaveBeenCalledWith("session"));
     expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 
@@ -248,9 +218,7 @@ describe("slash-command suggestions", () => {
     expect(fakes.submitRun).not.toHaveBeenCalled();
 
     fireEvent.click(send);
-    await waitFor(() =>
-      expect(fakes.compactSession).toHaveBeenCalledWith("session"),
-    );
+    await waitFor(() => expect(fakes.compactSession).toHaveBeenCalledWith("session"));
     expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 
@@ -347,9 +315,7 @@ describe("slash-command suggestions", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     await waitFor(() => expect(fakes.listCommands).toHaveBeenCalledOnce());
-    await waitFor(() =>
-      expect(fakes.compactSession).toHaveBeenCalledWith("session"),
-    );
+    await waitFor(() => expect(fakes.compactSession).toHaveBeenCalledWith("session"));
 
     cleanup();
     commandFixtures = undefined;
@@ -359,9 +325,7 @@ describe("slash-command suggestions", () => {
     type(failedTextarea, "/compact");
     fireEvent.keyDown(failedTextarea, { key: "Escape" });
     fireEvent.keyDown(failedTextarea, { key: "Enter" });
-    await waitFor(() =>
-      expect(screen.getByText("Unable to load slash commands")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("Unable to load slash commands")).toBeTruthy());
     expect(fakes.compactSession).toHaveBeenCalledTimes(1);
 
     cleanup();
@@ -369,8 +333,6 @@ describe("slash-command suggestions", () => {
     const ordinaryTextarea = composer();
     type(ordinaryTextarea, "ordinary prompt");
     fireEvent.keyDown(ordinaryTextarea, { key: "Enter" });
-    await waitFor(() =>
-      expect(fakes.submitRun).toHaveBeenCalledWith("session", "ordinary prompt"),
-    );
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledWith("session", "ordinary prompt"));
   });
 });

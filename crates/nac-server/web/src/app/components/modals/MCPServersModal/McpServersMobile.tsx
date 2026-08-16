@@ -23,13 +23,7 @@ type Draft = { template: McpLibraryEntry | null };
  * so the panel itself is the list and everything it leads to opens as another
  * panel on top of it: list → catalog → form, each with its own way back.
  */
-export function McpServersMobile({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export function McpServersMobile({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: library } = useMcpLibrary();
   const { data, isLoading } = useMcpServers();
   const servers = data?.servers ?? [];
@@ -46,8 +40,7 @@ export function McpServersMobile({
     template ??
     (record
       ? (library?.entries.find(
-          (entry) =>
-            entry.id === record.library_id || entry.name === record.name,
+          (entry) => entry.id === record.library_id || entry.name === record.name,
         ) ?? null)
       : null);
 
@@ -68,10 +61,7 @@ export function McpServersMobile({
     <>
       <Modal open={open} onClose={onClose} title="MCP servers">
         <div className="flex flex-col gap-1 [&>*]:shrink-0">
-          <TabButton
-            size={TabButtonSize.Large}
-            onClick={() => setPicking(true)}
-          >
+          <TabButton size={TabButtonSize.Large} onClick={() => setPicking(true)}>
             <Icon iconName={IconName.Add} />
             <span className="text-left flex-grow truncate">Add server</span>
             <Icon iconName={IconName.Right} className="shrink-0" />
@@ -83,9 +73,7 @@ export function McpServersMobile({
               size={TabButtonSize.Large}
               onClick={() => setEditing(server.name)}
             >
-              <span className="text-left flex-grow truncate">
-                {server.name}
-              </span>
+              <span className="text-left flex-grow truncate">{server.name}</span>
               <Icon iconName={IconName.Right} className="shrink-0" />
             </TabButton>
           ))}

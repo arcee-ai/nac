@@ -21,11 +21,7 @@ import { useRunning } from "@/app/store/runtimeStore";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /** Why the picker will not act right now, or null when it is free to. */
-function blockedReason(
-  running: boolean,
-  dirty: boolean,
-  create: boolean,
-): string | null {
+function blockedReason(running: boolean, dirty: boolean, create: boolean): string | null {
   if (running) return "A run is in flight; wait for it to finish.";
   // A new branch carries uncommitted work along, so only leaving is a problem.
   if (dirty && !create) {
@@ -71,18 +67,10 @@ function Row({
 }
 
 /** A line of panel status, with a spinner while something is in flight. */
-function Status({
-  busy,
-  children,
-}: {
-  busy?: boolean;
-  children: React.ReactNode;
-}) {
+function Status({ busy, children }: { busy?: boolean; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 p-1 label-micro text-basic-muted">
-      {busy ? (
-        <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />
-      ) : null}
+      {busy ? <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} /> : null}
       {children}
     </div>
   );
@@ -94,13 +82,7 @@ function Status({
  * be working in the checkout; the server enforces the same rules, because
  * another session may share this directory.
  */
-export function BranchPicker({
-  sessionId,
-  branch,
-}: {
-  sessionId: string;
-  branch: string;
-}) {
+export function BranchPicker({ sessionId, branch }: { sessionId: string; branch: string }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -190,15 +172,11 @@ export function BranchPicker({
                     active={item.is_current}
                     disabled={Boolean(reason)}
                     title={reason ?? undefined}
-                    onClick={
-                      item.is_current ? () => {} : () => act(item.name, false)
-                    }
+                    onClick={item.is_current ? () => {} : () => act(item.name, false)}
                   />
                 );
               })}
-              {branches.length === 0 && !needle ? (
-                <Status>No local branches.</Status>
-              ) : null}
+              {branches.length === 0 && !needle ? <Status>No local branches.</Status> : null}
             </div>
           ) : null}
 

@@ -13,13 +13,9 @@ const zero = () => 0;
  */
 export function useNow(intervalMs = 1000, enabled = true): number {
   const subscribe = useCallback(
-    (listener: () => void) =>
-      enabled ? subscribeToClock(intervalMs, listener) : noop(),
+    (listener: () => void) => (enabled ? subscribeToClock(intervalMs, listener) : noop()),
     [intervalMs, enabled],
   );
-  const snapshot = useCallback(
-    () => (enabled ? readClock(intervalMs) : 0),
-    [intervalMs, enabled],
-  );
+  const snapshot = useCallback(() => (enabled ? readClock(intervalMs) : 0), [intervalMs, enabled]);
   return useSyncExternalStore(subscribe, snapshot, enabled ? snapshot : zero);
 }

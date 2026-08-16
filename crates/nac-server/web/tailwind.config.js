@@ -68,49 +68,31 @@ const config = {
         "btn-secondary-hovered": "var(--color-bg-btn-secondary-hovered)",
         "btn-secondary-pressed": "var(--color-bg-btn-secondary-pressed)",
         "btn-secondary-disabled": "var(--color-bg-btn-secondary-disabled)",
-        "btn-secondary-highlighted":
-          "var(--color-bg-btn-secondary-highlighted)",
-        "btn-secondary-highlighted-hovered":
-          "var(--color-bg-btn-secondary-highlighted-hovered)",
-        "btn-secondary-highlighted-pressed":
-          "var(--color-bg-btn-secondary-highlighted-pressed)",
-        "btn-secondary-highlighted-disabled":
-          "var(--color-bg-btn-secondary-highlighted-disabled)",
+        "btn-secondary-highlighted": "var(--color-bg-btn-secondary-highlighted)",
+        "btn-secondary-highlighted-hovered": "var(--color-bg-btn-secondary-highlighted-hovered)",
+        "btn-secondary-highlighted-pressed": "var(--color-bg-btn-secondary-highlighted-pressed)",
+        "btn-secondary-highlighted-disabled": "var(--color-bg-btn-secondary-highlighted-disabled)",
         "btn-ghost": "var(--color-bg-btn-ghost)",
         "btn-ghost-hovered": "var(--color-bg-btn-ghost-hovered)",
         "btn-ghost-pressed": "var(--color-bg-btn-ghost-pressed)",
         "btn-ghost-disabled": "var(--color-bg-btn-ghost-disabled)",
         "btn-ghost-highlighted": "var(--color-bg-btn-ghost-highlighted)",
-        "btn-ghost-highlighted-hovered":
-          "var(--color-bg-btn-ghost-highlighted-hovered)",
-        "btn-ghost-highlighted-pressed":
-          "var(--color-bg-btn-ghost-highlighted-pressed)",
-        "btn-ghost-highlighted-disabled":
-          "var(--color-bg-btn-ghost-highlighted-disabled)",
-        "btn-secondary-destructive":
-          "var(--color-bg-btn-secondary-destructive)",
-        "btn-secondary-destructive-hovered":
-          "var(--color-bg-btn-secondary-destructive-hovered)",
-        "btn-secondary-destructive-pressed":
-          "var(--color-bg-btn-secondary-destructive-pressed)",
-        "btn-secondary-destructive-disabled":
-          "var(--color-bg-btn-secondary-destructive-disabled)",
+        "btn-ghost-highlighted-hovered": "var(--color-bg-btn-ghost-highlighted-hovered)",
+        "btn-ghost-highlighted-pressed": "var(--color-bg-btn-ghost-highlighted-pressed)",
+        "btn-ghost-highlighted-disabled": "var(--color-bg-btn-ghost-highlighted-disabled)",
+        "btn-secondary-destructive": "var(--color-bg-btn-secondary-destructive)",
+        "btn-secondary-destructive-hovered": "var(--color-bg-btn-secondary-destructive-hovered)",
+        "btn-secondary-destructive-pressed": "var(--color-bg-btn-secondary-destructive-pressed)",
+        "btn-secondary-destructive-disabled": "var(--color-bg-btn-secondary-destructive-disabled)",
         "btn-ghost-destructive": "var(--color-bg-btn-ghost-destructive)",
-        "btn-ghost-destructive-hovered":
-          "var(--color-bg-btn-ghost-destructive-hovered)",
-        "btn-ghost-destructive-pressed":
-          "var(--color-bg-btn-ghost-destructive-pressed)",
-        "btn-ghost-destructive-disabled":
-          "var(--color-bg-btn-ghost-destructive-disabled)",
+        "btn-ghost-destructive-hovered": "var(--color-bg-btn-ghost-destructive-hovered)",
+        "btn-ghost-destructive-pressed": "var(--color-bg-btn-ghost-destructive-pressed)",
+        "btn-ghost-destructive-disabled": "var(--color-bg-btn-ghost-destructive-disabled)",
         "btn-secondary-accent": "var(--color-bg-btn-secondary-accent)",
-        "btn-secondary-accent-hovered":
-          "var(--color-bg-btn-secondary-accent-hovered)",
-        "btn-secondary-accent-disabled":
-          "var(--color-bg-btn-secondary-accent-disabled)",
-        "btn-secondary-accent-pressed":
-          "var(--color-bg-btn-secondary-accent-pressed)",
-        "btn-secondary-accent-highlighted":
-          "var(--color-bg-btn-secondary-accent-highlighted)",
+        "btn-secondary-accent-hovered": "var(--color-bg-btn-secondary-accent-hovered)",
+        "btn-secondary-accent-disabled": "var(--color-bg-btn-secondary-accent-disabled)",
+        "btn-secondary-accent-pressed": "var(--color-bg-btn-secondary-accent-pressed)",
+        "btn-secondary-accent-highlighted": "var(--color-bg-btn-secondary-accent-highlighted)",
         "btn-secondary-accent-highlighted-hovered":
           "var(--color-bg-btn-secondary-accent-highlighted-hovered)",
         "btn-secondary-accent-highlighted-pressed":
@@ -120,10 +102,8 @@ const config = {
         "btn-ghost-accent": "var(--color-bg-btn-ghost-accent)",
         "btn-ghost-accent-hovered": "var(--color-bg-btn-ghost-accent-hovered)",
         "btn-ghost-accent-pressed": "var(--color-bg-btn-ghost-accent-pressed)",
-        "btn-ghost-accent-disabled":
-          "var(--color-bg-btn-ghost-accent-disabled)",
-        "btn-ghost-accent-highlighted":
-          "var(--color-bg-btn-ghost-accent-highlighted)",
+        "btn-ghost-accent-disabled": "var(--color-bg-btn-ghost-accent-disabled)",
+        "btn-ghost-accent-highlighted": "var(--color-bg-btn-ghost-accent-highlighted)",
         "btn-ghost-accent-highlighted-hovered":
           "var(--color-bg-btn-ghost-accent-highlighted-hovered)",
         "btn-ghost-accent-highlighted-pressed":
@@ -147,14 +127,11 @@ const config = {
         "elevation-level-1": "var(--color-bg-elevation-level-1)",
         "elevation-level-2": "var(--color-bg-elevation-level-2)",
         "elevation-level-3": "var(--color-bg-elevation-level-3)",
-        "elevation-sublevel-variant-A":
-          "var(--color-bg-elevation-sublevel-variant-A)",
-        "elevation-sublevel-variant-B":
-          "var(--color-bg-elevation-sublevel-variant-B)",
+        "elevation-sublevel-variant-A": "var(--color-bg-elevation-sublevel-variant-A)",
+        "elevation-sublevel-variant-B": "var(--color-bg-elevation-sublevel-variant-B)",
 
         "code-input-content": "var(--color-bg-code-input-content)",
-        "code-input-content-integration":
-          "var(--color-bg-code-input-content-integration)",
+        "code-input-content-integration": "var(--color-bg-code-input-content-integration)",
         "code-input-line-numbers": "var(--color-bg-code-input-line-numbers)",
         "code-input-header": "var(--color-bg-code-input-header)",
 
@@ -173,16 +150,13 @@ const config = {
         "input-knob": "var(--color-bg-input-knob)",
         "input-knob-disabled": "var(--color-bg-input-knob-disabled)",
         "input-switcher-active": "var(--color-bg-input-switcher-active)",
-        "input-switcher-active-disabled":
-          "var(--color-bg-input-switcher-active-disabled)",
+        "input-switcher-active-disabled": "var(--color-bg-input-switcher-active-disabled)",
         "input-knob-active": "var(--color-bg-input-knob-active)",
-        "input-knob-active-disabled":
-          "var(--color-bg-input-knob-active-disabled)",
+        "input-knob-active-disabled": "var(--color-bg-input-knob-active-disabled)",
         "input-progress": "var(--color-bg-input-progress)",
         "input-progress-bar": "var(--color-bg-input-progress-bar)",
         "input-progress-disabled": "var(--color-bg-input-progress-disabled)",
-        "input-progress-bar-disabled":
-          "var(--color-bg-input-progress-bar-disabled)",
+        "input-progress-bar-disabled": "var(--color-bg-input-progress-bar-disabled)",
         input: "var(--color-bg-input)",
         "input-disabled": "var(--color-bg-input-disabled)",
 
@@ -226,8 +200,7 @@ const config = {
         "btn-destructive": "var(--color-text-btn-destructive)",
         "btn-destructive-hovered": "var(--color-text-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-text-btn-destructive-pressed)",
-        "btn-destructive-disabled":
-          "var(--color-text-btn-destructive-disabled)",
+        "btn-destructive-disabled": "var(--color-text-btn-destructive-disabled)",
 
         "danger-primary": "var(--color-text-danger-primary)",
         "danger-secondary": "var(--color-text-danger-secondary)",
@@ -247,8 +220,7 @@ const config = {
         input: "var(--color-text-input)",
         "input-disabled": "var(--color-text-input-disabled)",
         "input-placeholder": "var(--color-text-input-placeholder)",
-        "input-placeholder-disabled":
-          "var(--color-text-input-placeholder-disabled)",
+        "input-placeholder-disabled": "var(--color-text-input-placeholder-disabled)",
 
         "primary-inverse": "var(--color-text-primary-inverse)",
         "secondary-inverse": "var(--color-text-secondary-inverse)",
@@ -325,8 +297,7 @@ const config = {
         "btn-destructive": "var(--color-fill-btn-destructive)",
         "btn-destructive-hovered": "var(--color-fill-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-fill-btn-destructive-pressed)",
-        "btn-destructive-disabled":
-          "var(--color-fill-btn-destructive-disabled)",
+        "btn-destructive-disabled": "var(--color-fill-btn-destructive-disabled)",
 
         "danger-primary": "var(--color-fill-danger-primary)",
         "danger-secondary": "var(--color-fill-danger-secondary)",

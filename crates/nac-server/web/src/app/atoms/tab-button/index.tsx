@@ -31,37 +31,32 @@ const TabButton: React.FC<ButtonProps> & {
   children,
   ...props
 }) => {
-    const computedVariant =
-      active && variant === TabButtonVariant.Regular
-        ? "btn-ghost-highlighted"
-        : active && variant === TabButtonVariant.Accent
-          ? "btn-ghost-highlighted-accent"
-          : variant;
+  const computedVariant =
+    active && variant === TabButtonVariant.Regular
+      ? "btn-ghost-highlighted"
+      : active && variant === TabButtonVariant.Accent
+        ? "btn-ghost-highlighted-accent"
+        : variant;
 
-    const classes = [
-      "btn btn-icon tab-btn",
-      "w-full",
-      "justify-start",
-      size,
-      computedVariant,
-      disabled ? "btn-disabled" : "",
-      className,
-      "rounded-[4px]",
-    ]
-      .filter(Boolean)
-      .join(" ");
+  const classes = [
+    "btn btn-icon tab-btn",
+    "w-full",
+    "justify-start",
+    size,
+    computedVariant,
+    disabled ? "btn-disabled" : "",
+    className,
+    "rounded-[4px]",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-    return (
-      <button
-        onClick={() => { }}
-        className={classes}
-        disabled={disabled}
-        {...props}
-      >
-        {children}
-      </button>
-    );
-  };
+  return (
+    <button onClick={() => {}} className={classes} disabled={disabled} {...props}>
+      {children}
+    </button>
+  );
+};
 
 TabButton.Size = TabButtonSize;
 TabButton.Variant = TabButtonVariant;

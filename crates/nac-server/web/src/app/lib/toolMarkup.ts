@@ -16,15 +16,9 @@ const NATIVE_TOOL_TAG_NAMES = [
 
 const NATIVE_TOOL_TAG = NATIVE_TOOL_TAG_NAMES.join("|");
 
-const PAIRED_NATIVE_TOOL_TAG = new RegExp(
-  `<(${NATIVE_TOOL_TAG})\\b[^>]*>[\\s\\S]*?<\\/\\1>`,
-  "gi",
-);
+const PAIRED_NATIVE_TOOL_TAG = new RegExp(`<(${NATIVE_TOOL_TAG})\\b[^>]*>[\\s\\S]*?<\\/\\1>`, "gi");
 
-const STRAY_NATIVE_TOOL_TAG = new RegExp(
-  `<\\/?(?:${NATIVE_TOOL_TAG})\\b[^>]*>`,
-  "gi",
-);
+const STRAY_NATIVE_TOOL_TAG = new RegExp(`<\\/?(?:${NATIVE_TOOL_TAG})\\b[^>]*>`, "gi");
 
 /** Drops leaked native tool-call markup so Thoughts / prose stay readable. */
 export function stripNativeToolMarkup(text: string): string {

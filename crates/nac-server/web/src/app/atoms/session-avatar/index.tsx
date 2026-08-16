@@ -53,7 +53,7 @@ function neighbours(cell: number): number[] {
 // gone. That keeps every hole connected to the outside, so the avatar reads as
 // one solid silhouette with bitten-off edges instead of random speckle.
 function emptyCells(next: () => number): boolean[] {
-  const empty = new Array<boolean>(CELLS).fill(false);
+  const empty = Array.from({ length: CELLS }, () => false);
   const frontier: number[] = [];
   for (let i = 0; i < CELLS; i += 1) {
     const col = i % GRID;
@@ -85,13 +85,9 @@ function emptyCells(next: () => number): boolean[] {
 function cellStates(id: string | undefined): Cell[] {
   const next = xorshift32(hashId(id));
   const empty = emptyCells(next);
-  const states = new Array<Cell>(CELLS);
+  const states: Cell[] = [];
   for (let i = 0; i < CELLS; i += 1) {
-    states[i] = empty[i]
-      ? Cell.Empty
-      : next() % 7 < 4
-        ? Cell.Outline
-        : Cell.Filled;
+    states.push(empty[i] ? Cell.Empty : next() % 7 < 4 ? Cell.Outline : Cell.Filled);
   }
   return states;
 }

@@ -20,9 +20,7 @@ export function EntryThumbnail({ entry }: { entry: McpLibraryEntry }) {
           onError={() => setBroken(true)}
         />
       ) : (
-        <span className="text-small text-basic-muted uppercase">
-          {entry.name.charAt(0)}
-        </span>
+        <span className="text-small text-basic-muted uppercase">{entry.name.charAt(0)}</span>
       )}
     </div>
   );
@@ -54,9 +52,7 @@ export function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
         <EntryThumbnail entry={entry} />
         <div className="flex flex-col min-w-0 flex-grow">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="header-small text-basic-primary truncate">
-              {entry.name}
-            </span>
+            <span className="header-small text-basic-primary truncate">{entry.name}</span>
             {entry.auth === "required_header" ? (
               <Badge text="Key required" color={BadgeColor.Yellow} />
             ) : null}
@@ -77,10 +73,7 @@ export function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
         <>
           <span
             ref={proseRef}
-            className={cn(
-              "text-small text-basic-muted",
-              !expanded && "line-clamp-3",
-            )}
+            className={cn("text-small text-basic-muted", !expanded && "line-clamp-3")}
           >
             {description}
           </span>

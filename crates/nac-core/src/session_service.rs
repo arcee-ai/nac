@@ -402,6 +402,8 @@ pub struct SessionClientHandle {
     client_id: SessionClientId,
 }
 
+// Submission errors retain the active-operation snapshot callers need to render.
+#[allow(clippy::result_large_err)]
 impl SessionClientHandle {
     pub fn client_id(&self) -> &SessionClientId {
         &self.client_id
@@ -647,6 +649,8 @@ impl TranscriptScanCache {
     }
 }
 
+// Submission errors retain the active-operation snapshot callers need to render.
+#[allow(clippy::result_large_err)]
 impl SessionService {
     pub fn from_orchestrator_run_config(
         mut run_config: OrchestratorRunConfig,
@@ -1113,6 +1117,8 @@ fn decode_thread_events(
     }
 }
 
+// Submission errors retain the active-operation snapshot callers need to render.
+#[allow(clippy::result_large_err)]
 impl SessionService {
     pub fn thread_events_page(
         &self,
@@ -1770,16 +1776,15 @@ impl SessionService {
             cache.scanned_len = merged_len;
             return Ok(());
         }
-        let mut position = scanned_len;
-        for message in blob_delta
-            .iter()
-            .chain(rows.iter().map(|(_, message)| message))
-        {
+        for (position, message) in (scanned_len..).zip(
+            blob_delta
+                .iter()
+                .chain(rows.iter().map(|(_, message)| message)),
+        ) {
             if position >= cache.scanned_len {
                 cache.scan_message(position, message);
                 cache.scanned_len = position + 1;
             }
-            position += 1;
         }
         Ok(())
     }

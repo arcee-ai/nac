@@ -90,9 +90,7 @@ export const UserMessage = memo(function UserMessage({
             <Tooltip title="Resend" position={TooltipPosition.BottomLeft}>
               <Button
                 size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={
-                  isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                }
+                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                 content={ButtonContent.Icon}
                 aria-label="Resend"
                 disabled={actionsDisabled}
@@ -105,15 +103,10 @@ export const UserMessage = memo(function UserMessage({
           ) : null}
 
           {canRevert ? (
-            <Tooltip
-              title="Revert to this snapshot"
-              position={TooltipPosition.BottomLeft}
-            >
+            <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomLeft}>
               <Button
                 size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={
-                  isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                }
+                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                 content={ButtonContent.Icon}
                 aria-label="Revert to this snapshot"
                 disabled={actionsDisabled}
@@ -131,9 +124,7 @@ export const UserMessage = memo(function UserMessage({
               <span className="inline-flex">
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled

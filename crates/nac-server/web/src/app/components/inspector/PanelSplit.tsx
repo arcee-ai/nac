@@ -84,8 +84,7 @@ export function PanelSplit({
     return () => observer.disconnect();
   }, []);
 
-  const maxWidth =
-    containerWidth > 0 ? containerWidth * PANEL_LIST_MAX_RATIO : storedWidth;
+  const maxWidth = containerWidth > 0 ? containerWidth * PANEL_LIST_MAX_RATIO : storedWidth;
   const listWidth = clampPanelListWidth(storedWidth, maxWidth);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -102,9 +101,7 @@ export function PanelSplit({
       if (!dragging.current) return;
       const rect = container.getBoundingClientRect();
       const next = moveEvent.clientX - rect.left;
-      setPanelListWidth(
-        clampPanelListWidth(next, rect.width * PANEL_LIST_MAX_RATIO),
-      );
+      setPanelListWidth(clampPanelListWidth(next, rect.width * PANEL_LIST_MAX_RATIO));
     };
 
     const onUp = (upEvent: PointerEvent) => {
@@ -167,9 +164,7 @@ export function PanelSplit({
             what leads back to it. */}
         {!showList ? (
           <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-level-1">
-            <span className="min-w-0 truncate label-small text-basic-primary">
-              {title}
-            </span>
+            <span className="min-w-0 truncate label-small text-basic-primary">{title}</span>
             {titleAction}
             <span className="flex-1" />
             {actions}
@@ -202,10 +197,7 @@ export function PanelSplit({
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="flex flex-1 min-h-0 w-full"
-    >
+    <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
       <div
         className="relative flex flex-col shrink-0 min-h-0 border-r border-muted bg-elevation-level-1"
         style={{ width: listWidth }}
@@ -228,21 +220,15 @@ export function PanelSplit({
             const step = event.shiftKey ? 24 : 8;
             if (event.key === "ArrowLeft") {
               event.preventDefault();
-              setPanelListWidth(
-                clampPanelListWidth(listWidth - step, maxWidth),
-              );
+              setPanelListWidth(clampPanelListWidth(listWidth - step, maxWidth));
             } else if (event.key === "ArrowRight") {
               event.preventDefault();
-              setPanelListWidth(
-                clampPanelListWidth(listWidth + step, maxWidth),
-              );
+              setPanelListWidth(clampPanelListWidth(listWidth + step, maxWidth));
             }
           }}
         />
       </div>
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
-        {children}
-      </div>
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">{children}</div>
     </div>
   );
 }
@@ -284,9 +270,7 @@ export function PanelRow({
       onClick={onClick}
     >
       {icon}
-      <span className={cn("flex-1 min-w-0 truncate text-left", labelClassName)}>
-        {label}
-      </span>
+      <span className={cn("flex-1 min-w-0 truncate text-left", labelClassName)}>{label}</span>
       {trailing}
     </TabButton>
   );
@@ -326,13 +310,7 @@ export function PanelLoading({ listTitle }: { listTitle?: string }) {
  * the design's two-line form — what is missing above why it is — in the same
  * monospace as the panel body it stands in for.
  */
-export function PanelEmpty({
-  title,
-  children,
-}: {
-  title?: string;
-  children: ReactNode;
-}) {
+export function PanelEmpty({ title, children }: { title?: string; children: ReactNode }) {
   if (title === undefined) {
     return (
       <div className="flex flex-1 flex-col min-h-0 overflow-auto p-6 label-small text-basic-muted [&>*]:shrink-0">

@@ -3,14 +3,7 @@ import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 import DayGrid, { type DateRange } from "./DayGrid";
-import {
-  addDays,
-  addMonths,
-  monthGrid,
-  monthLabel,
-  startOfMonth,
-  weekdayLabels,
-} from "./utils";
+import { addDays, addMonths, monthGrid, monthLabel, startOfMonth, weekdayLabels } from "./utils";
 
 export type { DateRange };
 
@@ -47,9 +40,7 @@ const DatePicker: React.FC<DatePickerProps> = ({
   className = "",
 }) => {
   const anchor = range ? (range.to ?? range.from) : selected;
-  const [month, setMonth] = useState(() =>
-    startOfMonth(defaultMonth ?? anchor ?? new Date()),
-  );
+  const [month, setMonth] = useState(() => startOfMonth(defaultMonth ?? anchor ?? new Date()));
   const [focused, setFocused] = useState<Date | undefined>(anchor);
   const days = useMemo(() => monthGrid(month), [month]);
 
@@ -66,18 +57,13 @@ const DatePicker: React.FC<DatePickerProps> = ({
       onRangeChange?.({ from: date, to: undefined });
       return;
     }
-    onRangeChange?.(
-      date < from ? { from: date, to: from } : { from, to: date },
-    );
+    onRangeChange?.(date < from ? { from: date, to: from } : { from, to: date });
   };
 
   const navigate = (from: Date, offsetDays: number) => {
     const next = addDays(from, offsetDays);
     setFocused(next);
-    if (
-      next.getFullYear() !== month.getFullYear() ||
-      next.getMonth() !== month.getMonth()
-    ) {
+    if (next.getFullYear() !== month.getFullYear() || next.getMonth() !== month.getMonth()) {
       setMonth(startOfMonth(next));
     }
   };

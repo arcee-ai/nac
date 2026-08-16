@@ -10,10 +10,7 @@ interface ProgressLoaderProps {
  * Hairline indeterminate progress bar, meant to sit on the edge of a panel
  * that is refreshing. It keeps its space when idle so nothing shifts.
  */
-const ProgressLoader: React.FC<ProgressLoaderProps> = ({
-  active = false,
-  className = "",
-}) => (
+const ProgressLoader: React.FC<ProgressLoaderProps> = ({ active = false, className = "" }) => (
   <div
     className={cn(
       "h-px w-full overflow-hidden transition-opacity duration-150",

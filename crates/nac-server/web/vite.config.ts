@@ -41,9 +41,7 @@ const API_TARGET = process.env.NAC_API_URL ?? "http://127.0.0.1:3210";
 // the server sends for everything under `assets/` would pin an upgrade out.
 const require_ = createRequire(import.meta.url);
 const MATHJAX_MANIFEST = require_.resolve("mathjax-full/package.json");
-const MATHJAX_VERSION = String(
-  JSON.parse(fs.readFileSync(MATHJAX_MANIFEST, "utf8")).version,
-);
+const MATHJAX_VERSION = String(JSON.parse(fs.readFileSync(MATHJAX_MANIFEST, "utf8")).version);
 const MATHJAX_FONT_SOURCE = path.join(
   path.dirname(MATHJAX_MANIFEST),
   "es5/output/chtml/fonts/woff-v2",
@@ -72,10 +70,7 @@ function mathjaxFonts(): Plugin {
         const url = request.url ?? "";
         if (!url.startsWith(prefix)) return next();
         // `basename` keeps a crafted URL inside the font directory.
-        const file = path.join(
-          MATHJAX_FONT_SOURCE,
-          path.basename(url.slice(prefix.length)),
-        );
+        const file = path.join(MATHJAX_FONT_SOURCE, path.basename(url.slice(prefix.length)));
         if (!fs.existsSync(file)) return next();
         response.setHeader("Content-Type", "font/woff");
         response.end(fs.readFileSync(file));
@@ -120,12 +115,7 @@ function locatorJsx(): Plugin {
         // Only the Locator plugin runs here: TypeScript and JSX are parsed but
         // printed back untouched, leaving both transforms to Vite.
         parserOpts: { plugins: ["typescript", "jsx"] },
-        plugins: [
-          [
-            "@locator/babel-jsx/dist",
-            { dataAttribute: "path" },
-          ],
-        ],
+        plugins: [["@locator/babel-jsx/dist", { dataAttribute: "path" }]],
       });
       if (!result?.code) return null;
       return { code: result.code, map: result.map };
@@ -160,13 +150,7 @@ export default defineConfig(({ command }) => {
   const base = command === "build" ? BASE : "/";
   return {
     base,
-    plugins: [
-      locatorJsx(),
-      locatorCopyWithLine(),
-      react(),
-      tailwindcss(),
-      mathjaxFonts(),
-    ],
+    plugins: [locatorJsx(), locatorCopyWithLine(), react(), tailwindcss(), mathjaxFonts()],
     define: {
       __MATHJAX_FONT_URL__: JSON.stringify(base + MATHJAX_FONT_DIR),
       // MathJax reads its own version off disk with `eval('require')` unless a
@@ -191,10 +175,7 @@ export default defineConfig(({ command }) => {
       port: 5173,
       strictPort: true,
       proxy: Object.fromEntries(
-        API_PREFIXES.map((prefix) => [
-          prefix,
-          { target: API_TARGET, changeOrigin: true },
-        ]),
+        API_PREFIXES.map((prefix) => [prefix, { target: API_TARGET, changeOrigin: true }]),
       ),
     },
     build: {

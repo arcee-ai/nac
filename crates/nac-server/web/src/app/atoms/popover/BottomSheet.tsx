@@ -77,12 +77,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
 
   return createPortal(
     <>
-      <CoverBackground
-        open={!down}
-        zIndex={zIndex}
-        className="!duration-300"
-        onClick={onClose}
-      />
+      <CoverBackground open={!down} zIndex={zIndex} className="!duration-300" onClick={onClose} />
       <div
         style={{ zIndex }}
         className={cn(

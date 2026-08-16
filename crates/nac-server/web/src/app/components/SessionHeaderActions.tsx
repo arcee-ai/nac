@@ -1,13 +1,6 @@
 import { useLocation } from "react-router-dom";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { sessionIdFromPath } from "@/app/lib/routes";
 import { toggleSidePanelExpanded } from "@/app/store/sessionLayoutStore";

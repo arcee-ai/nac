@@ -195,6 +195,8 @@ impl Drop for ManualCompactionTaskGuard {
     }
 }
 
+// Admission errors retain the active-operation snapshot callers need to render.
+#[allow(clippy::result_large_err)]
 impl SessionClientHandle {
     pub fn try_compact(
         &self,
@@ -211,6 +213,8 @@ impl SessionClientHandle {
     }
 }
 
+// Admission errors retain the active-operation snapshot callers need to render.
+#[allow(clippy::result_large_err)]
 impl SessionService {
     pub fn try_compact(
         &self,
@@ -301,8 +305,14 @@ impl SessionService {
                 let mut agent = agent.lock().await;
                 agent.compact_for_session(compaction_id, event_sink).await
             };
-            if let Ok(CompactionResult::Compacted { projected_context, .. }) = &result {
-                if let Err(error) = persist_service.persist_compaction_context(*projected_context).await {
+            if let Ok(CompactionResult::Compacted {
+                projected_context, ..
+            }) = &result
+            {
+                if let Err(error) = persist_service
+                    .persist_compaction_context(*projected_context)
+                    .await
+                {
                     eprintln!("nac: failed to persist compaction context: {error:#}");
                 }
             }

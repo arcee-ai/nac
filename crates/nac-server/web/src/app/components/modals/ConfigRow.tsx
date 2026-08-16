@@ -20,18 +20,11 @@ export function FieldLabel({
 }) {
   return (
     <div className="flex items-center gap-1 w-full">
-      <div
-        className={cn(
-          "label-small",
-          invalid ? "text-error-primary" : "text-basic-primary",
-        )}
-      >
+      <div className={cn("label-small", invalid ? "text-error-primary" : "text-basic-primary")}>
         {label}
         {required ? "*" : ""}
       </div>
-      {hint ? (
-        <HoverHint title={hint} position={TooltipPosition.TopCenter} />
-      ) : null}
+      {hint ? <HoverHint title={hint} position={TooltipPosition.TopCenter} /> : null}
     </div>
   );
 }
@@ -100,13 +93,9 @@ export function ConfigRow({
           {label}
           {required ? "*" : ""}
         </div>
-        {hint ? (
-          <HoverHint title={hint} position={TooltipPosition.TopCenter} />
-        ) : null}
+        {hint ? <HoverHint title={hint} position={TooltipPosition.TopCenter} /> : null}
       </div>
-      <div className={cn("shrink-0", verticalOnMobile && "w-full md:w-auto")}>
-        {control}
-      </div>
+      <div className={cn("shrink-0", verticalOnMobile && "w-full md:w-auto")}>{control}</div>
     </div>
   );
 }

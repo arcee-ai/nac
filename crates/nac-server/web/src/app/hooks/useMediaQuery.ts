@@ -27,5 +27,4 @@ export const useIsMobile = () => useMediaQuery("(max-width: 767.98px)");
  * The design's middle tier, between the phone and the full desktop bar. The
  * header drops the wordmark for the signet and tightens its padding here.
  */
-export const useIsTablet = () =>
-  useMediaQuery("(min-width: 768px) and (max-width: 1279.98px)");
+export const useIsTablet = () => useMediaQuery("(min-width: 768px) and (max-width: 1279.98px)");

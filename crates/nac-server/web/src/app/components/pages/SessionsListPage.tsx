@@ -1,11 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -22,33 +15,18 @@ import {
   StickyInputVariant,
   Tooltip,
 } from "@/app/atoms";
-import {
-  SessionCard,
-  type SessionReorderStart,
-} from "@/app/components/sessions/SessionCard";
+import { SessionCard, type SessionReorderStart } from "@/app/components/sessions/SessionCard";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
 import { SessionsEmptyState } from "@/app/components/sessions/SessionsEmptyState";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 import { NEW_SESSION_KEYS } from "@/app/lib/shortcuts";
-import {
-  isNoOpMove,
-  pinGroup,
-  targetIndexInGroup,
-  type DropEdge,
-} from "@/app/lib/sessionOrder";
+import { isNoOpMove, pinGroup, targetIndexInGroup, type DropEdge } from "@/app/lib/sessionOrder";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import {
-  useMoveSessionOrder,
-  useSessionsWithWorkspaceStats,
-} from "@/app/services/queries";
-import {
-  clearAttention,
-  trackAttention,
-  useAttention,
-} from "@/app/store/attentionStore";
+import { useMoveSessionOrder, useSessionsWithWorkspaceStats } from "@/app/services/queries";
+import { clearAttention, trackAttention, useAttention } from "@/app/store/attentionStore";
 import {
   setQuery,
   useFilterQuery,
@@ -73,9 +51,7 @@ function CardGrid({
     <div
       className={cn(
         "grid gap-2",
-        single
-          ? "grid-cols-1"
-          : "grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]",
+        single ? "grid-cols-1" : "grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]",
       )}
     >
       {children}
@@ -176,8 +152,7 @@ function hitTestDropTarget(
     // Skip the floating ghost (fixed + data-dragging).
     if (card.dataset.dragging === "true") continue;
     const rect = card.getBoundingClientRect();
-    const edge: DropEdge =
-      clientX < rect.left + rect.width / 2 ? "before" : "after";
+    const edge: DropEdge = clientX < rect.left + rect.width / 2 ? "before" : "after";
     return { sessionId, edge };
   }
   return null;
@@ -261,9 +236,7 @@ export default function SessionsListPage() {
     (entry: ManagedSessionSummary, delta: -1 | 1) => {
       const pinnedGroup = Boolean(entry.summary.pinned);
       const group = pinnedGroup ? fullPinned : fullUnpinned;
-      const index = group.findIndex(
-        (e) => e.summary.session_id === entry.summary.session_id,
-      );
+      const index = group.findIndex((e) => e.summary.session_id === entry.summary.session_id);
       if (index < 0) return;
       const next = index + delta;
       if (next < 0 || next >= group.length) return;
@@ -285,12 +258,7 @@ export default function SessionsListPage() {
       }
       const targetPinned = Boolean(targetEntry.summary.pinned);
       const group = targetPinned ? fullPinned : fullUnpinned;
-      const targetIndex = targetIndexInGroup(
-        group,
-        target.sessionId,
-        target.edge,
-        dragId,
-      );
+      const targetIndex = targetIndexInGroup(group, target.sessionId, target.edge, dragId);
       void moveTo(dragId, targetPinned, targetIndex);
     },
     [clearDrag, entriesById, fullPinned, fullUnpinned, moveTo],
@@ -339,9 +307,7 @@ export default function SessionsListPage() {
       if (!hit) return;
       dropTargetRef.current = hit;
       setDropTarget((prev) =>
-        prev?.sessionId === hit.sessionId && prev.edge === hit.edge
-          ? prev
-          : hit,
+        prev?.sessionId === hit.sessionId && prev.edge === hit.edge ? prev : hit,
       );
     };
 
@@ -373,18 +339,12 @@ export default function SessionsListPage() {
     };
   }, [applyDropTarget, clearDrag, drag, moveTo]);
 
-  const renderCard = (
-    entry: ManagedSessionSummary,
-    group: "pinned" | "unpinned",
-  ) => {
+  const renderCard = (entry: ManagedSessionSummary, group: "pinned" | "unpinned") => {
     const fullGroup = group === "pinned" ? fullPinned : fullUnpinned;
-    const index = fullGroup.findIndex(
-      (e) => e.summary.session_id === entry.summary.session_id,
-    );
+    const index = fullGroup.findIndex((e) => e.summary.session_id === entry.summary.session_id);
     const id = entry.summary.session_id;
     const isDragging = drag?.sessionId === id;
-    const dropEdge =
-      !isDragging && dropTarget?.sessionId === id ? dropTarget.edge : null;
+    const dropEdge = !isDragging && dropTarget?.sessionId === id ? dropTarget.edge : null;
 
     return (
       <Fragment key={id}>
@@ -488,9 +448,7 @@ export default function SessionsListPage() {
   const rail = (
     <BoxSurface
       title={countLabel}
-      headerContent={
-        <div className="flex items-center gap-2 shrink-0">{newButton}</div>
-      }
+      headerContent={<div className="flex items-center gap-2 shrink-0">{newButton}</div>}
       className="h-full"
       bodyClassName="overflow-auto"
     >
@@ -510,9 +468,7 @@ export default function SessionsListPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      {isMobile ? null : (
-        <aside className="w-[360px] shrink-0 p-2 pt-16 min-h-0">{rail}</aside>
-      )}
+      {isMobile ? null : <aside className="w-[360px] shrink-0 p-2 pt-16 min-h-0">{rail}</aside>}
       {isMobile ? searchBar : null}
       {isMobile ? filtersDialog : null}
 

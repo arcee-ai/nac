@@ -21,10 +21,7 @@ const SOURCE_DIR = path.join(
   "icons",
 );
 const TARGET_DIR = path.resolve(__dirname, "../src/app/atoms/file-icon/icons");
-const MANIFEST_FILE = path.resolve(
-  __dirname,
-  "../src/app/atoms/file-icon/manifest.generated.ts",
-);
+const MANIFEST_FILE = path.resolve(__dirname, "../src/app/atoms/file-icon/manifest.generated.ts");
 
 /** Rendered when nothing else matches, so it always has to be vendored. */
 const FALLBACK_ICON = "file";
@@ -167,9 +164,7 @@ const wanted = new Set(ICONS);
 
 const missing = ICONS.filter((name) => !manifest.iconDefinitions[name]);
 if (missing.length > 0) {
-  throw new Error(
-    `Icons missing from material-icon-theme: ${missing.join(", ")}`,
-  );
+  throw new Error(`Icons missing from material-icon-theme: ${missing.join(", ")}`);
 }
 
 /** Upstream keys vary in case; the runtime lookup always compares lowercase. */

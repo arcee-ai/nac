@@ -41,9 +41,7 @@ export function mapFromRows(rows: KvRow[]) {
   return map;
 }
 
-export function literalsOnly(
-  map: Record<string, string | null>,
-) {
+export function literalsOnly(map: Record<string, string | null>) {
   const literals: Record<string, string> = {};
   for (const [key, value] of Object.entries(map)) {
     if (value !== null) literals[key] = value;

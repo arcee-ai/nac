@@ -25,9 +25,14 @@
 //! not advance the sidecar clock, so the next process start retries). A
 //! corrupt cache file is ignored at load with a typed warning.
 
-use super::data::{GeneratedModel, hydrate_entry};
-use super::overlay::{atomic_replace, overlay_dir, unix_now, REFRESH_CADENCE_SECS, REFRESH_TIMEOUT};
-use super::{CatalogWarning, ModelCatalog, ModelSource, ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS};
+use super::data::{hydrate_entry, GeneratedModel};
+use super::overlay::{
+    atomic_replace, overlay_dir, unix_now, REFRESH_CADENCE_SECS, REFRESH_TIMEOUT,
+};
+use super::{
+    CatalogWarning, ModelCatalog, ModelSource, ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW,
+    FALLBACK_MAX_TOKENS,
+};
 use crate::model::anthropic::ANTHROPIC_VERSION;
 use crate::model::{BackendKind, ReasoningEffort};
 use serde::{Deserialize, Serialize};
@@ -197,16 +202,17 @@ async fn refresh_anthropic_once() -> AnthropicRefreshOutcome {
     }
     write_sidecar(
         &sidecar_path,
-        &AnthropicOverlaySidecar { fetched_at_unix: now },
+        &AnthropicOverlaySidecar {
+            fetched_at_unix: now,
+        },
     );
     super::reload();
-    AnthropicRefreshOutcome::Updated { models: model_count }
+    AnthropicRefreshOutcome::Updated {
+        models: model_count,
+    }
 }
 
-async fn fetch_anthropic_models(
-    client: &reqwest::Client,
-    api_key: &str,
-) -> Result<String, String> {
+async fn fetch_anthropic_models(client: &reqwest::Client, api_key: &str) -> Result<String, String> {
     let response = client
         .get(ANTHROPIC_MODELS_URL)
         .header("x-api-key", api_key)
@@ -328,9 +334,7 @@ fn map_anthropic_api_response(body: &str) -> Result<Vec<AnthropicOverlayEntry>, 
                 }
             }
             Err(error) => {
-                eprintln!(
-                    "nac: model catalog: skipping anthropic model entry: {error}"
-                );
+                eprintln!("nac: model catalog: skipping anthropic model entry: {error}");
             }
         }
     }
@@ -352,13 +356,11 @@ fn map_anthropic_model(model: &AnthropicApiModel) -> Option<AnthropicOverlayEntr
         .and_then(|c| c.thinking.as_ref())
         .and_then(|t| t.supported)
         .unwrap_or(false);
-    let thinking_types = caps.and_then(|c| c.thinking.as_ref()).and_then(|t| t.types.as_ref());
-    let adaptive_thinking = flag_supported(
-        thinking_types.and_then(|t| t.adaptive.as_ref()),
-    );
-    let enabled_thinking = flag_supported(
-        thinking_types.and_then(|t| t.enabled.as_ref()),
-    );
+    let thinking_types = caps
+        .and_then(|c| c.thinking.as_ref())
+        .and_then(|t| t.types.as_ref());
+    let adaptive_thinking = flag_supported(thinking_types.and_then(|t| t.adaptive.as_ref()));
+    let enabled_thinking = flag_supported(thinking_types.and_then(|t| t.enabled.as_ref()));
 
     // Effort support → thinking level map.
     let effort = caps.and_then(|c| c.effort.as_ref());
@@ -385,7 +387,10 @@ fn map_anthropic_model(model: &AnthropicApiModel) -> Option<AnthropicOverlayEntr
         ThinkingLevelMap(map)
     } else {
         // No effort support: keep none-only (safe omission).
-        ThinkingLevelMap(BTreeMap::from([(ReasoningEffort::None, Some("none".to_string()))]))
+        ThinkingLevelMap(BTreeMap::from([(
+            ReasoningEffort::None,
+            Some("none".to_string()),
+        )]))
     };
 
     // Context management.
@@ -460,8 +465,7 @@ pub(super) fn merge_anthropic_overlay(
         }
     };
 
-    let Some(provider_catalog) = catalog.providers.get_mut(&BackendKind::AnthropicMessages)
-    else {
+    let Some(provider_catalog) = catalog.providers.get_mut(&BackendKind::AnthropicMessages) else {
         return;
     };
     let compat = provider_catalog.default.compat.clone();

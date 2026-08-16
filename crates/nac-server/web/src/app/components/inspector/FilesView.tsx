@@ -30,11 +30,7 @@ import {
   type FileNode,
   type FileTreeDir,
 } from "@/app/lib/fileTree";
-import {
-  highlightCode,
-  highlightDiff,
-  type CodeToken,
-} from "@/app/lib/highlight";
+import { highlightCode, highlightDiff, type CodeToken } from "@/app/lib/highlight";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import {
   queryKeys,
@@ -87,10 +83,7 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
     // top of the indent margin would push every deep level a few pixels past
     // the panel and raise a horizontal scrollbar for nothing.
     <div
-      className={cn(
-        "flex flex-col gap-[2px]",
-        depth > 0 && "pl-1 ml-[3px] border-l border-muted",
-      )}
+      className={cn("flex flex-col gap-[2px]", depth > 0 && "pl-1 ml-[3px] border-l border-muted")}
     >
       {dir.dirs.map((child) => {
         const expanded = open.has(child.path);
@@ -100,9 +93,7 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
               label={child.name}
               icon={<Chevron open={expanded} />}
               // Collapsed folders would otherwise hide where the work is.
-              labelClassName={
-                child.hasChanges ? "text-danger-primary" : undefined
-              }
+              labelClassName={child.hasChanges ? "text-danger-primary" : undefined}
               onClick={() => onToggle(child.path)}
             />
             {expanded ? (
@@ -147,11 +138,7 @@ function ChangedList({
 }) {
   const isMobile = useIsMobile();
   if (files.length === 0) {
-    return (
-      <div className="p-1 label-micro text-basic-muted">
-        Nothing has changed here yet.
-      </div>
-    );
+    return <div className="p-1 label-micro text-basic-muted">Nothing has changed here yet.</div>;
   }
 
   return (
@@ -233,13 +220,7 @@ function ListToolbar({
       />
     </>
   );
-  const commit = (
-    <CommitPopover
-      sessionId={sessionId}
-      changed={changed}
-      revision={revision}
-    />
-  );
+  const commit = <CommitPopover sessionId={sessionId} changed={changed} revision={revision} />;
 
   // A phone has no room for a bar of its own above the list, so the design
   // floats the same two controls over its last rows instead.
@@ -303,13 +284,7 @@ function CodeLine({
   );
 }
 
-function DiffLine({
-  line,
-  tokens,
-}: {
-  line: WorkspaceDiffLine;
-  tokens: CodeToken[] | undefined;
-}) {
+function DiffLine({ line, tokens }: { line: WorkspaceDiffLine; tokens: CodeToken[] | undefined }) {
   const isDel = line.kind === "delete";
   // A deleted line still belongs to the old file, so it keeps the old number.
   const lineNo = isDel ? line.old_lineno : (line.new_lineno ?? line.old_lineno);
@@ -322,23 +297,14 @@ function DiffLine({
       tone={line.kind === "insert" ? "add" : isDel ? "delete" : undefined}
       trailing={
         line.has_trailing_newline === false ? (
-          <span className="italic text-basic-muted">
-            {" "}
-            No newline at end of file
-          </span>
+          <span className="italic text-basic-muted"> No newline at end of file</span>
         ) : null
       }
     />
   );
 }
 
-function Notice({
-  tone,
-  children,
-}: {
-  tone?: "error";
-  children: React.ReactNode;
-}) {
+function Notice({ tone, children }: { tone?: "error"; children: React.ReactNode }) {
   return (
     <div
       className={cn(
@@ -360,20 +326,14 @@ function Section({
   section: WorkspaceDiffSection;
   highlighted: Map<WorkspaceDiffLine, CodeToken[]>;
 }) {
-  if (section.error)
-    return <Notice tone="error">Error: {section.error}</Notice>;
+  if (section.error) return <Notice tone="error">Error: {section.error}</Notice>;
   if (section.binary) {
-    return (
-      <Notice>
-        Binary or non-UTF-8 content; inline hunks are unavailable.
-      </Notice>
-    );
+    return <Notice>Binary or non-UTF-8 content; inline hunks are unavailable.</Notice>;
   }
   if (section.too_large) {
     return <Notice>File is too large for inline diff rendering.</Notice>;
   }
-  if (section.hunks.length === 0)
-    return <Notice>No hunks for this section.</Notice>;
+  if (section.hunks.length === 0) return <Notice>No hunks for this section.</Notice>;
 
   return (
     <div className="pb-[128px] md:pb-0">
@@ -389,29 +349,17 @@ function Section({
             </span>
           </div>
           {hunk.lines.map((line, lineIndex) => (
-            <DiffLine
-              key={lineIndex}
-              line={line}
-              tokens={highlighted.get(line)}
-            />
+            <DiffLine key={lineIndex} line={line} tokens={highlighted.get(line)} />
           ))}
         </div>
       ))}
-      {section.truncated ? (
-        <Notice>Diff was truncated by the backend.</Notice>
-      ) : null}
+      {section.truncated ? <Notice>Diff was truncated by the backend.</Notice> : null}
     </div>
   );
 }
 
 /** Header shared by both panes: the file's name, with counts or size beside it. */
-function PaneHeader({
-  path,
-  trailing,
-}: {
-  path: string;
-  trailing: React.ReactNode;
-}) {
+function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNode }) {
   // On a phone the dialog chrome already names the file and carries the badge,
   // so this bar would only repeat them.
   const isDesktop = useIsDesktop();
@@ -424,22 +372,16 @@ function PaneHeader({
     >
       <div className="flex flex-1 items-center gap-[6px] min-w-0">
         <FileIcon path={path} />
-        <span className="label-micro text-btn-secondary truncate">
-          {fileLabel(path)}
-        </span>
+        <span className="label-micro text-btn-secondary truncate">{fileLabel(path)}</span>
       </div>
-      <div className="flex items-center gap-2 shrink-0 code code-small">
-        {trailing}
-      </div>
+      <div className="flex items-center gap-2 shrink-0 code code-small">{trailing}</div>
     </div>
   );
 }
 
 function Scroller({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-auto py-2 [&>*]:shrink-0">
-      {children}
-    </div>
+    <div className="flex flex-col flex-1 min-h-0 overflow-auto py-2 [&>*]:shrink-0">{children}</div>
   );
 }
 
@@ -501,9 +443,9 @@ function DiffPane({
 }
 
 function DiffSections({ diff }: { diff: WorkspaceFileDiff }) {
-  const [highlighted, setHighlighted] = useState<
-    Map<WorkspaceDiffLine, CodeToken[]>
-  >(() => new Map());
+  const [highlighted, setHighlighted] = useState<Map<WorkspaceDiffLine, CodeToken[]>>(
+    () => new Map(),
+  );
 
   // The highlighter is loaded on demand, so the diff renders as plain text
   // first and gains its colours a frame later. A map left over from another
@@ -519,8 +461,7 @@ function DiffSections({ diff }: { diff: WorkspaceFileDiff }) {
   }, [diff]);
 
   if (diff.error) return <Notice tone="error">{diff.error}</Notice>;
-  if (diff.sections.length === 0)
-    return <Notice>No diff sections returned.</Notice>;
+  if (diff.sections.length === 0) return <Notice>No diff sections returned.</Notice>;
   return (
     <>
       {diff.sections.map((section, index) => (
@@ -530,8 +471,7 @@ function DiffSections({ diff }: { diff: WorkspaceFileDiff }) {
   );
 }
 
-const formatBytes = (size: number) =>
-  size < 1024 ? `${size} B` : `${Math.round(size / 1024)} KB`;
+const formatBytes = (size: number) => (size < 1024 ? `${size} B` : `${Math.round(size / 1024)} KB`);
 
 /** A file with nothing to diff, shown as its contents. */
 function FilePane({
@@ -543,11 +483,7 @@ function FilePane({
   path: string;
   revision: number | null;
 }) {
-  const { data, isFetching, error } = useWorkspaceFile(
-    sessionId,
-    path,
-    revision,
-  );
+  const { data, isFetching, error } = useWorkspaceFile(sessionId, path, revision);
   // Kept next to the text it describes, so a refetch that changes the file
   // cannot pair the new lines with the old colours.
   const [highlighted, setHighlighted] = useState<{
@@ -576,11 +512,7 @@ function FilePane({
     <>
       <PaneHeader
         path={path}
-        trailing={
-          data ? (
-            <span className="text-basic-muted">{formatBytes(data.size)}</span>
-          ) : null
-        }
+        trailing={data ? <span className="text-basic-muted">{formatBytes(data.size)}</span> : null}
       />
       <Scroller>
         {isFetching && !data ? (
@@ -589,22 +521,13 @@ function FilePane({
           </div>
         ) : null}
         {error ? <Notice tone="error">{errorMessage(error)}</Notice> : null}
-        {data?.binary ? (
-          <Notice>Binary file; nothing to show inline.</Notice>
-        ) : null}
+        {data?.binary ? <Notice>Binary file; nothing to show inline.</Notice> : null}
         {data?.too_large ? (
-          <Notice>
-            File is too large to display ({formatBytes(data.size)}).
-          </Notice>
+          <Notice>File is too large to display ({formatBytes(data.size)}).</Notice>
         ) : null}
         {lines
           ? lines.map((content, index) => (
-              <CodeLine
-                key={index}
-                lineNo={index + 1}
-                content={content}
-                tokens={tokens?.[index]}
-              />
+              <CodeLine key={index} lineNo={index + 1} content={content} tokens={tokens?.[index]} />
             ))
           : null}
       </Scroller>
@@ -636,11 +559,7 @@ export function FilesView({
   const toggled = useToggledFolders();
   const fileListing = useFileListing();
 
-  const {
-    data: listing,
-    isLoading,
-    error,
-  } = useWorkspaceFiles(sessionId, revision);
+  const { data: listing, isLoading, error } = useWorkspaceFiles(sessionId, revision);
   const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
 
   // Workspace stats are computed when the snapshot is built, so entering the
@@ -661,18 +580,12 @@ export function FilesView({
     [revision, workspace, revisionChanges.data],
   );
 
-  const nodes = useMemo(
-    () => mergeStatuses(listing?.files ?? [], changed),
-    [listing, changed],
-  );
+  const nodes = useMemo(() => mergeStatuses(listing?.files ?? [], changed), [listing, changed]);
   const tree = useMemo(() => buildFileTree(nodes), [nodes]);
   // Taken from the merged nodes rather than from `changed` directly, because an
   // untracked directory arrives from git as one entry and has to be spread back
   // over the files inside it.
-  const changedNodes = useMemo(
-    () => nodes.filter((node) => node.status !== null),
-    [nodes],
-  );
+  const changedNodes = useMemo(() => nodes.filter((node) => node.status !== null), [nodes]);
 
   // Folders start closed — a whole repository is too much to show at once —
   // except along the paths that lead to a change, which is what the panel is
@@ -698,18 +611,10 @@ export function FilesView({
 
   const failure = error ?? (revision != null ? revisionChanges.error : null);
   if (revision == null && workspace?.error) {
-    return (
-      <div className="p-6 label-small text-error-primary">
-        {workspace.error}
-      </div>
-    );
+    return <div className="p-6 label-small text-error-primary">{workspace.error}</div>;
   }
   if (failure) {
-    return (
-      <div className="p-6 label-small text-error-primary">
-        {errorMessage(failure)}
-      </div>
-    );
+    return <div className="p-6 label-small text-error-primary">{errorMessage(failure)}</div>;
   }
   if (isLoading || !listing) {
     return <PanelLoading listTitle="Files" />;
@@ -720,15 +625,10 @@ export function FilesView({
       listTitle="Files"
       title={current?.split("/").pop()}
       actions={
-        currentChange &&
-        (currentChange.additions || currentChange.deletions) ? (
+        currentChange && (currentChange.additions || currentChange.deletions) ? (
           <div className="flex items-center gap-2 shrink-0 code code-small">
-            <span className="text-success-primary">
-              +{currentChange.additions ?? 0}
-            </span>
-            <span className="text-error-primary">
-              -{currentChange.deletions ?? 0}
-            </span>
+            <span className="text-success-primary">+{currentChange.additions ?? 0}</span>
+            <span className="text-error-primary">-{currentChange.deletions ?? 0}</span>
           </div>
         ) : null
       }
@@ -742,15 +642,9 @@ export function FilesView({
       }
       list={
         nodes.length === 0 ? (
-          <div className="p-1 label-micro text-basic-muted">
-            No files in the workspace.
-          </div>
+          <div className="p-1 label-micro text-basic-muted">No files in the workspace.</div>
         ) : fileListing === "changed" ? (
-          <ChangedList
-            files={changedNodes}
-            selected={current}
-            onSelect={selectFile}
-          />
+          <ChangedList files={changedNodes} selected={current} onSelect={selectFile} />
         ) : (
           <>
             <Tree
@@ -762,9 +656,7 @@ export function FilesView({
               onSelect={selectFile}
             />
             {listing.truncated ? (
-              <div className="p-1 label-micro text-basic-muted">
-                Listing truncated.
-              </div>
+              <div className="p-1 label-micro text-basic-muted">Listing truncated.</div>
             ) : null}
           </>
         )
@@ -772,24 +664,12 @@ export function FilesView({
     >
       {!current ? (
         <PanelEmpty>
-          {nodes.length === 0
-            ? "No files in the workspace."
-            : "Select a file to see it."}
+          {nodes.length === 0 ? "No files in the workspace." : "Select a file to see it."}
         </PanelEmpty>
       ) : currentChange ? (
-        <DiffPane
-          key={current}
-          sessionId={sessionId}
-          file={currentChange}
-          revision={revision}
-        />
+        <DiffPane key={current} sessionId={sessionId} file={currentChange} revision={revision} />
       ) : (
-        <FilePane
-          key={current}
-          sessionId={sessionId}
-          path={current}
-          revision={revision}
-        />
+        <FilePane key={current} sessionId={sessionId} path={current} revision={revision} />
       )}
     </PanelSplit>
   );
@@ -801,16 +681,12 @@ export function FilesView({
  * matched by prefix; anything changed but unlisted is added so it cannot
  * vanish from the tree.
  */
-function mergeStatuses(
-  files: string[],
-  changed: ChangedFileStat[],
-): FileNode[] {
+function mergeStatuses(files: string[], changed: ChangedFileStat[]): FileNode[] {
   const exact = new Map(changed.map((file) => [file.path, file]));
   const prefixes = changed.filter((file) => file.path.endsWith("/"));
 
   const nodes = files.map((path) => {
-    const match =
-      exact.get(path) ?? prefixes.find((entry) => path.startsWith(entry.path));
+    const match = exact.get(path) ?? prefixes.find((entry) => path.startsWith(entry.path));
     return {
       path,
       status: match?.status ?? null,

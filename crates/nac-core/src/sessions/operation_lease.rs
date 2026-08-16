@@ -213,7 +213,7 @@ fn secure_open_lock_file(path: &Path) -> anyhow::Result<File> {
         if metadata.permissions().mode() & 0o777 != 0o600 {
             file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
-        return Ok(file);
+        Ok(file)
     }
 
     #[cfg(not(unix))]

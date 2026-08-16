@@ -94,11 +94,7 @@ function snapshot(
   } as SessionSnapshotResponse;
 }
 
-function page(
-  messages: Message[],
-  start: number,
-  total: number,
-): MessagesPageResponse {
+function page(messages: Message[], start: number, total: number): MessagesPageResponse {
   return {
     messages,
     created_at: messages.map((_, index) => `t-${start + index}`),
@@ -113,16 +109,8 @@ function page(
 
 describe("raw message windows", () => {
   it("preserves a contiguous prefix while a newest page advances", () => {
-    const current = snapshot(
-      [user("u-6"), assistant("a-7"), user("u-8"), assistant("a-9")],
-      6,
-      10,
-    );
-    const incoming = page(
-      [user("u-8"), assistant("a-9"), user("u-10"), assistant("a-11")],
-      8,
-      12,
-    );
+    const current = snapshot([user("u-6"), assistant("a-7"), user("u-8"), assistant("a-9")], 6, 10);
+    const incoming = page([user("u-8"), assistant("a-9"), user("u-10"), assistant("a-11")], 8, 12);
 
     const merged = mergeMessageTail(current, incoming);
     expect(merged.kind).toBe("accepted");
@@ -162,12 +150,8 @@ describe("raw message windows", () => {
 
   it("requires a canonical snapshot for shrink, gap, or invalid timestamps", () => {
     const current = snapshot([user("u-8"), assistant("a-9")], 8, 10);
-    expect(mergeMessageTail(current, page([user("u")], 4, 5)).kind).toBe(
-      "snapshot-required",
-    );
-    expect(mergeMessageTail(current, page([user("u")], 11, 12)).kind).toBe(
-      "snapshot-required",
-    );
+    expect(mergeMessageTail(current, page([user("u")], 4, 5)).kind).toBe("snapshot-required");
+    expect(mergeMessageTail(current, page([user("u")], 11, 12)).kind).toBe("snapshot-required");
     const invalid = page([user("u")], 9, 10);
     invalid.created_at = [];
     expect(mergeMessageTail(current, invalid).kind).toBe("snapshot-required");
@@ -204,16 +188,12 @@ describe("bounded transcript projection", () => {
       ["user", "user-23"],
       ["model", "model-24"],
     ]);
-    expect(
-      turns
-        .filter((turn) => turn.kind === "user")
-        .map((turn) => turn.messageIndex),
-    ).toEqual([21, 23]);
-    expect(
-      turns
-        .filter((turn) => turn.kind === "model")
-        .map((turn) => turn.durationMs),
-    ).toEqual([300, 400]);
+    expect(turns.filter((turn) => turn.kind === "user").map((turn) => turn.messageIndex)).toEqual([
+      21, 23,
+    ]);
+    expect(turns.filter((turn) => turn.kind === "model").map((turn) => turn.durationMs)).toEqual([
+      300, 400,
+    ]);
   });
 
   it("leaves the active tail turn untimed", () => {
@@ -227,23 +207,15 @@ describe("bounded transcript projection", () => {
     // fields the projection does not read.
     value.active_run = {} as SessionSnapshotResponse["active_run"];
 
-    const models = buildTranscript(value, {}).filter(
-      (turn) => turn.kind === "model",
-    );
+    const models = buildTranscript(value, {}).filter((turn) => turn.kind === "model");
     expect(models.map((turn) => turn.durationMs)).toEqual([900, null]);
   });
 
   it("retains model and thread identities across a partial-turn prepend", () => {
-    const current = snapshot(
-      [threadAssistant("worker", "call-new"), assistant("final")],
-      50,
-      52,
-    );
+    const current = snapshot([threadAssistant("worker", "call-new"), assistant("final")], 50, 52);
     // SAFETY: test fixture — the projection only reads name and
     // episode_count from a thread summary; the remaining fields are omitted.
-    current.threads = [
-      { name: "worker", episode_count: 2 },
-    ] as SessionSnapshotResponse["threads"];
+    current.threads = [{ name: "worker", episode_count: 2 }] as SessionSnapshotResponse["threads"];
     current.thread_events = { worker: [toolStarted("event-new")] };
     const before = buildTranscript(current, {});
 
@@ -262,24 +234,17 @@ describe("bounded transcript projection", () => {
     const beforeKeys =
       before[0]?.kind === "model"
         ? before[0].blocks.flatMap((block) =>
-            block.kind === "wave"
-              ? block.rows.flat().map((thread) => thread.key)
-              : [],
+            block.kind === "wave" ? block.rows.flat().map((thread) => thread.key) : [],
           )
         : [];
     const afterKeys =
       after[0]?.kind === "model"
         ? after[0].blocks.flatMap((block) =>
-            block.kind === "wave"
-              ? block.rows.flat().map((thread) => thread.key)
-              : [],
+            block.kind === "wave" ? block.rows.flat().map((thread) => thread.key) : [],
           )
         : [];
     expect(beforeKeys).toEqual(["worker@50:call-new"]);
-    expect(afterKeys).toEqual([
-      "worker@48:call-old",
-      "worker@50:call-new",
-    ]);
+    expect(afterKeys).toEqual(["worker@48:call-old", "worker@50:call-new"]);
     const newestThread =
       before[0]?.kind === "model"
         ? before[0].blocks
@@ -287,9 +252,7 @@ describe("bounded transcript projection", () => {
             .flatMap((block) => block.rows.flat())
             .find((thread) => thread.key === "worker@50:call-new")
         : undefined;
-    expect(newestThread?.log.map((line) => line.key)).toEqual([
-      "call-event-new",
-    ]);
+    expect(newestThread?.log.map((line) => line.key)).toEqual(["call-event-new"]);
   });
 
   it("renders every turn the user explicitly loaded", () => {
@@ -297,8 +260,6 @@ describe("bounded transcript projection", () => {
       user(`user-${index}`),
       assistant(`assistant-${index}`),
     ]).flat();
-    expect(buildTranscript(snapshot(messages, 0, messages.length), {})).toHaveLength(
-      100,
-    );
+    expect(buildTranscript(snapshot(messages, 0, messages.length), {})).toHaveLength(100);
   });
 });

@@ -92,13 +92,9 @@ function rowsFor(
   });
   const rows: Row[] = [];
   for (const provider of providers) {
-    for (const model of modelsForProvider(
-      provider,
-      liveByBackend.get(provider.id),
-    )) {
+    for (const model of modelsForProvider(provider, liveByBackend.get(provider.id))) {
       if (needle) {
-        const haystack =
-          `${model.id} ${model.display_name ?? ""} ${provider.id}`.toLowerCase();
+        const haystack = `${model.id} ${model.display_name ?? ""} ${provider.id}`.toLowerCase();
         if (!haystack.includes(needle)) continue;
       }
       rows.push({ provider, model });
@@ -108,9 +104,7 @@ function rowsFor(
 }
 
 function rate(value: number): string | null {
-  return Number.isFinite(value) && value > 0
-    ? `$${Number(value.toFixed(2))}`
-    : null;
+  return Number.isFinite(value) && value > 0 ? `$${Number(value.toFixed(2))}` : null;
 }
 
 /** Catalog rates are $/1M tokens; all-zero means unknown pricing, never free. */
@@ -122,9 +116,7 @@ function pricing(cost: ModelCostRates): string {
 
 function modelMeta(model: CatalogModel): string {
   const context =
-    model.context_window > 0
-      ? `${formatTokensCompact(model.context_window)} ctx`
-      : "";
+    model.context_window > 0 ? `${formatTokensCompact(model.context_window)} ctx` : "";
   return [context, pricing(model.cost)].filter(Boolean).join(" · ");
 }
 
@@ -138,18 +130,12 @@ const modelName = (model: CatalogModel) => model.display_name || model.id;
 function ProviderBadges({ provider }: { provider: CatalogProvider }) {
   if (provider.auth_status === "ready") {
     return (
-      <Badge
-        text="available"
-        color={BadgeColor.Green}
-        className="shrink-0 whitespace-nowrap"
-      />
+      <Badge text="available" color={BadgeColor.Green} className="shrink-0 whitespace-nowrap" />
     );
   }
   return (
     <Badge
-      text={
-        provider.managed_base_url ? "login required" : "no credential detected"
-      }
+      text={provider.managed_base_url ? "login required" : "no credential detected"}
       color={BadgeColor.Yellow}
       className="shrink-0 whitespace-nowrap"
     />
@@ -188,12 +174,10 @@ export function CatalogModelPicker({
     [catalog, query, liveByBackend],
   );
   // A shorter list can leave the highlight past its end.
-  const keyboardIndex =
-    active === null ? null : Math.min(active, Math.max(rows.length - 1, 0));
+  const keyboardIndex = active === null ? null : Math.min(active, Math.max(rows.length - 1, 0));
   // The lit row, if any: the pointer outranks the keyboard while it is in the
   // list, and neither has to be anywhere.
-  const index =
-    hovered !== null && hovered < rows.length ? hovered : keyboardIndex;
+  const index = hovered !== null && hovered < rows.length ? hovered : keyboardIndex;
 
   // The highlight belongs to the list a query produced, so it is reset next to
   // the query itself: an effect would land a frame later, over rows the search
@@ -217,8 +201,7 @@ export function CatalogModelPicker({
   }, [open, keyboardIndex]);
 
   const selected = rows.find(
-    (row) =>
-      row.provider.id === value?.backend && row.model.id === value?.model,
+    (row) => row.provider.id === value?.backend && row.model.id === value?.model,
   );
 
   // A dismissal under a resting pointer leaves no mouseleave behind, and a
@@ -288,12 +271,7 @@ export function CatalogModelPicker({
       // itself to 70dvh — a height on the child alone loses to flex-1 + auto parent.
       sheetClassName="h-[70dvh] max-h-[70dvh] min-h-[70dvh] overflow-hidden [&>*]:min-h-0 [&>*]:h-full [&>*]:flex [&>*]:flex-col"
       content={
-        <div
-          className={cn(
-            "flex flex-col min-h-0",
-            isMobile ? "h-full" : "h-[340px]",
-          )}
-        >
+        <div className={cn("flex flex-col min-h-0", isMobile ? "h-full" : "h-[340px]")}>
           <div className="shrink-0 p-4 pt-0 md:p-0 md:pb-2">
             <Input
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}
@@ -322,17 +300,10 @@ export function CatalogModelPicker({
               </p>
             ) : (
               rows.map((row, position) => {
-                const first =
-                  position === 0 ||
-                  rows[position - 1].provider.id !== row.provider.id;
-                const chosen =
-                  row.provider.id === value?.backend &&
-                  row.model.id === value?.model;
+                const first = position === 0 || rows[position - 1].provider.id !== row.provider.id;
+                const chosen = row.provider.id === value?.backend && row.model.id === value?.model;
                 return (
-                  <div
-                    key={`${row.provider.id}/${row.model.id}`}
-                    className="px-2 md:px-0"
-                  >
+                  <div key={`${row.provider.id}/${row.model.id}`} className="px-2 md:px-0">
                     {first ? (
                       <div className="flex items-center gap-2 px-2 pt-6 pb-2">
                         <span className="tag-label text-basic-muted whitespace-nowrap shrink-0">
@@ -351,9 +322,7 @@ export function CatalogModelPicker({
                       data-row={position}
                       onMouseEnter={() => setHovered(position)}
                       onMouseLeave={() =>
-                        setHovered((current) =>
-                          current === position ? null : current,
-                        )
+                        setHovered((current) => (current === position ? null : current))
                       }
                       onClick={() => pick(row)}
                     >

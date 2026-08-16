@@ -26,14 +26,8 @@ import {
   ConfigurationsPanel,
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
-import {
-  LightModelSection,
-  type LightSelection,
-} from "@/app/components/modals/LightModelSection";
-import {
-  REASONING_OPTIONS,
-  reasoningOptionsFor,
-} from "@/app/components/modals/options";
+import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
+import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
@@ -61,11 +55,7 @@ import {
   useStoreInfo,
   useUpdatePresentation,
 } from "@/app/services/queries";
-import type {
-  BackendKind,
-  CreateSessionRequest,
-  SshTarget,
-} from "@/app/types/api";
+import type { BackendKind, CreateSessionRequest, SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 type Mode = "local" | "ssh" | "sandbox";
@@ -122,23 +112,11 @@ interface FormError {
 }
 
 /** Remounted on every open so the form always starts from the configured defaults. */
-export function LaunchModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export function LaunchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: storeInfo } = useStoreInfo();
   const mounted = useExitTransition(open);
   if (!mounted) return null;
-  return (
-    <LaunchForm
-      open={open}
-      defaultCwd={storeInfo?.root_cwd ?? ""}
-      onClose={onClose}
-    />
-  );
+  return <LaunchForm open={open} defaultCwd={storeInfo?.root_cwd ?? ""} onClose={onClose} />;
 }
 
 function LaunchForm({
@@ -180,11 +158,9 @@ function LaunchForm({
   // The override only makes sense for the model the selection settles on, so
   // the catalog narrows it to the efforts that model accepts.
   const catalog = useModelCatalog();
-  const chosen =
-    selection?.kind === "save" ? selection.request : (selection ?? null);
+  const chosen = selection?.kind === "save" ? selection.request : (selection ?? null);
   const reasoningItems = reasoningOptionsFor(
-    resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model)
-      .supportedEfforts,
+    resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model).supportedEfforts,
     reasoning,
     ADVANCED_REASONING,
   );
@@ -262,11 +238,7 @@ function LaunchForm({
   const compactionRef = useRef("");
   const compactionAutoRef = useRef(true);
   const compactionPlaceholder = useMemo(() => {
-    const resolved = resolveCatalogModel(
-      catalog.data,
-      chosen?.backend,
-      chosen?.model,
-    );
+    const resolved = resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model);
     const contextWindow = resolved.contextWindow;
     return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
   }, [catalog.data, chosen?.backend, chosen?.model]);
@@ -301,10 +273,7 @@ function LaunchForm({
    * The SSH box owns Connect/Disconnect; we only keep the proved target and
    * seed the working directory from the login home it returned.
    */
-  const onSshConnectionChange = (
-    target: SshTarget | null,
-    homePath?: string,
-  ) => {
+  const onSshConnectionChange = (target: SshTarget | null, homePath?: string) => {
     setError(null);
     setConnection(target);
     if (target) {
@@ -330,8 +299,7 @@ function LaunchForm({
     if (!selection) {
       setError({
         field: "config",
-        message:
-          "Complete the provider configuration before creating a session.",
+        message: "Complete the provider configuration before creating a session.",
       });
       return;
     }
@@ -403,17 +371,13 @@ function LaunchForm({
       base_url: baseUrl,
       backend,
       api_key_env: apiKeyEnv,
-      reasoning_effort:
-        reasoning === CLEAR_EFFORT
-          ? null
-          : reasoning || configuredEffort || null,
+      reasoning_effort: reasoning === CLEAR_EFFORT ? null : reasoning || configuredEffort || null,
     };
     if (headers !== undefined) body.extra_headers = headers;
     if (launchLight) body.light_model = launchLight;
 
     const threshold = nullable(compaction);
-    if (threshold !== null)
-      body.orchestrator_compaction_threshold = Number(threshold);
+    if (threshold !== null) body.orchestrator_compaction_threshold = Number(threshold);
     if (!body.ssh_host) {
       const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
       setLaunchKey(activityKey);
@@ -433,9 +397,7 @@ function LaunchForm({
     try {
       const snapshot = await createSession.mutateAsync(body);
       const newId = snapshot.metadata.session_id;
-      storeLastLight(
-        launchLight && withoutInheritedCredential(launchLight, apiKeyEnv),
-      );
+      storeLastLight(launchLight && withoutInheritedCredential(launchLight, apiKeyEnv));
       toast.success("Session created");
 
       // A title is presentation state, so it is applied after creation.
@@ -522,19 +484,12 @@ function LaunchForm({
     >
       <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
         <div className="flex flex-col gap-1">
-          <FieldLabel
-            label="Environment"
-            hint="Where NAC runs commands and accesses files."
-          />
+          <FieldLabel label="Environment" hint="Where NAC runs commands and accesses files." />
           <div className="flex items-start gap-3">
             {MODES.map((item) => (
               <Button
                 key={item.id}
-                variant={
-                  mode === item.id
-                    ? ButtonVariant.Primary
-                    : ButtonVariant.Secondary
-                }
+                variant={mode === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
                 size={ButtonSize.Medium}
                 content={ButtonContent.Text}
                 onClick={() => changeMode(item.id)}
@@ -608,9 +563,7 @@ function LaunchForm({
                 <Icon iconName={IconName.Folder} className="shrink-0" />
               </Button>
               {invalid("cwd") ? (
-                <p className="pt-1 text-error-primary text-micro">
-                  {error?.message}
-                </p>
+                <p className="pt-1 text-error-primary text-micro">{error?.message}</p>
               ) : null}
             </div>
             <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
@@ -633,20 +586,12 @@ function LaunchForm({
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
-              <LightModelSection
-                key={savedLightKey}
-                initial={savedLight}
-                onChange={onLight}
-              />
+              <LightModelSection key={savedLightKey} initial={savedLight} onChange={onLight} />
               <Separator />
               <ConfigRow
                 label="Reasoning Effort"
                 hint="Higher effort for deeper reasoning and lower effort for faster responses."
-                control={smallSelect(
-                  reasoningItems,
-                  reasoning,
-                  edit(setReasoning),
-                )}
+                control={smallSelect(reasoningItems, reasoning, edit(setReasoning))}
               />
               <Separator />
               <ConfigRow
@@ -663,9 +608,7 @@ function LaunchForm({
                       value={compaction}
                       onChange={(e) => onCompactionChange(e.target.value)}
                     />
-                    <span className="shrink-0 text-micro text-basic-muted">
-                      tokens
-                    </span>
+                    <span className="shrink-0 text-micro text-basic-muted">tokens</span>
                   </div>
                 }
               />
@@ -764,9 +707,7 @@ function LaunchForm({
                             checked={sandbox.noMount}
                             onChange={(value) => setSb({ noMount: value })}
                             aria-label="Don't mount the working folder"
-                            size={
-                              isMobile ? SwitchSize.Large : SwitchSize.Medium
-                            }
+                            size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
                           />
                         }
                       />

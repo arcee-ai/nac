@@ -60,17 +60,10 @@ function SessionSwitcherRow({
     >
       <button
         type="button"
-        className={cn(
-          "flex flex-1 items-center min-w-0 text-left",
-          isMobile ? "gap-3" : "gap-2",
-        )}
+        className={cn("flex flex-1 items-center min-w-0 text-left", isMobile ? "gap-3" : "gap-2")}
         onClick={onOpen}
       >
-        <SessionAvatar
-          id={summary.session_id}
-          size={isMobile ? 24 : 20}
-          isRunning={running}
-        />
+        <SessionAvatar id={summary.session_id} size={isMobile ? 24 : 20} isRunning={running} />
         <span
           className={cn(
             "truncate",
@@ -121,9 +114,7 @@ function SessionSwitcherRow({
 function GroupLabel({ children }: { children: string }) {
   return (
     <div className="flex items-center gap-2 px-2 pt-3 pb-1 first:pt-1">
-      <span className="tag-label text-basic-muted whitespace-nowrap shrink-0">
-        {children}
-      </span>
+      <span className="tag-label text-basic-muted whitespace-nowrap shrink-0">{children}</span>
       {/* Basis 100%, so it eats the row's slack and leaves the label at its
           natural width. */}
       <Separator className="shrink" />
@@ -179,9 +170,7 @@ export function SessionSwitcher({
   );
 
   return (
-    <div
-      className={isMobile ? "flex flex-col h-[calc(70dvh)]" : "flex flex-col"}
-    >
+    <div className={isMobile ? "flex flex-col h-[calc(70dvh)]" : "flex flex-col"}>
       {/* The trail is gone on a phone, so the way back to the list (and the
           launch affordance) stay pinned above the switcher. */}
       {isMobile ? (
@@ -194,9 +183,7 @@ export function SessionSwitcher({
             }}
           >
             <Icon iconName={IconName.Left} className="shrink-0" />
-            <span className="flex-1 min-w-0 truncate text-left">
-              All Sessions
-            </span>
+            <span className="flex-1 min-w-0 truncate text-left">All Sessions</span>
           </TabButton>
           <Separator />
           <TabButton
@@ -207,9 +194,7 @@ export function SessionSwitcher({
             }}
           >
             <Icon iconName={IconName.Add} className="shrink-0" />
-            <span className="flex-1 min-w-0 truncate text-left">
-              New Session
-            </span>
+            <span className="flex-1 min-w-0 truncate text-left">New Session</span>
           </TabButton>
         </div>
       ) : null}
@@ -220,9 +205,7 @@ export function SessionSwitcher({
         )}
       >
         {sessions.length === 0 ? (
-          <div className="label-small text-basic-muted px-2 py-1">
-            No sessions
-          </div>
+          <div className="label-small text-basic-muted px-2 py-1">No sessions</div>
         ) : pinned.length === 0 ? (
           // A single group needs no heading to tell it from anything.
           rest.map(row)

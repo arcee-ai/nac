@@ -1364,6 +1364,7 @@ async fn classify_grep_root(fs: &mut WorkspaceFs, root: &str) -> SearchResult<Gr
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn collect_grep_root(
     fs: &mut WorkspaceFs,
     root: &str,

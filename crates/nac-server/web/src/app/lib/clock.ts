@@ -21,10 +21,7 @@ function getClock(intervalMs: number): Clock {
   return clock;
 }
 
-export function subscribeToClock(
-  intervalMs: number,
-  listener: () => void,
-): () => void {
+export function subscribeToClock(intervalMs: number, listener: () => void): () => void {
   const clock = getClock(intervalMs);
   clock.listeners.add(listener);
   // The interval only runs while something is watching this resolution.

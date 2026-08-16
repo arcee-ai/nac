@@ -238,6 +238,7 @@ impl TerminalManager {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn exec_one_shot(
         &self,
         cmd: &str,

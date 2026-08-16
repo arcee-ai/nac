@@ -1,10 +1,4 @@
-import {
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   Button,
@@ -42,33 +36,20 @@ function nextDefaultName(configurations: SshConfigurationRecord[]): string {
   return `SSH-config-${n}`;
 }
 
-export function SshConfigsModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export function SshConfigsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const mounted = useExitTransition(open);
   if (!mounted) return null;
   return <SshConfigsManager open={open} onClose={onClose} />;
 }
 
-function SshConfigsManager({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+function SshConfigsManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const isMobile = useIsMobile();
   const { data, isLoading } = useSshConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);
   const [footer, setFooter] = useState<ReactNode>(null);
   const selected = picked ?? configurations.at(-1)?.config_id ?? DRAFT;
-  const record =
-    configurations.find((entry) => entry.config_id === selected) ?? null;
+  const record = configurations.find((entry) => entry.config_id === selected) ?? null;
 
   return (
     <Modal
@@ -135,18 +116,11 @@ function SshConfigForm({
 
   const [name, setName] = useState(record?.name ?? defaultName);
   const [host, setHost] = useState(record?.ssh_host ?? "");
-  const [port, setPort] = useState(
-    record?.ssh_port ? String(record.ssh_port) : "",
-  );
-  const [identityFile, setIdentityFile] = useState(
-    record?.ssh_identity_file ?? "",
-  );
+  const [port, setPort] = useState(record?.ssh_port ? String(record.ssh_port) : "");
+  const [identityFile, setIdentityFile] = useState(record?.ssh_identity_file ?? "");
 
   const busy =
-    createConfig.isPending ||
-    updateConfig.isPending ||
-    deleteConfig.isPending ||
-    connect.isPending;
+    createConfig.isPending || updateConfig.isPending || deleteConfig.isPending || connect.isPending;
 
   const save = async () => {
     const trimmedName = name.trim();
@@ -158,9 +132,7 @@ function SshConfigForm({
     const portValue = port.trim() ? Number(port.trim()) : null;
     if (
       port.trim() &&
-      (!Number.isInteger(portValue) ||
-        (portValue ?? 0) < 1 ||
-        (portValue ?? 0) > 65535)
+      (!Number.isInteger(portValue) || (portValue ?? 0) < 1 || (portValue ?? 0) > 65535)
     ) {
       toast.error("Port must be an integer between 1 and 65535.");
       return;
@@ -262,11 +234,7 @@ function SshConfigForm({
             Cancel
           </StickyButton>
         ) : (
-          <Button
-            size={ButtonSize.Large}
-            variant={ButtonVariant.Ghost}
-            onClick={onClose}
-          >
+          <Button size={ButtonSize.Large} variant={ButtonVariant.Ghost} onClick={onClose}>
             Cancel
           </Button>
         )}
@@ -296,12 +264,7 @@ function SshConfigForm({
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
-      <div
-        className={cn(
-          "flex-1 overflow-auto p-4 [&>*]:shrink-0",
-          isMobile && "pb-[88px]",
-        )}
-      >
+      <div className={cn("flex-1 overflow-auto p-4 [&>*]:shrink-0", isMobile && "pb-[88px]")}>
         <SshConnectionBox
           mode="manage"
           connection={null}

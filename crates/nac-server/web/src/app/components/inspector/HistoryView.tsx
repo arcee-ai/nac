@@ -37,9 +37,7 @@ function Row({
       <span className="flex-1 min-w-0 flex flex-col">
         <span className="label-medium text-basic-primary truncate">{title}</span>
         {subtitle ? (
-          <span className="label-small text-basic-muted truncate">
-            {subtitle}
-          </span>
+          <span className="label-small text-basic-muted truncate">{subtitle}</span>
         ) : null}
       </span>
       {trailing ? (
@@ -95,12 +93,8 @@ export function HistoryView({
           trailing={
             revision.additions || revision.deletions ? (
               <>
-                <span className="text-success-primary">
-                  +{revision.additions}
-                </span>
-                <span className="text-error-primary">
-                  -{revision.deletions}
-                </span>
+                <span className="text-success-primary">+{revision.additions}</span>
+                <span className="text-error-primary">-{revision.deletions}</span>
               </>
             ) : null
           }

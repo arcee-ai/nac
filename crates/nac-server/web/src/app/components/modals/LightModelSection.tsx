@@ -11,10 +11,7 @@ import {
 } from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
-import {
-  EFFORT_LEVEL_OPTIONS,
-  reasoningOptionsFor,
-} from "@/app/components/modals/options";
+import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import {
   catalogBaseUrl,
   catalogProviderForModel,
@@ -22,11 +19,7 @@ import {
   resolveCatalogModel,
 } from "@/app/lib/catalog";
 import { useModelCatalog } from "@/app/services/queries";
-import type {
-  LightModelSettings,
-  ModelCatalog,
-  ReasoningEffort,
-} from "@/app/types/api";
+import type { LightModelSettings, ModelCatalog, ReasoningEffort } from "@/app/types/api";
 
 export type LightMode = "single" | "dual";
 
@@ -63,14 +56,12 @@ function lightStateFrom(
   if (!settings?.model) {
     return { pick: null, effort: "", apiKeyEnv: null };
   }
-  const backend =
-    settings.backend ?? catalogProviderForModel(catalog, settings.model);
+  const backend = settings.backend ?? catalogProviderForModel(catalog, settings.model);
   if (!backend) {
     return { pick: null, effort: "", apiKeyEnv: null };
   }
   const provider = catalog?.providers?.find((entry) => entry.id === backend);
-  const baseUrl =
-    settings.base_url ?? (provider ? catalogBaseUrl(provider) : "");
+  const baseUrl = settings.base_url ?? (provider ? catalogBaseUrl(provider) : "");
   return {
     pick: { backend, model: settings.model, baseUrl },
     effort: settings.reasoning_effort ?? "",
@@ -105,9 +96,7 @@ export function LightModelSection({
 }) {
   const catalog = useModelCatalog();
   const [mode, setMode] = useState<LightMode>(initial ? "dual" : "single");
-  const [light, setLight] = useState<LightState>(() =>
-    lightStateFrom(initial, catalog.data),
-  );
+  const [light, setLight] = useState<LightState>(() => lightStateFrom(initial, catalog.data));
 
   // A sparse stored light model needs the catalog to resolve its backend, and
   // the catalog may arrive after mount; while the user has not picked a model
@@ -128,11 +117,8 @@ export function LightModelSection({
   }, [selection, onChange]);
 
   const efforts = reasoningOptionsFor(
-    resolveCatalogModel(
-      catalog.data,
-      effectiveLight.pick?.backend,
-      effectiveLight.pick?.model,
-    ).supportedEfforts,
+    resolveCatalogModel(catalog.data, effectiveLight.pick?.backend, effectiveLight.pick?.model)
+      .supportedEfforts,
     effectiveLight.effort,
     LIGHT_EFFORT_OPTIONS,
   );
@@ -148,9 +134,7 @@ export function LightModelSection({
           {(["single", "dual"] as const).map((item) => (
             <Button
               key={item}
-              variant={
-                mode === item ? ButtonVariant.Primary : ButtonVariant.Secondary
-              }
+              variant={mode === item ? ButtonVariant.Primary : ButtonVariant.Secondary}
               size={ButtonSize.Medium}
               content={ButtonContent.Text}
               onClick={() => setMode(item)}
