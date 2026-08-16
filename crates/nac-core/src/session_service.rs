@@ -402,8 +402,6 @@ pub struct SessionClientHandle {
     client_id: SessionClientId,
 }
 
-// Submission errors retain the active-operation snapshot callers need to render.
-#[allow(clippy::result_large_err)]
 impl SessionClientHandle {
     pub fn client_id(&self) -> &SessionClientId {
         &self.client_id
@@ -441,6 +439,7 @@ impl SessionClientHandle {
         self.service.frontend_snapshot().await
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prepared_prompt(
         &self,
         prompt: PreparedPrompt,
@@ -448,6 +447,7 @@ impl SessionClientHandle {
         self.try_submit_prompt(prompt.agent_prompt)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prepared_prompt_with_lease(
         &self,
         prompt: PreparedPrompt,
@@ -460,6 +460,7 @@ impl SessionClientHandle {
         )
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -649,8 +650,6 @@ impl TranscriptScanCache {
     }
 }
 
-// Submission errors retain the active-operation snapshot callers need to render.
-#[allow(clippy::result_large_err)]
 impl SessionService {
     pub fn from_orchestrator_run_config(
         mut run_config: OrchestratorRunConfig,
@@ -963,6 +962,7 @@ impl SessionService {
         commands::prepare_user_input(input)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prepared_prompt(
         &self,
         prompt: PreparedPrompt,
@@ -1117,8 +1117,6 @@ fn decode_thread_events(
     }
 }
 
-// Submission errors retain the active-operation snapshot callers need to render.
-#[allow(clippy::result_large_err)]
 impl SessionService {
     pub fn thread_events_page(
         &self,
@@ -2071,6 +2069,7 @@ impl SessionService {
         Ok(operation_lease)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -2078,6 +2077,7 @@ impl SessionService {
         self.try_submit_prompt_inner(None, expanded_prompt, None)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt_for_client(
         &self,
         client_id: SessionClientId,
@@ -2086,6 +2086,7 @@ impl SessionService {
         self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt_for_client_with_lease(
         &self,
         client_id: SessionClientId,
@@ -2204,6 +2205,7 @@ impl SessionService {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn try_submit_prompt_inner(
         &self,
         client_id: Option<SessionClientId>,
@@ -2291,6 +2293,7 @@ impl SessionService {
         Ok(active)
     }
 
+    #[allow(clippy::result_large_err)]
     fn try_begin_run_with_lease(
         &self,
         client_id: Option<SessionClientId>,
@@ -2300,6 +2303,7 @@ impl SessionService {
         self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true)
     }
 
+    #[allow(clippy::result_large_err)]
     fn try_begin_run_inner(
         &self,
         client_id: Option<SessionClientId>,

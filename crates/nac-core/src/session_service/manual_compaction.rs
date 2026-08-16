@@ -195,15 +195,15 @@ impl Drop for ManualCompactionTaskGuard {
     }
 }
 
-// Admission errors retain the active-operation snapshot callers need to render.
-#[allow(clippy::result_large_err)]
 impl SessionClientHandle {
+    #[allow(clippy::result_large_err)]
     pub fn try_compact(
         &self,
     ) -> std::result::Result<SessionCompactionHandle, SessionCompactionAdmissionError> {
         self.service.try_compact_for_client(self.client_id.clone())
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_compact_with_lease(
         &self,
         lease: sessions::SessionOperationLease,
@@ -213,15 +213,15 @@ impl SessionClientHandle {
     }
 }
 
-// Admission errors retain the active-operation snapshot callers need to render.
-#[allow(clippy::result_large_err)]
 impl SessionService {
+    #[allow(clippy::result_large_err)]
     pub fn try_compact(
         &self,
     ) -> std::result::Result<SessionCompactionHandle, SessionCompactionAdmissionError> {
         self.try_compact_inner(None, None)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_compact_for_client(
         &self,
         client_id: SessionClientId,
@@ -229,6 +229,7 @@ impl SessionService {
         self.try_compact_inner(Some(client_id), None)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_compact_with_lease(
         &self,
         lease: sessions::SessionOperationLease,
@@ -236,6 +237,7 @@ impl SessionService {
         self.try_compact_inner(None, Some(lease))
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_compact_for_client_with_lease(
         &self,
         client_id: SessionClientId,
@@ -244,6 +246,7 @@ impl SessionService {
         self.try_compact_inner(Some(client_id), Some(lease))
     }
 
+    #[allow(clippy::result_large_err)]
     fn try_compact_inner(
         &self,
         client_id: Option<SessionClientId>,
