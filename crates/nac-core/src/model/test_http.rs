@@ -8,6 +8,7 @@ pub(crate) struct ScriptedResponse {
     status: &'static str,
     headers: BTreeMap<String, String>,
     body: String,
+    send_response: bool,
 }
 
 impl ScriptedResponse {
@@ -16,6 +17,7 @@ impl ScriptedResponse {
             status,
             headers: BTreeMap::new(),
             body: body.into(),
+            send_response: true,
         }
     }
 
@@ -28,11 +30,17 @@ impl ScriptedResponse {
             status,
             headers: BTreeMap::from([("Location".to_string(), location.into())]),
             body: body.into(),
+            send_response: true,
         }
     }
 
     pub(crate) fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub(crate) fn drop_connection(mut self) -> Self {
+        self.send_response = false;
         self
     }
 }
@@ -60,13 +68,24 @@ impl ScriptedServer {
     where
         F: Fn(usize, &CapturedRequest) + Send + 'static,
     {
+        Self::start_observed_with_timeout(responses, Duration::from_secs(5), observer)
+    }
+
+    pub(crate) fn start_observed_with_timeout<F>(
+        responses: Vec<ScriptedResponse>,
+        timeout: Duration,
+        observer: F,
+    ) -> Self
+    where
+        F: Fn(usize, &CapturedRequest) + Send + 'static,
+    {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind scripted HTTP server");
         listener
             .set_nonblocking(true)
             .expect("set scripted HTTP listener nonblocking");
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let handle = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + timeout;
             let mut requests = Vec::with_capacity(responses.len());
             for (index, response) in responses.into_iter().enumerate() {
                 let mut stream = loop {
@@ -86,7 +105,9 @@ impl ScriptedServer {
                 let request = read_request(&mut stream);
                 observer(index, &request);
                 requests.push(request);
-                write_response(&mut stream, &response);
+                if response.send_response {
+                    write_response(&mut stream, &response);
+                }
             }
             requests
         });

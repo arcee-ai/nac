@@ -355,9 +355,16 @@ function describeThread(
   );
 
   const episodeEvents = eventsForEpisode(ctx, name, episode);
-  const finishedPersisted = episodeEvents?.some(
-    (event) => event.type === "thread_finished",
-  );
+  // A live "running" can only describe the newest dispatch (older cards never
+  // see the stream), while the persisted events may still be the previous
+  // episode's: the snapshot's window only gains this dispatch's thread_started
+  // on the refetch its start triggers. Until then the old episode's
+  // thread_finished must not mark the running card done. A committed tool
+  // result still can — it only exists once the worker actually returned.
+  const finishedPersisted =
+    live?.status === "running"
+      ? false
+      : episodeEvents?.some((event) => event.type === "thread_finished");
   const finishedLive = live?.status === "finished";
   const cancelled =
     result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
@@ -639,10 +646,15 @@ export function buildTranscript(
           continue;
         }
         // Snapshot may already have thread_finished before the tool-result
-        // batch is committed for this DAG.
+        // batch is committed for this DAG. A live "running" means the newest
+        // dispatch is still going, so the window's latest episode is the
+        // previous one and its finish says nothing about this dispatch.
         const episodes = ctx.threadEpisodes[name] ?? [];
         const latest = episodes[episodes.length - 1];
-        if (latest?.some((event) => event.type === "thread_finished")) {
+        if (
+          ctx.liveThreads[name]?.status !== "running" &&
+          latest?.some((event) => event.type === "thread_finished")
+        ) {
           finishedNames.add(name);
         }
       }
