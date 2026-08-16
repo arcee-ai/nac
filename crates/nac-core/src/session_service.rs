@@ -3482,6 +3482,7 @@ pub(super) mod tests {
                         image: crate::sandbox::DEFAULT_SANDBOX_IMAGE.to_string(),
                         mounts: Vec::new(),
                         workdir: PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
+                        worktree: None,
                         gpu_devices: Vec::new(),
                         shm_size: None,
                         cpus: 2,
