@@ -46,12 +46,13 @@ function compareParts(left, right) {
   return 0;
 }
 
-function requireBase(base) {
-  const parsed = parseStableTag(`v${base}`);
-  if (!parsed || parsed.baseText !== base) {
-    throw new Error(`nac-server version must be canonical SemVer, got ${base}`);
-  }
-  return parsed.base;
+function greatestStableRelease(releases) {
+  const stableVersions = releases
+    .filter((release) => !release.draft && !release.prerelease)
+    .map((release) => parseStableTag(release.tag_name))
+    .filter(Boolean);
+  stableVersions.sort((left, right) => compareParts(right.base, left.base));
+  return stableVersions[0] || null;
 }
 
 function requireSha(sha, context) {
@@ -64,7 +65,6 @@ function releaseForTag(releases, tag) {
 }
 
 export async function prepareCandidate(input, api) {
-  const baseParts = requireBase(input.base);
   const sha = requireSha(input.sha, "scheduled source");
   const runNumber = Number(input.runNumber);
   const runAttempt = Number(input.runAttempt);
@@ -76,26 +76,35 @@ export async function prepareCandidate(input, api) {
   }
 
   const releases = await api.listReleases();
-  const stableTag = `v${input.base}`;
-  if (await api.resolveTagOrNull(stableTag)) {
-    return { run: false, reason: `${stableTag} already exists` };
+  const latestStable = greatestStableRelease(releases);
+  if (!latestStable) throw new Error("nightly RCs require a published stable release");
+
+  const latestStableSha = await api.resolveTag(latestStable.tag);
+  if (latestStableSha === sha) {
+    return { run: false, reason: `${latestStable.tag} already publishes ${sha}` };
+  }
+  const comparison = await api.compareCommits(latestStableSha, sha);
+  if (comparison !== "ahead") {
+    throw new Error(
+      `scheduled source is ${comparison} relative to latest stable ${latestStable.tag}`,
+    );
   }
 
-  const stableVersions = releases
-    .filter((release) => !release.draft && !release.prerelease)
-    .map((release) => parseStableTag(release.tag_name))
-    .filter(Boolean);
-  stableVersions.sort((left, right) => compareParts(right.base, left.base));
-  if (stableVersions[0] && compareParts(baseParts, stableVersions[0].base) <= 0) {
-    throw new Error(
-      `release base ${input.base} must be greater than latest stable ${stableVersions[0].baseText}`,
-    );
+  const baseParts = [...latestStable.base];
+  baseParts[2] += 1;
+  if (!Number.isSafeInteger(baseParts[2])) {
+    throw new Error(`cannot increment patch version for ${latestStable.tag}`);
+  }
+  const base = baseParts.join(".");
+  const stableTag = `v${base}`;
+  if (await api.resolveTagOrNull(stableTag)) {
+    return { run: false, reason: `${stableTag} already exists` };
   }
 
   const currentTrain = releases
     .filter((release) => !release.draft && release.prerelease)
     .map((release) => ({ release, parsed: parseRcTag(release.tag_name) }))
-    .filter(({ parsed }) => parsed?.baseText === input.base)
+    .filter(({ parsed }) => parsed?.baseText === base)
     .sort((left, right) => right.parsed.number - left.parsed.number);
   if (currentTrain[0]) {
     const previousSha = await api.resolveTag(currentTrain[0].release.tag_name);
@@ -108,7 +117,7 @@ export async function prepareCandidate(input, api) {
   }
 
   const tag = `${stableTag}-rc.${runNumber}`;
-  const version = `${input.base}-rc.${runNumber}`;
+  const version = `${base}-rc.${runNumber}`;
   const existingRelease = releaseForTag(releases, tag);
   const tagSha = await api.resolveTagOrNull(tag);
 
@@ -126,7 +135,16 @@ export async function prepareCandidate(input, api) {
     if (!existingRelease.prerelease || !matchingSource) {
       throw new Error(`${tag} draft does not match the scheduled candidate`);
     }
-    return { run: true, resume: true, sha, base: input.base, version, tag };
+    return {
+      run: true,
+      resume: true,
+      sha,
+      base,
+      version,
+      tag,
+      latestStableTag: latestStable.tag,
+      latestStableSha,
+    };
   }
 
   if (tagSha) {
@@ -134,11 +152,29 @@ export async function prepareCandidate(input, api) {
     // the draft-versus-standalone decision to the write-scoped publish job,
     // which revalidates both the release and the tag before modifying either.
     if (runAttempt > 1 && tagSha === sha) {
-      return { run: true, resume: true, sha, base: input.base, version, tag };
+      return {
+        run: true,
+        resume: true,
+        sha,
+        base,
+        version,
+        tag,
+        latestStableTag: latestStable.tag,
+        latestStableSha,
+      };
     }
     throw new Error(`${tag} is occupied by a standalone tag`);
   }
-  return { run: true, resume: false, sha, base: input.base, version, tag };
+  return {
+    run: true,
+    resume: false,
+    sha,
+    base,
+    version,
+    tag,
+    latestStableTag: latestStable.tag,
+    latestStableSha,
+  };
 }
 
 export async function validateStableDispatch(tag, api) {
@@ -216,6 +252,17 @@ export class GitHubApi {
       next = linkNext(response.headers.get("link"));
     }
     return releases;
+  }
+
+  async compareCommits(base, head) {
+    const { data } = await this.request(
+      "GET",
+      `/repos/${this.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+    );
+    if (!["ahead", "behind", "diverged", "identical"].includes(data?.status)) {
+      throw new Error("GitHub compare response had an invalid status");
+    }
+    return data.status;
   }
 
   async resolveTagOrNull(tag) {
@@ -313,6 +360,19 @@ function sameBytes(left, right) {
   return left.equals(right);
 }
 
+async function requireLatestStableSnapshot(input, api, releases) {
+  const expected = parseStableTag(input.latestStableTag);
+  if (!expected) throw new Error("nightly candidate is missing its latest stable tag");
+  const expectedSha = requireSha(input.latestStableSha, expected.tag);
+  const latest = greatestStableRelease(releases);
+  if (!latest || latest.tag !== expected.tag) {
+    throw new Error(`latest stable changed after candidate preparation; expected ${expected.tag}`);
+  }
+  if ((await api.resolveTag(expected.tag)) !== expectedSha) {
+    throw new Error(`${expected.tag} moved after candidate preparation`);
+  }
+}
+
 export async function publishCandidate(input, api) {
   const sha = requireSha(input.sha, "candidate");
   const parsed = parseRcTag(input.tag);
@@ -328,16 +388,16 @@ export async function publishCandidate(input, api) {
   const files = new Map();
   for (const name of EXPECTED_ASSETS) files.set(name, await readFile(`${input.assetDir}/${name}`));
 
-  if (await api.resolveTagOrNull(`v${base}`)) {
-    throw new Error(`stable v${base} appeared before RC publication`);
-  }
-
   let releases = await api.listReleases();
   let release = releaseForTag(releases, input.tag);
   let tagSha = await api.resolveTagOrNull(input.tag);
   if (release && !release.draft) {
     if (!release.prerelease || tagSha !== sha) throw new Error(`${input.tag} is published with conflicting identity`);
     return { alreadyPublished: true, release };
+  }
+  await requireLatestStableSnapshot(input, api, releases);
+  if (await api.resolveTagOrNull(`v${base}`)) {
+    throw new Error(`stable v${base} appeared before RC publication`);
   }
 
   if (release) {
@@ -383,6 +443,8 @@ export async function publishCandidate(input, api) {
       throw new Error(`uploaded asset ${asset.name} failed byte-for-byte verification`);
     }
   }
+  releases = await api.listReleases();
+  await requireLatestStableSnapshot(input, api, releases);
   if (await api.resolveTagOrNull(`v${base}`)) {
     throw new Error(`stable v${base} appeared during RC publication`);
   }
@@ -416,12 +478,8 @@ async function main() {
   const command = process.argv[2];
   const api = repositoryApi();
   if (command === "prepare") {
-    const manifest = await readFile("crates/nac-server/Cargo.toml", "utf8");
-    const match = /^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m.exec(manifest);
-    if (!match) throw new Error("could not read nac-server package version");
     const result = await prepareCandidate(
       {
-        base: match[1],
         sha: process.env.GITHUB_SHA,
         runNumber: process.env.GITHUB_RUN_NUMBER,
         runAttempt: process.env.GITHUB_RUN_ATTEMPT,
@@ -431,11 +489,13 @@ async function main() {
     await writeOutputs({
       run: result.run,
       sha: result.sha || process.env.GITHUB_SHA,
-      base: result.base || match[1],
+      base: result.base || "",
       version: result.version || "",
       tag: result.tag || "",
       resume: result.resume || false,
       reason: result.reason || "",
+      latest_stable_tag: result.latestStableTag || "",
+      latest_stable_sha: result.latestStableSha || "",
     });
     console.log(result.reason || `${result.resume ? "resuming" : "preparing"} ${result.tag}`);
   } else if (command === "validate-stable") {
@@ -449,6 +509,8 @@ async function main() {
         runNumber: process.env.GITHUB_RUN_NUMBER,
         runAttempt: process.env.GITHUB_RUN_ATTEMPT,
         assetDir: process.env.ASSET_DIR || "dist",
+        latestStableTag: process.env.LATEST_STABLE_TAG,
+        latestStableSha: process.env.LATEST_STABLE_SHA,
       },
       api,
     );

@@ -33,6 +33,8 @@ jobs:
       version: ${{ steps.rc.outputs.version || steps.stable.outputs.version || steps.ci.outputs.version }}
       tag: ${{ steps.rc.outputs.tag || steps.stable.outputs.tag }}
       is_rc: ${{ github.event_name == 'schedule' }}
+      latest_stable_tag: ${{ steps.rc.outputs.latest_stable_tag }}
+      latest_stable_sha: ${{ steps.rc.outputs.latest_stable_sha }}
 
     steps:
       - uses: actions/checkout@v4
@@ -271,6 +273,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          LATEST_STABLE_TAG: ${{ needs.prepare.outputs.latest_stable_tag }}
+          LATEST_STABLE_SHA: ${{ needs.prepare.outputs.latest_stable_sha }}
           ASSET_DIR: dist
         run: node .github/scripts/rc-release.mjs publish
 
