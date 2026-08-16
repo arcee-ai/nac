@@ -1,4 +1,7 @@
 use super::*;
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 // 14 adds the bounded interrupted-run recovery row. 13 added the light-model
 // columns (`light_model_json` on both `sessions` and `model_configurations`) —
@@ -16,6 +19,146 @@ const RUN_COUNT_BACKFILL_VERSION: i64 = 5;
 /// Later versions add columns without touching them, so a store at or past this
 /// one does not need its whole message history walked again.
 const SESSION_SUMMARY_BACKFILL_VERSION: i64 = 8;
+/// Hard SQLite checkout limits for one NAC process.
+///
+/// Connections are operation-scoped, but concurrent opens still need a
+/// descriptor bound: at most 32 connections may be opening or checked out in
+/// one process, and at most four of those may target the same canonical store.
+/// Cached sessions and writers do not own capacity while idle.
+const PROCESS_CONNECTION_LIMIT: usize = 32;
+const STORE_CONNECTION_LIMIT: usize = 4;
+const CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Default)]
+struct ConnectionCapacityState {
+    total: usize,
+    by_store: HashMap<PathBuf, usize>,
+}
+
+struct ConnectionCapacity {
+    process_limit: usize,
+    store_limit: usize,
+    state: Mutex<ConnectionCapacityState>,
+    available: Condvar,
+}
+
+impl ConnectionCapacity {
+    fn new(process_limit: usize, store_limit: usize) -> Arc<Self> {
+        assert!(process_limit > 0);
+        assert!(store_limit > 0);
+        Arc::new(Self {
+            process_limit,
+            store_limit,
+            state: Mutex::new(ConnectionCapacityState::default()),
+            available: Condvar::new(),
+        })
+    }
+
+    fn acquire(self: &Arc<Self>, store_path: &Path, timeout: Duration) -> Result<ConnectionPermit> {
+        let deadline = Instant::now() + timeout;
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            let store_count = state.by_store.get(store_path).copied().unwrap_or(0);
+            if state.total < self.process_limit && store_count < self.store_limit {
+                state.total += 1;
+                *state.by_store.entry(store_path.to_path_buf()).or_default() += 1;
+                return Ok(ConnectionPermit {
+                    capacity: Arc::clone(self),
+                    store_path: store_path.to_path_buf(),
+                });
+            }
+
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(anyhow!("timed out waiting for SQLite connection capacity"));
+            }
+            let (next, wait) = self
+                .available
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state = next;
+            if wait.timed_out() {
+                let store_count = state.by_store.get(store_path).copied().unwrap_or(0);
+                if state.total >= self.process_limit || store_count >= self.store_limit {
+                    return Err(anyhow!("timed out waiting for SQLite connection capacity"));
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn counts(&self, store_path: &Path) -> (usize, usize) {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (
+            state.total,
+            state.by_store.get(store_path).copied().unwrap_or(0),
+        )
+    }
+}
+
+struct ConnectionPermit {
+    capacity: Arc<ConnectionCapacity>,
+    store_path: PathBuf,
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        let mut state = self
+            .capacity
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.total = state
+            .total
+            .checked_sub(1)
+            .expect("SQLite process connection count underflow");
+        let remove_store = {
+            let store_count = state
+                .by_store
+                .get_mut(&self.store_path)
+                .expect("SQLite store connection count missing");
+            *store_count = store_count
+                .checked_sub(1)
+                .expect("SQLite store connection count underflow");
+            *store_count == 0
+        };
+        if remove_store {
+            state.by_store.remove(&self.store_path);
+        }
+        drop(state);
+        self.capacity.available.notify_all();
+    }
+}
+
+static CONNECTION_CAPACITY: std::sync::LazyLock<Arc<ConnectionCapacity>> =
+    std::sync::LazyLock::new(|| {
+        ConnectionCapacity::new(PROCESS_CONNECTION_LIMIT, STORE_CONNECTION_LIMIT)
+    });
+
+pub(crate) struct StoreConnection {
+    connection: Connection,
+    _permit: ConnectionPermit,
+}
+
+impl Deref for StoreConnection {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.connection
+    }
+}
+
+impl DerefMut for StoreConnection {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.connection
+    }
+}
 
 #[cfg(test)]
 static TRACKED_CONNECTION_OPENS: std::sync::LazyLock<
@@ -34,28 +177,100 @@ pub fn initialize(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn connect(path: &Path) -> Result<Connection> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create store dir {}", parent.display()))?;
+/// Verify that session-serving traffic can check out, open, and query the
+/// initialized store without creating or migrating a replacement database.
+pub fn check_readiness(path: &Path) -> Result<()> {
+    let conn = connect_existing(path)?;
+    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version != STORE_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "SQLite store schema version {schema_version} is not ready (expected {STORE_SCHEMA_VERSION})"
+        ));
     }
+    let _: i64 = conn.query_row("SELECT EXISTS(SELECT 1 FROM sessions LIMIT 1)", [], |row| {
+        row.get(0)
+    })?;
+    Ok(())
+}
 
-    let conn = Connection::open(path)
-        .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
+fn resolved_store_path(path: &Path) -> Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let file_name = path
+                .file_name()
+                .context("SQLite store path must name a file")?;
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create store dir {}", parent.display()))?;
+            let parent = std::fs::canonicalize(parent)
+                .with_context(|| format!("failed to resolve store dir {}", parent.display()))?;
+            Ok(parent.join(file_name))
+        }
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to resolve SQLite store {}", path.display()))
+        }
+    }
+}
+
+fn connect_with_capacity_using(
+    path: &Path,
+    capacity: &Arc<ConnectionCapacity>,
+    timeout: Duration,
+    open: impl FnOnce(&Path) -> rusqlite::Result<Connection>,
+) -> Result<StoreConnection> {
+    let path = resolved_store_path(path)?;
+    let permit = capacity.acquire(&path, timeout)?;
+    let connection =
+        open(&path).with_context(|| format!("failed to open SQLite store {}", path.display()))?;
+    let conn = StoreConnection {
+        connection,
+        _permit: permit,
+    };
     #[cfg(test)]
     {
         let mut tracked = TRACKED_CONNECTION_OPENS
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(count) = tracked.get_mut(path) {
+        if let Some(count) = tracked.get_mut(&path) {
             *count += 1;
         }
     }
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.busy_timeout(Duration::from_secs(5))?;
     Ok(conn)
 }
 
-pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
+fn connect_with_capacity(
+    path: &Path,
+    capacity: &Arc<ConnectionCapacity>,
+    timeout: Duration,
+) -> Result<StoreConnection> {
+    connect_with_capacity_using(path, capacity, timeout, |path| Connection::open(path))
+}
+
+fn connect(path: &Path) -> Result<StoreConnection> {
+    connect_with_capacity(path, &CONNECTION_CAPACITY, CONNECTION_WAIT_TIMEOUT)
+}
+
+fn connect_existing(path: &Path) -> Result<StoreConnection> {
+    connect_with_capacity_using(
+        path,
+        &CONNECTION_CAPACITY,
+        CONNECTION_WAIT_TIMEOUT,
+        |path| {
+            Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+        },
+    )
+}
+
+pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
     let conn = connect(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let journal_mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
@@ -75,22 +290,30 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<Connection> {
 
 #[cfg(test)]
 pub(crate) fn track_connection_opens(path: &Path) {
+    let path = resolved_store_path(path).unwrap();
     TRACKED_CONNECTION_OPENS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(path.to_path_buf(), 0);
+        .insert(path, 0);
 }
 
 #[cfg(test)]
 pub(crate) fn tracked_connection_opens(path: &Path) -> usize {
+    let path = resolved_store_path(path).unwrap();
     TRACKED_CONNECTION_OPENS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(path)
+        .remove(&path)
         .unwrap_or(0)
 }
 
-pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
+#[cfg(test)]
+pub(crate) fn active_connection_counts(path: &Path) -> Result<(usize, usize)> {
+    let path = resolved_store_path(path)?;
+    Ok(CONNECTION_CAPACITY.counts(&path))
+}
+
+pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     let mut conn = connect(path)?;
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;

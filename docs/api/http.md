@@ -8,6 +8,20 @@ nac-web
 
 With the default bind, that is [http://127.0.0.1:3210/docs](http://127.0.0.1:3210/docs) for the embedded Swagger UI and [http://127.0.0.1:3210/openapi.json](http://127.0.0.1:3210/openapi.json) for the OpenAPI 3.1 document (`GET /docs` and `GET /openapi.json` on whatever host and port you chose).
 
+## Health and SQLite capacity
+
+`GET /health` is a readiness check for session-serving traffic. It returns
+HTTP 200 with `{"status":"ok"}` only when nac-web can open the configured
+SQLite store and query its required session schema. Store capacity, open, or
+schema failures return HTTP 503 with `{"status":"unavailable"}`; the response
+does not expose the store path or SQLite diagnostic.
+
+SQLite connections are operation-scoped rather than owned by cached sessions.
+Each nac process admits at most 32 opening or checked-out SQLite connections,
+with at most four targeting the same canonical store. Capacity waits are
+bounded. These limits are internal and intentionally not configurable, leaving
+descriptor headroom under the common 256-descriptor process limit.
+
 ## Remote access
 
 Remote access delegates the authority of the local user to every client that

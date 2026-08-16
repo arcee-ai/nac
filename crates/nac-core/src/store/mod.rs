@@ -21,7 +21,7 @@ mod workspace_revisions;
 pub use model_configurations::*;
 pub use render::*;
 pub(crate) use run_recovery::*;
-pub use schema::{default_store_path, initialize};
+pub use schema::{check_readiness, default_store_path, initialize};
 pub use ssh_configurations::*;
 pub use steering::*;
 pub use thread_events::*;
@@ -30,11 +30,13 @@ pub use transcript::*;
 pub use worksets::*;
 pub use workspace_revisions::*;
 
-pub(crate) use schema::{open_connection, open_runtime_connection};
+pub(crate) use schema::{open_connection, open_runtime_connection, StoreConnection};
 #[cfg(test)]
 pub(crate) use schema::{track_connection_opens, tracked_connection_opens};
 pub(crate) use steering::list_thread_steering_with_connection;
-pub(crate) use thread_events::load_all_thread_events_with_connection;
+pub(crate) use thread_events::{
+    load_all_thread_events_with_connection, load_thread_events_page_with_connection,
+};
 pub(crate) use threads::{list_threads_with_connection, load_all_dispatches_with_connection};
 use time::now_utc;
 pub(crate) use worksets::{list_worksets_with_connection, read_workset_with_connection};

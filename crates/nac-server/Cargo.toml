@@ -31,4 +31,5 @@ utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum
 [dev-dependencies]
 flate2 = "1"
 nac-core = { path = "../nac-core", features = ["test-support"] }
+libc = "0.2"
 tower = { version = "0.5", features = ["util"] }
