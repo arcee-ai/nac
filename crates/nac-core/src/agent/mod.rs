@@ -723,6 +723,8 @@ impl Agent {
                 self.thread_name.clone(),
             )
             .await;
+            let tool_messages =
+                finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
                 let error = anyhow!("worker command cancelled");
@@ -745,8 +747,6 @@ impl Agent {
 
             self.last_usage = Some(accumulated_usage.clone());
 
-            let tool_messages =
-                finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
             // Transcript commit point (tool results): the complete parallel
             // batch is logged atomically before any of it enters the
             // transcript, so the loop re-enters provider-view preparation

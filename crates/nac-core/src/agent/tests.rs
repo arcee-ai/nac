@@ -545,3 +545,80 @@ fn image_limit_error_is_the_only_finished_event_for_the_result() {
     ));
     assert!(events_rx.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn cancelled_image_result_still_emits_finished_event() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    let root = std::env::temp_dir().join(format!(
+        "nac_cancelled_image_finish_{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(1, 1, Rgba([1, 2, 3, 255])));
+    let mut encoded = Cursor::new(Vec::new());
+    source.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    std::fs::write(root.join("fixture.png"), encoded.into_inner()).unwrap();
+
+    let response = serde_json::json!({
+        "status": "completed",
+        "output": [{
+            "type": "function_call",
+            "call_id": "call-image",
+            "name": "read",
+            "arguments": "{\"path\":\"fixture.png\"}"
+        }],
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+    })
+    .to_string();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response)]);
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut agent = Agent::with_config(
+        ModelClient::new_for_test_server(server.base_url.clone()),
+        AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
+            mode: AgentMode::Worker,
+            store_path: root.join("store.db"),
+            session_id: None,
+            orchestrator_compaction_threshold: None,
+            initial_messages: Vec::new(),
+            thread_name: Some("worker".to_string()),
+            dispatch_id: None,
+            event_sink: EventSink::channel(events_tx),
+            workspace_cwd: root.clone(),
+            config_cwd: root.clone(),
+            working_directory: root.display().to_string(),
+            worker_executable: None,
+            sandbox: None,
+            ssh: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: None,
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            light_client: None,
+        },
+    )
+    .unwrap();
+    agent.command_cancellation().cancel();
+
+    let error = agent.send("read the fixture").await.unwrap_err();
+    assert!(error.to_string().contains("worker command cancelled"));
+    let finished = std::iter::from_fn(|| events_rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AgentEvent::ToolCallFinished {
+                call_id,
+                content_preview,
+                ..
+            } => Some((call_id, content_preview)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0].0, "call-image");
+    assert!(finished[0].1.contains("[image: image/png,"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
