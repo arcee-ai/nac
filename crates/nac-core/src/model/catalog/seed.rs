@@ -137,6 +137,7 @@ fn rates(input: f64, output: f64, cache_read: f64, cache_write: f64) -> ModelCos
         output,
         cache_read,
         cache_write,
+        tiers: None,
     }
 }
 

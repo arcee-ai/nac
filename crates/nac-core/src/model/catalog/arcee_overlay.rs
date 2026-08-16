@@ -328,11 +328,13 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
     let max_tokens = max_tokens.min(context_window);
 
     let pricing = model.pricing.as_ref();
+    // The arcee API publishes no tiered pricing today.
     let cost = super::ModelCostRates {
         input: parse_pricing_rate(pricing.and_then(|p| p.prompt.as_deref())),
         output: parse_pricing_rate(pricing.and_then(|p| p.completion.as_deref())),
         cache_read: parse_pricing_rate(pricing.and_then(|p| p.input_cache_reads.as_deref())),
         cache_write: parse_pricing_rate(pricing.and_then(|p| p.input_cache_writes.as_deref())),
+        tiers: None,
     };
 
     // Known third-party models get a hardcoded effort map matching the

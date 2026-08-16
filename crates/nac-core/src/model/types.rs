@@ -400,6 +400,18 @@ impl TokenCostMicros {
 /// these non-negative values); results saturate at u64::MAX. Non-finite or
 /// negative rates bill as zero: unknown pricing never errors.
 ///
+/// Tiered pricing (pi's `model.cost.tiers`, models.dev `cost.tiers`): when
+/// the response's prompt size (input + cache read + cache write) exceeds a
+/// tier's `input_tokens_above`, the highest matching tier's rates replace
+/// the base rates for the whole response.
+///
+/// Reasoning tokens bill at the output rate (opencode's approach): the
+/// bill is `max(output_tokens, reasoning_tokens) × rate`. Providers that
+/// include reasoning in their output count (the OpenAI convention,
+/// verified live for deepseek and together's kimi-k3) bill exactly
+/// `output_tokens × rate`; a provider that excludes reasoning still has
+/// its reasoning billed, and the bill can never double-count.
+///
 /// `cache_write_1h_rate` replaces the standard cache-write rate for
 /// Anthropic 1-hour-TTL writes; `None` bills writes at `rates.cache_write`.
 pub(crate) fn calculate_cost(
@@ -414,12 +426,38 @@ pub(crate) fn calculate_cost(
         // f64→u64 `as` saturates at u64::MAX and maps NaN to 0.
         (tokens as f64 * rate_per_mtok).round() as u64
     }
-    let input = micros(usage.input_tokens, rates.input);
-    let output = micros(usage.output_tokens, rates.output);
-    let cache_read = micros(usage.cache_read_tokens, rates.cache_read);
+    // Tier selection keys on the full prompt size (pi's inputTokens =
+    // input + cacheRead + cacheWrite); nac's parsers normalize cache tokens
+    // out of `input_tokens`, so they are added back here.
+    let prompt_tokens = usage
+        .input_tokens
+        .saturating_add(usage.cache_read_tokens)
+        .saturating_add(usage.cache_write_tokens);
+    let base = catalog::CostTier {
+        input_tokens_above: 0,
+        input: rates.input,
+        output: rates.output,
+        cache_read: rates.cache_read,
+        cache_write: rates.cache_write,
+    };
+    let selected = rates
+        .tiers
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|tier| prompt_tokens > tier.input_tokens_above)
+        .max_by_key(|tier| tier.input_tokens_above)
+        .copied()
+        .unwrap_or(base);
+    let input = micros(usage.input_tokens, selected.input);
+    let output = micros(
+        usage.output_tokens.max(usage.reasoning_tokens),
+        selected.output,
+    );
+    let cache_read = micros(usage.cache_read_tokens, selected.cache_read);
     let cache_write = micros(
         usage.cache_write_tokens,
-        cache_write_1h_rate.unwrap_or(rates.cache_write),
+        cache_write_1h_rate.unwrap_or(selected.cache_write),
     );
     let total = input
         .saturating_add(output)
@@ -438,6 +476,9 @@ pub(crate) fn calculate_cost(
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TokenUsage {
     pub input_tokens: u64,
+    /// Inclusive of `reasoning_tokens` — parsers normalize to the OpenAI
+    /// convention, and cost billing relies on it (reasoning bills at the
+    /// output rate via `max(output_tokens, reasoning_tokens)`).
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,

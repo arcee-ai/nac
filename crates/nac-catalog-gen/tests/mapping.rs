@@ -222,6 +222,65 @@ fn negative_cost_rate_fails_loudly() {
 }
 
 #[test]
+fn cost_tiers_map_context_steps_and_fill_omitted_buckets_from_base() {
+    let generation = generate(
+        &api_json(
+            r#""claude-tiered": {
+              "id": "claude-tiered", "name": "Claude Tiered", "reasoning": false,
+              "limit": {"context": 1000000, "output": 64000},
+              "cost": {
+                "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75,
+                "tiers": [
+                  {"tier": {"type": "context", "size": 200000}, "input": 6, "output": 22.5}
+                ]
+              }
+            }"#,
+            "",
+        ),
+        EMPTY_OVERRIDES,
+    );
+    let cost = &only_model(&generation).cost;
+    assert_eq!(cost.input, 3.0);
+    let tiers = cost.tiers.as_ref().expect("tier mapped");
+    assert_eq!(tiers.len(), 1);
+    assert_eq!(tiers[0].input_tokens_above, 200_000);
+    assert_eq!(tiers[0].input, 6.0);
+    assert_eq!(tiers[0].output, 22.5);
+    assert_eq!(tiers[0].cache_read, 0.3, "omitted bucket fills from base");
+    assert_eq!(tiers[0].cache_write, 3.75, "omitted bucket fills from base");
+}
+
+#[test]
+fn unknown_cost_tier_type_fails_loudly() {
+    let result = gen::generate(
+        &api_json(
+            r#""m-tier": {"id": "m-tier", "cost": {"input": 1, "tiers": [
+              {"tier": {"type": "time_of_day", "size": 1000}, "input": 2}
+            ]}}"#,
+            "",
+        ),
+        EMPTY_OVERRIDES,
+    );
+    let error = format!("{:#}", result.unwrap_err());
+    assert!(error.contains("unknown cost tier type 'time_of_day'"), "{error}");
+}
+
+#[test]
+fn negative_tier_rate_fails_loudly() {
+    let result = gen::generate(
+        &api_json(
+            r#""m-tier-neg": {"id": "m-tier-neg", "cost": {"input": 1, "tiers": [
+              {"tier": {"type": "context", "size": 1000}, "output": -2}
+            ]}}"#,
+            "",
+        ),
+        EMPTY_OVERRIDES,
+    );
+    let error = format!("{:#}", result.unwrap_err());
+    assert!(error.contains("negative output rate"), "{error}");
+}
+
+#[test]
 fn missing_mapped_provider_fails_loudly() {
     let result = gen::generate(
         r#"{"deepseek": {"models": {}}, "fireworks-ai": {"models": {}},

@@ -905,7 +905,16 @@
             "input": 2.5,
             "output": 15.0,
             "cache_read": 0.25,
-            "cache_write": 0.0
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 5.0,
+                "output": 22.5,
+                "cache_read": 0.5,
+                "cache_write": 0.0
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {
@@ -965,7 +974,16 @@
             "input": 30.0,
             "output": 180.0,
             "cache_read": 0.0,
-            "cache_write": 0.0
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 60.0,
+                "output": 270.0,
+                "cache_read": 0.0,
+                "cache_write": 0.0
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {
@@ -985,7 +1003,16 @@
             "input": 5.0,
             "output": 30.0,
             "cache_read": 0.5,
-            "cache_write": 0.0
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 10.0,
+                "output": 45.0,
+                "cache_read": 1.0,
+                "cache_write": 0.0
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {
@@ -1005,7 +1032,16 @@
             "input": 30.0,
             "output": 180.0,
             "cache_read": 0.0,
-            "cache_write": 0.0
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 60.0,
+                "output": 270.0,
+                "cache_read": 0.0,
+                "cache_write": 0.0
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {
@@ -1025,7 +1061,16 @@
             "input": 5.0,
             "output": 30.0,
             "cache_read": 0.5,
-            "cache_write": 6.25
+            "cache_write": 6.25,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 10.0,
+                "output": 45.0,
+                "cache_read": 1.0,
+                "cache_write": 12.5
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {
@@ -1046,7 +1091,16 @@
             "input": 0.2,
             "output": 1.2,
             "cache_read": 0.02,
-            "cache_write": 0.25
+            "cache_write": 0.25,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 0.4,
+                "output": 1.8,
+                "cache_read": 0.04,
+                "cache_write": 0.5
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {
@@ -1067,7 +1121,16 @@
             "input": 5.0,
             "output": 30.0,
             "cache_read": 0.5,
-            "cache_write": 6.25
+            "cache_write": 6.25,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 10.0,
+                "output": 45.0,
+                "cache_read": 1.0,
+                "cache_write": 12.5
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {
@@ -1088,7 +1151,16 @@
             "input": 2.0,
             "output": 12.0,
             "cache_read": 0.2,
-            "cache_write": 2.5
+            "cache_write": 2.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 4.0,
+                "output": 18.0,
+                "cache_read": 0.4,
+                "cache_write": 5.0
+              }
+            ]
           },
           "reasoning": true,
           "thinking_level_map": {

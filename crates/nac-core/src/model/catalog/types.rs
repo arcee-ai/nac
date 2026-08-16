@@ -110,9 +110,37 @@ impl ThinkingLevelMap {
 /// Cost rates in USD per 1M tokens. All-zero = unknown (pi's zero-cost
 /// fallback); `calculate_cost` bills unknown pricing as zero. Missing fields
 /// deserialize as zero so partial catalog records stay loadable.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+///
+/// `tiers` carries context-dependent pricing (models.dev `cost.tiers`,
+/// pi's `model.cost.tiers`): when a response's prompt size exceeds a tier's
+/// `input_tokens_above`, that tier's rates replace the base rates for the
+/// response. `None` and `Some([])` both mean flat pricing; the Option keeps
+/// user overrides three-state (absent = keep existing tiers, `[]` = clear).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelCostRates {
+    #[serde(default)]
+    pub input: f64,
+    #[serde(default)]
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: f64,
+    #[serde(default)]
+    pub cache_write: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tiers: Option<Vec<CostTier>>,
+}
+
+/// One context-priced rate step (models.dev `cost.tiers[]` with
+/// `tier.type == "context"`): applies when the response's prompt tokens
+/// (input + cache read + cache write) exceed `input_tokens_above`. Rates
+/// are complete — mappers fill buckets a tier omits from the base rates, so
+/// selection is a wholesale swap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CostTier {
+    #[serde(default)]
+    pub input_tokens_above: u64,
     #[serde(default)]
     pub input: f64,
     #[serde(default)]

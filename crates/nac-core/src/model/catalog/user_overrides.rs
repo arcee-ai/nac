@@ -58,10 +58,31 @@ struct UserOverrideSet {
     display_name: Option<String>,
     context_window: Option<u64>,
     max_tokens: Option<u64>,
-    cost: Option<super::ModelCostRates>,
+    cost: Option<CostPatch>,
     cache_write_1h: Option<f64>,
     reasoning: Option<bool>,
     thinking_level_map: Option<ThinkingLevelMap>,
+}
+
+/// Patch-side cost rates. Base and tier buckets are optional: omitted base
+/// buckets keep the resolved rates, and omitted tier buckets fill from that
+/// merged base so user tiers stay complete rate sets.
+#[derive(Debug, Deserialize)]
+struct CostPatch {
+    input: Option<f64>,
+    output: Option<f64>,
+    cache_read: Option<f64>,
+    cache_write: Option<f64>,
+    tiers: Option<Vec<CostTierPatch>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CostTierPatch {
+    input_tokens_above: u64,
+    input: Option<f64>,
+    output: Option<f64>,
+    cache_read: Option<f64>,
+    cache_write: Option<f64>,
 }
 
 /// Apply `$NAC_HOME/models.json` over the catalog. Never fails: a missing
@@ -128,8 +149,32 @@ fn apply_one(catalog: &mut ModelCatalog, value: serde_json::Value) -> Result<(),
     if let Some(max_tokens) = set.max_tokens {
         metadata.max_tokens = max_tokens;
     }
-    if let Some(cost) = set.cost {
-        metadata.cost = cost;
+    if let Some(patch) = set.cost {
+        let base = super::ModelCostRates {
+            input: patch.input.unwrap_or(metadata.cost.input),
+            output: patch.output.unwrap_or(metadata.cost.output),
+            cache_read: patch.cache_read.unwrap_or(metadata.cost.cache_read),
+            cache_write: patch.cache_write.unwrap_or(metadata.cost.cache_write),
+            tiers: None,
+        };
+        // Three-state tiers: a patch without `tiers` keeps the entry's
+        // existing tiers; an explicit `"tiers": []` clears them.
+        let tiers = match patch.tiers {
+            None => metadata.cost.tiers.take(),
+            Some(tiers) => Some(
+                tiers
+                    .into_iter()
+                    .map(|tier| super::CostTier {
+                        input_tokens_above: tier.input_tokens_above,
+                        input: tier.input.unwrap_or(base.input),
+                        output: tier.output.unwrap_or(base.output),
+                        cache_read: tier.cache_read.unwrap_or(base.cache_read),
+                        cache_write: tier.cache_write.unwrap_or(base.cache_write),
+                    })
+                    .collect(),
+            ),
+        };
+        metadata.cost = super::ModelCostRates { tiers, ..base };
     }
     if let Some(cache_write_1h) = set.cache_write_1h {
         metadata.cache_write_1h = Some(cache_write_1h);
@@ -174,6 +219,21 @@ fn validate(metadata: &ModelMetadata) -> Result<(), String> {
     ] {
         if !rate.is_finite() || rate < 0.0 {
             return Err(format!("invalid {field} rate {rate}"));
+        }
+    }
+    for tier in metadata.cost.tiers.as_deref().unwrap_or(&[]) {
+        for (field, rate) in [
+            ("input", tier.input),
+            ("output", tier.output),
+            ("cache_read", tier.cache_read),
+            ("cache_write", tier.cache_write),
+        ] {
+            if !rate.is_finite() || rate < 0.0 {
+                return Err(format!(
+                    "invalid tier {field} rate {rate} (above {} prompt tokens)",
+                    tier.input_tokens_above
+                ));
+            }
         }
     }
     if let Some(rate) = metadata.cache_write_1h {

@@ -49,9 +49,9 @@ pub use anthropic_overlay::spawn_anthropic_model_refresh;
 pub use arcee_overlay::spawn_arcee_model_refresh;
 pub use overlay::spawn_overlay_refresh;
 pub use types::{
-    ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, DefaultLimits, ModelCostRates,
-    ModelEntry, ModelListing, ModelMetadata, ModelSource, ProviderAuth, ProviderListing,
-    ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+    ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, CostTier, DefaultLimits,
+    ModelCostRates, ModelEntry, ModelListing, ModelMetadata, ModelSource, ProviderAuth,
+    ProviderListing, ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -83,6 +83,11 @@ pub(crate) enum CatalogWarning {
     OverlayCorrupt {
         path: PathBuf,
         error: String,
+    },
+    OverlayIncompatible {
+        path: PathBuf,
+        found_schema_version: u32,
+        expected_schema_version: u32,
     },
     OverlayStale {
         path: PathBuf,
@@ -130,6 +135,17 @@ impl std::fmt::Display for CatalogWarning {
             Self::OverlayCorrupt { path, error } => write!(
                 formatter,
                 "ignoring corrupt catalog overlay {}: {error} (embedded baseline stays active)",
+                path.display()
+            ),
+            Self::OverlayIncompatible {
+                path,
+                found_schema_version,
+                expected_schema_version,
+            } => write!(
+                formatter,
+                "ignoring incompatible catalog overlay {}: schema version \
+                 {found_schema_version}, expected {expected_schema_version} \
+                 (embedded baseline stays active)",
                 path.display()
             ),
             Self::OverlayStale {
@@ -460,7 +476,7 @@ pub fn api_listing() -> ModelListing {
                         display_name: metadata.display_name.clone(),
                         context_window: metadata.context_window,
                         max_tokens: metadata.max_tokens,
-                        cost: metadata.cost,
+                        cost: metadata.cost.clone(),
                         reasoning: metadata.reasoning,
                         supported_efforts: metadata.thinking_level_map.supported_efforts(),
                         source: metadata.source,

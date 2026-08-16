@@ -41,15 +41,13 @@ fn user_override_patches_an_exact_model() {
     assert_eq!(metadata.max_tokens, 65_536);
     assert_eq!(
         metadata.display_name.as_deref(),
-        Some("DeepSeek V4 Flash (patched)"
-    ));
+        Some("DeepSeek V4 Flash (patched)")
+    );
     // Untouched fields keep the baseline values.
     assert_eq!(metadata.context_window, 1_000_000);
     assert_eq!(metadata.cost.input, 0.14);
     assert_eq!(
-        metadata
-            .thinking_level_map
-            .wire_value(ReasoningEffort::Max),
+        metadata.thinking_level_map.wire_value(ReasoningEffort::Max),
         Some("max")
     );
 }
@@ -254,4 +252,172 @@ fn invalid_override_entries_are_skipped_individually() {
     assert_eq!(metadata.source, ModelSource::UserOverride);
     assert_eq!(metadata.max_tokens, 12_345);
     assert_eq!(metadata.context_window, 1_000_000);
+}
+
+#[test]
+fn user_override_cost_patch_without_tiers_keeps_existing_tiers() {
+    // gpt-5.6 ships a baseline tier at 272k prompt tokens.
+    let home = TempHome::new("tiers-kept");
+    write_models_json(
+        &home,
+        serde_json::json!({
+            "overrides": [
+                { "provider": "openai-responses", "model": "gpt-5.6", "set": { "cost": { "input": 6.0 } } }
+            ]
+        }),
+    );
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let metadata = catalog.resolve(BackendKind::OpenAiResponses, "gpt-5.6");
+    assert_eq!(metadata.cost.input, 6.0);
+    assert_eq!(metadata.cost.output, 30.0);
+    assert_eq!(metadata.cost.cache_read, 0.5);
+    assert_eq!(metadata.cost.cache_write, 6.25);
+    let tiers = metadata.cost.tiers.as_ref().expect("baseline tiers kept");
+    assert_eq!(tiers.len(), 1);
+    assert_eq!(tiers[0].input_tokens_above, 272_000);
+    assert_eq!(tiers[0].input, 10.0);
+    assert_eq!(tiers[0].output, 45.0);
+    assert_eq!(tiers[0].cache_read, 1.0);
+    assert_eq!(tiers[0].cache_write, 12.5);
+}
+
+#[test]
+fn user_override_cost_patch_with_empty_tiers_clears_them() {
+    let home = TempHome::new("tiers-cleared");
+    write_models_json(
+        &home,
+        serde_json::json!({
+            "overrides": [
+                { "provider": "openai-responses", "model": "gpt-5.6", "set": { "cost": { "input": 6.0, "tiers": [] } } }
+            ]
+        }),
+    );
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let metadata = catalog.resolve(BackendKind::OpenAiResponses, "gpt-5.6");
+    assert_eq!(metadata.cost.input, 6.0);
+    assert_eq!(metadata.cost.output, 30.0);
+    assert_eq!(metadata.cost.cache_read, 0.5);
+    assert_eq!(metadata.cost.cache_write, 6.25);
+    assert_eq!(metadata.cost.tiers, Some(vec![]));
+}
+
+#[test]
+fn user_override_tier_buckets_fill_from_the_merged_base_rates() {
+    let home = TempHome::new("tiers-filled");
+    write_models_json(
+        &home,
+        serde_json::json!({
+            "overrides": [
+                { "provider": "openai-responses", "model": "gpt-5.6", "set": {
+                    "cost": {
+                        "input": 1.0, "output": 2.0, "cache_read": 0.1, "cache_write": 0.2
+                    }
+                } },
+                { "provider": "openai-responses", "model": "gpt-5.6", "set": {
+                    "cost": {
+                        "output": 0.0,
+                        "tiers": [ { "input_tokens_above": 100_000, "input": 3.0 } ]
+                    }
+                } }
+            ]
+        }),
+    );
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let metadata = catalog.resolve(BackendKind::OpenAiResponses, "gpt-5.6");
+    assert_eq!(
+        metadata.cost.input, 1.0,
+        "omitted bucket keeps resolved base"
+    );
+    assert_eq!(
+        metadata.cost.output, 0.0,
+        "explicit zero replaces resolved base"
+    );
+    assert_eq!(
+        metadata.cost.cache_read, 0.1,
+        "omitted bucket keeps resolved base"
+    );
+    assert_eq!(
+        metadata.cost.cache_write, 0.2,
+        "omitted bucket keeps resolved base"
+    );
+    let tiers = metadata.cost.tiers.as_ref().expect("tier applied");
+    assert_eq!(tiers.len(), 1);
+    assert_eq!(tiers[0].input_tokens_above, 100_000);
+    assert_eq!(tiers[0].input, 3.0);
+    assert_eq!(
+        tiers[0].output, 0.0,
+        "omitted bucket fills from merged base"
+    );
+    assert_eq!(
+        tiers[0].cache_read, 0.1,
+        "omitted bucket fills from merged base"
+    );
+    assert_eq!(
+        tiers[0].cache_write, 0.2,
+        "omitted bucket fills from merged base"
+    );
+}
+
+#[test]
+fn user_override_with_invalid_tier_rate_is_skipped() {
+    let home = TempHome::new("tiers-invalid");
+    write_models_json(
+        &home,
+        serde_json::json!({
+            "overrides": [
+                { "provider": "deepseek-chat", "model": "deepseek-v4-flash", "set": {
+                    "cost": { "input": 1.0, "tiers": [ { "input_tokens_above": 100_000, "output": -2.0 } ] }
+                } }
+            ]
+        }),
+    );
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        matches!(&warnings[0], CatalogWarning::UserOverrideSkipped { index, reason }
+            if *index == 0 && reason.contains("invalid tier output rate")),
+        "{warnings:?}"
+    );
+    // The skipped entry leaves the baseline metadata untouched.
+    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
+    assert_eq!(metadata.cost.input, 0.14);
+}
+
+#[test]
+fn user_override_tier_without_selector_is_skipped() {
+    let home = TempHome::new("tier-selector-missing");
+    write_models_json(
+        &home,
+        serde_json::json!({
+            "overrides": [
+                { "provider": "deepseek-chat", "model": "deepseek-v4-flash", "set": {
+                    "cost": { "tiers": [ { "input": 3.0 } ] }
+                } }
+            ]
+        }),
+    );
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        matches!(&warnings[0], CatalogWarning::UserOverrideSkipped { index, reason }
+            if *index == 0 && reason.contains("missing field `input_tokens_above`")),
+        "{warnings:?}"
+    );
+    // A malformed tier cannot silently become a zero-threshold rate set.
+    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
+    assert_eq!(metadata.cost.input, 0.14);
+    assert_eq!(metadata.cost.tiers, None);
 }
