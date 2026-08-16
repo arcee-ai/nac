@@ -78,7 +78,6 @@ struct CostPatch {
 
 #[derive(Debug, Deserialize)]
 struct CostTierPatch {
-    #[serde(default)]
     input_tokens_above: u64,
     input: Option<f64>,
     output: Option<f64>,

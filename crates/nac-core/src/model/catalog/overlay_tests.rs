@@ -6,7 +6,7 @@ use super::data;
 use super::overlay::{
     format_unix_utc, is_utc_iso8601, map_models_dev, overlay_dir, read_sidecar,
     refresh_overlay_once, spawn_overlay_refresh, unix_now, write_sidecar, OverlaySidecar,
-    RefreshOutcome, DEFAULT_MODELS_DEV_URL, REFRESH_CADENCE_SECS,
+    RefreshOutcome, DEFAULT_MODELS_DEV_URL, OVERLAY_SCHEMA_VERSION, REFRESH_CADENCE_SECS,
 };
 use super::test_support::{write_overlay, EnvGuard, TempHome};
 use super::*;
@@ -52,6 +52,7 @@ fn write_sidecar_file(home: &Path, etag: Option<&str>, fetched_at_unix: u64, url
     write_sidecar(
         &dir.join("overlay.etag"),
         &OverlaySidecar {
+            schema_version: OVERLAY_SCHEMA_VERSION,
             etag: etag.map(str::to_string),
             fetched_at_unix,
             url: url.to_string(),
@@ -150,9 +151,7 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     );
     assert_eq!(metadata.cache_write_1h, None);
     assert_eq!(
-        metadata
-            .thinking_level_map
-            .wire_value(ReasoningEffort::Max),
+        metadata.thinking_level_map.wire_value(ReasoningEffort::Max),
         Some("max")
     );
     assert!(metadata
@@ -209,6 +208,54 @@ async fn refresh_sends_sidecar_etag_for_revalidation() {
     );
     let sidecar = read_sidecar(&env.sidecar_path()).unwrap();
     assert_eq!(sidecar.etag.as_deref(), Some("\"new-etag\""));
+}
+
+#[tokio::test]
+async fn legacy_sidecar_forces_an_unconditional_overlay_refresh() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let env = EnvGuard::new(
+        "refresh-legacy-sidecar",
+        &["NAC_HOME", "MODELS_DEV_URL", "DEEPSEEK_API_KEY"],
+        &[],
+    )
+    .with_env_layers();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        novel_model_payload(),
+    )]);
+    let dir = overlay_dir(env.path());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        env.sidecar_path(),
+        serde_json::json!({
+            "etag": "\"pre-schema\"",
+            "fetched_at_unix": unix_now(),
+            "url": server.base_url
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let outcome = refresh_overlay_once(&server.base_url, Duration::from_secs(5)).await;
+
+    assert!(
+        matches!(outcome, RefreshOutcome::Updated { .. }),
+        "{outcome:?}"
+    );
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].headers.get("if-none-match"),
+        None,
+        "a pre-schema ETag must not produce a 304 that preserves old pricing"
+    );
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(env.overlay_path()).unwrap()).unwrap();
+    assert_eq!(written["schema_version"], OVERLAY_SCHEMA_VERSION);
+    assert_eq!(
+        read_sidecar(&env.sidecar_path()).unwrap().schema_version,
+        OVERLAY_SCHEMA_VERSION
+    );
 }
 
 #[tokio::test]
@@ -616,6 +663,51 @@ fn overlay_older_than_baseline_is_ignored() {
 }
 
 #[test]
+fn pre_schema_overlay_is_ignored_after_upgrade() {
+    let home = TempHome::new("pre-schema-overlay");
+    let dir = overlay_dir(home.path());
+    std::fs::create_dir_all(&dir).unwrap();
+    let doc = serde_json::json!({
+        "generated_at": "2099-01-01T00:00:00Z",
+        "providers": {
+            "openai-responses": {
+                "models": { "gpt-5.6": overlay_model_doc(424_242, 11_111) }
+            }
+        }
+    });
+    std::fs::write(
+        dir.join("overlay.json"),
+        serde_json::to_string_pretty(&doc).unwrap(),
+    )
+    .unwrap();
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        matches!(
+            warnings[0],
+            CatalogWarning::OverlayIncompatible {
+                found_schema_version: 0,
+                expected_schema_version: OVERLAY_SCHEMA_VERSION,
+                ..
+            }
+        ),
+        "{warnings:?}"
+    );
+    let metadata = catalog.resolve(BackendKind::OpenAiResponses, "gpt-5.6");
+    assert_eq!(metadata.source, ModelSource::Baseline);
+    assert!(
+        metadata
+            .cost
+            .tiers
+            .as_ref()
+            .is_some_and(|tiers| !tiers.is_empty()),
+        "the pre-tier cache must not erase the upgraded baseline tiers"
+    );
+}
+
+#[test]
 fn corrupt_overlay_is_ignored_with_a_warning() {
     let home = TempHome::new("corrupt-overlay");
     let dir = overlay_dir(home.path());
@@ -919,7 +1011,11 @@ fn runtime_mapper_maps_context_tiers_and_skips_unknown_tier_types() {
     let mapped = providers.remove(&BackendKind::DeepSeekChat).unwrap();
     let cost = &mapped.models["deepseek-v9-tier-test"].cost;
     let tiers = cost.tiers.as_ref().expect("context tier mapped");
-    assert_eq!(tiers.len(), 1, "non-context tier type skipped: {warnings:?}");
+    assert_eq!(
+        tiers.len(),
+        1,
+        "non-context tier type skipped: {warnings:?}"
+    );
     assert_eq!(tiers[0].input_tokens_above, 200_000);
     assert_eq!(tiers[0].input, 6.0);
     assert_eq!(tiers[0].output, 22.5);
@@ -950,10 +1046,11 @@ fn runtime_mapper_skips_models_with_bad_tier_rates() {
     let mapped = providers.remove(&BackendKind::DeepSeekChat).unwrap();
     assert!(!mapped.models.contains_key("deepseek-v9-bad-tier"));
     assert!(
-        warnings.iter().any(|warning| warning
-            .contains("deepseek-v9-bad-tier")
-            && warning.contains("invalid output rate")
-            && warning.contains("skipped")),
+        warnings
+            .iter()
+            .any(|warning| warning.contains("deepseek-v9-bad-tier")
+                && warning.contains("invalid output rate")
+                && warning.contains("skipped")),
         "{warnings:?}"
     );
 }
@@ -1100,6 +1197,7 @@ fn sidecar_round_trips_and_corrupt_sidecar_is_ignored() {
     assert_eq!(read_sidecar(&path), None);
 
     let sidecar = OverlaySidecar {
+        schema_version: OVERLAY_SCHEMA_VERSION,
         etag: Some("\"e\"".to_string()),
         fetched_at_unix: 42,
         url: "https://models.dev/api.json".to_string(),
@@ -1181,9 +1279,6 @@ fn arcee_overlay_load_caps_healed_max_tokens_at_context_window() {
     let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
 
     assert!(warnings.is_empty(), "{warnings:?}");
-    let metadata = catalog.resolve(
-        BackendKind::ArceeAuth,
-        "deepseek/deepseek-v4-flash-latest",
-    );
+    let metadata = catalog.resolve(BackendKind::ArceeAuth, "deepseek/deepseek-v4-flash-latest");
     assert_eq!(metadata.max_tokens, 128_000);
 }

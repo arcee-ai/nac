@@ -41,15 +41,13 @@ fn user_override_patches_an_exact_model() {
     assert_eq!(metadata.max_tokens, 65_536);
     assert_eq!(
         metadata.display_name.as_deref(),
-        Some("DeepSeek V4 Flash (patched)"
-    ));
+        Some("DeepSeek V4 Flash (patched)")
+    );
     // Untouched fields keep the baseline values.
     assert_eq!(metadata.context_window, 1_000_000);
     assert_eq!(metadata.cost.input, 0.14);
     assert_eq!(
-        metadata
-            .thinking_level_map
-            .wire_value(ReasoningEffort::Max),
+        metadata.thinking_level_map.wire_value(ReasoningEffort::Max),
         Some("max")
     );
 }
@@ -394,4 +392,32 @@ fn user_override_with_invalid_tier_rate_is_skipped() {
     // The skipped entry leaves the baseline metadata untouched.
     let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
     assert_eq!(metadata.cost.input, 0.14);
+}
+
+#[test]
+fn user_override_tier_without_selector_is_skipped() {
+    let home = TempHome::new("tier-selector-missing");
+    write_models_json(
+        &home,
+        serde_json::json!({
+            "overrides": [
+                { "provider": "deepseek-chat", "model": "deepseek-v4-flash", "set": {
+                    "cost": { "tiers": [ { "input": 3.0 } ] }
+                } }
+            ]
+        }),
+    );
+
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        matches!(&warnings[0], CatalogWarning::UserOverrideSkipped { index, reason }
+            if *index == 0 && reason.contains("missing field `input_tokens_above`")),
+        "{warnings:?}"
+    );
+    // A malformed tier cannot silently become a zero-threshold rate set.
+    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
+    assert_eq!(metadata.cost.input, 0.14);
+    assert_eq!(metadata.cost.tiers, None);
 }

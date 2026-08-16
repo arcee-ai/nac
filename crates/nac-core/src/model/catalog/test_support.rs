@@ -44,7 +44,11 @@ impl Drop for TempHome {
 pub(super) fn write_overlay(home: &Path, generated_at: &str, providers: serde_json::Value) {
     let dir = overlay::overlay_dir(home);
     std::fs::create_dir_all(&dir).unwrap();
-    let doc = serde_json::json!({ "generated_at": generated_at, "providers": providers });
+    let doc = serde_json::json!({
+        "schema_version": overlay::OVERLAY_SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "providers": providers
+    });
     std::fs::write(
         dir.join("overlay.json"),
         serde_json::to_string_pretty(&doc).unwrap(),

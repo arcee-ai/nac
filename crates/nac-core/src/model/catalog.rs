@@ -84,6 +84,11 @@ pub(crate) enum CatalogWarning {
         path: PathBuf,
         error: String,
     },
+    OverlayIncompatible {
+        path: PathBuf,
+        found_schema_version: u32,
+        expected_schema_version: u32,
+    },
     OverlayStale {
         path: PathBuf,
         overlay_generated_at: String,
@@ -130,6 +135,17 @@ impl std::fmt::Display for CatalogWarning {
             Self::OverlayCorrupt { path, error } => write!(
                 formatter,
                 "ignoring corrupt catalog overlay {}: {error} (embedded baseline stays active)",
+                path.display()
+            ),
+            Self::OverlayIncompatible {
+                path,
+                found_schema_version,
+                expected_schema_version,
+            } => write!(
+                formatter,
+                "ignoring incompatible catalog overlay {}: schema version \
+                 {found_schema_version}, expected {expected_schema_version} \
+                 (embedded baseline stays active)",
                 path.display()
             ),
             Self::OverlayStale {

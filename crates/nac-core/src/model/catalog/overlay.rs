@@ -50,6 +50,7 @@ pub(crate) const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
 const OVERLAY_DIR_NAME: &str = "model-catalog";
 const OVERLAY_FILE_NAME: &str = "overlay.json";
 const ETAG_FILE_NAME: &str = "overlay.etag";
+pub(super) const OVERLAY_SCHEMA_VERSION: u32 = 1;
 
 /// models.dev provider id → nac provider; mirrors nac-catalog-gen's
 /// `PROVIDER_MAP` (arcee and chatgpt-codex-responses are not models.dev
@@ -84,6 +85,8 @@ fn overlay_etag_path(home: &Path) -> PathBuf {
 /// the sidecar at refresh time.
 #[derive(Debug, Deserialize)]
 struct OverlayDoc {
+    #[serde(default)]
+    schema_version: u32,
     generated_at: String,
     providers: BTreeMap<String, serde_json::Value>,
 }
@@ -92,6 +95,7 @@ struct OverlayDoc {
 /// record shape as the checked-in baseline.
 #[derive(Debug, Serialize)]
 struct OverlayDocWrite {
+    schema_version: u32,
     generated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     models_dev_etag: Option<String>,
@@ -129,6 +133,14 @@ pub(super) fn merge_overlay(
             return;
         }
     };
+    if doc.schema_version != OVERLAY_SCHEMA_VERSION {
+        warnings.push(CatalogWarning::OverlayIncompatible {
+            path,
+            found_schema_version: doc.schema_version,
+            expected_schema_version: OVERLAY_SCHEMA_VERSION,
+        });
+        return;
+    }
     if !is_utc_iso8601(&doc.generated_at) {
         warnings.push(CatalogWarning::OverlayCorrupt {
             path,
@@ -198,6 +210,8 @@ fn baseline_generated_at() -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct OverlaySidecar {
     #[serde(default)]
+    pub(super) schema_version: u32,
+    #[serde(default)]
     pub(super) etag: Option<String>,
     pub(super) fetched_at_unix: u64,
     #[serde(default)]
@@ -256,7 +270,8 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
     };
     let now = unix_now();
     let sidecar_path = overlay_etag_path(&home);
-    let sidecar = read_sidecar(&sidecar_path);
+    let sidecar = read_sidecar(&sidecar_path)
+        .filter(|sidecar| sidecar.schema_version == OVERLAY_SCHEMA_VERSION);
     if let Some(sidecar) = &sidecar {
         if sidecar.url == url && now.saturating_sub(sidecar.fetched_at_unix) < REFRESH_CADENCE_SECS
         {
@@ -309,6 +324,7 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
         write_sidecar(
             &sidecar_path,
             &OverlaySidecar {
+                schema_version: OVERLAY_SCHEMA_VERSION,
                 etag,
                 fetched_at_unix: now,
                 url: url.to_string(),
@@ -340,6 +356,7 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
         Err(error) => return RefreshOutcome::Failed { error },
     };
     let doc = OverlayDocWrite {
+        schema_version: OVERLAY_SCHEMA_VERSION,
         generated_at: format_unix_utc(now),
         models_dev_etag: response_etag.clone(),
         providers,
@@ -360,6 +377,7 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
     write_sidecar(
         &sidecar_path,
         &OverlaySidecar {
+            schema_version: OVERLAY_SCHEMA_VERSION,
             etag: response_etag,
             fetched_at_unix: now,
             url: url.to_string(),
@@ -752,11 +770,7 @@ fn map_model(
 /// a `GeneratedModel` that carries every curated override (context_window,
 /// max_tokens, cost, reasoning, display_name, thinking_level_map). Returns
 /// `None` for unknown models so the caller maps them from models.dev data.
-fn seed_model(
-    baseline: &ModelCatalog,
-    provider: BackendKind,
-    id: &str,
-) -> Option<GeneratedModel> {
+fn seed_model(baseline: &ModelCatalog, provider: BackendKind, id: &str) -> Option<GeneratedModel> {
     let catalog = baseline.providers.get(&provider)?;
     let metadata = catalog.resolve_entry(id);
     if metadata.source != ModelSource::Baseline {
