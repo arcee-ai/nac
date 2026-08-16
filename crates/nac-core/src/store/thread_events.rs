@@ -1,28 +1,49 @@
 use super::*;
-use std::sync::Mutex;
 
 pub struct ThreadEventWriter {
-    connection: Mutex<Connection>,
+    store_path: PathBuf,
 }
 
-impl ThreadEventWriter {
-    pub fn new(path: &Path) -> Result<Self> {
-        Ok(Self {
-            connection: Mutex::new(open_runtime_connection(path)?),
-        })
-    }
+pub(crate) struct ThreadEventConnection {
+    connection: StoreConnection,
+}
 
-    pub fn append(&self, session_id: &str, thread_name: &str, event_json: &str) -> Result<()> {
-        let connection = self
-            .connection
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        connection.execute(
+impl ThreadEventConnection {
+    pub(crate) fn append(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        event_json: &str,
+    ) -> Result<()> {
+        self.connection.execute(
             "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
              VALUES (?1, ?2, ?3, ?4)",
             params![session_id, thread_name, event_json, now_utc()],
         )?;
         Ok(())
+    }
+}
+impl ThreadEventWriter {
+    pub fn new(path: &Path) -> Result<Self> {
+        Ok(Self {
+            store_path: path.to_path_buf(),
+        })
+    }
+
+    pub(crate) fn path_backed(path: &Path) -> Self {
+        Self {
+            store_path: path.to_path_buf(),
+        }
+    }
+
+    pub(crate) fn checkout(&self) -> Result<ThreadEventConnection> {
+        Ok(ThreadEventConnection {
+            connection: open_runtime_connection(&self.store_path)?,
+        })
+    }
+
+    pub fn append(&self, session_id: &str, thread_name: &str, event_json: &str) -> Result<()> {
+        self.checkout()?.append(session_id, thread_name, event_json)
     }
 }
 
@@ -106,6 +127,19 @@ pub fn load_thread_events_page(
         return Ok((Vec::new(), false));
     }
     let conn = open_runtime_connection(path)?;
+    load_thread_events_page_with_connection(&conn, session_id, thread_name, before_id, limit)
+}
+
+pub(crate) fn load_thread_events_page_with_connection(
+    conn: &Connection,
+    session_id: &str,
+    thread_name: &str,
+    before_id: Option<i64>,
+    limit: usize,
+) -> Result<(Vec<ThreadEventRecord>, bool)> {
+    if limit == 0 {
+        return Ok((Vec::new(), false));
+    }
     // Transcript log rows live under the reserved orchestrator target
     // (store/transcript.rs); they must never enter the event/tile paths, even
     // when paged directly by name.

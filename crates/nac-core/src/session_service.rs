@@ -1122,20 +1122,33 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let load = || {
-            crate::store::load_thread_events_page(
-                &self.metadata.store_path,
-                session_id,
-                thread_name,
-                before_id,
-                limit,
-            )
-        };
         let (thread_event_boundary, (records, has_older)) = if before_id.is_none() {
+            // Persistence also checks out before taking the event state lock.
+            // Keep the latest-page snapshot on the same order so capacity
+            // saturation cannot deadlock emitters against this boundary.
+            let connection = crate::store::open_runtime_connection(&self.metadata.store_path)?;
+            let load = || {
+                crate::store::load_thread_events_page_with_connection(
+                    &connection,
+                    session_id,
+                    thread_name,
+                    before_id,
+                    limit,
+                )
+            };
             let (boundary, records) = self.event_bus.thread_event_boundary(load)?;
             (Some(boundary), records)
         } else {
-            (None, load()?)
+            (
+                None,
+                crate::store::load_thread_events_page(
+                    &self.metadata.store_path,
+                    session_id,
+                    thread_name,
+                    before_id,
+                    limit,
+                )?,
+            )
         };
         let next_before_id = records.last().map(|record| record.id);
         let mut diagnostics = Vec::new();
@@ -3684,7 +3697,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn frontend_snapshot_reuses_one_runtime_connection() {
+    async fn frontend_snapshot_uses_three_operation_scoped_connections() {
         let (parts, store_path) =
             test_active_service("snapshot_connection_reuse", "connection-session");
         for index in 0..3 {
@@ -3736,7 +3749,43 @@ pub(super) mod tests {
         assert_eq!(snapshot.thread_events["worker"].len(), 1);
         assert_eq!(snapshot.thread_steering.len(), 1);
         assert_eq!(snapshot.worksets.items.len(), 3);
-        assert_eq!(crate::store::tracked_connection_opens(&store_path), 1);
+        // One checkout covers the relational dashboard data; the path-backed
+        // transcript writer checks out once for messages and once for row times.
+        assert_eq!(crate::store::tracked_connection_opens(&store_path), 3);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn latest_thread_event_page_waits_for_capacity_before_event_state() {
+        let (parts, store_path) =
+            test_active_service("thread_event_page_lock_order", "connection-session");
+        let held_connections = (0..4)
+            .map(|_| {
+                parts
+                    .service
+                    .event_bus
+                    .hold_thread_event_connection_for_test()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let service = parts.service.clone();
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let page = std::thread::spawn(move || {
+            started_sender.send(()).unwrap();
+            service.thread_events_page("worker", None, 10)
+        });
+
+        started_receiver.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            parts.service.event_bus.event_state_is_available_for_test(),
+            "latest-page loading held event state while waiting for connection capacity"
+        );
+
+        drop(held_connections);
+        let page = page.join().unwrap().unwrap();
+        assert!(page.events.is_empty());
+        assert!(page.thread_event_boundary.is_some());
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 

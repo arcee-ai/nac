@@ -163,8 +163,9 @@ pub struct Agent {
     partial_stream: StdMutex<ModelStreamDelta>,
 }
 
-/// Connection and identity needed to append to the orchestrator transcript
-/// log. The writer is shared into `spawn_blocking` closures per append.
+/// Path-backed writer and identity needed to append to the orchestrator
+/// transcript log. The writer is shared into `spawn_blocking` closures per
+/// operation.
 struct TranscriptLogSink {
     writer: Arc<crate::store::TranscriptLogWriter>,
     session_id: String,
@@ -806,7 +807,7 @@ impl Agent {
     /// Shared handle to the transcript log writer, present only for
     /// orchestrator agents with a session id. The session service reads the
     /// log through the same writer for store-backed transcript reads (step
-    /// 3), so reads and appends serialize on one connection.
+    /// 3), so reads and appends stay serialized without retaining a connection.
     pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
         self.transcript_log.as_ref().map(|sink| sink.writer.clone())
     }

@@ -268,19 +268,21 @@ pub fn last_transcript_log_user_prompt(
     .map_err(Into::into)
 }
 
-/// Dedicated writer/reader for the transcript log. Owns its connection, same
-/// shape as `ThreadEventWriter`. All methods are synchronous and the writer is
-/// Send + Sync, so every method is usable inside `tokio::task::spawn_blocking`.
+/// Dedicated path-backed writer/reader for the transcript log. Connections
+/// are checked out only for the duration of each operation. All methods are
+/// synchronous and the writer is Send + Sync, so every method is usable inside
+/// `tokio::task::spawn_blocking`.
 ///
 /// Callers must uphold the module-level invariants: one writer per session,
 /// `idx` contiguous and increasing per append.
 pub struct TranscriptLogWriter {
-    connection: Mutex<Connection>,
+    store_path: PathBuf,
+    operation: Mutex<()>,
 }
 
-/// Length of the log tail relative to a snapshot blob of `blob_len` messages,
-/// read from the newest row's `idx`. Callers hold the connection lock, so the
-/// extent cannot shift under a window read taken with it.
+/// Length of the log tail relative to a snapshot blob of `blob_len`, read from
+/// the newest row's `idx`. Callers hold the writer operation lock, so the extent
+/// cannot shift under a window read taken with it.
 fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Result<u64> {
     let mut statement = connection.prepare(
         "SELECT id, event_json
@@ -389,7 +391,8 @@ fn append_messages_in_transaction(
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
-            connection: Mutex::new(open_runtime_connection(path)?),
+            store_path: path.to_path_buf(),
+            operation: Mutex::new(()),
         })
     }
 
@@ -413,10 +416,11 @@ impl TranscriptLogWriter {
         if messages.is_empty() {
             return Ok(());
         }
-        let mut connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         append_messages_in_transaction(&transaction, session_id, start_idx, messages)?;
@@ -436,10 +440,11 @@ impl TranscriptLogWriter {
         if !matches!(message, Message::User { .. }) {
             return Err(anyhow!("a run prompt must be a user transcript message"));
         }
-        let mut connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let submitted_message_id = append_messages_in_transaction(
@@ -471,8 +476,8 @@ impl TranscriptLogWriter {
     /// tail positions `[tail_start, tail_start + limit)` clamped to the
     /// tail, in log (append) order.
     ///
-    /// The extent probe and the window read run under one connection lock,
-    /// so a concurrent append cannot interleave and shift the window. Rowid
+    /// The extent probe and the window read run under one writer operation
+    /// lock, so a concurrent append cannot interleave and shift the window. Rowid
     /// order is append order (= `idx` order) under the module invariants, so
     /// the window is an `ORDER BY id DESC LIMIT .. OFFSET ..` read that
     /// decodes only the returned rows — O(page) instead of O(log). The
@@ -485,10 +490,11 @@ impl TranscriptLogWriter {
         tail_start: u64,
         limit: usize,
     ) -> Result<(u64, Vec<(u64, Message)>)> {
-        let connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let connection = open_runtime_connection(&self.store_path)?;
         let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
             return Ok((tail_len, Vec::new()));
@@ -553,10 +559,11 @@ impl TranscriptLogWriter {
         tail_start: u64,
         limit: usize,
     ) -> Result<Vec<String>> {
-        let connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let connection = open_runtime_connection(&self.store_path)?;
         let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
             return Ok(Vec::new());
@@ -587,10 +594,11 @@ impl TranscriptLogWriter {
 
     /// Read the snapshot prefix currently stored on the session row.
     pub(crate) fn read_snapshot_messages(&self, session_id: &str) -> Result<Vec<Message>> {
-        let connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let connection = open_runtime_connection(&self.store_path)?;
         let messages_json: String = connection.query_row(
             "SELECT messages_json FROM sessions WHERE session_id = ?1",
             params![session_id],
@@ -603,10 +611,11 @@ impl TranscriptLogWriter {
     /// A row under the reserved name that does not decode as a transcript
     /// entry is corruption and fails the read loudly.
     pub fn read_from(&self, session_id: &str, from_idx: u64) -> Result<Vec<(u64, Message)>> {
-        let connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let connection = open_runtime_connection(&self.store_path)?;
         let mut statement = connection.prepare(
             "SELECT id, event_json
              FROM thread_events
@@ -647,10 +656,11 @@ impl TranscriptLogWriter {
         session_id: &str,
         blob_len: u64,
     ) -> Result<(Vec<(u64, Message)>, Option<TranscriptLogRecovery>)> {
-        let mut connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let decoded_rows = {
@@ -726,10 +736,11 @@ impl TranscriptLogWriter {
     /// Infrequent path: the idx values live inside the JSON payloads, so this
     /// scans the session's transcript rows and deletes by row id.
     pub fn delete_from(&self, session_id: &str, from_idx: u64) -> Result<usize> {
-        let mut connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let row_ids = {
@@ -780,10 +791,11 @@ impl TranscriptLogWriter {
             serde_json::to_string(messages).context("failed to serialize repaired transcript")?;
         let from_idx =
             u64::try_from(messages.len()).context("repaired transcript length overflowed")?;
-        let mut connection = self
-            .connection
+        let _operation = self
+            .operation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let row_ids = {

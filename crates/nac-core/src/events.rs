@@ -459,13 +459,26 @@ pub struct SessionEventBus {
 enum ThreadEventPersistence {
     Disabled,
     Available(ThreadEventStore),
-    Unavailable,
 }
 
 #[derive(Clone)]
 struct ThreadEventStore {
     writer: Arc<crate::store::ThreadEventWriter>,
     session_id: String,
+}
+
+struct PreparedThreadEvent<'a> {
+    connection: crate::store::ThreadEventConnection,
+    session_id: &'a str,
+    thread_name: String,
+    event_json: String,
+}
+
+impl PreparedThreadEvent<'_> {
+    fn persist(&self) -> anyhow::Result<()> {
+        self.connection
+            .append(self.session_id, &self.thread_name, &self.event_json)
+    }
 }
 
 struct SessionEventBusState {
@@ -492,16 +505,10 @@ impl SessionEventBus {
     pub fn with_thread_event_store(session_id: Option<String>, path: PathBuf) -> Self {
         let mut bus = Self::new(session_id.clone());
         bus.thread_event_persistence = match session_id {
-            Some(session_id) => match crate::store::ThreadEventWriter::new(&path) {
-                Ok(writer) => ThreadEventPersistence::Available(ThreadEventStore {
-                    writer: Arc::new(writer),
-                    session_id,
-                }),
-                Err(error) => {
-                    eprintln!("nac: failed to open thread event store: {error:#}");
-                    ThreadEventPersistence::Unavailable
-                }
-            },
+            Some(session_id) => ThreadEventPersistence::Available(ThreadEventStore {
+                writer: Arc::new(crate::store::ThreadEventWriter::path_backed(&path)),
+                session_id,
+            }),
             None => ThreadEventPersistence::Disabled,
         };
         bus
@@ -637,6 +644,7 @@ impl SessionEventBus {
         run_id: Option<SessionRunId>,
         client_id: Option<SessionClientId>,
     ) -> SessionEventEnvelope {
+        let prepared = self.prepare_thread_event(&event);
         let mut state = self.lock_state();
         state.next_sequence_id = state
             .next_sequence_id
@@ -650,8 +658,18 @@ impl SessionEventBus {
             run_id,
             event,
         };
-        if !self.persist_thread_event(&envelope) {
-            return envelope;
+        match prepared {
+            Ok(Some(prepared)) => {
+                if let Err(error) = prepared.persist() {
+                    eprintln!("nac: failed to persist thread event: {error:#}");
+                    return envelope;
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("nac: failed to prepare thread event persistence: {error:#}");
+                return envelope;
+            }
         }
         state.published_sequence_id = envelope.sequence_id;
         if let Some(serialized_bytes) =
@@ -726,46 +744,56 @@ impl SessionEventBus {
         self.session_id.as_deref()
     }
 
+    #[cfg(test)]
+    pub(crate) fn hold_thread_event_connection_for_test(
+        &self,
+    ) -> anyhow::Result<crate::store::ThreadEventConnection> {
+        match &self.thread_event_persistence {
+            ThreadEventPersistence::Available(store) => store.writer.checkout(),
+            ThreadEventPersistence::Disabled => {
+                Err(anyhow::anyhow!("thread event persistence is disabled"))
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn event_state_is_available_for_test(&self) -> bool {
+        self.state.try_lock().is_ok()
+    }
+
     fn lock_state(&self) -> std::sync::MutexGuard<'_, SessionEventBusState> {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Persist thread-owned events before publication. `false` means this was a
-    /// persistable event whose configured writer could not append it.
-    fn persist_thread_event(&self, envelope: &SessionEventEnvelope) -> bool {
-        let SessionEvent::Agent { event } = &envelope.event else {
-            return true;
+    /// Prepare persistence before taking the event state lock. Snapshot loading
+    /// checks out SQLite before taking the same lock, so this order prevents a
+    /// capacity/state inversion while preserving persistence-before-publication.
+    fn prepare_thread_event(
+        &self,
+        event: &SessionEvent,
+    ) -> anyhow::Result<Option<PreparedThreadEvent<'_>>> {
+        let SessionEvent::Agent { event } = event else {
+            return Ok(None);
         };
         let Some(event) = sanitize_external_agent_event(event.clone()) else {
-            return true;
+            return Ok(None);
         };
         let Some(thread_name) = persisted_thread_event_name(&event) else {
-            return true;
+            return Ok(None);
         };
         let store = match &self.thread_event_persistence {
-            ThreadEventPersistence::Disabled => return true,
+            ThreadEventPersistence::Disabled => return Ok(None),
             ThreadEventPersistence::Available(store) => store,
-            ThreadEventPersistence::Unavailable => return false,
         };
-        let event_json = match serde_json::to_string(&event) {
-            Ok(event_json) => event_json,
-            Err(error) => {
-                eprintln!("nac: failed to serialize thread event: {error}");
-                return false;
-            }
-        };
-        match store
-            .writer
-            .append(&store.session_id, thread_name, &event_json)
-        {
-            Ok(()) => true,
-            Err(error) => {
-                eprintln!("nac: failed to persist thread event: {error:#}");
-                false
-            }
-        }
+        let event_json = serde_json::to_string(&event)?;
+        Ok(Some(PreparedThreadEvent {
+            connection: store.writer.checkout()?,
+            session_id: &store.session_id,
+            thread_name: thread_name.to_string(),
+            event_json,
+        }))
     }
 }
 

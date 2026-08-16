@@ -1301,16 +1301,12 @@ impl SessionManager {
         probed
     }
 
-    /// Releases the SQLite handles of sessions that are not currently in use.
+    /// Releases session services that are not currently in use.
     ///
-    /// Every retained session holds two long-lived SQLite connections (the
-    /// transcript log writer and the thread event writer), which in WAL mode
-    /// keep roughly six file descriptors open. Sessions are never removed from
-    /// `active_sessions` on their own, so under a low descriptor limit enough
-    /// session creations exhaust the process's FDs and new sessions start
-    /// failing with HTTP 500s. Evicting an idle session drops the last strong
-    /// reference to its `SessionService`, closing both connections; the next
-    /// attach rebuilds the service from the durable store via `resume_session`.
+    /// SQLite connections are operation-scoped, so this cache is no longer a
+    /// storage-handle bound. Idle eviction still avoids retaining reconstructible
+    /// agent state indefinitely; the next attach rebuilds the service from the
+    /// durable store via `resume_session`.
     ///
     /// A session is evicted only when all of these hold:
     /// - it has no active run or compaction,
@@ -1341,7 +1337,7 @@ impl SessionManager {
             .collect();
         for session_id in idle {
             active.remove(&session_id);
-            eprintln!("nac: evicted idle session {session_id} to release its SQLite handles");
+            eprintln!("nac: evicted idle session {session_id}");
         }
     }
 
@@ -2638,6 +2634,10 @@ pub async fn serve_with_policy(
     on_listening: impl FnOnce(SocketAddr),
 ) -> Result<()> {
     policy.validate(addr)?;
+    // Establish the durable store before serving requests. Readiness probes
+    // then verify this store in place and never create a blank replacement
+    // if it disappears while the process is running.
+    nac_core::store::initialize(&manager.inner.store_path)?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;
@@ -2655,10 +2655,36 @@ pub async fn serve_with_policy(
     path = "/health",
     operation_id = "get_health",
     tag = "system",
-    responses((status = 200, description = "Success", body = HealthResponse, content_type = "application/json"))
+    responses(
+        (status = 200, description = "Session store ready", body = HealthResponse, content_type = "application/json"),
+        (status = 503, description = "Session store unavailable", body = HealthResponse, content_type = "application/json")
+    )
 )]
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
+async fn health(State(manager): State<SessionManager>) -> (StatusCode, Json<HealthResponse>) {
+    let store_path = manager.inner.store_path.clone();
+    let ready =
+        tokio::task::spawn_blocking(move || nac_core::store::check_readiness(&store_path)).await;
+    match ready {
+        Ok(Ok(())) => (StatusCode::OK, Json(HealthResponse { status: "ok" })),
+        Ok(Err(error)) => {
+            eprintln!("nac: session store readiness check failed: {error:#}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HealthResponse {
+                    status: "unavailable",
+                }),
+            )
+        }
+        Err(error) => {
+            eprintln!("nac: session store readiness task failed: {error}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HealthResponse {
+                    status: "unavailable",
+                }),
+            )
+        }
+    }
 }
 
 // The frontend is a Vite/React app built from `web/` into `assets/dist/`. That
@@ -5628,6 +5654,7 @@ mod tests {
         let root = temp_root("foreign_host");
         let nac_home = root.join("nac-home");
         let _env = ScopedModelEnv::isolated(&nac_home, None);
+        nac_core::store::initialize(&root.join("store.db")).unwrap();
 
         let health = |app: Router, host: &'static str| async move {
             app.oneshot(
@@ -5697,6 +5724,7 @@ mod tests {
     #[tokio::test]
     async fn a_request_without_a_host_header_is_served() {
         let root = temp_root("hostless_request");
+        nac_core::store::initialize(&root.join("store.db")).unwrap();
         let app = router(test_manager(&root));
 
         // HTTP/1.0 clients and probes omit the header; browsers never do.
@@ -5720,6 +5748,7 @@ mod tests {
     #[tokio::test]
     async fn cross_origin_browser_mutations_are_refused() {
         let root = temp_root("cross_origin_mutation");
+        nac_core::store::initialize(&root.join("store.db")).unwrap();
         let app = router(test_manager(&root));
         let request = |fetch_site: Option<&str>, origin: Option<&str>| {
             let mut request = Request::builder()
@@ -6111,6 +6140,189 @@ mod tests {
 
     async fn response_body(response: Response) -> Bytes {
         to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn health_reports_store_readiness_and_recovers_without_path_leakage() {
+        let root = temp_root("health_store_readiness");
+        let store_path = root.join("store.db");
+        nac_core::store::initialize(&store_path).unwrap();
+        let app = router(test_manager(&root));
+
+        let healthy = get_response(app.clone(), "/health", None).await;
+        assert_eq!(healthy.status(), StatusCode::OK);
+        assert_eq!(
+            response_body(healthy).await,
+            Bytes::from_static(br#"{"status":"ok"}"#)
+        );
+
+        std::fs::remove_file(&store_path).unwrap();
+        let unavailable = get_response(app.clone(), "/health", None).await;
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response_body(unavailable).await;
+        assert_eq!(body, Bytes::from_static(br#"{"status":"unavailable"}"#));
+        assert!(!String::from_utf8_lossy(&body).contains(&store_path.display().to_string()));
+        assert!(
+            !store_path.exists(),
+            "readiness recreated the missing store"
+        );
+
+        nac_core::store::initialize(&store_path).unwrap();
+        let recovered = get_response(app, "/health", None).await;
+        assert_eq!(recovered.status(), StatusCode::OK);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn open_store_descriptor_count(store_path: &std::path::Path) -> usize {
+        let canonical = std::fs::canonicalize(store_path).unwrap();
+        let sidecar = |suffix: &str| {
+            let mut path = canonical.as_os_str().to_os_string();
+            path.push(suffix);
+            PathBuf::from(path)
+        };
+        let targets = [canonical.clone(), sidecar("-wal"), sidecar("-shm")];
+        #[cfg(target_os = "linux")]
+        {
+            return std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(|entry| std::fs::read_link(entry.ok()?.path()).ok())
+                .filter(|path| targets.contains(path))
+                .count();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut count = 0;
+            let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+            let result = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limit.as_mut_ptr()) };
+            assert_eq!(result, 0);
+            let limit = unsafe { limit.assume_init() };
+            for descriptor in 0..limit.rlim_cur as libc::c_int {
+                let mut path = [0_i8; libc::PATH_MAX as usize];
+                let result = unsafe { libc::fcntl(descriptor, libc::F_GETPATH, path.as_mut_ptr()) };
+                if result == -1 {
+                    continue;
+                }
+                use std::os::unix::ffi::OsStrExt;
+                let path = unsafe { std::ffi::CStr::from_ptr(path.as_ptr()) };
+                let path = PathBuf::from(std::ffi::OsStr::from_bytes(path.to_bytes()));
+                if targets.contains(&path) {
+                    count += 1;
+                }
+            }
+            count
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn lower_nofile_limit(limit: libc::rlim_t) {
+        let mut current = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+        let result = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, current.as_mut_ptr()) };
+        assert_eq!(result, 0);
+        let mut current = unsafe { current.assume_init() };
+        assert!(current.rlim_max >= limit);
+        current.rlim_cur = limit;
+        let result = unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &current) };
+        assert_eq!(result, 0);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn sqlite_connection_bound_low_nofile_helper() {
+        let Some(root) = std::env::var_os("NAC_TEST_LOW_NOFILE_ROOT") else {
+            return;
+        };
+        lower_nofile_limit(256);
+        unsafe { std::env::set_var("OPENAI_API_KEY", "low-nofile-test-key") };
+        let root = PathBuf::from(root);
+        for index in 0..80 {
+            seed_editable_session(&root, &format!("session-{index:03}"));
+        }
+
+        let manager = test_manager(&root);
+        let mut subscriptions = Vec::new();
+        for index in 0..56 {
+            subscriptions.push(
+                manager
+                    .subscribe_events(&format!("session-{index:03}"), None, 1)
+                    .await
+                    .unwrap(),
+            );
+            assert_eq!(open_store_descriptor_count(&root.join("store.db")), 0);
+        }
+
+        let mut attachments = Vec::new();
+        for index in 56..72 {
+            let manager = manager.clone();
+            attachments.push(tokio::spawn(async move {
+                manager
+                    .subscribe_events(&format!("session-{index:03}"), None, 1)
+                    .await
+            }));
+        }
+        for attachment in attachments {
+            subscriptions.push(attachment.await.unwrap().unwrap());
+        }
+
+        subscriptions.push(
+            manager
+                .subscribe_events("session-079", None, 1)
+                .await
+                .unwrap(),
+        );
+        let request = CreateSessionRequest {
+            cwd: Some(root.clone()),
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+            ..CreateSessionRequest::default()
+        };
+        let mut creations = Vec::new();
+        for _ in 0..8 {
+            let manager = manager.clone();
+            let request = request.clone();
+            creations.push(tokio::spawn(async move {
+                manager.create_session(request).await
+            }));
+        }
+        for creation in creations {
+            creation.await.unwrap().unwrap();
+        }
+        manager.create_session(request).await.unwrap();
+        assert_eq!(open_store_descriptor_count(&root.join("store.db")), 0);
+        nac_core::store::check_readiness(&root.join("store.db")).unwrap();
+        assert_eq!(open_store_descriptor_count(&root.join("store.db")), 0);
+        assert_eq!(subscriptions.len(), 73);
+        println!("low-nofile connection regression completed");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn retained_subscriptions_do_not_exhaust_low_nofile_store_descriptors() {
+        let root = temp_root("low_nofile_connections");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::sqlite_connection_bound_low_nofile_helper",
+                "--nocapture",
+            ])
+            .env("NAC_TEST_LOW_NOFILE_ROOT", &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "low-NOFILE child failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("low-nofile connection regression completed"),
+            "low-NOFILE helper did not execute\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     async fn response_json(response: Response) -> serde_json::Value {
