@@ -141,6 +141,13 @@ pub struct Agent {
     /// store/transcript.rs). Present only for orchestrator agents with a
     /// session id — workers (separate `__worker` processes) never log.
     transcript_log: Option<TranscriptLogSink>,
+    /// Exclusive upper bound of transcript log rows this process has
+    /// committed or adopted (restore/refresh). Durable rows at or beyond
+    /// this position were committed by a peer while it held the session
+    /// operation lease, so the terminal normalization paths must never
+    /// delete them from stale in-memory boundaries (shared-store recovery,
+    /// issue #146).
+    committed_log_len: u64,
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
@@ -347,6 +354,9 @@ impl Agent {
             )?,
             AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
         };
+        // The initial messages are exactly the snapshot blob written at
+        // session creation; the log tail starts at this length.
+        let committed_log_len = messages.len() as u64;
         Ok(Self {
             client,
             messages,
@@ -374,6 +384,7 @@ impl Agent {
             steering_dispatch_id: config.dispatch_id,
             appended_steering_ids: HashSet::new(),
             transcript_log,
+            committed_log_len,
             transcript_recovery_warning: None,
             interrupted_run_recovery: None,
             last_usage: None,
@@ -833,6 +844,9 @@ impl Agent {
                 *stored = fresh.clone();
             }
         }
+        // The restored transcript claims the durable state through its
+        // length: every log row below it was adopted by this process.
+        self.committed_log_len = messages.len() as u64;
         self.messages = messages;
         if let Some(compaction) = &mut self.compaction {
             compaction.reset_for_transcript_replacement();
@@ -1001,9 +1015,186 @@ impl Agent {
                     self.delete_log_tail(merged.len() as u64).await?;
                 }
             }
+            // The durable transcript is now exactly `merged`: every row it
+            // holds was committed or adopted by this process.
+            self.committed_log_len = merged.len() as u64;
             self.restore_messages(merged);
             return Ok(refreshed_blob);
         }
+    }
+
+    /// Re-restore the in-memory transcript from the durable store (snapshot
+    /// blob ++ transcript log tail) while the caller holds the session
+    /// operation lease, normalizing a dangling tool turn exactly like
+    /// [`Agent::restore_messages_merging_log_tail`].
+    ///
+    /// Shared-store recovery (issue #146): a long-lived `SessionService`
+    /// can survive the peer process that owned the previous run. The OS
+    /// releases the peer's operation lease on its death, but this agent's
+    /// in-memory transcript still predates the peer's committed rows, so
+    /// the next run would append at a stale index (rejected by the log's
+    /// contiguity guard) and terminal normalization would delete the peer's
+    /// committed rows from the stale length. Called from
+    /// `SessionService::prepare_operation_admission` after the lease is
+    /// acquired: the lease excludes concurrent peer appends, so the refresh
+    /// is race-free and the run starts from the newest durable state.
+    ///
+    /// Synchronous counterpart of the async restore: admission is a sync
+    /// path that already performs blocking store reads (config revision,
+    /// compaction checkpoint). Returns the post-refresh durable snapshot
+    /// blob — the rewritten blob when dangling-turn normalization repaired
+    /// it, the unchanged blob otherwise — so the caller can reconcile its
+    /// cached snapshot copy on every admission: a prior admission may have
+    /// repaired the blob and then failed before patching that copy, and the
+    /// retry sees nothing left to repair. `None` only when the session has
+    /// no transcript log.
+    pub fn refresh_transcript_under_lease(
+        &mut self,
+        operation_lease: &crate::sessions::SessionOperationLease,
+    ) -> Result<Option<Vec<Message>>> {
+        self.transcript_recovery_warning = None;
+        let Some(sink) = &self.transcript_log else {
+            return Ok(None);
+        };
+        operation_lease
+            .validate(&sink.store_path, &sink.session_id)
+            .map_err(anyhow::Error::new)?;
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+
+        let snapshot_messages = writer.read_snapshot_messages(&session_id)?;
+        let blob_len = snapshot_messages.len() as u64;
+        let blob_len_usize = snapshot_messages.len();
+        let mut tail = writer.read_from(&session_id, blob_len)?;
+
+        let mut expected_idx = blob_len;
+        let mut gap = false;
+        for (idx, _) in &tail {
+            if *idx != expected_idx {
+                gap = true;
+                break;
+            }
+            expected_idx = expected_idx
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
+        }
+
+        if gap {
+            // The lease is held, so no peer can be appending: a gap is
+            // genuine corruption. Keep the longest contiguous prefix and
+            // atomically delete the untrusted physical suffix, exactly like
+            // the restore path.
+            let (repaired_tail, recovery) =
+                writer.read_tail_repairing_gap(&session_id, blob_len)?;
+            tail = repaired_tail;
+            if let Some(recovery) = recovery {
+                let row_label = if recovery.discarded_rows == 1 {
+                    "row"
+                } else {
+                    "rows"
+                };
+                self.transcript_recovery_warning = Some(format!(
+                    "Recovered this session to its last valid message because transcript index {} was missing. Discarded {} untrusted transcript log {row_label} beginning at index {}.",
+                    recovery.expected_idx, recovery.discarded_rows, recovery.found_idx
+                ));
+            }
+        }
+
+        let mut merged = snapshot_messages;
+        let mut expected_idx = blob_len;
+        for (idx, message) in tail {
+            if idx != expected_idx {
+                return Err(anyhow!(
+                    "transcript log tail is not contiguous with the snapshot: expected idx {expected_idx}, found {idx}"
+                ));
+            }
+            merged.push(message);
+            expected_idx = expected_idx
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
+        }
+
+        if let Some(incomplete_turn) = incomplete_tool_turn_index(&merged) {
+            merged.truncate(incomplete_turn);
+            // Trimming below the blob length means the dangling turn lives
+            // in the write-once snapshot itself, so rewrite the snapshot
+            // and tail together while the operation lease is held.
+            if merged.len() < blob_len_usize {
+                writer.replace_snapshot_and_delete_from(&session_id, &merged)?;
+            } else {
+                writer.delete_from(&session_id, merged.len() as u64)?;
+            }
+        }
+
+        // The durable snapshot blob after the refresh: the rewritten blob
+        // when normalization repaired it, otherwise the unchanged prefix of
+        // the merged transcript.
+        let durable_blob = merged[..merged.len().min(blob_len_usize)].to_vec();
+
+        // The durable transcript is now exactly `merged`.
+        self.committed_log_len = merged.len() as u64;
+        if !transcripts_match(&self.messages, &merged)? {
+            self.restore_messages(merged);
+        }
+        Ok(Some(durable_blob))
+    }
+
+    /// Stale-transcript guard for the terminal normalization paths (shared
+    /// store, issue #146): `true` when the durable transcript log holds
+    /// rows at or beyond `committed_log_len` — rows this process never
+    /// committed or adopted, so a peer must have appended them while it
+    /// held the operation lease (e.g. the previous run owner crashed and
+    /// this survivor's long-lived agent never re-restored). Deleting the
+    /// log tail from the stale in-memory length would permanently remove
+    /// those committed rows.
+    async fn durable_log_has_rows_past_own_commits(&self) -> Result<bool> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(false);
+        };
+        let from_idx = self.committed_log_len;
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        let tail = tokio::task::spawn_blocking(move || writer.read_from(&session_id, from_idx))
+            .await
+            .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
+        Ok(!tail.is_empty())
+    }
+
+    /// Adopt the durable transcript (snapshot blob ++ log tail) in memory
+    /// without deleting anything: the read-only half of
+    /// [`Agent::refresh_transcript_under_lease`] for the terminal
+    /// normalization paths, which do not hold the operation lease they
+    /// could pass down. A genuine gap is left for the next lease-held
+    /// restore or admission refresh to repair.
+    async fn reload_transcript_from_store(&mut self) -> Result<()> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(());
+        };
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        let (snapshot, tail) = tokio::task::spawn_blocking(move || {
+            let snapshot = writer.read_snapshot_messages(&session_id)?;
+            let tail = writer.read_from(&session_id, snapshot.len() as u64)?;
+            Ok::<_, anyhow::Error>((snapshot, tail))
+        })
+        .await
+        .map_err(|error| anyhow!("transcript reload task failed: {error}"))??;
+        let mut merged = snapshot;
+        let mut expected_idx = merged.len() as u64;
+        for (idx, message) in tail {
+            if idx != expected_idx {
+                return Err(anyhow!(
+                    "transcript log tail is not contiguous with the snapshot: expected idx {expected_idx}, found {idx}"
+                ));
+            }
+            merged.push(message);
+            expected_idx = expected_idx
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
+        }
+        self.committed_log_len = merged.len() as u64;
+        self.restore_messages(merged);
+        Ok(())
     }
 
     /// Trim a dangling tool turn from the transcript AND the transcript log
@@ -1021,9 +1212,19 @@ impl Agent {
     /// once started, so the log can hold a straggler row at `messages.len()`
     /// that the vec never saw — without the delete, the next append would
     /// reuse that idx and leave duplicate-idx rows for the restore merge.
+    /// The straggler stays within this process's own commits because
+    /// appends claim their rows in `committed_log_len` at submission time
+    /// (before the `spawn_blocking` await), so the delete stays below that
+    /// boundary.
+    /// Durable rows BEYOND it belong to a peer (shared store, issue #146):
+    /// the in-memory transcript is stale, so the durable state is adopted
+    /// instead of deleting the peer's committed rows from the stale length.
     /// Both terminal paths treat a normalization error as best-effort: the
     /// next restore re-normalizes the stale tail.
     pub async fn normalize_dangling_tail(&mut self) -> Result<()> {
+        if self.durable_log_has_rows_past_own_commits().await? {
+            return self.reload_transcript_from_store().await;
+        }
         truncate_incomplete_tool_turn(&mut self.messages);
         self.delete_log_tail(self.messages.len() as u64).await
     }
@@ -1047,6 +1248,19 @@ impl Agent {
     /// path so the chat can retain dispatched thread cards and their persisted
     /// logs while the resulting transcript remains valid provider history.
     pub async fn append_cancellation_marker_preserving_tools(&mut self) -> Result<()> {
+        if self.durable_log_has_rows_past_own_commits().await? {
+            // Shared-store recovery (issue #146): a peer committed rows this
+            // agent never saw. Adopt the durable state instead of deleting
+            // the peer's committed rows from the stale in-memory length (see
+            // [`Agent::normalize_dangling_tail`]).
+            self.reload_transcript_from_store().await?;
+        } else {
+            // Remove a log row whose blocking append completed after the run
+            // task was aborted but before its in-memory push.
+            self.delete_log_tail(self.messages.len() as u64).await?;
+        }
+        // The missing-result scan deliberately uses the authoritative
+        // in-memory transcript (freshly reloaded when it was stale).
         let missing_results = missing_tool_result_ids(&self.messages)
             .into_iter()
             .map(|tool_call_id| Message::Tool {
@@ -1054,10 +1268,6 @@ impl Agent {
                 content: crate::types::TOOL_CALL_CANCELLED_MARKER.to_string(),
             })
             .collect::<Vec<_>>();
-        // Remove a log row whose blocking append completed after the run task
-        // was aborted but before its in-memory push. The missing-result scan
-        // above deliberately uses the authoritative in-memory transcript.
-        self.delete_log_tail(self.messages.len() as u64).await?;
         self.append_cancellation_tail(missing_results).await
     }
 
@@ -1105,7 +1315,7 @@ impl Agent {
     /// Append `messages` to the transcript log at absolute positions
     /// `start_idx..` via `spawn_blocking` (steering-claim precedent). A no-op
     /// for agents without a transcript log (workers, picker sessions).
-    async fn log_transcript_batch(&self, start_idx: u64, messages: &[Message]) -> Result<()> {
+    async fn log_transcript_batch(&mut self, start_idx: u64, messages: &[Message]) -> Result<()> {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
@@ -1116,31 +1326,69 @@ impl Agent {
         let session_id = sink.session_id.clone();
         let messages = messages.to_vec();
         let batch_len = messages.len() as u64;
-        tokio::task::spawn_blocking(move || writer.append_batch(&session_id, start_idx, &messages))
-            .await
-            .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
-        // Live trigger (step 3): emitted after the log commit, before the
-        // vec push — the store-backed read path sees the rows immediately.
-        self.event_sink
-            .emit_transcript_appended(start_idx + batch_len);
-        Ok(())
+        // Claim the rows at submission, before the await: a run task
+        // dropped while the blocking append is in flight cannot interrupt
+        // it, so the append still completes without this function ever
+        // resuming. The up-front claim keeps that straggler row within this
+        // process's own commits, so terminal normalization trims it instead
+        // of mistaking it for a peer's committed row (issue #146).
+        let pre_submission_committed = self.committed_log_len;
+        self.committed_log_len = self.committed_log_len.max(start_idx + batch_len);
+        let appended = tokio::task::spawn_blocking(move || {
+            writer.append_batch(&session_id, start_idx, &messages)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        match appended {
+            Ok(()) => {
+                // Live trigger (step 3): emitted after the log commit,
+                // before the vec push — the store-backed read path sees the
+                // rows immediately.
+                self.event_sink
+                    .emit_transcript_appended(start_idx + batch_len);
+                Ok(())
+            }
+            Err(error) => {
+                // The batch commits in one transaction, so a failed append
+                // left no rows behind: release the optimistic claim to keep
+                // the own-commits bound exact. A dropped task never reaches
+                // this rollback — which is exactly the straggler case the
+                // claim exists for.
+                self.committed_log_len = pre_submission_committed;
+                Err(error)
+            }
+        }
     }
 
     /// Append one message to the transcript log at absolute position `idx`
     /// via `spawn_blocking`. A no-op for agents without a transcript log.
-    async fn log_transcript_message(&self, idx: u64, message: &Message) -> Result<()> {
+    async fn log_transcript_message(&mut self, idx: u64, message: &Message) -> Result<()> {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
         let writer = sink.writer.clone();
         let session_id = sink.session_id.clone();
         let message = message.clone();
-        tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
+        // Claim the row at submission, before the await — see
+        // log_transcript_batch for why the straggler from a dropped run
+        // task must stay within this process's own commits.
+        let pre_submission_committed = self.committed_log_len;
+        self.committed_log_len = self.committed_log_len.max(idx + 1);
+        let appended = tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
             .await
-            .map_err(|error| anyhow!("transcript log append task failed: {error}"))??;
-        // Live trigger (step 3): see log_transcript_batch.
-        self.event_sink.emit_transcript_appended(idx + 1);
-        Ok(())
+            .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        match appended {
+            Ok(()) => {
+                // Live trigger (step 3): see log_transcript_batch.
+                self.event_sink.emit_transcript_appended(idx + 1);
+                Ok(())
+            }
+            Err(error) => {
+                // Nothing was committed: release the optimistic claim.
+                self.committed_log_len = pre_submission_committed;
+                Err(error)
+            }
+        }
     }
 
     /// Push one message into the transcript, appending it to the log first
@@ -1185,13 +1433,13 @@ impl Agent {
 
     /// Append the already-staged transcript tail `self.messages[from_idx..]`
     /// to the log (steering commit point: stage→ack→append).
-    async fn log_transcript_tail(&self, from_idx: usize) -> Result<()> {
+    async fn log_transcript_tail(&mut self, from_idx: usize) -> Result<()> {
         let staged = self.messages[from_idx..].to_vec();
         self.log_transcript_batch(from_idx as u64, &staged).await
     }
 
     /// Delete log rows with `idx >= from_idx` (crash/cancel normalization).
-    async fn delete_log_tail(&self, from_idx: u64) -> Result<()> {
+    async fn delete_log_tail(&mut self, from_idx: u64) -> Result<()> {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
@@ -1200,6 +1448,7 @@ impl Agent {
         tokio::task::spawn_blocking(move || writer.delete_from(&session_id, from_idx))
             .await
             .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
+        self.committed_log_len = self.committed_log_len.min(from_idx);
         Ok(())
     }
 
