@@ -298,10 +298,13 @@ impl Agent {
         };
 
         let (mut system_prompt, mut tool_defs) = match config.mode {
-            AgentMode::Worker => (
-                render_worker_system_prompt(&cwd),
-                tools::worker_tool_definitions(),
-            ),
+            AgentMode::Worker => {
+                let image_read = client.supports_image_tool_results();
+                (
+                    render_worker_system_prompt(&cwd),
+                    tools::worker_tool_definitions(image_read),
+                )
+            }
             AgentMode::Orchestrator => (
                 render_orchestrator_system_prompt(&cwd, thread_timeout_secs),
                 tools::orchestrator_tool_definitions(
@@ -742,13 +745,8 @@ impl Agent {
 
             self.last_usage = Some(accumulated_usage.clone());
 
-            let tool_messages = results
-                .into_iter()
-                .map(|(tool_call_id, _tool_name, result)| Message::Tool {
-                    tool_call_id,
-                    content: result.content,
-                })
-                .collect::<Vec<_>>();
+            let tool_messages =
+                finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
             // Transcript commit point (tool results): the complete parallel
             // batch is logged atomically before any of it enters the
             // transcript, so the loop re-enters provider-view preparation
@@ -1266,7 +1264,7 @@ impl Agent {
             .into_iter()
             .map(|tool_call_id| Message::Tool {
                 tool_call_id,
-                content: crate::types::TOOL_CALL_CANCELLED_MARKER.to_string(),
+                content: crate::types::TOOL_CALL_CANCELLED_MARKER.into(),
             })
             .collect::<Vec<_>>();
         self.append_cancellation_tail(missing_results).await
@@ -1577,6 +1575,52 @@ impl Agent {
     fn emit(&self, event: AgentEvent) {
         self.event_sink.emit(event);
     }
+}
+
+fn finalize_tool_results(
+    messages: &[Message],
+    results: Vec<(String, String, ToolResult)>,
+    event_sink: &EventSink,
+    thread_name: &Option<String>,
+) -> Vec<Message> {
+    let mut transcript_image_stats = Ok(crate::tool_content::ImageStats::default());
+    for message in messages {
+        if let Message::Tool { content, .. } = message {
+            transcript_image_stats =
+                transcript_image_stats.and_then(|stats| stats.checked_add(content.image_stats()));
+        }
+    }
+    results
+        .into_iter()
+        .map(|(tool_call_id, tool_name, mut result)| {
+            let was_image_result = result.content.contains_images();
+            if was_image_result {
+                let next_stats = transcript_image_stats
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|stats| stats.checked_add(result.content.image_stats()));
+                match next_stats {
+                    Ok(stats) => transcript_image_stats = Ok(stats),
+                    Err(_) => {
+                        result = ToolResult::text(
+                            "Error: image_limit_exceeded: image history limit reached",
+                            true,
+                        );
+                    }
+                }
+                event_sink.emit(AgentEvent::tool_call_finished(
+                    thread_name.clone(),
+                    tool_call_id.clone(),
+                    tool_name,
+                    &result,
+                ));
+            }
+            Message::Tool {
+                tool_call_id,
+                content: result.content,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

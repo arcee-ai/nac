@@ -60,6 +60,17 @@ fn golden_output_covers_the_five_models_dev_providers() {
 }
 
 #[test]
+fn models_dev_input_modalities_drive_image_capability() {
+    let generation = gen::generate(FIXTURE, OVERRIDES).expect("fixture generates");
+    assert!(
+        generation.catalog.providers["anthropic-messages"].models["claude-fable-5"].image_input
+    );
+    assert!(
+        !generation.catalog.providers["together-chat"].models["MiniMaxAI/MiniMax-M2.7"].image_input
+    );
+}
+
+#[test]
 fn golden_output_satisfies_catalog_invariants() {
     let generation = gen::generate(FIXTURE, OVERRIDES).expect("fixture generates");
     for (provider, doc) in &generation.catalog.providers {

@@ -53,6 +53,7 @@ pub mod sessions;
 mod skills;
 pub mod store;
 mod terminal;
+mod tool_content;
 mod tools;
 pub mod types;
 pub mod upgrade;

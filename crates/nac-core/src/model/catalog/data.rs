@@ -69,6 +69,8 @@ pub(super) struct GeneratedModel {
     #[serde(default)]
     pub(super) reasoning: bool,
     #[serde(default)]
+    pub(super) image_input: bool,
+    #[serde(default)]
     pub(super) thinking_level_map: super::ThinkingLevelMap,
     /// Whether the model supports adaptive thinking. Populated by the
     /// Anthropic API overlay; `false` in the checked-in baseline.
@@ -124,6 +126,7 @@ pub(super) fn hydrate_entry(
         cost: entry.cost,
         cache_write_1h: None,
         reasoning: entry.reasoning,
+        image_input: entry.image_input,
         thinking_level_map: entry.thinking_level_map,
         compat: compat.clone(),
         source,

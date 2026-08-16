@@ -17,13 +17,13 @@ mod operation_lease;
 mod snapshot;
 mod summary;
 
-pub(crate) use db::list_sessions_with_connection;
 pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
 pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
     load_session, load_session_config, reorder_sessions, save_session, save_session_run_state,
     session_exists, update_raw_session_config, update_session_config, update_session_presentation,
 };
+pub(crate) use db::{list_sessions_with_connection, load_session_run_state};
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
 };
@@ -31,6 +31,21 @@ pub use operation_lease::{
 pub type SessionRunLease = SessionOperationLease;
 pub type SessionRunLeaseError = SessionOperationLeaseError;
 pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunStateUpdate};
+
+pub(crate) async fn load_session_async(
+    path: PathBuf,
+    session_id: String,
+) -> Result<SessionSnapshot> {
+    tokio::task::spawn_blocking(move || load_session(&path, &session_id))
+        .await
+        .context("session load task failed")?
+}
+
+pub(crate) async fn load_last_session_async(path: PathBuf) -> Result<SessionSnapshot> {
+    tokio::task::spawn_blocking(move || load_last_session(&path))
+        .await
+        .context("last-session load task failed")?
+}
 
 use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
@@ -1845,6 +1860,36 @@ mod tests {
     }
 
     #[test]
+    fn run_state_loader_does_not_deserialize_transcript_messages() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("run_state_without_messages");
+        let snapshot = test_snapshot(
+            "session-run-state",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:01.000000000",
+        );
+        create_session(&store_path, &snapshot).unwrap();
+        crate::store::open_connection(&store_path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET messages_json = 'not valid JSON' WHERE session_id = 'session-run-state'",
+                [],
+            )
+            .unwrap();
+
+        let (run_state, updated_at) =
+            load_session_run_state(&store_path, "session-run-state").unwrap();
+
+        assert_eq!(run_state.last_response_duration_ms, None);
+        assert_eq!(run_state.previous_response_duration_ms, None);
+        assert_eq!(run_state.response_durations_ms, None);
+        assert!(run_state.token_usages.is_empty());
+        assert_eq!(run_state.unattributed_token_usage, None);
+        assert_eq!(updated_at, "2026-01-01 00:00:01.000000000");
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
     fn session_summaries_merge_blob_stats_with_transcript_log_tail() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let store_path = temp_store_path("summary_blob_plus_log");
@@ -1911,7 +1956,7 @@ mod tests {
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),
-                        content: "tool output".to_string(),
+                        content: ("tool output".to_string()).into(),
                     },
                 ],
             )

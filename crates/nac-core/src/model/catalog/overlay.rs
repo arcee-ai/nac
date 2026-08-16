@@ -748,7 +748,13 @@ fn map_model(
     // reasoning, display_name, and thinking_level_map (same design as
     // seed_thinking_map: curated overrides persist through overlay
     // refreshes). For unknown models, map from models.dev data directly.
-    if let Some(entry) = seed_model(baseline, provider, id) {
+    let image_input = model
+        .modalities
+        .as_ref()
+        .and_then(|modalities| modalities.input.as_ref())
+        .is_some_and(|inputs| inputs.iter().any(|input| input == "image"));
+    if let Some(mut entry) = seed_model(baseline, provider, id) {
+        entry.image_input = image_input;
         return Ok(entry);
     }
     let (context_window, max_tokens) = map_limits(model.limit.as_ref());
@@ -758,6 +764,7 @@ fn map_model(
         max_tokens,
         cost: map_cost(model.cost.as_ref())?,
         reasoning: model.reasoning.unwrap_or(false),
+        image_input,
         thinking_level_map: seed_thinking_map(baseline, provider, id),
         adaptive_thinking: false,
         enabled_thinking: false,
@@ -782,6 +789,7 @@ fn seed_model(baseline: &ModelCatalog, provider: BackendKind, id: &str) -> Optio
         max_tokens: metadata.max_tokens,
         cost: metadata.cost,
         reasoning: metadata.reasoning,
+        image_input: metadata.image_input,
         thinking_level_map: metadata.thinking_level_map,
         adaptive_thinking: metadata.adaptive_thinking,
         enabled_thinking: metadata.enabled_thinking,

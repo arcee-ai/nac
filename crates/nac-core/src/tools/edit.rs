@@ -132,7 +132,8 @@ mod tests {
             std::fs::read_to_string(dir.join("file.txt")).unwrap(),
             "alpha = 2\nbeta = 2\n"
         );
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["old_revision"], expected);
         assert_eq!(value["new_revision"], revision(b"alpha = 2\nbeta = 2\n"));
         assert!(value["diff"].as_str().unwrap().contains("alpha = 2"));
@@ -177,7 +178,8 @@ mod tests {
         )
         .await;
         assert!(result.is_error);
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["error"], "stale_revision");
         assert_eq!(value["current_revision"], revision(b"current\n"));
         assert_eq!(

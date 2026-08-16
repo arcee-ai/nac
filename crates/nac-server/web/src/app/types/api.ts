@@ -90,6 +90,16 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+export type ToolContent =
+  | string
+  | Array<
+      | { type: "text"; text: string }
+      | {
+          type: "image";
+          image: { mime_type: string; data: string };
+        }
+    >;
+
 /** `nac_core::types::Message`, internally tagged on `role`. */
 export type Message =
   | { role: "system"; content: string }
@@ -103,7 +113,7 @@ export type Message =
       /** How long the model call behind this message took. */
       duration_ms?: number;
     }
-  | { role: "tool"; tool_call_id: string; content: string };
+  | { role: "tool"; tool_call_id: string; content: ToolContent };
 
 export type MessageRole = Message["role"];
 

@@ -326,7 +326,7 @@ fn anthropic_response_tool_thinking_round_trips() {
             },
             Message::Tool {
                 tool_call_id: "toolu_1".to_string(),
-                content: "file contents".to_string(),
+                content: ("file contents".to_string()).into(),
             },
         ],
         &[],

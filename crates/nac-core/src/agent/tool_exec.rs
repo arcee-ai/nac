@@ -90,12 +90,14 @@ async fn spawn_and_collect_non_thread(
     while let Some(join_result) = join_set.join_next().await {
         match join_result {
             Ok((index, _, tool_call_id, tool_name, result)) => {
-                event_sink.emit(AgentEvent::tool_call_finished(
-                    thread_name.clone(),
-                    tool_call_id.clone(),
-                    tool_name.clone(),
-                    &result,
-                ));
+                if !result.content.contains_images() {
+                    event_sink.emit(AgentEvent::tool_call_finished(
+                        thread_name.clone(),
+                        tool_call_id.clone(),
+                        tool_name.clone(),
+                        &result,
+                    ));
+                }
                 results.push((index, tool_call_id, tool_name, result));
             }
             Err(error) => {
@@ -104,7 +106,7 @@ async fn spawn_and_collect_non_thread(
                     "unknown".to_string(),
                     "unknown".to_string(),
                     ToolResult {
-                        content: format!("Tool task panicked: {}", error),
+                        content: (format!("Tool task panicked: {}", error)).into(),
                         is_error: true,
                     },
                 ));
@@ -183,7 +185,7 @@ async fn execute_with_dag_error(
 
     for dispatch in &thread_dispatches {
         let result = ToolResult {
-            content: error_message.clone(),
+            content: (error_message.clone()).into(),
             is_error: true,
         };
         event_sink.emit(AgentEvent::ToolCallStarted {

@@ -18,6 +18,7 @@ import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
   DispatchWeight,
+  Message,
   SessionSnapshotResponse,
   ToolCall,
 } from "@/app/types/api";
@@ -295,6 +296,19 @@ function eventsForEpisode(
   return episodes[episode - dropped];
 }
 
+function toolContentPreview(
+  content: Extract<Message, { role: "tool" }>["content"],
+): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((part) =>
+      part.type === "text"
+        ? part.text
+        : `[Image: ${part.image.mime_type}]`,
+    )
+    .join("\n\n");
+}
+
 /**
  * Tool results that belong to one assistant message: the run of `tool` rows
  * that follow it, stopping at the next user/assistant turn.
@@ -310,7 +324,7 @@ function toolResultsForAssistant(
   for (let index = assistantIndex + 1; index < messages.length; index += 1) {
     const message = messages[index];
     if (message.role === "tool") {
-      results.set(message.tool_call_id, message.content);
+      results.set(message.tool_call_id, toolContentPreview(message.content));
       continue;
     }
     if (message.role === "assistant" || message.role === "user") break;

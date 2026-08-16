@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
 use crate::model::BackendKind;
+#[cfg(feature = "openapi")]
+use crate::tool_content::ToolContentSchema;
+pub use crate::tool_content::{ImageMimeType, ToolContent, ToolContentPart, ToolImage};
 
 /// Prefix every tool result that exists only because the user stopped the run
 /// carries. The transcript stays valid provider history and the web client can
@@ -64,7 +67,8 @@ pub enum Message {
     #[serde(rename = "tool")]
     Tool {
         tool_call_id: String,
-        content: String,
+        #[cfg_attr(feature = "openapi", schema(value_type = ToolContentSchema))]
+        content: ToolContent,
     },
 }
 
@@ -204,7 +208,7 @@ mod tests {
 
         let tool = Message::Tool {
             tool_call_id: "call_abc".to_string(),
-            content: "result".to_string(),
+            content: ("result".to_string()).into(),
         };
         let json = serde_json::to_string(&tool).unwrap();
         assert!(json.contains("\"role\":\"tool\""), "Got: {}", json);

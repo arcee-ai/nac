@@ -10384,7 +10384,7 @@ model = "gpt-5.2"
             6,
             Message::Tool {
                 tool_call_id: "call-thread".to_string(),
-                content: "thread result".to_string(),
+                content: "thread result".into(),
             },
         );
         seed_session_with_messages(&root, "target", "2026-01-02 00:00:00.000000000", transcript);

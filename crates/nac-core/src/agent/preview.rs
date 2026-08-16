@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::*;
 
 pub(super) fn preview(value: &str, max_len: usize) -> String {
@@ -161,7 +163,11 @@ pub(crate) fn key_arg_preview(
 }
 
 pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
-    let trimmed = result.content.trim();
+    let rendered = match result.content.as_text() {
+        Some(text) => Cow::Borrowed(text),
+        None => Cow::Owned(result.content.preview()),
+    };
+    let trimmed = rendered.trim();
     if trimmed.is_empty() && !result.is_error {
         return "ok".to_string();
     }
@@ -172,8 +178,7 @@ pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
         }
     }
 
-    let lines: Vec<&str> = result
-        .content
+    let lines: Vec<&str> = rendered
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())

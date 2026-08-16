@@ -15,6 +15,7 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -30,6 +31,7 @@
             "cache_write": 1.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -45,6 +47,7 @@
             "cache_write": 1.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -60,6 +63,7 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -75,6 +79,7 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -90,6 +95,7 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -109,6 +115,7 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -124,6 +131,7 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -139,6 +147,7 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -154,6 +163,7 @@
             "cache_write": 3.75
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -169,6 +179,7 @@
             "cache_write": 3.75
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -184,6 +195,7 @@
             "cache_write": 3.75
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -202,6 +214,7 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "none": "none"
           }
@@ -223,6 +236,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -241,6 +255,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -265,6 +280,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -283,6 +299,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -301,6 +318,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -319,6 +337,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "max": "max",
@@ -336,6 +355,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -353,6 +373,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -370,6 +391,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -388,6 +410,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -406,6 +429,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -423,6 +447,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -440,6 +465,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "max": "max",
             "none": "none"
@@ -456,6 +482,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -474,6 +501,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "max": "max",
@@ -491,6 +519,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -509,6 +538,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -527,6 +557,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -545,6 +576,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -568,6 +600,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -588,6 +621,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -608,6 +642,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -628,6 +663,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -648,6 +684,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -668,6 +705,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -688,6 +726,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -708,6 +747,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -728,6 +768,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -748,6 +789,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -768,6 +810,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -788,6 +831,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -808,6 +852,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -828,6 +873,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -848,6 +894,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -868,6 +915,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -888,6 +936,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -917,6 +966,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -937,6 +987,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -957,6 +1008,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -986,6 +1038,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1015,6 +1068,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1044,6 +1098,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1073,6 +1128,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1103,6 +1159,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1133,6 +1190,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1163,6 +1221,7 @@
             ]
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1184,6 +1243,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1204,6 +1264,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1230,6 +1291,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1248,6 +1310,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "max": "max",
             "none": "none"
@@ -1264,6 +1327,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": false,
           "thinking_level_map": {}
         },
         "Qwen/Qwen3.5-9B": {
@@ -1277,6 +1341,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1295,6 +1360,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1313,6 +1379,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": false,
           "thinking_level_map": {}
         },
         "deepseek-ai/DeepSeek-V4-Flash-0731": {
@@ -1326,6 +1393,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1344,6 +1412,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1362,6 +1431,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1380,6 +1450,7 @@
             "cache_write": 0.0
           },
           "reasoning": false,
+          "image_input": false,
           "thinking_level_map": {}
         },
         "moonshotai/Kimi-K2.6": {
@@ -1393,6 +1464,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1411,6 +1483,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1429,6 +1502,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1446,6 +1520,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1464,6 +1539,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1482,6 +1558,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1500,6 +1577,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": true,
           "thinking_level_map": {
             "high": "high",
             "low": "low",
@@ -1518,6 +1596,7 @@
             "cache_write": 0.0
           },
           "reasoning": true,
+          "image_input": false,
           "thinking_level_map": {
             "high": "high",
             "max": "max",

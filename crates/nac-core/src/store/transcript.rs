@@ -931,7 +931,7 @@ mod tests {
             },
             Message::Tool {
                 tool_call_id: "call-1".to_string(),
-                content: "tool output".to_string(),
+                content: "tool output".into(),
             },
         ]
     }
@@ -969,7 +969,7 @@ mod tests {
             (
                 Message::Tool {
                     tool_call_id: "c".to_string(),
-                    content: "t".to_string(),
+                    content: ("t".to_string()).into(),
                 },
                 TranscriptMessageKind::Tool,
                 "tool",
@@ -983,6 +983,37 @@ mod tests {
             assert_eq!(entry.kind, kind);
             assert_eq!(entry.message_json.as_bytes(), canonical(&message));
         }
+    }
+
+    #[test]
+    fn image_tool_content_survives_transcript_log_replay() {
+        use crate::tool_content::{ToolContent, ToolContentPart, ToolImage};
+        use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+        use std::io::Cursor;
+
+        let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255])));
+        let mut encoded = Cursor::new(Vec::new());
+        source.write_to(&mut encoded, ImageFormat::Png).unwrap();
+        let image = ToolImage::validate(encoded.into_inner(), None, None).unwrap();
+        let message = Message::Tool {
+            tool_call_id: "call-image".to_string(),
+            content: ToolContent::from_parts(vec![ToolContentPart::Image(image)]).unwrap(),
+        };
+
+        let path = temp_store_path("image_replay");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-image");
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_batch("session-image", 0, std::slice::from_ref(&message))
+            .unwrap();
+        let replayed = writer.read_from("session-image", 0).unwrap();
+        assert_eq!(replayed[0].0, 0);
+        assert_eq!(
+            serde_json::to_value(&replayed[0].1).unwrap(),
+            serde_json::to_value(&message).unwrap()
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -1572,7 +1603,7 @@ mod tests {
                     },
                     Message::Tool {
                         tool_call_id: "call-1".to_string(),
-                        content: "tool output".to_string(),
+                        content: ("tool output".to_string()).into(),
                     },
                     // Assistant without content: not visible.
                     Message::Assistant {

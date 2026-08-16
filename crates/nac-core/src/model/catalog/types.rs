@@ -198,6 +198,9 @@ pub struct ModelMetadata {
     /// the effort picker for non-reasoning models. Effort validation reads
     /// `thinking_level_map` instead.
     pub reasoning: bool,
+    /// Whether the model accepts image input. Derived from models.dev input
+    /// modalities or an explicit curated/user override.
+    pub image_input: bool,
     pub thinking_level_map: ThinkingLevelMap,
     pub compat: Compat,
     /// Which catalog layer produced this metadata. Served by the `/models`
@@ -244,6 +247,7 @@ impl ModelMetadata {
             cost: ModelCostRates::default(),
             cache_write_1h: None,
             reasoning: false,
+            image_input: false,
             thinking_level_map: ThinkingLevelMap::default(),
             compat: Compat::default(),
             source,

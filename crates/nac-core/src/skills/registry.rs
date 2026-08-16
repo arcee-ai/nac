@@ -92,7 +92,7 @@ impl SkillRegistry {
     pub fn activate(&self, name: &str) -> ToolResult {
         let Some(skill) = self.skills.get(name) else {
             return ToolResult {
-                content: format!("Error: unknown skill '{}'", name),
+                content: (format!("Error: unknown skill '{}'", name)).into(),
                 is_error: true,
             };
         };
@@ -122,7 +122,7 @@ impl SkillRegistry {
         content.push_str("</skill_content>");
 
         ToolResult {
-            content,
+            content: content.into(),
             is_error: false,
         }
     }

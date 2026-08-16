@@ -112,7 +112,7 @@ fn reconcile_tool_turns(messages: Vec<Message>) -> Vec<Message> {
                 for tool_call_id in missing {
                     reconciled.push(Message::Tool {
                         tool_call_id,
-                        content: INTERRUPTED_TOOL_RESULT.to_string(),
+                        content: INTERRUPTED_TOOL_RESULT.into(),
                     });
                 }
             }
@@ -207,7 +207,7 @@ mod tests {
             ),
             Message::Tool {
                 tool_call_id: "call-1".to_string(),
-                content: "result".to_string(),
+                content: "result".into(),
             },
             // A same-origin message in the same history keeps everything.
             assistant(Some(current()), Some("ours"), Some(thinking_blocks()), None),
@@ -312,7 +312,7 @@ mod tests {
             ),
             Message::Tool {
                 tool_call_id: "call-1".to_string(),
-                content: "real result".to_string(),
+                content: "real result".into(),
             },
         ];
 
@@ -357,12 +357,12 @@ mod tests {
             },
             Message::Tool {
                 tool_call_id: "ghost".to_string(),
-                content: "no call for this".to_string(),
+                content: "no call for this".into(),
             },
             assistant(Some(current()), None, None, Some(vec![tool_call("call-1")])),
             Message::Tool {
                 tool_call_id: "call-1".to_string(),
-                content: "real result".to_string(),
+                content: "real result".into(),
             },
         ];
 

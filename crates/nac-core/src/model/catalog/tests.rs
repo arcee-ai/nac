@@ -504,7 +504,10 @@ fn arcee_third_party_models_are_seeded_with_real_limits() {
                 Some(seed.display_name),
                 "{backend}/{id}"
             );
-            assert_eq!(metadata.context_window, seed.context_window, "{backend}/{id}");
+            assert_eq!(
+                metadata.context_window, seed.context_window,
+                "{backend}/{id}"
+            );
             assert_eq!(metadata.max_tokens, seed.max_tokens, "{backend}/{id}");
             assert!(metadata.reasoning, "{backend}/{id}");
             // The seeded map carries exactly the table's effort tiers.
@@ -534,7 +537,10 @@ fn arcee_third_party_models_are_seeded_with_real_limits() {
         Some("max")
     );
     let kimi = resolve(BackendKind::ArceeAuth, "moonshotai/kimi-k3");
-    assert_eq!(kimi.thinking_level_map.wire_value(ReasoningEffort::None), None);
+    assert_eq!(
+        kimi.thinking_level_map.wire_value(ReasoningEffort::None),
+        None
+    );
 }
 
 #[test]
