@@ -274,10 +274,16 @@ fn user_override_cost_patch_without_tiers_keeps_existing_tiers() {
     assert!(warnings.is_empty(), "{warnings:?}");
     let metadata = catalog.resolve(BackendKind::OpenAiResponses, "gpt-5.6");
     assert_eq!(metadata.cost.input, 6.0);
+    assert_eq!(metadata.cost.output, 30.0);
+    assert_eq!(metadata.cost.cache_read, 0.5);
+    assert_eq!(metadata.cost.cache_write, 6.25);
     let tiers = metadata.cost.tiers.as_ref().expect("baseline tiers kept");
     assert_eq!(tiers.len(), 1);
     assert_eq!(tiers[0].input_tokens_above, 272_000);
     assert_eq!(tiers[0].input, 10.0);
+    assert_eq!(tiers[0].output, 45.0);
+    assert_eq!(tiers[0].cache_read, 1.0);
+    assert_eq!(tiers[0].cache_write, 12.5);
 }
 
 #[test]
@@ -296,20 +302,29 @@ fn user_override_cost_patch_with_empty_tiers_clears_them() {
 
     assert!(warnings.is_empty(), "{warnings:?}");
     let metadata = catalog.resolve(BackendKind::OpenAiResponses, "gpt-5.6");
+    assert_eq!(metadata.cost.input, 6.0);
+    assert_eq!(metadata.cost.output, 30.0);
+    assert_eq!(metadata.cost.cache_read, 0.5);
+    assert_eq!(metadata.cost.cache_write, 6.25);
     assert_eq!(metadata.cost.tiers, Some(vec![]));
 }
 
 #[test]
-fn user_override_tier_buckets_fill_from_the_patch_base_rates() {
+fn user_override_tier_buckets_fill_from_the_merged_base_rates() {
     let home = TempHome::new("tiers-filled");
     write_models_json(
         &home,
         serde_json::json!({
             "overrides": [
-                { "provider": "deepseek-chat", "model": "deepseek-v4-flash", "set": {
+                { "provider": "openai-responses", "model": "gpt-5.6", "set": {
                     "cost": {
-                        "input": 1.0, "output": 2.0, "cache_read": 0.1, "cache_write": 0.2,
-                        "tiers": [ { "input_tokens_above": 100_000, "input": 2.0 } ]
+                        "input": 1.0, "output": 2.0, "cache_read": 0.1, "cache_write": 0.2
+                    }
+                } },
+                { "provider": "openai-responses", "model": "gpt-5.6", "set": {
+                    "cost": {
+                        "output": 0.0,
+                        "tiers": [ { "input_tokens_above": 100_000, "input": 3.0 } ]
                     }
                 } }
             ]
@@ -319,14 +334,39 @@ fn user_override_tier_buckets_fill_from_the_patch_base_rates() {
     let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
 
     assert!(warnings.is_empty(), "{warnings:?}");
-    let metadata = catalog.resolve(BackendKind::DeepSeekChat, "deepseek-v4-flash");
+    let metadata = catalog.resolve(BackendKind::OpenAiResponses, "gpt-5.6");
+    assert_eq!(
+        metadata.cost.input, 1.0,
+        "omitted bucket keeps resolved base"
+    );
+    assert_eq!(
+        metadata.cost.output, 0.0,
+        "explicit zero replaces resolved base"
+    );
+    assert_eq!(
+        metadata.cost.cache_read, 0.1,
+        "omitted bucket keeps resolved base"
+    );
+    assert_eq!(
+        metadata.cost.cache_write, 0.2,
+        "omitted bucket keeps resolved base"
+    );
     let tiers = metadata.cost.tiers.as_ref().expect("tier applied");
     assert_eq!(tiers.len(), 1);
     assert_eq!(tiers[0].input_tokens_above, 100_000);
-    assert_eq!(tiers[0].input, 2.0);
-    assert_eq!(tiers[0].output, 2.0, "omitted bucket fills from patch base");
-    assert_eq!(tiers[0].cache_read, 0.1, "omitted bucket fills from patch base");
-    assert_eq!(tiers[0].cache_write, 0.2, "omitted bucket fills from patch base");
+    assert_eq!(tiers[0].input, 3.0);
+    assert_eq!(
+        tiers[0].output, 0.0,
+        "omitted bucket fills from merged base"
+    );
+    assert_eq!(
+        tiers[0].cache_read, 0.1,
+        "omitted bucket fills from merged base"
+    );
+    assert_eq!(
+        tiers[0].cache_write, 0.2,
+        "omitted bucket fills from merged base"
+    );
 }
 
 #[test]

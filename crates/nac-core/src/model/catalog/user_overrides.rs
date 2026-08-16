@@ -64,20 +64,15 @@ struct UserOverrideSet {
     thinking_level_map: Option<ThinkingLevelMap>,
 }
 
-/// Patch-side cost rates. Mirrors `ModelCostRates`, but tier buckets are
-/// optional and fill from the patch's base rates — the models.dev mappers'
-/// rule — so user tiers stay complete rate sets instead of zero-filling
-/// omitted buckets.
+/// Patch-side cost rates. Base and tier buckets are optional: omitted base
+/// buckets keep the resolved rates, and omitted tier buckets fill from that
+/// merged base so user tiers stay complete rate sets.
 #[derive(Debug, Deserialize)]
 struct CostPatch {
-    #[serde(default)]
-    input: f64,
-    #[serde(default)]
-    output: f64,
-    #[serde(default)]
-    cache_read: f64,
-    #[serde(default)]
-    cache_write: f64,
+    input: Option<f64>,
+    output: Option<f64>,
+    cache_read: Option<f64>,
+    cache_write: Option<f64>,
     tiers: Option<Vec<CostTierPatch>>,
 }
 
@@ -157,10 +152,10 @@ fn apply_one(catalog: &mut ModelCatalog, value: serde_json::Value) -> Result<(),
     }
     if let Some(patch) = set.cost {
         let base = super::ModelCostRates {
-            input: patch.input,
-            output: patch.output,
-            cache_read: patch.cache_read,
-            cache_write: patch.cache_write,
+            input: patch.input.unwrap_or(metadata.cost.input),
+            output: patch.output.unwrap_or(metadata.cost.output),
+            cache_read: patch.cache_read.unwrap_or(metadata.cost.cache_read),
+            cache_write: patch.cache_write.unwrap_or(metadata.cost.cache_write),
             tiers: None,
         };
         // Three-state tiers: a patch without `tiers` keeps the entry's
