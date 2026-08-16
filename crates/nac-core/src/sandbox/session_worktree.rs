@@ -407,7 +407,6 @@ pub(crate) fn restore(worktree: &SandboxWorktree, checkout_in_container: bool) -
     if checkout_in_container {
         mark_needs_materialization(worktree)?;
     }
-    worktree::remove(&worktree.repo_root, &worktree.path)?;
     worktree::re_add(
         &worktree.repo_root,
         &worktree.path,
