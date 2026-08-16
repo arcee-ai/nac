@@ -4,6 +4,7 @@
 // itself, and in development the Vite proxy forwards the API routes to it.
 
 import type { JsonObject } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import type {
   BranchList,
   BrowseListing,
@@ -101,7 +102,7 @@ async function errorDetail(res: Response): Promise<string> {
         // SAFETY: the identity check above admits only non-null JSON objects.
         const record = parsed as JsonObject;
         const error = record.error;
-        if (String(error) === error) return String(error);
+        if (isString(error)) return error;
       }
     } catch {
       // Not JSON; the raw body is the best detail available.

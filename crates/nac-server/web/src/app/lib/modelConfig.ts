@@ -3,6 +3,7 @@
 // inheritance, reasoning-effort clearing and extra-header validation.
 
 import type { JsonObject } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import type {
   BackendKind,
   LightModelSettings,
@@ -158,7 +159,7 @@ export function serializeExtraHeaders<T>(
   // the loop below verifies every value is a string before the cast.
   const record = parsed as JsonObject;
   for (const [key, headerValue] of Object.entries(record)) {
-    if (String(headerValue) !== headerValue) {
+    if (!isString(headerValue)) {
       throw new Error(`Extra Headers value for "${key}" must be a string`);
     }
   }

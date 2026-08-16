@@ -18,6 +18,7 @@ import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
 import { normalizeMath } from "@/app/lib/math-source";
 import { perfRender } from "@/app/lib/perfDebug";
+import { isNumber, isString } from "@/app/lib/primitive";
 import type { RunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import {
@@ -102,11 +103,8 @@ function loadMathPlugins(): Promise<MathPlugins> {
 
 /** Text of a fenced block, for the clipboard. Nested spans carry the tokens. */
 function textOf(node: ReactNode): string {
-  // String()/Number() are the identity on their own primitive and stringify
-  // everything else, so the round-trip comparisons isolate strings and numbers
-  // without typeof checks.
-  if (String(node) === node) return String(node);
-  if (Number(node) === node) return String(node);
+  if (isString(node)) return node;
+  if (isNumber(node)) return String(node);
   if (Array.isArray(node)) return node.map(textOf).join("");
   if (isValidElement<{ children?: ReactNode }>(node)) {
     return textOf(node.props.children);
@@ -273,7 +271,7 @@ function buildComponents(streaming: boolean) {
     // turn produces one per block, every message another copy. Naming them
     // lets React hoist them into the head and keep one of each instead.
     style: ({ children }: ComponentPropsWithoutRef<"style">) => {
-      const css = String(children) === children ? String(children) : "";
+      const css = isString(children) ? children : "";
       if (!css) return null;
       return (
         <style href={`mathjax-${fingerprint(css)}`} precedence="mathjax">

@@ -7,6 +7,7 @@
 
 import { displayPromptFromMessageText } from "@/app/lib/format";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
 import {
   mergeThreadLog,
@@ -137,9 +138,7 @@ function parseArguments(call: ToolCall): JsonObject {
 
 /** String fields only; any other JSON value reads as "". */
 function text(value: JsonValue | undefined): string {
-  // String() is the identity on strings and stringifies everything else, so
-  // the round-trip comparison isolates string values without a typeof check.
-  return String(value) === value ? String(value) : "";
+  return isString(value) ? value : "";
 }
 
 interface BuildContext {
@@ -223,11 +222,7 @@ export function dispatchActions(
 function sourceThreads(call: ToolCall): string[] {
   const value = parseArguments(call).threads;
   if (!Array.isArray(value)) return [];
-  const threads: string[] = [];
-  for (const entry of value) {
-    if (String(entry) === entry) threads.push(String(entry));
-  }
-  return threads;
+  return value.filter(isString);
 }
 
 /**

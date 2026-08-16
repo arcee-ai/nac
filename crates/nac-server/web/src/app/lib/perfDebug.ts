@@ -5,6 +5,8 @@
 // It is also off by default in dev — turn it on from the console with
 // `__perf.on()`, run a prompt, then `__perf.report()`.
 
+import { isNumber } from "@/app/lib/primitive";
+
 const DEV = import.meta.env.DEV;
 const STORAGE_KEY = "nac.perf";
 
@@ -67,9 +69,7 @@ export interface PerfOptions {
 
 /** True for the numeric half of a perf field; strings print but never sum. */
 function isNumericField(value: number | string): value is number {
-  // String() is the identity on strings and stringifies numbers, so the
-  // round-trip comparison isolates the numeric half without a typeof check.
-  return String(value) !== value;
+  return isNumber(value);
 }
 
 /** Record one occurrence of `tag` and, subject to throttling, print it. */

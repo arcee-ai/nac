@@ -3,6 +3,7 @@
 // Presentation state only — the server never sees this key.
 
 import type { JsonObject } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 import type { LightModelSettings } from "@/app/types/api";
 
 const STORAGE_KEY = "nac.last-light-model";
@@ -17,10 +18,7 @@ export function loadLastLight(): LightModelSettings | null {
     // SAFETY: the identity check above admits only non-null JSON objects, and
     // the field checks below verify the two fields the app reads.
     const light = parsed as JsonObject;
-    if (
-      String(light.model) !== light.model ||
-      String(light.backend) !== light.backend
-    ) {
+    if (!isString(light.model) || !isString(light.backend)) {
       return null;
     }
     // SAFETY: model and backend were just verified to be strings on the

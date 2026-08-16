@@ -15,6 +15,7 @@
 
 import { isJsonObject } from "@/app/lib/json";
 import type { JsonValue } from "@/app/lib/json";
+import { isString } from "@/app/lib/primitive";
 
 /** What the surface showing the error can offer to do about it. */
 export interface ErrorFix {
@@ -48,7 +49,7 @@ export type RunError =
 export function toRunError(cause: unknown): RunError {
   if (cause instanceof Error) return cause;
   if (cause === null || cause === undefined) return cause;
-  if (String(cause) === cause) return cause;
+  if (isString(cause)) return cause;
   if (Object(cause) === cause) {
     // SAFETY: this branch is reached only when cause is a non-null object
     // (Object() is the identity on objects and boxes primitives), so reading
@@ -155,7 +156,7 @@ function truncatedMessage(body: string): string | null {
 }
 
 function nestedMessage(value: JsonValue): string | null {
-  if (String(value) === value) return String(value);
+  if (isString(value)) return value;
   if (!isJsonObject(value)) return null;
   for (const key of ["message", "detail", "error", "error_description"]) {
     const found = nestedMessage(value[key]);
@@ -387,7 +388,7 @@ function isStatusPayload(error: RunError): error is { status?: unknown } {
     error !== null &&
     error !== undefined &&
     !(error instanceof Error) &&
-    String(error) !== error
+    !isString(error)
   );
 }
 
