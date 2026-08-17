@@ -327,6 +327,51 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     row.into_snapshot()
 }
 
+pub(crate) fn load_session_run_state(
+    path: &Path,
+    session_id: &str,
+) -> Result<(SessionRunState, String)> {
+    let conn = crate::store::open_connection(path)?;
+    let row = conn
+        .query_row(
+            "SELECT last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, token_usages_json, updated_at
+             FROM sessions
+             WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<u64>>(0)?,
+                    row.get::<_, Option<u64>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((last, previous, durations_json, token_usages_json, updated_at)) = row else {
+        return Err(anyhow!("session '{}' was not found", session_id));
+    };
+    let response_durations_ms = durations_json
+        .map(|json| {
+            serde_json::from_str::<Vec<Option<u64>>>(&json)
+                .context("failed to parse stored session response durations")
+        })
+        .transpose()?;
+    let (token_usages, unattributed_token_usage) =
+        deserialize_token_accounting(token_usages_json.as_deref())?;
+    Ok((
+        SessionRunState {
+            last_response_duration_ms: last,
+            previous_response_duration_ms: previous,
+            response_durations_ms,
+            token_usages,
+            unattributed_token_usage,
+        },
+        updated_at,
+    ))
+}
+
 pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionConfig> {
     let conn = crate::store::open_connection(path)?;
     let row = conn

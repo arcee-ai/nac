@@ -67,6 +67,19 @@ function toolResult(callId: string): Message {
   return { role: "tool", tool_call_id: callId, content: "done" };
 }
 
+function imageToolResult(callId: string): Message {
+  return {
+    role: "tool",
+    tool_call_id: callId,
+    content: [
+      {
+        type: "image",
+        image: { mime_type: "image/png", data: "base64-payload" },
+      },
+    ],
+  };
+}
+
 function threadSnapshot(name: string, episodeCount: number): ThreadSnapshot {
   return {
     name,
@@ -241,6 +254,23 @@ describe("re-dispatched thread cards", () => {
     const dependent = cards.find((card) => card.name === "dependent");
     expect(source?.state).toBe("running");
     expect(dependent?.state).toBe("pending");
+  });
+
+  it("renders typed image results as bounded placeholders", () => {
+    const cards = waveCards(
+      buildTranscript(
+        snapshot([
+          threadCall("worker", "call-image"),
+          imageToolResult("call-image"),
+        ]),
+        {},
+      ),
+    );
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0].state).toBe("done");
+    expect(cards[0].summary).toBe("[Image: image/png]");
+    expect(cards[0].summary).not.toContain("base64-payload");
   });
 });
 

@@ -75,7 +75,8 @@ fn parsed(result: crate::tools::ToolResult) -> Value {
         "unexpected tool error: {}",
         result.content
     );
-    serde_json::from_str(&result.content).expect("tool output must be JSON")
+    serde_json::from_str(result.content.as_text().expect("text tool result"))
+        .expect("tool output must be JSON")
 }
 
 #[tokio::test]
@@ -218,8 +219,13 @@ async fn grep_accepts_file_roots() {
     .await;
     assert!(invalid_descendant.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&invalid_descendant.content).expect("error JSON")["error"]
-            ["code"],
+        serde_json::from_str::<Value>(
+            invalid_descendant
+                .content
+                .as_text()
+                .expect("text tool result"),
+        )
+        .expect("error JSON")["error"]["code"],
         "not_directory"
     );
     fs::remove_dir_all(root).expect("remove fixture");
@@ -231,14 +237,16 @@ async fn invalid_patterns_and_outside_roots_are_explicit_errors() {
     let invalid = execute("glob", json!({"pattern": "["}), &runtime).await;
     assert!(invalid.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&invalid.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(invalid.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "invalid_glob"
     );
 
     let empty = execute("glob", json!({"pattern": ""}), &runtime).await;
     assert!(empty.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&empty.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(empty.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "invalid_glob"
     );
 
@@ -250,7 +258,8 @@ async fn invalid_patterns_and_outside_roots_are_explicit_errors() {
     .await;
     assert!(outside.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&outside.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(outside.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "outside_workspace"
     );
 
@@ -262,7 +271,8 @@ async fn invalid_patterns_and_outside_roots_are_explicit_errors() {
     .await;
     assert!(unreadable.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&unreadable.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(unreadable.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "unreadable_path"
     );
     fs::remove_dir_all(root).expect("remove fixture");
@@ -543,13 +553,15 @@ async fn invalid_regex_limits_and_mismatched_cursors_are_errors() {
     let invalid_regex = execute("grep", json!({"pattern": "("}), &runtime).await;
     assert!(invalid_regex.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&invalid_regex.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(invalid_regex.content.as_text().expect("text tool result"),)
+            .expect("error JSON")["error"]["code"],
         "invalid_regex"
     );
     let invalid_limit = execute("glob", json!({"pattern": "**", "limit": 0}), &runtime).await;
     assert!(invalid_limit.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&invalid_limit.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(invalid_limit.content.as_text().expect("text tool result"),)
+            .expect("error JSON")["error"]["code"],
         "invalid_arguments"
     );
     let first = parsed(execute("glob", json!({"pattern": "**/*.rs", "limit": 1}), &runtime).await);
@@ -565,7 +577,8 @@ async fn invalid_regex_limits_and_mismatched_cursors_are_errors() {
     .await;
     assert!(mismatched.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&mismatched.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(mismatched.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "invalid_cursor"
     );
     fs::remove_dir_all(root).expect("remove fixture");
@@ -596,7 +609,8 @@ async fn dispatch_path_bounds_long_match_text() {
         result.content
     );
     assert!(result.content.len() < 70_000);
-    let output: Value = serde_json::from_str(&result.content).expect("result JSON");
+    let output: Value = serde_json::from_str(result.content.as_text().expect("text tool result"))
+        .expect("result JSON");
     assert_eq!(output["matches"].as_array().expect("matches").len(), 1);
     assert_eq!(output["matches"][0]["text_truncated"], true);
 
@@ -608,7 +622,8 @@ async fn dispatch_path_bounds_long_match_text() {
     .await;
     assert!(malformed.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&malformed.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(malformed.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "invalid_cursor"
     );
     fs::remove_dir_all(root).expect("remove fixture");
@@ -908,8 +923,14 @@ async fn podman_and_local_backends_return_identical_discovery_pages() {
             podman_output.content, local_output.content
         );
         assert_eq!(
-            serde_json::from_str::<Value>(&podman_output.content).expect("Podman JSON"),
-            serde_json::from_str::<Value>(&local_output.content).expect("local JSON"),
+            serde_json::from_str::<Value>(
+                podman_output.content.as_text().expect("text tool result"),
+            )
+            .expect("Podman JSON"),
+            serde_json::from_str::<Value>(
+                local_output.content.as_text().expect("text tool result"),
+            )
+            .expect("local JSON"),
             "{tool}"
         );
     }
@@ -932,7 +953,8 @@ async fn podman_and_local_backends_return_identical_discovery_pages() {
     let rejected = execute("glob", json!({"pattern": "**"}), &unmounted_runtime).await;
     assert!(rejected.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&rejected.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(rejected.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "backend_protocol"
     );
     fs::remove_dir_all(root).expect("remove fixture");
@@ -1005,8 +1027,12 @@ async fn ssh_and_local_backends_return_identical_discovery_pages() {
             ssh_output.content, local_output.content
         );
         assert_eq!(
-            serde_json::from_str::<Value>(&ssh_output.content).expect("SSH JSON"),
-            serde_json::from_str::<Value>(&local_output.content).expect("local JSON"),
+            serde_json::from_str::<Value>(ssh_output.content.as_text().expect("text tool result"),)
+                .expect("SSH JSON"),
+            serde_json::from_str::<Value>(
+                local_output.content.as_text().expect("text tool result"),
+            )
+            .expect("local JSON"),
             "{tool}"
         );
     }
@@ -1018,8 +1044,10 @@ async fn ssh_and_local_backends_return_identical_discovery_pages() {
         ));
         let actual = execute("glob", request.clone(), &ssh_runtime).await;
         assert_eq!(
-            serde_json::from_str::<Value>(&actual.content).expect("SSH root JSON"),
-            serde_json::from_str::<Value>(&expected.content).expect("local root JSON"),
+            serde_json::from_str::<Value>(actual.content.as_text().expect("text tool result"))
+                .expect("SSH root JSON"),
+            serde_json::from_str::<Value>(expected.content.as_text().expect("text tool result"))
+                .expect("local root JSON"),
             "remote cwd {}",
             remote_cwd.display()
         );
@@ -1222,14 +1250,16 @@ async fn aggregate_arrays_and_version_specific_regexes_are_rejected() {
     let excessive = execute("grep", json!({"pattern": "x", "roots": roots}), &runtime).await;
     assert!(excessive.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&excessive.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(excessive.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "invalid_arguments"
     );
 
     let unsupported = execute("grep", json!({"pattern": "(?>x)", "regex": true}), &runtime).await;
     assert!(unsupported.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&unsupported.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(unsupported.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "invalid_regex"
     );
     fs::remove_dir_all(root).expect("remove fixture");
@@ -1271,7 +1301,8 @@ async fn rust_pattern_engines_handle_unicode_and_supported_syntax() {
     let invalid = execute("grep", json!({"pattern": "(", "regex": true}), &runtime).await;
     assert!(invalid.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&invalid.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(invalid.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "invalid_regex"
     );
     fs::remove_dir_all(root).expect("remove fixture");
@@ -1412,7 +1443,8 @@ async fn ignore_rules_have_cumulative_count_and_byte_limits() {
     let result = execute("glob", json!({"pattern": "**/*"}), &runtime).await;
     assert!(result.is_error);
     assert_eq!(
-        serde_json::from_str::<Value>(&result.content).expect("error JSON")["error"]["code"],
+        serde_json::from_str::<Value>(result.content.as_text().expect("text tool result"))
+            .expect("error JSON")["error"]["code"],
         "ignore_limit"
     );
 

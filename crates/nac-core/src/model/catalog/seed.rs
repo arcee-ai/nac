@@ -183,7 +183,7 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
                  max_tokens: u64,
                  cost: ModelCostRates,
                  thinking_level_map: ThinkingLevelMap| {
-        seeded_model(
+        let mut model = seeded_model(
             provider,
             id,
             display_name,
@@ -193,7 +193,9 @@ fn codex_seed_models() -> Vec<ModelMetadata> {
             true,
             thinking_level_map,
             Compat::default(),
-        )
+        );
+        model.image_input = true;
+        model
     };
     vec![
         model(

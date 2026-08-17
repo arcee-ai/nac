@@ -260,10 +260,10 @@ impl McpRegistry {
         definitions
     }
 
-    pub async fn call_tool(&self, name: &str, args: Value) -> ToolResult {
+    pub async fn call_tool(&self, name: &str, args: Value, image_results: bool) -> ToolResult {
         let Some(binding) = self.tools.get(name) else {
             return ToolResult {
-                content: format!("Error: unknown MCP tool '{}'", name),
+                content: format!("Error: unknown MCP tool '{}'", name).into(),
                 is_error: true,
             };
         };
@@ -273,7 +273,7 @@ impl McpRegistry {
             Value::Null => None,
             _ => {
                 return ToolResult {
-                    content: format!("Error: MCP tool '{}' requires object arguments", name),
+                    content: format!("Error: MCP tool '{}' requires object arguments", name).into(),
                     is_error: true,
                 }
             }
@@ -289,9 +289,9 @@ impl McpRegistry {
         )
         .await
         {
-            Ok(Ok(result)) => flatten_tool_result(result),
+            Ok(Ok(result)) => flatten_tool_result(result, image_results).await,
             Ok(Err(error)) => ToolResult {
-                content: format!("Error calling MCP tool '{}': {}", name, error),
+                content: format!("Error calling MCP tool '{}': {}", name, error).into(),
                 is_error: true,
             },
             Err(_) => ToolResult {
@@ -299,7 +299,8 @@ impl McpRegistry {
                     "Error calling MCP tool '{}': timed out after {}s",
                     name,
                     MCP_TOOL_CALL_TIMEOUT.as_secs()
-                ),
+                )
+                .into(),
                 is_error: true,
             },
         }

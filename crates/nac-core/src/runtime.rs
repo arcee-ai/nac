@@ -1184,15 +1184,18 @@ pub async fn build_resume_config(
     let resume_store_path = resolve_store_path(&lookup_cwd, options.store, config);
 
     let snapshot = match (options.session_id.as_deref(), options.last) {
-        (Some(session_id), false) => sessions::load_session(&resume_store_path, session_id)?,
+        (Some(session_id), false) => {
+            sessions::load_session_async(resume_store_path.clone(), session_id.to_string()).await?
+        }
         (Some(_), true) => unreachable!(),
-        (None, _) => sessions::load_last_session(&resume_store_path)?,
+        (None, _) => sessions::load_last_session_async(resume_store_path.clone()).await?,
     };
     let session_id = snapshot.session_id.clone();
     let lease = sessions::SessionOperationLease::try_acquire(&resume_store_path, &session_id)?;
     lease.validate(&resume_store_path, &session_id)?;
     let recovery = store::reconcile_active_run(&resume_store_path, &session_id)?;
-    let snapshot = sessions::load_session(&resume_store_path, &session_id)?;
+    let snapshot =
+        sessions::load_session_async(resume_store_path.clone(), session_id.clone()).await?;
 
     let mut run_config = build_resume_config_from_snapshot(
         snapshot,
@@ -1219,7 +1222,7 @@ pub async fn build_resume_config_for_session(
     let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
     lease.validate(&store_path, session_id)?;
     let recovery = store::reconcile_active_run(&store_path, session_id)?;
-    let snapshot = sessions::load_session(&store_path, session_id)?;
+    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let mut run_config = build_resume_config_from_snapshot(
         snapshot,
         store_path,
@@ -1246,7 +1249,7 @@ pub async fn build_resume_config_for_session_attachment(
     bool,
     Option<sessions::SessionOperationLease>,
 )> {
-    let snapshot = sessions::load_session(&store_path, session_id)?;
+    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let metadata = resolve_model_metadata(snapshot.backend, &snapshot.model);
     let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
         metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
@@ -1270,7 +1273,8 @@ pub async fn build_resume_config_for_session_attachment(
         Ok(lease) => {
             lease.validate(&store_path, session_id)?;
             let recovery = store::reconcile_active_run(&store_path, session_id)?;
-            let snapshot = sessions::load_session(&store_path, session_id)?;
+            let snapshot =
+                sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
             let mut run_config = build_resume_config_from_snapshot(
                 snapshot,
                 store_path,
@@ -1313,7 +1317,7 @@ pub async fn build_resume_config_for_session_with_lease(
 ) -> Result<OrchestratorRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
     let recovery = store::reconcile_active_run(&store_path, session_id)?;
-    let snapshot = sessions::load_session(&store_path, session_id)?;
+    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let mut run_config = build_resume_config_from_snapshot(
         snapshot,
         store_path,

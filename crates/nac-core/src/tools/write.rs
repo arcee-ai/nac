@@ -140,7 +140,8 @@ mod tests {
             std::fs::read_to_string(dir.join("nested/file.txt")).unwrap(),
             "created\n"
         );
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert!(value["old_revision"].is_null());
         assert_eq!(value["new_revision"], revision(b"created\n"));
         let _ = std::fs::remove_dir_all(dir);
@@ -207,7 +208,8 @@ mod tests {
         )
         .await;
         assert!(result.is_error);
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["error"], "stale_revision");
         assert_eq!(value["current_revision"], revision(b"current\n"));
         let _ = std::fs::remove_dir_all(dir);
@@ -252,7 +254,8 @@ mod tests {
         assert!(result.is_error);
         assert!(result.content.contains("read-only"));
         assert_eq!(
-            serde_json::from_str::<Value>(&result.content).unwrap()["error"],
+            serde_json::from_str::<Value>(result.content.as_text().expect("text tool result"),)
+                .unwrap()["error"],
             "permission_denied"
         );
         assert!(!dir.join("nested").exists());
@@ -282,7 +285,8 @@ mod tests {
         assert!(result.is_error);
         assert!(result.content.contains("read-only"));
         assert_eq!(
-            serde_json::from_str::<Value>(&result.content).unwrap()["error"],
+            serde_json::from_str::<Value>(result.content.as_text().expect("text tool result"),)
+                .unwrap()["error"],
             "permission_denied"
         );
         assert!(!outside.join("file.txt").exists());
@@ -311,7 +315,8 @@ mod tests {
         )
         .await;
         assert!(result.is_error);
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["error"], "permission_denied");
         assert!(value["message"].as_str().unwrap().contains("symlinked"));
         assert!(!outside.join("file.txt").exists());

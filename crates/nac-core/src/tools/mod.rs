@@ -12,7 +12,7 @@ use crate::mcp::McpRegistry;
 use crate::sandbox::ExecutionBackend;
 use crate::skills::SkillRegistry;
 use crate::terminal::TerminalManager;
-use crate::types::ToolDefinition;
+use crate::types::{ToolContent, ToolDefinition};
 
 pub(crate) const REMOTE_FILE_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const REMOTE_FILE_LOCK_BUSY_EXIT_CODE: i32 = 75;
@@ -31,8 +31,17 @@ pub mod write;
 
 #[derive(Debug)]
 pub struct ToolResult {
-    pub content: String,
+    pub content: ToolContent,
     pub is_error: bool,
+}
+
+impl ToolResult {
+    pub fn text(content: impl Into<String>, is_error: bool) -> Self {
+        Self {
+            content: ToolContent::text(content),
+            is_error,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -386,19 +395,23 @@ pub(crate) fn remote_file_lock_busy(output: &std::process::Output) -> bool {
         && String::from_utf8_lossy(&output.stdout).trim() == REMOTE_FILE_LOCK_BUSY_MARKER
 }
 
-pub fn worker_tool_definitions() -> Vec<ToolDefinition> {
+pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     use serde_json::json;
 
     let mut tools = vec![
         def(
             "read",
-            "Read UTF-8 file content and return JSON metadata including the complete-file revision. Pass next_offset to continue.",
+            if image_read {
+                "Read and view UTF-8 text or supported PNG, JPEG, WebP, and static GIF image files. Text results include complete-file revision metadata; pass next_offset to continue text files."
+            } else {
+                "Read UTF-8 file content and return JSON metadata including the complete-file revision. Pass next_offset to continue."
+            },
             json!({
                 "type": "object",
                 "properties": {
                     "path": { "type": "string", "description": "Path to file" },
-                    "offset": { "type": "integer", "minimum": 0, "description": "Zero-based line offset (optional)" },
-                    "limit": { "type": "integer", "minimum": 1, "description": "Maximum lines to read (optional, default 2000)" }
+                    "offset": { "type": "integer", "minimum": 0, "description": "Zero-based line offset (optional; text files only)" },
+                    "limit": { "type": "integer", "minimum": 1, "description": "Maximum lines to read (optional, default 2000; text files only)" }
                 },
                 "required": ["path"],
                 "additionalProperties": false
@@ -489,7 +502,7 @@ pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
         .and_then(|value| value.as_str())
         .map(|value| value.to_string())
         .ok_or_else(|| ToolResult {
-            content: format!("Error: '{}' argument required", key),
+            content: (format!("Error: '{}' argument required", key)).into(),
             is_error: true,
         })
 }
@@ -501,7 +514,7 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
 
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
-            content: format!("Error: '{}' must be an array of strings", key),
+            content: (format!("Error: '{}' must be an array of strings", key)).into(),
             is_error: true,
         });
     };
@@ -510,7 +523,7 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
     for item in items {
         let Some(value) = item.as_str() else {
             return Err(ToolResult {
-                content: format!("Error: '{}' must be an array of strings", key),
+                content: (format!("Error: '{}' must be an array of strings", key)).into(),
                 is_error: true,
             });
         };
@@ -529,15 +542,17 @@ pub async fn execute_tool(
     if name.starts_with("mcp__") {
         let Some(registry) = &runtime.mcp else {
             return ToolResult {
-                content: format!("Error: MCP tool '{}' is not available", name),
+                content: (format!("Error: MCP tool '{}' is not available", name)).into(),
                 is_error: true,
             };
         };
-        return registry.call_tool(name, args).await;
+        return registry
+            .call_tool(name, args, client.supports_image_tool_results())
+            .await;
     }
 
     match name {
-        "read" => read::execute(args, runtime).await,
+        "read" => read::execute(args, runtime, client.supports_image_tool_results()).await,
         "write" => write::execute(args, runtime).await,
         "edit" => edit::execute(args, runtime).await,
         "glob" => glob::execute(args, runtime).await,
@@ -553,7 +568,7 @@ pub async fn execute_tool(
         "workset_read" => workset::execute_read(args, runtime).await,
         "workset_list" => workset::execute_list(args, runtime).await,
         unknown => ToolResult {
-            content: format!("Error: unknown tool '{}'", unknown),
+            content: (format!("Error: unknown tool '{}'", unknown)).into(),
             is_error: true,
         },
     }
@@ -565,7 +580,7 @@ mod discovery_tool_definition_tests {
 
     #[test]
     fn every_worker_receives_complete_glob_and_grep_definitions_once() {
-        let definitions = worker_tool_definitions();
+        let definitions = worker_tool_definitions(false);
         for name in ["glob", "grep"] {
             let matches: Vec<_> = definitions
                 .iter()
@@ -609,6 +624,20 @@ mod discovery_tool_definition_tests {
                 "missing grep property {property}"
             );
         }
+    }
+
+    #[test]
+    fn read_description_advertises_images_only_when_supported() {
+        let description = |image_read| {
+            worker_tool_definitions(image_read)
+                .into_iter()
+                .find(|definition| definition.function.name == "read")
+                .unwrap()
+                .function
+                .description
+        };
+        assert!(description(true).contains("PNG"));
+        assert!(!description(false).contains("image"));
     }
 }
 

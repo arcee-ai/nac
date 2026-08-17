@@ -287,7 +287,7 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
         },
         Message::Tool {
             tool_call_id: "call".to_string(),
-            content: "result".to_string(),
+            content: "result".into(),
         },
     ];
     for (label, boundary) in [("user", 2), ("assistant", 3), ("end", messages.len())] {

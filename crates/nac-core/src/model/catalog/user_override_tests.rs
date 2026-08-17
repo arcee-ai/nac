@@ -107,7 +107,10 @@ fn user_override_for_unknown_model_derives_from_provider_default() {
         &home,
         serde_json::json!({
             "overrides": [
-                { "provider": "together-chat", "model": "brand-new-model", "set": { "max_tokens": 8_192 } }
+                { "provider": "together-chat", "model": "brand-new-model", "set": {
+                    "max_tokens": 8_192,
+                    "image_input": true
+                } }
             ]
         }),
     );
@@ -118,6 +121,7 @@ fn user_override_for_unknown_model_derives_from_provider_default() {
     let metadata = catalog.resolve(BackendKind::TogetherChat, "brand-new-model");
     assert_eq!(metadata.source, ModelSource::UserOverride);
     assert_eq!(metadata.max_tokens, 8_192);
+    assert!(metadata.image_input);
     // Everything else derives from the provider default.
     assert_eq!(metadata.context_window, FALLBACK_CONTEXT_WINDOW);
     assert!(metadata
@@ -154,6 +158,7 @@ fn user_override_dated_snapshot_derives_from_the_family_entry() {
     let metadata = catalog.resolve(BackendKind::AnthropicMessages, "claude-opus-4-6-20261225");
     assert_eq!(metadata.source, ModelSource::UserOverride);
     assert_eq!(metadata.max_tokens, 9_999);
+    assert!(metadata.image_input);
     // The family map (adaptive with the "max" tier) carries over.
     assert_eq!(
         metadata

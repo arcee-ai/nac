@@ -76,9 +76,12 @@ pub fn read_command_output_definition() -> ToolDefinition {
 
 pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> ToolResult {
     match execute_exec_command_inner(args, runtime).await {
-        Ok((content, is_error)) => ToolResult { content, is_error },
+        Ok((content, is_error)) => ToolResult {
+            content: content.into(),
+            is_error,
+        },
         Err(error) => ToolResult {
-            content: format!("Error: {error:#}"),
+            content: (format!("Error: {error:#}")).into(),
             is_error: true,
         },
     }
@@ -178,12 +181,13 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
 
     match result {
         Ok(output) => ToolResult {
-            content: serde_json::to_string_pretty(&output)
-                .unwrap_or_else(|error| format!("Error serializing terminal output: {error}")),
+            content: (serde_json::to_string_pretty(&output)
+                .unwrap_or_else(|error| format!("Error serializing terminal output: {error}")))
+            .into(),
             is_error: false,
         },
         Err(error) => ToolResult {
-            content: format!("Error: {error:#}"),
+            content: (format!("Error: {error:#}")).into(),
             is_error: true,
         },
     }
@@ -206,11 +210,11 @@ pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolR
 
     match result {
         Ok(content) => ToolResult {
-            content,
+            content: content.into(),
             is_error: false,
         },
         Err(error) => ToolResult {
-            content: format!("Error: {error:#}"),
+            content: (format!("Error: {error:#}")).into(),
             is_error: true,
         },
     }
@@ -320,8 +324,10 @@ mod tests {
         .await;
         assert!(!pty.is_error, "{}", pty.content);
 
-        let one_shot: Value = serde_json::from_str(&one_shot.content).unwrap();
-        let pty: Value = serde_json::from_str(&pty.content).unwrap();
+        let one_shot: Value =
+            serde_json::from_str(one_shot.content.as_text().expect("text tool result")).unwrap();
+        let pty: Value =
+            serde_json::from_str(pty.content.as_text().expect("text tool result")).unwrap();
         runtime.terminal_manager.remove_all().await;
         std::fs::write(
             result_path,
@@ -380,7 +386,11 @@ mod tests {
             &test_runtime(),
         )
         .await;
-        std::fs::write(result_path, result.content).unwrap();
+        std::fs::write(
+            result_path,
+            result.content.as_text().expect("text tool result"),
+        )
+        .unwrap();
     }
 
     #[cfg(unix)]
@@ -564,7 +574,8 @@ mod tests {
     async fn short_command_is_complete_without_followup() {
         let result = execute_exec_command(&json!({"cmd": "printf hello"}), &test_runtime()).await;
         assert!(!result.is_error, "{}", result.content);
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["status"], "completed");
         assert_eq!(value["stdout_preview"], "hello");
         assert_eq!(value["truncated"], false);
@@ -576,7 +587,8 @@ mod tests {
         let result =
             execute_exec_command(&json!({"cmd": "printf fail >&2; exit 7"}), &test_runtime()).await;
         assert!(!result.is_error);
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["status"], "completed");
         assert_eq!(value["exit_code"], 7);
         assert_eq!(value["stderr_preview"], "fail");
@@ -590,7 +602,8 @@ mod tests {
             &runtime,
         )
         .await;
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["truncated"], true);
         let output_id = value["output_id"].as_str().unwrap();
         let page = execute_read_command_output(
@@ -598,7 +611,8 @@ mod tests {
             &runtime,
         );
         assert!(!page.is_error, "{}", page.content);
-        let page_value: Value = serde_json::from_str(&page.content).unwrap();
+        let page_value: Value =
+            serde_json::from_str(page.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(page_value["content"].as_str().unwrap().len(), 64);
     }
 

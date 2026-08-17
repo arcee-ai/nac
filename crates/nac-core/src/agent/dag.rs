@@ -57,10 +57,11 @@ pub(crate) fn partition_tool_calls(
                         id,
                         args_str,
                         ToolResult {
-                            content: format!(
+                            content: (format!(
                                 "Error: failed to parse tool arguments for '{}': {}",
                                 name, error
-                            ),
+                            ))
+                            .into(),
                             is_error: true,
                         },
                     ));
@@ -286,10 +287,11 @@ pub(crate) fn spawn_non_thread_into(
                         tool_call_id,
                         tool_name.clone(),
                         ToolResult {
-                            content: format!(
+                            content: (format!(
                                 "Error: failed to parse tool arguments for '{}': {}",
                                 tool_name, error
-                            ),
+                            ))
+                            .into(),
                             is_error: true,
                         },
                     );
@@ -360,10 +362,11 @@ pub(crate) async fn execute_with_dag(
             );
         } else {
             let result = ToolResult {
-                content: format!(
+                content: (format!(
                     "Thread '{}' is already running; retry after the current dispatch completes.",
                     dispatch.params.thread_name
-                ),
+                ))
+                .into(),
                 is_error: true,
             };
             event_sink.emit(AgentEvent::ToolCallStarted {
@@ -444,10 +447,11 @@ pub(crate) async fn execute_with_dag(
                     .unwrap_or_default();
 
                 let result = ToolResult {
-                    content: format!(
+                    content: (format!(
                         "Source thread '{}' failed; dispatch '{}' skipped.",
                         failed_dep_name, dispatch.params.thread_name
-                    ),
+                    ))
+                    .into(),
                     is_error: true,
                 };
 
@@ -530,12 +534,14 @@ pub(crate) async fn execute_with_dag(
                     nt_res = non_thread_join_set.join_next() => {
                         match nt_res {
                             Some(Ok((index, _, tool_call_id, tool_name, result))) => {
-                                event_sink.emit(AgentEvent::tool_call_finished(
-                                    agent_thread_name.clone(),
-                                    tool_call_id.clone(),
-                                    tool_name.clone(),
-                                    &result,
-                                ));
+                                if !result.content.contains_images() {
+                                    event_sink.emit(AgentEvent::tool_call_finished(
+                                        agent_thread_name.clone(),
+                                        tool_call_id.clone(),
+                                        tool_name.clone(),
+                                        &result,
+                                    ));
+                                }
                                 all_results.push((index, tool_call_id, tool_name, result));
                             }
                             Some(Err(error)) => {
@@ -544,7 +550,7 @@ pub(crate) async fn execute_with_dag(
                                     "unknown".to_string(),
                                     "unknown".to_string(),
                                     ToolResult {
-                                        content: format!("Tool task panicked: {}", error),
+                                        content: format!("Tool task panicked: {}", error).into(),
                                         is_error: true,
                                     },
                                 ));
@@ -596,7 +602,7 @@ pub(crate) async fn execute_with_dag(
                         "unknown".to_string(),
                         "unknown".to_string(),
                         ToolResult {
-                            content: format!("Tool task panicked: {}", error),
+                            content: (format!("Tool task panicked: {}", error)).into(),
                             is_error: true,
                         },
                     ));
@@ -612,12 +618,14 @@ pub(crate) async fn execute_with_dag(
     while let Some(join_result) = non_thread_join_set.join_next().await {
         match join_result {
             Ok((index, _, tool_call_id, tool_name, result)) => {
-                event_sink.emit(AgentEvent::tool_call_finished(
-                    agent_thread_name.clone(),
-                    tool_call_id.clone(),
-                    tool_name.clone(),
-                    &result,
-                ));
+                if !result.content.contains_images() {
+                    event_sink.emit(AgentEvent::tool_call_finished(
+                        agent_thread_name.clone(),
+                        tool_call_id.clone(),
+                        tool_name.clone(),
+                        &result,
+                    ));
+                }
                 all_results.push((index, tool_call_id, tool_name, result));
             }
             Err(error) => {
@@ -626,7 +634,7 @@ pub(crate) async fn execute_with_dag(
                     "unknown".to_string(),
                     "unknown".to_string(),
                     ToolResult {
-                        content: format!("Tool task panicked: {}", error),
+                        content: (format!("Tool task panicked: {}", error)).into(),
                         is_error: true,
                     },
                 ));

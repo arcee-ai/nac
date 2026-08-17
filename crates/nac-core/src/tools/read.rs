@@ -4,14 +4,13 @@ use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, execute_remote, read_error, read_mounted, read_result, required_string,
-    success_tool_result,
+    argument_error, execute_remote, read_error, read_mounted, read_opened_file, required_string,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
 
 const DEFAULT_LIMIT: usize = 2_000;
 
-pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
+pub async fn execute(args: Value, runtime: &ToolRuntime, image_read: bool) -> ToolResult {
     let path = match required_string(&args, "path") {
         Ok(path) => path,
         Err(error) => return error,
@@ -34,9 +33,17 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
             runtime.backend.host_path_for_remote_file(&guest_path)
         {
             if host_path.relative.as_os_str().is_empty() {
-                return read_local(host_path.root, path, offset, limit).await;
+                return read_local(host_path.root, path, offset, limit, image_read).await;
             }
-            return read_mounted(host_path.root, host_path.relative, path, offset, limit).await;
+            return read_mounted(
+                host_path.root,
+                host_path.relative,
+                path,
+                offset,
+                limit,
+                image_read,
+            )
+            .await;
         }
         return execute_remote(
             json!({
@@ -45,6 +52,7 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
                 "resolved_path": guest_path.display().to_string(),
                 "offset": offset,
                 "limit": limit,
+                "image_read": image_read,
             }),
             runtime,
         )
@@ -56,6 +64,7 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         path,
         offset,
         limit,
+        image_read,
     )
     .await
 }
@@ -65,17 +74,24 @@ async fn read_local(
     path_display: String,
     offset: usize,
     limit: usize,
+    image_read: bool,
 ) -> ToolResult {
-    let bytes = match tokio::task::spawn_blocking(move || std::fs::read(path)).await {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(error)) => return read_error(&path_display, error),
-        Err(error) => {
-            return argument_error(format!("file read task failed for {path_display}: {error}"))
-        }
-    };
-    match read_result(path_display, &bytes, offset, limit) {
-        Ok(result) => success_tool_result(&result),
-        Err(error) => error,
+    let display_for_task = path_display.clone();
+    match tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(path)?;
+        Ok::<_, std::io::Error>(read_opened_file(
+            file,
+            display_for_task,
+            offset,
+            limit,
+            image_read,
+        ))
+    })
+    .await
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => read_error(&path_display, error),
+        Err(error) => argument_error(format!("file read task failed for {path_display}: {error}")),
     }
 }
 
@@ -109,6 +125,16 @@ mod tests {
 
     use super::*;
     use crate::tools::test_runtime;
+    use crate::types::ToolContentPart;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    fn image_bytes(format: ImageFormat) -> Vec<u8> {
+        let image = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255])));
+        let mut bytes = Cursor::new(Vec::new());
+        image.write_to(&mut bytes, format).unwrap();
+        bytes.into_inner()
+    }
 
     #[tokio::test]
     async fn read_returns_complete_file_revision_and_range_metadata() {
@@ -121,10 +147,12 @@ mod tests {
         let result = execute(
             json!({"path":"fixture.txt", "offset":1, "limit":1}),
             &runtime,
+            false,
         )
         .await;
         assert!(!result.is_error, "{}", result.content);
-        let value: Value = serde_json::from_str(&result.content).unwrap();
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(value["path"], "fixture.txt");
         assert_eq!(value["content"], "two\n");
         assert_eq!(value["start_line"], 2);
@@ -142,10 +170,60 @@ mod tests {
         let result = execute(
             json!({"path": format!("missing-{}", Uuid::new_v4())}),
             &test_runtime(),
+            false,
         )
         .await;
         assert!(result.is_error);
         assert!(result.content.contains("not_found"));
+    }
+    #[tokio::test]
+    async fn image_read_is_capability_gated_for_png_and_jpeg() {
+        for (extension, format, expected_mime) in [
+            ("png", ImageFormat::Png, "image/png"),
+            ("jpg", ImageFormat::Jpeg, "image/jpeg"),
+        ] {
+            let dir = std::env::temp_dir().join(format!("nac-read-image-{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let name = format!("fixture.{extension}");
+            std::fs::write(dir.join(&name), image_bytes(format)).unwrap();
+            let mut runtime = test_runtime();
+            runtime.workspace_cwd = dir.clone();
+
+            let capable = execute(json!({"path": name}), &runtime, true).await;
+            assert!(!capable.is_error, "{}", capable.content);
+            let parts = capable.content.parts().expect("typed image result");
+            assert_eq!(parts.len(), 1);
+            let ToolContentPart::Image(image) = &parts[0] else {
+                panic!("expected image content");
+            };
+            assert_eq!(image.mime_type().as_str(), expected_mime);
+
+            let text_only = execute(json!({"path": name}), &runtime, false).await;
+            assert!(text_only.is_error);
+            assert!(text_only.content.contains("unsupported_image"));
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_and_unsupported_images_return_deterministic_errors() {
+        let dir = std::env::temp_dir().join(format!("nac-read-invalid-image-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("broken.png"), b"\x89PNG\r\n\x1a\nbroken").unwrap();
+        std::fs::write(dir.join("unsupported.bmp"), b"BMunsupported").unwrap();
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = dir.clone();
+
+        for name in ["broken.png", "unsupported.bmp"] {
+            let result = execute(json!({"path": name}), &runtime, true).await;
+            assert!(result.is_error);
+            assert!(
+                result.content.contains("invalid_image"),
+                "{}",
+                result.content
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

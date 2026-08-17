@@ -61,6 +61,7 @@ struct UserOverrideSet {
     cost: Option<CostPatch>,
     cache_write_1h: Option<f64>,
     reasoning: Option<bool>,
+    image_input: Option<bool>,
     thinking_level_map: Option<ThinkingLevelMap>,
 }
 
@@ -181,6 +182,9 @@ fn apply_one(catalog: &mut ModelCatalog, value: serde_json::Value) -> Result<(),
     }
     if let Some(reasoning) = set.reasoning {
         metadata.reasoning = reasoning;
+    }
+    if let Some(image_input) = set.image_input {
+        metadata.image_input = image_input;
     }
     if let Some(thinking_level_map) = set.thinking_level_map {
         metadata.thinking_level_map = thinking_level_map;

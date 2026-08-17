@@ -1,7 +1,7 @@
 #[cfg(unix)]
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
 #[cfg(unix)]
@@ -11,6 +11,10 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsE
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
+use crate::tool_content::{is_image_candidate, reserve_image_memory, ToolImage, MAX_IMAGE_BYTES};
+use crate::types::{ToolContent, ToolContentPart};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use diffy::DiffOptions;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -283,16 +287,19 @@ fn truncate_utf8(value: &str, max: usize) -> &str {
 pub(crate) fn success_tool_result<T: Serialize>(result: &T) -> ToolResult {
     ToolResult {
         content: serde_json::to_string_pretty(result)
-            .unwrap_or_else(|error| format!("{{\"error\":\"io_error\",\"message\":\"{error}\"}}")),
+            .unwrap_or_else(|error| format!("{{\"error\":\"io_error\",\"message\":\"{error}\"}}"))
+            .into(),
         is_error: false,
     }
 }
 
 fn error_tool_result(error: MutationError) -> ToolResult {
     ToolResult {
-        content: serde_json::to_string_pretty(&error).unwrap_or_else(|serialization| {
-            format!("Error serializing mutation result: {serialization}")
-        }),
+        content: serde_json::to_string_pretty(&error)
+            .unwrap_or_else(|serialization| {
+                format!("Error serializing mutation result: {serialization}")
+            })
+            .into(),
         is_error: true,
     }
 }
@@ -384,41 +391,126 @@ pub(crate) async fn write_mounted(
     .await
 }
 
+pub(crate) fn read_opened_file(
+    mut file: File,
+    path_display: String,
+    offset: usize,
+    limit: usize,
+    image_read: bool,
+) -> ToolResult {
+    let mut header = [0u8; 32];
+    let header_len = match file.read(&mut header) {
+        Ok(length) => length,
+        Err(error) => return read_error(&path_display, error),
+    };
+    if let Err(error) = file.seek(SeekFrom::Start(0)) {
+        return read_error(&path_display, error);
+    }
+    if is_image_candidate(Path::new(&path_display), &header[..header_len]) {
+        if !image_read {
+            return error_tool_result(MutationError::precondition(
+                "unsupported_image",
+                format!("the selected model cannot view image files: {path_display}"),
+            ));
+        }
+        let file_len = match file.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(error) => return read_error(&path_display, error),
+        };
+        if file_len > MAX_IMAGE_BYTES as u64 {
+            return error_tool_result(MutationError::precondition(
+                "image_limit_exceeded",
+                format!("image exceeds the {MAX_IMAGE_BYTES} byte limit: {path_display}"),
+            ));
+        }
+        let reservation = match reserve_image_memory(file_len as usize) {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                return error_tool_result(MutationError::precondition(
+                    error.code(),
+                    error.message(),
+                ))
+            }
+        };
+        let mut bytes = Vec::with_capacity(file_len as usize);
+        if let Err(error) = file
+            .take((MAX_IMAGE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+        {
+            return read_error(&path_display, error);
+        }
+        if bytes.len() > MAX_IMAGE_BYTES {
+            return error_tool_result(MutationError::precondition(
+                "image_limit_exceeded",
+                format!("image exceeds the {MAX_IMAGE_BYTES} byte limit: {path_display}"),
+            ));
+        }
+        let image = match ToolImage::validate_reserved(
+            bytes,
+            Some(Path::new(&path_display)),
+            None,
+            reservation,
+        ) {
+            Ok(image) => image,
+            Err(error) => {
+                return error_tool_result(MutationError::precondition(
+                    error.code(),
+                    format!("{}: {path_display}", error.message()),
+                ))
+            }
+        };
+        let content = ToolContent::from_parts(vec![ToolContentPart::Image(image)])
+            .expect("one validated image is within result limits");
+        return ToolResult {
+            content,
+            is_error: false,
+        };
+    }
+    let mut bytes = Vec::new();
+    if let Err(error) = file.read_to_end(&mut bytes) {
+        return read_error(&path_display, error);
+    }
+    match read_result(path_display, &bytes, offset, limit) {
+        Ok(result) => success_tool_result(&result),
+        Err(error) => error,
+    }
+}
+
 pub(crate) async fn read_mounted(
     root: PathBuf,
     relative: PathBuf,
     path_display: String,
     offset: usize,
     limit: usize,
+    image_read: bool,
 ) -> ToolResult {
     #[cfg(unix)]
     {
+        let display_for_task = path_display.clone();
         let result = tokio::task::spawn_blocking(move || {
             let (directory, name) = open_parent_beneath(&root, &relative, false)?;
-            let mut file = open_target_at(&directory, &name)?
+            let file = open_target_at(&directory, &name)?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "mounted file not found"))?;
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
-            Ok::<_, io::Error>(bytes)
+            Ok::<_, io::Error>(read_opened_file(
+                file,
+                display_for_task,
+                offset,
+                limit,
+                image_read,
+            ))
         })
         .await;
-        let bytes = match result {
-            Ok(Ok(bytes)) => bytes,
-            Ok(Err(error)) => return read_error(&path_display, error),
-            Err(error) => {
-                return argument_error(format!(
-                    "mounted file read task failed for {path_display}: {error}"
-                ))
-            }
-        };
-        match read_result(path_display, &bytes, offset, limit) {
-            Ok(result) => success_tool_result(&result),
-            Err(error) => error,
+        match result {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => read_error(&path_display, error),
+            Err(error) => argument_error(format!(
+                "mounted file read task failed for {path_display}: {error}"
+            )),
         }
     }
     #[cfg(not(unix))]
     {
-        let _ = (root, relative, offset, limit);
+        let _ = (root, relative, offset, limit, image_read);
         argument_error(format!(
             "safe mounted file reads are unsupported on this platform: {path_display}"
         ))
@@ -1314,6 +1406,7 @@ _nac_cwd = posix.getcwd()
 sys.path = [entry for entry in sys.path if entry not in ("", ".", _nac_cwd)]
 del _nac_cwd
 
+import base64
 import difflib
 import fcntl
 import hashlib
@@ -1537,7 +1630,35 @@ operation = payload["operation"]
 if operation == "read":
     path = Path(payload["resolved_path"]).expanduser()
     try:
-        data = path.read_bytes()
+        with path.open("rb") as source:
+            header = source.read(32)
+            extension = path.suffix.lower()
+            supported_extension = extension in (".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".gif", ".webp")
+            # Transport-only parity with image::guess_format; Rust validates the returned bytes.
+            image_signature = (
+                header.startswith(b"\x89PNG\r\n\x1a\n")
+                or header.startswith(b"\xff\xd8\xff")
+                or header.startswith(b"GIF87a")
+                or header.startswith(b"GIF89a")
+                or (len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP")
+                or header.startswith((b"MM\x00*", b"II*\x00", b"DDS ", b"BM", b"\x00\x00\x01\x00"))
+                or header.startswith((b"\x23?RADIANCE", b"\x76\x2f\x31\x01", b"qoif", b"farbfeld"))
+                or header.startswith((b"P1", b"P2", b"P3", b"P4", b"P5", b"P6", b"P7"))
+                or (len(header) >= 12 and header[:2] == b"\x00\x00" and header[4:12] == b"ftypavif")
+            )
+            if supported_extension or image_signature:
+                if not payload.get("image_read", False):
+                    fail("unsupported_image", f"the selected model cannot view image files: {original_path}")
+                image_limit = 20 * 1024 * 1024
+                if path.stat().st_size > image_limit:
+                    fail("image_limit_exceeded", f"image exceeds the {image_limit} byte limit: {original_path}")
+                source.seek(0)
+                data = source.read(image_limit + 1)
+                if len(data) > image_limit:
+                    fail("image_limit_exceeded", f"image exceeds the {image_limit} byte limit: {original_path}")
+                emit({"image_data": base64.b64encode(data).decode("ascii")})
+            source.seek(0)
+            data = source.read()
     except FileNotFoundError:
         fail("not_found", f"file not found: {original_path}")
     if b"\0" in data[:8192]:
@@ -1660,6 +1781,11 @@ pub(crate) async fn execute_remote(payload: Value, runtime: &ToolRuntime) -> Too
             ))
         }
     };
+    let path_display = payload
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     loop {
         match runtime.backend.exec("python3", &args, Some(&input)).await {
             Ok(output) if remote_file_lock_busy(&output) => {
@@ -1676,8 +1802,65 @@ pub(crate) async fn execute_remote(payload: Value, runtime: &ToolRuntime) -> Too
                         ),
                     ));
                 }
+                if output.status.success() {
+                    if let Ok(value) = serde_json::from_str::<Value>(&content) {
+                        if let Some(encoded) = value.get("image_data").and_then(Value::as_str) {
+                            let reservation =
+                                match reserve_image_memory(encoded.len().div_ceil(4) * 3) {
+                                    Ok(reservation) => reservation,
+                                    Err(error) => {
+                                        return error_tool_result(MutationError::precondition(
+                                            error.code(),
+                                            error.message(),
+                                        ))
+                                    }
+                                };
+                            let bytes = match BASE64.decode(encoded.as_bytes()) {
+                                Ok(bytes) => bytes,
+                                Err(_) => {
+                                    return error_tool_result(MutationError::precondition(
+                                        "invalid_image",
+                                        "remote image result is not valid base64",
+                                    ))
+                                }
+                            };
+                            let image_path = path_display.clone();
+                            let image = match tokio::task::spawn_blocking(move || {
+                                ToolImage::validate_reserved(
+                                    bytes,
+                                    Some(Path::new(&image_path)),
+                                    None,
+                                    reservation,
+                                )
+                            })
+                            .await
+                            {
+                                Ok(Ok(image)) => image,
+                                Ok(Err(error)) => {
+                                    return error_tool_result(MutationError::precondition(
+                                        error.code(),
+                                        error.message(),
+                                    ))
+                                }
+                                Err(error) => {
+                                    return error_tool_result(MutationError::precondition(
+                                        "invalid_image",
+                                        format!("remote image validation task failed: {error}"),
+                                    ))
+                                }
+                            };
+                            let content =
+                                ToolContent::from_parts(vec![ToolContentPart::Image(image)])
+                                    .expect("one validated image is within result limits");
+                            return ToolResult {
+                                content,
+                                is_error: false,
+                            };
+                        }
+                    }
+                }
                 return ToolResult {
-                    content,
+                    content: content.into(),
                     is_error: !output.status.success(),
                 };
             }
@@ -1694,6 +1877,17 @@ pub(crate) async fn execute_remote(payload: Value, runtime: &ToolRuntime) -> Too
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_png() -> Vec<u8> {
+        use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+        use std::io::Cursor;
+
+        let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255])));
+        let mut encoded = Cursor::new(Vec::new());
+        source.write_to(&mut encoded, ImageFormat::Png).unwrap();
+        encoded.into_inner()
+    }
+
     struct RestorePath(Option<std::ffi::OsString>);
 
     impl Drop for RestorePath {
@@ -1705,6 +1899,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mounted_reads_preserve_validated_image_content() {
+        let root = std::env::temp_dir().join(format!("nac-mounted-image-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("fixture.png"), test_png()).unwrap();
+
+        let result = read_mounted(
+            root.clone(),
+            PathBuf::from("fixture.png"),
+            "fixture.png".to_string(),
+            0,
+            10,
+            true,
+        )
+        .await;
+        assert!(!result.is_error, "{}", result.content);
+        assert!(matches!(
+            result.content.parts().unwrap(),
+            [ToolContentPart::Image(image)] if image.mime_type().as_str() == "image/png"
+        ));
+
+        let rejected = read_mounted(
+            root.clone(),
+            PathBuf::from("fixture.png"),
+            "fixture.png".to_string(),
+            0,
+            10,
+            false,
+        )
+        .await;
+        assert!(rejected.is_error);
+        assert!(rejected.content.contains("unsupported_image"));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2148,9 +2378,10 @@ mod tests {
         )
         .await;
         assert!(!create.is_error, "{}", create.content);
-        let read = crate::tools::read::execute(json!({"path":"file.txt"}), &runtime).await;
+        let read = crate::tools::read::execute(json!({"path":"file.txt"}), &runtime, false).await;
         assert!(!read.is_error, "{}", read.content);
-        let read_value: Value = serde_json::from_str(&read.content).unwrap();
+        let read_value: Value =
+            serde_json::from_str(read.content.as_text().expect("text tool result")).unwrap();
         let edit = crate::tools::edit::execute(
             json!({
                 "path":"file.txt",
@@ -2209,14 +2440,28 @@ mod tests {
             workspace.clone(),
         ))
         .into();
+        fs::write(workspace.join("fixture.png"), test_png()).unwrap();
+        let image =
+            crate::tools::read::execute(json!({"path":"fixture.png"}), &runtime, true).await;
+        assert!(!image.is_error, "{}", image.content);
+        assert!(matches!(
+            image.content.parts().unwrap(),
+            [ToolContentPart::Image(image)] if image.mime_type().as_str() == "image/png"
+        ));
+        fs::write(workspace.join("unsupported.bmp"), b"BMunsupported").unwrap();
+        let unsupported =
+            crate::tools::read::execute(json!({"path":"unsupported.bmp"}), &runtime, true).await;
+        assert!(unsupported.is_error);
+        assert!(unsupported.content.contains("invalid_image"));
         fs::write(
             workspace.join("difflib.py"),
             "raise RuntimeError('workspace module imported')\n",
         )
         .unwrap();
-        let read = crate::tools::read::execute(json!({"path":"file.txt"}), &runtime).await;
+        let read = crate::tools::read::execute(json!({"path":"file.txt"}), &runtime, false).await;
         assert!(!read.is_error, "{}", read.content);
-        let read_value: Value = serde_json::from_str(&read.content).unwrap();
+        let read_value: Value =
+            serde_json::from_str(read.content.as_text().expect("text tool result")).unwrap();
         let edit = crate::tools::edit::execute(
             json!({
                 "path":"file.txt",
@@ -2571,7 +2816,7 @@ mod tests {
 
     #[test]
     fn worker_definitions_advertise_revisioned_batched_contract() {
-        let definitions = crate::tools::worker_tool_definitions();
+        let definitions = crate::tools::worker_tool_definitions(false);
         let edit = definitions
             .iter()
             .find(|definition| definition.function.name == "edit")

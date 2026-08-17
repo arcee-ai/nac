@@ -189,7 +189,10 @@ async fn read_response_body(
     let status = response.status();
     response.text().await.map_err(|error| ModelHttpError {
         status: Some(status.as_u16()),
-        message: format!("Failed to read response body: {}", with_source_chain(&error)),
+        message: format!(
+            "Failed to read response body: {}",
+            with_source_chain(&error)
+        ),
     })
 }
 
@@ -304,6 +307,7 @@ impl ModelClient {
         // Runs once here so every adapter (and the compaction summary call)
         // inherits it; operates on the send-time copy, never the transcript.
         let messages = normalize_history(messages, &self.model_origin());
+        self.validate_image_history(&messages)?;
         // S6: dispatch on the resolved catalog api (the wire protocol), not
         // the provider id. BackendKind remains the auth/base-url/catalog axis
         // (approved decision #1); within the completions adapter it still
@@ -353,6 +357,34 @@ impl ModelClient {
 
     pub fn backend(&self) -> BackendKind {
         self.backend
+    }
+    pub(crate) fn supports_image_tool_results(&self) -> bool {
+        self.resolved_model.image_input
+            && matches!(
+                self.resolved_model.api,
+                catalog::ApiKind::OpenAiResponses | catalog::ApiKind::ChatGptCodexResponses
+            )
+    }
+    fn validate_image_history(&self, messages: &[Message]) -> Result<()> {
+        let mut stats = crate::tool_content::ImageStats::default();
+        for message in messages {
+            let Message::Tool { content, .. } = message else {
+                continue;
+            };
+            let content_stats = content.image_stats();
+            if content_stats.count == 0 {
+                continue;
+            }
+            if !self.supports_image_tool_results() {
+                anyhow::bail!(
+                    "image tool results are unsupported by model '{}' on backend '{}'",
+                    self.model,
+                    self.backend
+                );
+            }
+            stats = stats.checked_add(content_stats)?;
+        }
+        Ok(())
     }
 
     pub fn reasoning_effort(&self) -> Option<ReasoningEffort> {
@@ -855,11 +887,7 @@ impl ModelClient {
                     status.as_u16(),
                     safe_url,
                     truncate_utf8(
-                        &redact_json_body_with_extra_headers(
-                            &body,
-                            secrets,
-                            &self.extra_headers,
-                        ),
+                        &redact_json_body_with_extra_headers(&body, secrets, &self.extra_headers,),
                         500,
                     )
                 ),

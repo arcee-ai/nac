@@ -35,7 +35,9 @@ async fn send_provider_test_request(client: &ModelClient, url: &str) -> Result<V
     match client.backend {
         BackendKind::OpenAiResponses => client.post_json_with_retry(url, &body).await,
         BackendKind::AnthropicMessages => {
-            client.post_anthropic_json_with_retry(url, &body, false).await
+            client
+                .post_anthropic_json_with_retry(url, &body, false)
+                .await
         }
         backend => panic!("unsupported test backend: {backend}"),
     }
@@ -105,7 +107,7 @@ fn s5_history(
         },
         Message::Tool {
             tool_call_id: "call-1".to_string(),
-            content: "tool output".to_string(),
+            content: "tool output".into(),
         },
         Message::User {
             content: "second".to_string(),
@@ -172,4 +174,49 @@ fn s5_thinking_blocks() -> Value {
 
 fn s5_reasoning_items() -> Value {
     json!([{"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "prior thinking"}]}])
+}
+
+fn image_tool_message() -> Message {
+    use crate::tool_content::{ToolContent, ToolContentPart, ToolImage};
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(1, 1, Rgba([1, 2, 3, 255])));
+    let mut encoded = Cursor::new(Vec::new());
+    source.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    let image = ToolImage::validate(encoded.into_inner(), None, None).unwrap();
+    Message::Tool {
+        tool_call_id: "call-image".to_string(),
+        content: ToolContent::from_parts(vec![ToolContentPart::Image(image)]).unwrap(),
+    }
+}
+
+#[test]
+fn image_tool_results_require_both_model_and_adapter_support() {
+    let mut responses = test_model_client(
+        BackendKind::OpenAiResponses,
+        "http://unused".to_string(),
+        Default::default(),
+    );
+    responses.resolved_model.image_input = true;
+    assert!(responses.supports_image_tool_results());
+    assert!(responses
+        .validate_image_history(&[image_tool_message()])
+        .is_ok());
+
+    let mut anthropic = test_model_client(
+        BackendKind::AnthropicMessages,
+        "http://unused".to_string(),
+        Default::default(),
+    );
+    anthropic.resolved_model.image_input = true;
+    assert!(!anthropic.supports_image_tool_results());
+    assert!(anthropic
+        .validate_image_history(&[image_tool_message()])
+        .unwrap_err()
+        .to_string()
+        .contains("unsupported"));
+
+    responses.resolved_model.image_input = false;
+    assert!(!responses.supports_image_tool_results());
 }

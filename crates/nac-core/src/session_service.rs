@@ -1863,7 +1863,9 @@ impl SessionService {
             .validate(&self.metadata.store_path, session_id)
             .map_err(anyhow::Error::new)?;
         let recovery = crate::store::reconcile_active_run(&self.metadata.store_path, session_id)?;
-        let mut snapshot = sessions::load_session(&self.metadata.store_path, session_id)?;
+        let mut snapshot =
+            sessions::load_session_async(self.metadata.store_path.clone(), session_id.to_string())
+                .await?;
         if Some(snapshot.config_version) != self.config_version {
             return Err(anyhow::anyhow!(
                 "session '{session_id}' configuration changed before run recovery"
@@ -2035,14 +2037,13 @@ impl SessionService {
                 // state. Keep cached identity/configuration fields: cwd is
                 // runtime-canonicalized, and the config revision was checked
                 // above.
-                let durable_snapshot =
-                    sessions::load_session(&self.metadata.store_path, session_id).map_err(
-                        |error| OperationAdmissionPreparationError::Coordination {
+                let (durable_run_state, durable_updated_at) =
+                    sessions::load_session_run_state(&self.metadata.store_path, session_id)
+                        .map_err(|error| OperationAdmissionPreparationError::Coordination {
                             message: SessionCoordinationError::store(format!(
                                 "failed to refresh durable session run state: {error:#}"
                             )),
-                        },
-                    )?;
+                        })?;
                 let mut snapshot = self.session_snapshot.try_lock().map_err(|_| {
                     OperationAdmissionPreparationError::Coordination {
                         message: SessionCoordinationError::local_agent_busy(),
@@ -2050,13 +2051,14 @@ impl SessionService {
                 })?;
                 if let Some(snapshot) = snapshot.as_mut() {
                     snapshot.messages = durable_blob;
-                    snapshot.last_response_duration_ms = durable_snapshot.last_response_duration_ms;
+                    snapshot.last_response_duration_ms =
+                        durable_run_state.last_response_duration_ms;
                     snapshot.previous_response_duration_ms =
-                        durable_snapshot.previous_response_duration_ms;
-                    snapshot.response_durations_ms = durable_snapshot.response_durations_ms;
-                    snapshot.token_usages = durable_snapshot.token_usages;
-                    snapshot.unattributed_token_usage = durable_snapshot.unattributed_token_usage;
-                    snapshot.updated_at = durable_snapshot.updated_at;
+                        durable_run_state.previous_response_duration_ms;
+                    snapshot.response_durations_ms = durable_run_state.response_durations_ms;
+                    snapshot.token_usages = durable_run_state.token_usages;
+                    snapshot.unattributed_token_usage = durable_run_state.unattributed_token_usage;
+                    snapshot.updated_at = durable_updated_at;
                 }
             }
         }
@@ -3208,7 +3210,7 @@ pub(super) mod tests {
             },
             Message::Tool {
                 tool_call_id: "older-tool".to_string(),
-                content: "older result".to_string(),
+                content: "older result".into(),
             },
             Message::System {
                 content: "system-two".to_string(),
@@ -3234,7 +3236,7 @@ pub(super) mod tests {
             },
             Message::Tool {
                 tool_call_id: "thread-zeta".to_string(),
-                content: "zeta started".to_string(),
+                content: "zeta started".into(),
             },
             Message::Assistant {
                 content: None,
@@ -3262,7 +3264,7 @@ pub(super) mod tests {
             },
             Message::Tool {
                 tool_call_id: "thread-alpha".to_string(),
-                content: "alpha started".to_string(),
+                content: "alpha started".into(),
             },
             Message::Assistant {
                 content: Some("latest answer".to_string()),

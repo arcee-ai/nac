@@ -188,11 +188,11 @@ fn weighted_boundary_counts_complete_tool_groups_atomically() {
         },
         Message::Tool {
             tool_call_id: "b".to_string(),
-            content: "large result".repeat(500),
+            content: "large result".repeat(500).into(),
         },
         Message::Tool {
             tool_call_id: "a".to_string(),
-            content: "tool error: timed out".to_string(),
+            content: "tool error: timed out".into(),
         },
         user("retained"),
     ];
@@ -258,7 +258,7 @@ fn safe_boundary_scanner_rejects_duplicate_unknown_orphan_missing_and_interleave
     };
     let tool = |id: &str| Message::Tool {
         tool_call_id: id.to_string(),
-        content: "any content, including errors".to_string(),
+        content: ("any content, including errors".to_string()).into(),
     };
 
     let valid = vec![calls(&["a", "b"]), tool("b"), tool("a")];

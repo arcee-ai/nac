@@ -275,8 +275,10 @@ impl AgentEvent {
         result: &crate::tools::ToolResult,
     ) -> Self {
         let (command_status, exit_code) = if name == "exec_command" {
-            serde_json::from_str::<serde_json::Value>(&result.content)
-                .ok()
+            result
+                .content
+                .as_text()
+                .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok())
                 .map(|value| {
                     let status = value
                         .get("status")

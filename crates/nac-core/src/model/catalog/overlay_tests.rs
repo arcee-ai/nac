@@ -26,6 +26,7 @@ fn novel_model_payload() -> String {
                 NOVEL_MODEL: {
                     "name": "DeepSeek V9 Overlay Test",
                     "reasoning": true,
+                    "modalities": { "input": ["text", "image"], "output": ["text"] },
                     "limit": { "context": 999_000, "output": 77_000 },
                     "cost": { "input": 1.5, "output": 6.0, "cache_read": 0.15, "cache_write": 1.875 }
                 }
@@ -144,6 +145,7 @@ async fn refresh_fetches_maps_writes_overlay_and_reloads_catalog() {
     assert_eq!(metadata.source, ModelSource::Overlay);
     assert_eq!(metadata.context_window, 999_000);
     assert_eq!(metadata.max_tokens, 77_000);
+    assert!(metadata.image_input);
     assert_eq!(metadata.cost.input, 1.5);
     assert_eq!(
         metadata.display_name.as_deref(),
@@ -869,6 +871,30 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
     }
 }
 
+#[test]
+fn runtime_mapper_refreshes_known_model_image_capability_in_both_directions() {
+    let baseline = baseline_catalog();
+    for (inputs, expected) in [
+        (serde_json::json!(["text", "image"]), true),
+        (serde_json::json!(["text"]), false),
+    ] {
+        let payload = serde_json::json!({
+            "deepseek": {
+                "models": {
+                    "deepseek-v4-flash": {
+                        "modalities": { "input": inputs, "output": ["text"] }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let (providers, _, _) = map_models_dev(&payload, &baseline).unwrap();
+        assert_eq!(
+            providers[&BackendKind::DeepSeekChat].models["deepseek-v4-flash"].image_input,
+            expected
+        );
+    }
+}
 #[test]
 fn runtime_mapper_preserves_only_malformed_baseline_ids() {
     let seed = seed::seed_catalog();

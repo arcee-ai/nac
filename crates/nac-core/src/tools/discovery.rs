@@ -1088,7 +1088,7 @@ pub(crate) async fn execute(tool: &'static str, args: Value, runtime: &ToolRunti
     let result = tokio::time::timeout(QUERY_TIMEOUT, execute_inner(tool, args, runtime)).await;
     match result {
         Ok(Ok(value)) => ToolResult {
-            content: value.to_string(),
+            content: (value.to_string()).into(),
             is_error: false,
         },
         Ok(Err(error)) => error_result(error.code, &error.message, error.path.as_deref()),
@@ -2416,14 +2416,15 @@ fn diagnostic(code: &str, message: &str, path: Option<&str>) -> Record {
 
 fn error_result(code: &str, message: &str, path: Option<&str>) -> ToolResult {
     ToolResult {
-        content: json!({
+        content: (json!({
             "error": {
                 "code": code,
                 "message": message,
                 "path": path,
             }
         })
-        .to_string(),
+        .to_string())
+        .into(),
         is_error: true,
     }
 }

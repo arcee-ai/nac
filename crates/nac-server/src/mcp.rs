@@ -754,6 +754,6 @@ fn message_content(msg: &nac_core::types::Message) -> String {
         nac_core::types::Message::System { content } => content.clone(),
         nac_core::types::Message::User { content } => content.clone(),
         nac_core::types::Message::Assistant { content, .. } => content.clone().unwrap_or_default(),
-        nac_core::types::Message::Tool { content, .. } => content.clone(),
+        nac_core::types::Message::Tool { content, .. } => content.preview(),
     }
 }

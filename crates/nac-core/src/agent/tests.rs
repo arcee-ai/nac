@@ -74,7 +74,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
 #[test]
 fn exec_command_result_preview_uses_structured_previews() {
     let result = ToolResult {
-        content: serde_json::json!({
+        content: (serde_json::json!({
             "status": "completed",
             "stdout_preview": "line one\nline two\n",
             "stderr_preview": "",
@@ -82,7 +82,8 @@ fn exec_command_result_preview_uses_structured_previews() {
             "wall_time_ms": 1,
             "truncated": false,
         })
-        .to_string(),
+        .to_string())
+        .into(),
         is_error: false,
     };
 
@@ -92,7 +93,7 @@ fn exec_command_result_preview_uses_structured_previews() {
 #[test]
 fn exec_command_result_preview_includes_nonzero_exit() {
     let result = ToolResult {
-        content: serde_json::json!({
+        content: (serde_json::json!({
             "status": "completed",
             "stdout_preview": "",
             "stderr_preview": "failure\n",
@@ -100,7 +101,8 @@ fn exec_command_result_preview_includes_nonzero_exit() {
             "wall_time_ms": 1,
             "truncated": false,
         })
-        .to_string(),
+        .to_string())
+        .into(),
         is_error: false,
     };
 
@@ -113,13 +115,14 @@ fn exec_command_result_preview_includes_nonzero_exit() {
 #[test]
 fn exec_command_finished_event_carries_structured_outcome() {
     let result = ToolResult {
-        content: serde_json::json!({
+        content: (serde_json::json!({
             "status": "completed",
             "stdout_preview": "",
             "stderr_preview": "failure",
             "exit_code": 7,
         })
-        .to_string(),
+        .to_string())
+        .into(),
         is_error: false,
     };
     let event = AgentEvent::tool_call_finished(
@@ -142,7 +145,7 @@ fn exec_command_finished_event_carries_structured_outcome() {
 #[test]
 fn finished_pty_result_preview_keeps_terminal_output() {
     let result = ToolResult {
-        content: serde_json::json!({
+        content: (serde_json::json!({
             "session_name": null,
             "output_id": "termout-1",
             "start_cursor": 0,
@@ -153,7 +156,8 @@ fn finished_pty_result_preview_keeps_terminal_output() {
             "exit_code": 0,
             "wall_time_ms": 1,
         })
-        .to_string(),
+        .to_string())
+        .into(),
         is_error: false,
     };
 
@@ -169,13 +173,14 @@ fn exec_command_finished_events_distinguish_terminal_statuses() {
         ("spawn_error", crate::terminal::CommandStatus::SpawnError),
     ] {
         let result = ToolResult {
-            content: serde_json::json!({
+            content: (serde_json::json!({
                 "status": serialized,
                 "stdout_preview": "",
                 "stderr_preview": "",
                 "exit_code": null,
             })
-            .to_string(),
+            .to_string())
+            .into(),
             is_error: serialized == "spawn_error",
         };
         let event = AgentEvent::tool_call_finished(
@@ -492,4 +497,128 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
     ));
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[test]
+fn image_limit_error_is_the_only_finished_event_for_the_result() {
+    use crate::tool_content::{ToolContent, ToolContentPart, ToolImage, MAX_TRANSCRIPT_IMAGES};
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(1, 1, Rgba([1, 2, 3, 255])));
+    let mut encoded = Cursor::new(Vec::new());
+    source.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    let image = ToolImage::validate(encoded.into_inner(), None, None).unwrap();
+    let image_content = ToolContent::from_parts(vec![ToolContentPart::Image(image)]).unwrap();
+    let messages = (0..MAX_TRANSCRIPT_IMAGES)
+        .map(|index| Message::Tool {
+            tool_call_id: format!("prior-{index}"),
+            content: image_content.clone(),
+        })
+        .collect::<Vec<_>>();
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let finalized = finalize_tool_results(
+        &messages,
+        vec![(
+            "call-image".to_string(),
+            "read".to_string(),
+            ToolResult {
+                content: image_content,
+                is_error: false,
+            },
+        )],
+        &EventSink::channel(events_tx),
+        &None,
+    );
+
+    assert!(
+        matches!(&finalized[0], Message::Tool { content, .. } if content.contains("image_limit_exceeded"))
+    );
+    assert!(matches!(
+        events_rx.try_recv().unwrap(),
+        AgentEvent::ToolCallFinished {
+            call_id,
+            is_error: true,
+            ..
+        } if call_id == "call-image"
+    ));
+    assert!(events_rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn cancelled_image_result_still_emits_finished_event() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    let root = std::env::temp_dir().join(format!(
+        "nac_cancelled_image_finish_{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(1, 1, Rgba([1, 2, 3, 255])));
+    let mut encoded = Cursor::new(Vec::new());
+    source.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    std::fs::write(root.join("fixture.png"), encoded.into_inner()).unwrap();
+
+    let response = serde_json::json!({
+        "status": "completed",
+        "output": [{
+            "type": "function_call",
+            "call_id": "call-image",
+            "name": "read",
+            "arguments": "{\"path\":\"fixture.png\"}"
+        }],
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+    })
+    .to_string();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response)]);
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut agent = Agent::with_config(
+        ModelClient::new_for_test_server(server.base_url.clone()),
+        AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
+            mode: AgentMode::Worker,
+            store_path: root.join("store.db"),
+            session_id: None,
+            orchestrator_compaction_threshold: None,
+            initial_messages: Vec::new(),
+            thread_name: Some("worker".to_string()),
+            dispatch_id: None,
+            event_sink: EventSink::channel(events_tx),
+            workspace_cwd: root.clone(),
+            config_cwd: root.clone(),
+            working_directory: root.display().to_string(),
+            worker_executable: None,
+            sandbox: None,
+            ssh: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: None,
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            light_client: None,
+        },
+    )
+    .unwrap();
+    agent.command_cancellation().cancel();
+
+    let error = agent.send("read the fixture").await.unwrap_err();
+    assert!(error.to_string().contains("worker command cancelled"));
+    let finished = std::iter::from_fn(|| events_rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AgentEvent::ToolCallFinished {
+                call_id,
+                content_preview,
+                ..
+            } => Some((call_id, content_preview)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0].0, "call-image");
+    assert!(finished[0].1.contains("[image: image/png,"));
+
+    let _ = std::fs::remove_dir_all(root);
 }

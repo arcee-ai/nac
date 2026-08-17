@@ -1,3 +1,8 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+
+use crate::types::{ToolContent, ToolContentPart};
+
 use super::pseudo_tool_calls::strip_native_tool_format_tags;
 use super::*;
 
@@ -63,7 +68,9 @@ pub(super) fn completions_message_to_value(
         } => json!({
             "role": "tool",
             "tool_call_id": tool_call_id,
-            "content": content,
+            "content": content
+                .as_text()
+                .expect("image tool history is rejected before completions mapping"),
         }),
     }
 }
@@ -358,10 +365,38 @@ pub(super) fn responses_input_items(messages: &[Message]) -> Vec<Value> {
             } => items.push(json!({
                 "type": "function_call_output",
                 "call_id": tool_call_id,
-                "output": content,
+                "output": responses_tool_output(content),
             })),
         }
     }
 
     items
+}
+
+fn responses_tool_output(content: &ToolContent) -> Value {
+    if let Some(text) = content.as_text() {
+        return Value::String(text.to_string());
+    }
+    Value::Array(
+        content
+            .parts()
+            .expect("non-text tool content has validated parts")
+            .iter()
+            .map(|part| match part {
+                ToolContentPart::Text(text) => json!({
+                    "type": "input_text",
+                    "text": text,
+                }),
+                ToolContentPart::Image(image) => json!({
+                    "type": "input_image",
+                    "image_url": format!(
+                        "data:{};base64,{}",
+                        image.mime_type().as_str(),
+                        BASE64.encode(image.data())
+                    ),
+                    "detail": "auto",
+                }),
+            })
+            .collect(),
+    )
 }

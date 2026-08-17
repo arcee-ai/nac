@@ -150,15 +150,15 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await
     {
         Ok(Ok(())) => ToolResult {
-            content: format!("Saved workset '{}' with {} item(s).", id, items_len),
+            content: (format!("Saved workset '{}' with {} item(s).", id, items_len)).into(),
             is_error: false,
         },
         Ok(Err(error)) => ToolResult {
-            content: format!("Error saving workset '{}': {}", id, error),
+            content: (format!("Error saving workset '{}': {}", id, error)).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: format!("Internal error saving workset '{}': {}", id, join_error),
+            content: (format!("Internal error saving workset '{}': {}", id, join_error)).into(),
             is_error: true,
         },
     }
@@ -179,19 +179,19 @@ pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let wid = id.clone();
     match tokio::task::spawn_blocking(move || store::read_workset(&store_path, &sid, &wid)).await {
         Ok(Ok(Some(workset))) => ToolResult {
-            content: store::render_workset_document(&workset),
+            content: (store::render_workset_document(&workset)).into(),
             is_error: false,
         },
         Ok(Ok(None)) => ToolResult {
-            content: format!("Workset '{}' does not exist in this session.", id),
+            content: (format!("Workset '{}' does not exist in this session.", id)).into(),
             is_error: true,
         },
         Ok(Err(error)) => ToolResult {
-            content: format!("Error reading workset '{}': {}", id, error),
+            content: (format!("Error reading workset '{}': {}", id, error)).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: format!("Internal error reading workset '{}': {}", id, join_error),
+            content: (format!("Internal error reading workset '{}': {}", id, join_error)).into(),
             is_error: true,
         },
     }
@@ -207,15 +207,15 @@ pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
     let sid = session_id.clone();
     match tokio::task::spawn_blocking(move || store::list_worksets(&store_path, &sid)).await {
         Ok(Ok(worksets)) => ToolResult {
-            content: store::render_workset_list(&worksets),
+            content: (store::render_workset_list(&worksets)).into(),
             is_error: false,
         },
         Ok(Err(error)) => ToolResult {
-            content: format!("Error listing worksets: {}", error),
+            content: (format!("Error listing worksets: {}", error)).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: format!("Internal error listing worksets: {}", join_error),
+            content: (format!("Internal error listing worksets: {}", join_error)).into(),
             is_error: true,
         },
     }
@@ -234,7 +234,7 @@ fn def(name: &str, description: &str, parameters: serde_json::Value) -> ToolDefi
 
 fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
     runtime.session_id.as_deref().ok_or_else(|| ToolResult {
-        content: "Error: workset tools require an active session".to_string(),
+        content: ("Error: workset tools require an active session".to_string()).into(),
         is_error: true,
     })
 }
@@ -244,7 +244,7 @@ fn optional_string(args: &Value, key: &str) -> Result<Option<String>, ToolResult
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => Ok(Some(value.clone())),
         Some(_) => Err(ToolResult {
-            content: format!("Error: '{}' must be a string", key),
+            content: (format!("Error: '{}' must be a string", key)).into(),
             is_error: true,
         }),
     }
@@ -253,13 +253,13 @@ fn optional_string(args: &Value, key: &str) -> Result<Option<String>, ToolResult
 fn parse_items(value: Option<&Value>) -> Result<Vec<WorksetItemDefinition>, ToolResult> {
     let Some(value) = value else {
         return Err(ToolResult {
-            content: "Error: 'workset_items' is required".to_string(),
+            content: ("Error: 'workset_items' is required".to_string()).into(),
             is_error: true,
         });
     };
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
-            content: "Error: 'workset_items' must be an array".to_string(),
+            content: ("Error: 'workset_items' must be an array".to_string()).into(),
             is_error: true,
         });
     };
@@ -293,7 +293,7 @@ fn require_item_str(value: &Value, key: &str) -> Result<String, ToolResult> {
         .and_then(Value::as_str)
         .map(ToString::to_string)
         .ok_or_else(|| ToolResult {
-            content: format!("Error: workset item '{}' is required", key),
+            content: (format!("Error: workset item '{}' is required", key)).into(),
             is_error: true,
         })
 }
@@ -301,13 +301,13 @@ fn require_item_str(value: &Value, key: &str) -> Result<String, ToolResult> {
 fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolResult> {
     let Some(value) = value.get(key) else {
         return Err(ToolResult {
-            content: format!("Error: '{}' is required", key),
+            content: (format!("Error: '{}' is required", key)).into(),
             is_error: true,
         });
     };
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
-            content: format!("Error: '{}' must be an array of strings", key),
+            content: (format!("Error: '{}' must be an array of strings", key)).into(),
             is_error: true,
         });
     };
@@ -315,7 +315,7 @@ fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolRes
     for item in items {
         let Some(value) = item.as_str() else {
             return Err(ToolResult {
-                content: format!("Error: '{}' must be an array of strings", key),
+                content: (format!("Error: '{}' must be an array of strings", key)).into(),
                 is_error: true,
             });
         };

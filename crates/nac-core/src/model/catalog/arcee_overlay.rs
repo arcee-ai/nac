@@ -366,6 +366,7 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
             max_tokens,
             cost,
             reasoning,
+            image_input: false,
             thinking_level_map,
             adaptive_thinking: false,
             enabled_thinking: false,

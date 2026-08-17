@@ -176,7 +176,9 @@ fn anthropic_messages_from_internal(messages: &[Message]) -> Result<(Option<Stri
                     content_blocks.push(json!({
                         "type": "tool_result",
                         "tool_use_id": tool_call_id,
-                        "content": content,
+                        "content": content
+                            .as_text()
+                            .expect("image tool history is rejected before Anthropic mapping"),
                     }));
                     index += 1;
                 }

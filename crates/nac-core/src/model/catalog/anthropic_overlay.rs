@@ -502,6 +502,7 @@ pub(super) fn merge_anthropic_overlay(
                 max_tokens: entry.max_tokens.unwrap_or(FALLBACK_MAX_TOKENS),
                 cost: super::ModelCostRates::default(),
                 reasoning: entry.reasoning,
+                image_input: false,
                 thinking_level_map: thinking_level_map.clone(),
                 adaptive_thinking: entry.adaptive_thinking,
                 enabled_thinking: entry.enabled_thinking,

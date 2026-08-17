@@ -432,7 +432,7 @@ fn responses_input_items_expand_reasoning_and_tool_state() {
         },
         Message::Tool {
             tool_call_id: "call_1".to_string(),
-            content: "tool output".to_string(),
+            content: ("tool output".to_string()).into(),
         },
     ]);
 
@@ -491,7 +491,7 @@ fn responses_input_items_replay_exact_output_sequence() {
         },
         Message::Tool {
             tool_call_id: "call_1".to_string(),
-            content: "tool output".to_string(),
+            content: ("tool output".to_string()).into(),
         },
     ]);
 
@@ -499,4 +499,92 @@ fn responses_input_items_replay_exact_output_sequence() {
     assert_eq!(items.len(), output.len() + 1);
     assert_eq!(items[3]["type"], "function_call_output");
     assert_eq!(items[3]["call_id"], "call_1");
+}
+
+#[test]
+fn responses_tool_outputs_preserve_png_and_jpeg_as_input_images() {
+    use crate::tool_content::{ToolContent, ToolContentPart, ToolImage};
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    for (format, mime) in [
+        (ImageFormat::Png, "image/png"),
+        (ImageFormat::Jpeg, "image/jpeg"),
+    ] {
+        let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255])));
+        let mut encoded = Cursor::new(Vec::new());
+        source.write_to(&mut encoded, format).unwrap();
+        let image = ToolImage::validate(encoded.into_inner(), None, None).unwrap();
+        let content = ToolContent::from_parts(vec![
+            ToolContentPart::Text("image follows".to_string()),
+            ToolContentPart::Image(image),
+        ])
+        .unwrap();
+
+        let items = responses_input_items(&[Message::Tool {
+            tool_call_id: "call-image".to_string(),
+            content,
+        }]);
+        let output = &items[0]["output"];
+        assert_eq!(
+            output[0],
+            json!({"type": "input_text", "text": "image follows"})
+        );
+        assert_eq!(output[1]["type"], "input_image");
+        assert_eq!(output[1]["detail"], "auto");
+        assert!(output[1]["image_url"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("data:{mime};base64,")));
+    }
+}
+
+#[tokio::test]
+async fn image_read_survives_persistence_into_the_next_responses_input() {
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    let root = std::env::temp_dir().join(format!(
+        "nac-responses-image-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255])));
+    let mut encoded = Cursor::new(Vec::new());
+    source.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    std::fs::write(root.join("fixture.png"), encoded.into_inner()).unwrap();
+
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = root.clone();
+    let result = crate::tools::read::execute(json!({"path": "fixture.png"}), &runtime, true).await;
+    assert!(!result.is_error, "{}", result.content);
+    let message = Message::Tool {
+        tool_call_id: "call-image".to_string(),
+        content: result.content,
+    };
+
+    let store_path = root.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session-image");
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_batch("session-image", 0, std::slice::from_ref(&message))
+        .unwrap();
+    let replayed = writer.read_from("session-image", 0).unwrap();
+    let messages = replayed
+        .into_iter()
+        .map(|(_, message)| message)
+        .collect::<Vec<_>>();
+
+    let items = responses_input_items(&messages);
+    assert_eq!(items[0]["type"], "function_call_output");
+    assert_eq!(items[0]["output"][0]["type"], "input_image");
+    assert!(items[0]["output"][0]["image_url"]
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    let _ = std::fs::remove_dir_all(root);
 }

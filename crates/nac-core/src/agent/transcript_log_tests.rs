@@ -367,7 +367,7 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
                 tool_call_assistant(&["call-1"]),
                 Message::Tool {
                     tool_call_id: "call-1".to_string(),
-                    content: "tool output".to_string(),
+                    content: ("tool output".to_string()).into(),
                 },
                 plain_assistant("crashed answer"),
             ],
@@ -462,7 +462,7 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
                 tool_call_assistant(&["call-1", "call-2"]),
                 Message::Tool {
                     tool_call_id: "call-1".to_string(),
-                    content: "partial output".to_string(),
+                    content: ("partial output".to_string()).into(),
                 },
             ],
         )
@@ -758,7 +758,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
         tool_call_assistant(&["call-1", "call-2"]),
         Message::Tool {
             tool_call_id: "call-1".to_string(),
-            content: "partial output".to_string(),
+            content: "partial output".into(),
         },
     ];
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();

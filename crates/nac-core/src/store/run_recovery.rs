@@ -1,6 +1,32 @@
 use super::*;
 
 use crate::types::Message;
+use serde_json::value::RawValue;
+
+#[derive(serde::Deserialize)]
+struct RecoveryTranscriptPayload<'a> {
+    #[serde(borrow)]
+    nac_transcript_message: RecoveryTranscriptEntry<'a>,
+}
+
+#[derive(serde::Deserialize)]
+struct RecoveryTranscriptEntry<'a> {
+    kind: TranscriptMessageKind,
+    #[serde(borrow, rename = "message")]
+    message_json: &'a RawValue,
+}
+
+fn decode_recovery_entry(event_json: &str) -> Option<RecoveryTranscriptEntry<'_>> {
+    serde_json::from_str::<RecoveryTranscriptPayload<'_>>(event_json)
+        .ok()
+        .map(|payload| payload.nac_transcript_message)
+}
+
+fn decode_recovery_message(entry: &RecoveryTranscriptEntry<'_>) -> Result<Message> {
+    let message_json: String = serde_json::from_str(entry.message_json.get())
+        .context("failed to decode active run transcript message envelope")?;
+    serde_json::from_str(&message_json).context("failed to decode active run transcript message")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunRecoveryStatus {
@@ -166,13 +192,10 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
             "active run references a transcript row outside session '{session_id}'"
         ));
     }
-    let submitted = decode_transcript_log_entry(&event_json)
+    let submitted = decode_recovery_entry(&event_json)
         .ok_or_else(|| anyhow!("active run references a malformed transcript row"))?;
     if submitted.kind != TranscriptMessageKind::User
-        || !matches!(
-            serde_json::from_str::<Message>(&submitted.message_json),
-            Ok(Message::User { .. })
-        )
+        || !matches!(decode_recovery_message(&submitted)?, Message::User { .. })
     {
         return Err(anyhow!(
             "active run does not reference a canonical user transcript row"
@@ -197,37 +220,41 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
         let mut terminal = false;
         for row in rows {
             let event_json = row?;
-            let entry = decode_transcript_log_entry(&event_json)
+            let entry = decode_recovery_entry(&event_json)
                 .ok_or_else(|| anyhow!("active run tail contains a malformed transcript row"))?;
-            let message: Message = serde_json::from_str(&entry.message_json)
-                .context("failed to decode active run transcript message")?;
-            match message {
-                // Pending steering is canonicalized as a User message after a
-                // no-tool assistant response and keeps the same run alive.
-                // A later submitted prompt cannot belong to this record
-                // because prompt admission replaces the recovery row
-                // atomically.
-                Message::User { .. } => terminal = false,
-                Message::Assistant {
-                    content: Some(content),
-                    tool_calls,
-                    ..
-                } if content == crate::agent::RUN_CANCELLED_MARKER
-                    && tool_calls.as_ref().is_none_or(Vec::is_empty) =>
-                {
-                    terminal = true;
-                    break;
+            match entry.kind {
+                TranscriptMessageKind::User => terminal = false,
+                TranscriptMessageKind::Assistant => {
+                    let message = decode_recovery_message(&entry)?;
+                    match message {
+                        Message::Assistant {
+                            content: Some(content),
+                            tool_calls,
+                            ..
+                        } if content == crate::agent::RUN_CANCELLED_MARKER
+                            && tool_calls.as_ref().is_none_or(Vec::is_empty) =>
+                        {
+                            terminal = true;
+                            break;
+                        }
+                        Message::Assistant {
+                            content: Some(content),
+                            tool_calls,
+                            ..
+                        } if !content.trim().is_empty()
+                            && tool_calls.as_ref().is_none_or(Vec::is_empty) =>
+                        {
+                            terminal = true;
+                        }
+                        Message::Assistant { .. } => {}
+                        _ => {
+                            return Err(anyhow!(
+                                "active run transcript message kind does not match its payload"
+                            ))
+                        }
+                    }
                 }
-                Message::Assistant {
-                    content: Some(content),
-                    tool_calls,
-                    ..
-                } if !content.trim().is_empty()
-                    && tool_calls.as_ref().is_none_or(Vec::is_empty) =>
-                {
-                    terminal = true;
-                }
-                _ => {}
+                TranscriptMessageKind::System | TranscriptMessageKind::Tool => {}
             }
         }
         terminal
@@ -311,6 +338,24 @@ mod tests {
             failed_run_id: None,
             updated_at: now_utc(),
         }
+    }
+
+    #[test]
+    fn recovery_envelope_borrows_tool_payload_without_unescaping_it() {
+        let payload = encode_transcript_log_entry(
+            0,
+            &Message::Tool {
+                tool_call_id: "call-image".to_string(),
+                content: "x".repeat(1024).into(),
+            },
+        )
+        .unwrap();
+        let entry = decode_recovery_entry(&payload).unwrap();
+        let payload_range = payload.as_ptr() as usize..payload.as_ptr() as usize + payload.len();
+        let message_ptr = entry.message_json.get().as_ptr() as usize;
+
+        assert_eq!(entry.kind, TranscriptMessageKind::Tool);
+        assert!(payload_range.contains(&message_ptr));
     }
 
     #[test]

@@ -175,6 +175,8 @@ pub struct ModelDoc {
     pub max_tokens: u64,
     pub cost: CostDoc,
     pub reasoning: bool,
+    #[serde(default)]
+    pub image_input: bool,
     /// Effort level (nac `ReasoningEffort` lowercase serde name) → provider
     /// wire value. Present + null = explicitly unsupported; absent =
     /// unsupported. nac-core deserializes this as `ThinkingLevelMap`.
@@ -600,6 +602,11 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
                 max_tokens,
                 cost: seed_cost(models_dev_id, id, model.cost.as_ref())?,
                 reasoning: model.reasoning.unwrap_or(false),
+                image_input: model
+                    .modalities
+                    .as_ref()
+                    .and_then(|modalities| modalities.input.as_ref())
+                    .is_some_and(|inputs| inputs.iter().any(|input| input == "image")),
                 thinking_level_map: seed_map,
             };
             let seed_map = entry.thinking_level_map.clone();
