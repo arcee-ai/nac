@@ -53,7 +53,7 @@ In a top-level orchestrator prompt you can reference a skill as `$skillname`. Re
 
 The literal `$skillname` stays in your sentence; the skill content is appended after it, wrapped in an `<invoked_skills>` element. You can reference several skills in one prompt: each is included once, in first-reference order.
 
-A `$` token that is not a registered skill is left untouched, so shell variables (`$HOME`, `${VAR}`, `$(cmd)`), money (`$5`), and a trailing or doubled `$` all pass through unchanged.
+A `$` token that is not a registered skill is left untouched, so shell variables (`$HOME`, `${VAR}`, `$(cmd)`), money (`$5`), and a trailing `$` all pass through unchanged. Recognition is by name only, so the flip side applies too: if a skill is named `HOME` or `5`, then `$HOME` and `$5` *will* expand — avoid skill names that look like shell variables or numbers. Likewise only the first `$` of a doubled `$` is literal: `$$demo` expands when `demo` is registered, because the second `$` starts the reference.
 
 The chat UI and history show the prompt as you typed it; the expanded form is what the model sees. Resend and retry re-expand from the original text, exactly once — the appended block is never nested.
 

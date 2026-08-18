@@ -6,7 +6,7 @@ import {
 } from "@/app/lib/format";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
-// Mirrors the expansion format of `expand_user_prompt_with_skills` in nac-core
+// Mirrors the expansion format of `expand_user_prompt` in nac-core
 // `commands.rs`: `{raw}\n\n<invoked_skills>\n{blocks joined by \n}\n</invoked_skills>`.
 function skillBlock(name: string, body: string): string {
   return `<skill_content name="${name}">\n${body}\n\n</skill_content>`;

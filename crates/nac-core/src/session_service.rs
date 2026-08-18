@@ -966,7 +966,7 @@ impl SessionService {
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
-        commands::prepare_user_input_with_skills(input, self.skills.as_deref())
+        commands::prepare_user_input(input, self.skills.as_deref())
     }
 
     #[allow(clippy::result_large_err)]
@@ -4376,6 +4376,11 @@ pub(super) mod tests {
         assert_eq!(prompt.raw_prompt, raw);
         assert_eq!(prompt.display_prompt, raw);
         assert!(prompt.agent_prompt.starts_with(raw));
+        // The sentinel strings in this test are intentionally hardcoded
+        // byte literals, not the commands::INVOKED_SKILLS_* consts (which
+        // are private to commands.rs): they pin the wire format the
+        // frontend mirrors byte-for-byte, so drifting the Rust consts
+        // fails this test.
         assert!(prompt.agent_prompt.contains("\n\n<invoked_skills>\n"));
         assert!(prompt.agent_prompt.contains("<skill_content name=\"demo\">"));
         assert!(prompt.agent_prompt.contains("DEMO SKILL BODY"));

@@ -11,9 +11,9 @@ use crate::skills::SkillRegistry;
 /// `INVOKED_SKILLS_SEPARATOR`, but only when the message ends with
 /// `INVOKED_SKILLS_CLOSE`, so user text that merely mentions the sentinel
 /// is left alone. The frontend mirrors this format byte-for-byte.
-pub(crate) const INVOKED_SKILLS_OPEN: &str = "<invoked_skills>";
-pub(crate) const INVOKED_SKILLS_CLOSE: &str = "</invoked_skills>";
-pub(crate) const INVOKED_SKILLS_SEPARATOR: &str = "\n\n<invoked_skills>\n";
+const INVOKED_SKILLS_OPEN: &str = "<invoked_skills>";
+const INVOKED_SKILLS_CLOSE: &str = "</invoked_skills>";
+const INVOKED_SKILLS_SEPARATOR: &str = "\n\n<invoked_skills>\n";
 
 /// Slash commands understood by NAC.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,15 +71,11 @@ pub enum PreparedUserInput {
     InvalidSlashCommand { message: String },
 }
 
-pub fn prepare_user_input(input: &str) -> PreparedUserInput {
-    prepare_user_input_with_skills(input, None)
-}
-
-/// Like `prepare_user_input`, but `$skillname` references in a submitted
-/// prompt are resolved against the session's skill registry: the raw and
-/// display prompts stay exactly what the user typed, while the agent prompt
-/// gets the recognized skills' rendered content appended.
-pub(crate) fn prepare_user_input_with_skills(
+/// Prepares raw user input for submission. `$skillname` references in a
+/// submitted prompt are resolved against the session's skill registry: the
+/// raw and display prompts stay exactly what the user typed, while the
+/// agent prompt gets the recognized skills' rendered content appended.
+pub(crate) fn prepare_user_input(
     input: &str,
     skills: Option<&SkillRegistry>,
 ) -> PreparedUserInput {
@@ -93,7 +89,7 @@ pub(crate) fn prepare_user_input_with_skills(
         None => PreparedUserInput::SubmitPrompt(PreparedPrompt {
             raw_prompt: input.to_string(),
             display_prompt: input.to_string(),
-            agent_prompt: expand_user_prompt_with_skills(input, skills),
+            agent_prompt: expand_user_prompt(input, skills),
         }),
     }
 }
@@ -122,10 +118,6 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
     })
 }
 
-pub fn expand_user_prompt(prompt: &str) -> String {
-    expand_user_prompt_with_skills(prompt, None)
-}
-
 /// Expands top-level `$skillname` references into an appended skill block.
 ///
 /// A reference is a `$` immediately followed by a name token matching
@@ -137,10 +129,7 @@ pub fn expand_user_prompt(prompt: &str) -> String {
 /// `$(cmd)`, `$5`, and `$$` all pass through byte-identical. Recognized
 /// skills are deduplicated and appended in first-reference order; the
 /// literal `$skillname` stays in the original sentence.
-pub(crate) fn expand_user_prompt_with_skills(
-    prompt: &str,
-    skills: Option<&SkillRegistry>,
-) -> String {
+pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -> String {
     let Some(skills) = skills else {
         return prompt.to_string();
     };
@@ -257,7 +246,7 @@ mod tests {
     }
 
     fn expand(prompt: &str, skills: Option<&SkillRegistry>) -> String {
-        expand_user_prompt_with_skills(prompt, skills)
+        expand_user_prompt(prompt, skills)
     }
 
     #[test]
@@ -277,16 +266,16 @@ mod tests {
             Some(Err("usage: /compact".to_string()))
         );
         assert_eq!(
-            prepare_user_input("/compact"),
+            prepare_user_input("/compact", None),
             PreparedUserInput::FrontendCommand(SlashCommand::Compact)
         );
         assert_eq!(
-            prepare_user_input("/compact now"),
+            prepare_user_input("/compact now", None),
             PreparedUserInput::InvalidSlashCommand {
                 message: "usage: /compact".to_string(),
             }
         );
-        assert_eq!(expand_user_prompt("/compact"), "/compact");
+        assert_eq!(expand_user_prompt("/compact", None), "/compact");
     }
 
     #[test]
@@ -401,7 +390,8 @@ mod tests {
     #[test]
     fn no_registry_returns_input_unchanged() {
         assert_eq!(expand("Use $demo here", None), "Use $demo here");
-        let PreparedUserInput::SubmitPrompt(prompt) = prepare_user_input("Use $demo here") else {
+        let PreparedUserInput::SubmitPrompt(prompt) = prepare_user_input("Use $demo here", None)
+        else {
             panic!("expected a submittable prompt");
         };
         assert_eq!(prompt.agent_prompt, "Use $demo here");
@@ -420,12 +410,11 @@ mod tests {
     }
 
     #[test]
-    fn prepare_user_input_with_skills_splits_display_from_agent_prompt() {
+    fn prepare_user_input_splits_display_from_agent_prompt() {
         let registry = test_registry(&[("demo", "DEMO BODY")]);
         let raw = "Use $demo to review this change.";
 
-        let PreparedUserInput::SubmitPrompt(prompt) =
-            prepare_user_input_with_skills(raw, Some(&registry))
+        let PreparedUserInput::SubmitPrompt(prompt) = prepare_user_input(raw, Some(&registry))
         else {
             panic!("expected a submittable prompt");
         };
