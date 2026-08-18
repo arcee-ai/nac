@@ -14,12 +14,33 @@ export function shortId(id: string | null | undefined): string {
   return id.length > 13 ? `${id.slice(0, 8)}:${id.slice(-4)}` : id;
 }
 
+const INVOKED_SKILLS_CLOSE = "</invoked_skills>";
+const INVOKED_SKILLS_SEPARATOR = "\n\n<invoked_skills>\n";
+
 /**
- * Collapse a `/plan` or `/run` command message back to its short human form.
- * Non-command text is returned unchanged.
+ * Collapse a `$skillname`-expanded prompt back to what the user typed.
+ * Mirrors `invoked_skills_display_prompt` in nac-core `commands.rs`
+ * byte-for-byte: the appended block is recognized by the closing tag at the
+ * very end of the message plus the last separator before it, so user text
+ * that merely mentions the sentinel — or even ends with the closing tag
+ * without an appended block — is left alone.
+ */
+function invokedSkillsDisplayPrompt(text: string): string | null {
+  if (!text.endsWith(INVOKED_SKILLS_CLOSE)) return null;
+  const index = text.lastIndexOf(INVOKED_SKILLS_SEPARATOR);
+  if (index === -1) return null;
+  return text.slice(0, index);
+}
+
+/**
+ * Collapse an expanded prompt back to its short human form: a `$skillname`
+ * expansion first (matching the Rust collapse order), then a legacy `/plan`
+ * or `/run` command message. Non-command text is returned unchanged.
  */
 export function displayPromptFromMessageText(content: string | null | undefined): string {
   const text = String(content ?? "");
+  const collapsed = invokedSkillsDisplayPrompt(text);
+  if (collapsed != null) return collapsed;
   const normalized = text.replaceAll("\r\n", "\n");
   const header = normalized.split("\n", 1)[0] ?? "";
   const match = /^# \/(plan|run)\s*:/.exec(header);
@@ -55,7 +76,7 @@ export function displaySessionTitle(summary: SessionSummarySnapshot | null | und
   if (summary.title != null && summary.title.trim()) {
     return summary.title.trim();
   }
-  const prompt = (summary.last_user_prompt ?? "").trim();
+  const prompt = displayPromptFromMessageText(summary.last_user_prompt).trim();
   if (prompt) return prompt;
   return shortId(summary.session_id) || "session";
 }
