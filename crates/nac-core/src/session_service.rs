@@ -3393,7 +3393,7 @@ pub(super) mod tests {
         store_path: PathBuf,
         session_id: Option<String>,
     ) -> Agent {
-        test_agent_with_compaction_threshold(client, store_path, session_id, None)
+        build_test_agent(client, store_path, session_id, None, None)
     }
 
     pub(super) fn test_agent_with_compaction_threshold(
@@ -3401,6 +3401,31 @@ pub(super) mod tests {
         store_path: PathBuf,
         session_id: Option<String>,
         orchestrator_compaction_threshold: Option<u64>,
+    ) -> Agent {
+        build_test_agent(
+            client,
+            store_path,
+            session_id,
+            orchestrator_compaction_threshold,
+            None,
+        )
+    }
+
+    pub(super) fn test_agent_with_skills(
+        client: ModelClient,
+        store_path: PathBuf,
+        session_id: Option<String>,
+        skills: Option<Arc<SkillRegistry>>,
+    ) -> Agent {
+        build_test_agent(client, store_path, session_id, None, skills)
+    }
+
+    fn build_test_agent(
+        client: ModelClient,
+        store_path: PathBuf,
+        session_id: Option<String>,
+        orchestrator_compaction_threshold: Option<u64>,
+        skills: Option<Arc<SkillRegistry>>,
     ) -> Agent {
         Agent::with_config(
             client,
@@ -3421,7 +3446,7 @@ pub(super) mod tests {
                 sandbox: None,
                 ssh: None,
                 mcp: None,
-                skills: None,
+                skills,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
@@ -3451,12 +3476,23 @@ pub(super) mod tests {
         label: &str,
         session_id: &str,
     ) -> (SessionServiceParts, PathBuf) {
+        test_active_service_with_skills(label, session_id, ModelClient::new_for_test(), None)
+    }
+
+    /// Active-session service whose agent carries a skill registry. The
+    /// client is a parameter so the test can point it at a scripted server.
+    pub(super) fn test_active_service_with_skills(
+        label: &str,
+        session_id: &str,
+        client: ModelClient,
+        skills: Option<Arc<SkillRegistry>>,
+    ) -> (SessionServiceParts, PathBuf) {
         let store_path = test_store_path(label);
-        let client = ModelClient::new_for_test();
-        let agent = test_agent(
+        let agent = test_agent_with_skills(
             client.clone(),
             store_path.clone(),
             Some(session_id.to_string()),
+            skills,
         );
         let snapshot = sessions::new_snapshot(
             session_id.to_string(),
@@ -4289,7 +4325,6 @@ pub(super) mod tests {
     async fn skill_references_expand_into_the_agent_prompt_only() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-        let store_path = test_store_path("skill_prompt_expansion");
         let server = ScriptedServer::start(vec![ScriptedResponse::json(
             "200 OK",
             serde_json::json!({
@@ -4300,7 +4335,6 @@ pub(super) mod tests {
             .to_string(),
         )]);
         let client = ModelClient::new_for_test_server(server.base_url.clone());
-        let session_id = "skill-expansion-session".to_string();
         let registry = Arc::new(SkillRegistry::load_for_test(vec![
             crate::skills::SkillRecord {
                 name: "demo".to_string(),
@@ -4311,61 +4345,12 @@ pub(super) mod tests {
                 resources: Vec::new(),
             },
         ]));
-        let agent = Agent::with_config(
-            client.clone(),
-            AgentConfig {
-                command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode: AgentMode::Orchestrator,
-                store_path: store_path.clone(),
-                session_id: Some(session_id.clone()),
-                orchestrator_compaction_threshold: None,
-                initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
-                event_sink: EventSink::none(),
-                workspace_cwd: PathBuf::from("/repo"),
-                config_cwd: PathBuf::from("/repo"),
-                working_directory: "/repo".to_string(),
-                worker_executable: None,
-                sandbox: None,
-                ssh: None,
-                mcp: None,
-                skills: Some(registry),
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                light_client: None,
-            },
-        )
-        .expect("agent config must be valid");
-        let snapshot = sessions::new_snapshot(
-            session_id.clone(),
-            PathBuf::from("/repo"),
-            client.model.clone(),
-            client.base_url().to_string(),
-            client.backend(),
-            client.reasoning_effort(),
-            None,
-            None,
-            agent.messages.clone(),
-            None,
-            BTreeMap::new(),
-        );
-        sessions::create_session(&store_path, &snapshot).unwrap();
-        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
-            agent,
+        let (parts, store_path) = test_active_service_with_skills(
+            "skill_prompt_expansion",
+            "skill-expansion-session",
             client,
-            session: OrchestratorSession::Active {
-                session_id: session_id.clone(),
-                store_path: store_path.clone(),
-                snapshot,
-            },
-            sandbox_status: "off".to_string(),
-            agents_md_status: "off".to_string(),
-            workspace_display: "/repo".to_string(),
-            workspace_git: Some(GitTarget::local("/repo")),
-            resume_base_cwd: PathBuf::from("/repo"),
-        });
+            Some(registry),
+        );
 
         // Preparation keeps the raw/display prompt exactly as typed and
         // appends the rendered skill to the agent-facing prompt only.
