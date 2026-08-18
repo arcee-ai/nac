@@ -7,10 +7,13 @@ use crate::skills::SkillRegistry;
 /// `{raw}\n\n<invoked_skills>\n{blocks}\n</invoked_skills>` where each block
 /// is one `<skill_content name="...">...</skill_content>` rendering (blocks
 /// are joined by a single `\n`). `display_prompt_from_message` collapses an
-/// expanded prompt back to what the user typed by truncating at
-/// `INVOKED_SKILLS_SEPARATOR`, but only when the message ends with
-/// `INVOKED_SKILLS_CLOSE`, so user text that merely mentions the sentinel
-/// is left alone. The frontend mirrors this format byte-for-byte.
+/// expanded prompt back to what the user typed by truncating at the last
+/// `INVOKED_SKILLS_SEPARATOR`, but only when the tail after it is exactly
+/// what an expansion appends: one or more well-formed skill blocks followed
+/// by `\n` + `INVOKED_SKILLS_CLOSE` at the very end of the message. User
+/// text that merely mentions the sentinel — or even ends with the closing
+/// tag without a well-formed appended block — is left alone. The frontend
+/// mirrors this format byte-for-byte.
 const INVOKED_SKILLS_OPEN: &str = "<invoked_skills>";
 const INVOKED_SKILLS_CLOSE: &str = "</invoked_skills>";
 const INVOKED_SKILLS_SEPARATOR: &str = "\n\n<invoked_skills>\n";
@@ -207,16 +210,65 @@ pub fn display_prompt_from_message(content: &str) -> String {
 }
 
 /// Collapses a `$skillname`-expanded prompt back to what the user typed.
-/// The appended block is recognized by the closing tag at the very end of
-/// the message plus the last separator before it, so user text that merely
-/// mentions the sentinel — or even ends with the closing tag without an
-/// appended block — is left alone.
+/// The appended region is recognized structurally: the message must end
+/// with `\n` + `INVOKED_SKILLS_CLOSE`, and everything between the last
+/// `INVOKED_SKILLS_SEPARATOR` and that final newline must be one or more
+/// well-formed `<skill_content>` blocks joined by single newlines — exactly
+/// what `expand_user_prompt` appends. Anything else (prose that happens to
+/// end with the closing tag, a malformed tail) is user text and is left
+/// unchanged.
 fn invoked_skills_display_prompt(content: &str) -> Option<String> {
-    if !content.ends_with(INVOKED_SKILLS_CLOSE) {
+    let tail = content
+        .strip_suffix(INVOKED_SKILLS_CLOSE)?
+        .strip_suffix('\n')?;
+    let (head, blocks) = tail.rsplit_once(INVOKED_SKILLS_SEPARATOR)?;
+    is_well_formed_skill_blocks(blocks).then(|| head.to_string())
+}
+
+/// Whether `text` is one or more well-formed `<skill_content>` blocks
+/// joined by single `\n`s — the exact shape `expand_user_prompt` appends
+/// between the separator and the closing tag. Mirrored byte-for-byte by
+/// `parseInvokedSkillsExpansion` in the web frontend's `format.ts`.
+fn is_well_formed_skill_blocks(mut text: &str) -> bool {
+    loop {
+        let Some(rest) = parse_skill_content_block(text) else {
+            return false;
+        };
+        if rest.is_empty() {
+            // Reaching the end means the whole region was blocks, and the
+            // loop only gets here past at least one.
+            return true;
+        }
+        let Some(next) = rest.strip_prefix('\n') else {
+            return false;
+        };
+        // A join newline with no block after it is not an expansion: real
+        // expansions end the region with the last block, not a separator.
+        if next.is_empty() {
+            return false;
+        }
+        text = next;
+    }
+}
+
+/// Parses one well-formed `<skill_content name="...">...</skill_content>`
+/// block at the start of `text`, returning what follows it. The name runs
+/// to the next `"` and must be non-empty with no `<` or `>` — a rendered
+/// name can never contain those (`escape_xml` replaces them) — and the
+/// block ends at the first `</skill_content>` (rendered bodies have the tag
+/// neutralized, so the first one closes the block).
+fn parse_skill_content_block(text: &str) -> Option<&str> {
+    const BLOCK_OPEN: &str = "<skill_content name=\"";
+    const BLOCK_CLOSE: &str = "</skill_content>";
+    let rest = text.strip_prefix(BLOCK_OPEN)?;
+    let quote = rest.find('"')?;
+    let name = &rest[..quote];
+    if name.is_empty() || name.contains('<') || name.contains('>') {
         return None;
     }
-    let (head, _) = content.rsplit_once(INVOKED_SKILLS_SEPARATOR)?;
-    Some(head.to_string())
+    let rest = rest[quote + 1..].strip_prefix('>')?;
+    let close = rest.find(BLOCK_CLOSE)?;
+    Some(&rest[close + BLOCK_CLOSE.len()..])
 }
 
 fn workset_command_display_prompt(content: &str) -> Option<String> {
@@ -465,6 +517,45 @@ mod tests {
         assert_eq!(display_prompt_from_message(prose), prose);
         let prose = "user text mentioning <skill_content name=\"x\"> inline";
         assert_eq!(display_prompt_from_message(prose), prose);
+        // Separator and closing tag both present, but the tail between them
+        // is prose, not well-formed skill blocks: still user text.
+        let prose = "notes on the format\n\n<invoked_skills>\nmore of my notes\n</invoked_skills>";
+        assert_eq!(display_prompt_from_message(prose), prose);
+    }
+
+    #[test]
+    fn malformed_invoked_skills_tail_is_not_collapsed() {
+        // The collapse only fires on the exact shape expand_user_prompt
+        // appends; anything off is user text and survives unchanged.
+        let cases = [
+            // Extra text after the last block.
+            "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content>\nextra text\n</invoked_skills>",
+            // Junk between two blocks.
+            "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content>\nJUNK\n<skill_content name=\"b\">\nY\n</skill_content>\n</invoked_skills>",
+            // A block missing its own closing tag.
+            "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</invoked_skills>",
+            // An empty wrapper: real expansions always append a block.
+            "raw\n\n<invoked_skills>\n\n</invoked_skills>",
+            // A block with an empty name.
+            "raw\n\n<invoked_skills>\n<skill_content name=\"\">\nX\n</skill_content>\n</invoked_skills>",
+            // Blocks joined by a blank line rather than a single newline.
+            "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content>\n\n<skill_content name=\"b\">\nY\n</skill_content>\n</invoked_skills>",
+            // No newline before the closing tag.
+            "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content></invoked_skills>",
+        ];
+        for case in cases {
+            assert_eq!(display_prompt_from_message(case), case, "case: {case:?}");
+        }
+    }
+
+    #[test]
+    fn pasted_well_formed_expansion_still_collapses() {
+        // A pasted expansion with genuine-looking blocks is
+        // indistinguishable from a real one, so it still collapses — the
+        // structural check only protects prose that does not parse as
+        // appended blocks.
+        let pasted = "my notes\n\n<invoked_skills>\n<skill_content name=\"x\">\nI typed this myself\n</skill_content>\n</invoked_skills>";
+        assert_eq!(display_prompt_from_message(pasted), "my notes");
     }
 
     #[test]
@@ -527,9 +618,10 @@ mod tests {
         // The web frontend mirrors the expand/collapse wire format
         // byte-for-byte; fixtures/invoked-skills-format.json at the repo
         // root is the shared pin both sides test against, so drifting the
-        // format on either side fails loudly. Every vector must stay true
-        // under a stricter collapse (one that only fires on a well-formed
-        // appended block), so keep no-collapse vectors conservative.
+        // format on either side fails loudly. The collapse only fires on a
+        // well-formed appended block, so keep every vector true under that:
+        // expansion vectors use well-formed blocks and no-collapse vectors
+        // must keep not collapsing.
         #[derive(Deserialize)]
         struct CollapseVector {
             name: String,
