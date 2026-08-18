@@ -112,9 +112,12 @@ impl SkillRegistry {
 
         let mut content = format!("<skill_content name=\"{}\">\n", escape_xml(&skill.name));
         if let Some(compatibility) = &skill.compatibility {
-            content.push_str(&format!("Compatibility: {}\n\n", compatibility));
+            content.push_str(&format!(
+                "Compatibility: {}\n\n",
+                neutralize_prompt_markup(compatibility)
+            ));
         }
-        content.push_str(&skill.body);
+        content.push_str(&neutralize_prompt_markup(&skill.body));
         if !skill.body.ends_with('\n') {
             content.push('\n');
         }
@@ -136,6 +139,25 @@ impl SkillRegistry {
 
         Some(content)
     }
+}
+
+/// Skill-controlled text (body, compatibility) is inserted into prompts
+/// raw, so it must not be able to forge the markup the prompt pipeline
+/// treats structurally. A literal `<invoked_skills>` sentinel in a skill
+/// body would corrupt the expand/collapse round trip: collapse truncates
+/// at the last separator, so a forged one makes display/resend show text
+/// the user never typed and makes re-expansion nest wrappers. Forged
+/// `<skill_content>` tags would fake block boundaries. Neutralize exactly
+/// those sequences by escaping their angle brackets — the same convention
+/// `escape_xml` uses for names and resource paths — and leave every other
+/// byte untouched. This rendering also backs `activate`, so tool
+/// activation and prompt expansion stay byte-identical.
+fn neutralize_prompt_markup(value: &str) -> String {
+    value
+        .replace("<invoked_skills>", "&lt;invoked_skills&gt;")
+        .replace("</invoked_skills>", "&lt;/invoked_skills&gt;")
+        .replace("</skill_content>", "&lt;/skill_content&gt;")
+        .replace("<skill_content", "&lt;skill_content")
 }
 
 #[cfg(test)]

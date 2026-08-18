@@ -2413,7 +2413,14 @@ impl SessionService {
         let active_run = ActiveRunSnapshot {
             run_id,
             client_id,
-            prompt_preview: prompt_preview(expanded_prompt, 160),
+            // Preview what the user typed, not the expanded prompt: this
+            // text feeds the events feed, history subtitles, and revision
+            // labels, where `<invoked_skills>`/skill-body fragments would
+            // leak.
+            prompt_preview: prompt_preview(
+                &commands::display_prompt_from_message(expanded_prompt),
+                160,
+            ),
             submitted_user_message: Some(submitted_user_message),
             started_at_epoch_ms: submitted_at_epoch_ms,
         };
@@ -4376,6 +4383,9 @@ pub(super) mod tests {
         let expanded = prompt.agent_prompt.clone();
 
         let handle = parts.service.try_submit_prepared_prompt(prompt).unwrap();
+        // The run preview shows what the user typed, not the expanded
+        // prompt, even though the run carries the expanded form.
+        assert_eq!(parts.service.active_run().unwrap().prompt_preview, raw);
         for _ in 0..100 {
             if parts.service.active_run().is_none() {
                 break;
