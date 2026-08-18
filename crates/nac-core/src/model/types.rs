@@ -16,10 +16,12 @@ pub enum BackendKind {
     AnthropicMessages,
     ArceeAuth,
     ArceeApi,
+    #[serde(rename = "xai-auth")]
+    XaiAuth,
 }
 
 impl BackendKind {
-    pub const SUPPORTED: &'static str = "deepseek-chat, fireworks-chat, together-chat, openai-responses, chatgpt-codex-responses, anthropic-messages, arcee-auth, arcee-api";
+    pub const SUPPORTED: &'static str = "deepseek-chat, fireworks-chat, together-chat, openai-responses, chatgpt-codex-responses, anthropic-messages, arcee-auth, arcee-api, xai-auth";
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -31,6 +33,7 @@ impl BackendKind {
             Self::AnthropicMessages => "anthropic-messages",
             Self::ArceeAuth => "arcee-auth",
             Self::ArceeApi => "arcee-api",
+            Self::XaiAuth => "xai-auth",
         }
     }
 
@@ -58,6 +61,7 @@ impl std::str::FromStr for BackendKind {
             "anthropic-messages" => Ok(Self::AnthropicMessages),
             "arcee-auth" => Ok(Self::ArceeAuth),
             "arcee-api" => Ok(Self::ArceeApi),
+            "xai-auth" | "grok-auth" => Ok(Self::XaiAuth),
             "arcee" => Err("unsupported backend 'arcee'; settings repair required: select 'arcee-auth' for managed arcee_auth.json credentials or 'arcee-api' for API-key credentials".to_string()),
             "auto" => Err(format!(
                 "unsupported backend 'auto'; settings repair required: select an explicit backend ({})",
@@ -156,6 +160,7 @@ pub struct EffectiveModelSettings {
 
 pub const ARCEE_AUTH_CANONICAL_BASE_URL: &str = "https://api.arcee.ai/api/v1";
 pub const CHATGPT_CODEX_CANONICAL_BASE_URL: &str = "https://chatgpt.com/backend-api";
+pub const XAI_AUTH_CANONICAL_BASE_URL: &str = "https://api.x.ai/v1";
 
 /// Return the fixed inference URL supplied when a managed backend has no
 /// explicit or configured base URL. API-key backends intentionally have no
@@ -164,6 +169,7 @@ pub fn managed_backend_base_url(backend: BackendKind) -> Option<&'static str> {
     match backend {
         BackendKind::ArceeAuth => Some(ARCEE_AUTH_CANONICAL_BASE_URL),
         BackendKind::ChatGptCodexResponses => Some(CHATGPT_CODEX_CANONICAL_BASE_URL),
+        BackendKind::XaiAuth => Some(XAI_AUTH_CANONICAL_BASE_URL),
         _ => None,
     }
 }

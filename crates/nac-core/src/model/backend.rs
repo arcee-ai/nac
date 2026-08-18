@@ -117,7 +117,10 @@ fn builtin_provider_hosts(backend: BackendKind) -> &'static [&'static str] {
         BackendKind::DeepSeekChat => &["api.deepseek.com"],
         BackendKind::TogetherChat => &["api.together.xyz"],
         BackendKind::FireworksChat => &["api.fireworks.ai"],
-        BackendKind::ArceeApi | BackendKind::ArceeAuth | BackendKind::ChatGptCodexResponses => &[],
+        BackendKind::ArceeApi
+        | BackendKind::ArceeAuth
+        | BackendKind::ChatGptCodexResponses
+        | BackendKind::XaiAuth => &[],
     }
 }
 
@@ -211,6 +214,7 @@ pub fn validate_backend_api_key_env(backend: BackendKind, api_key_env: Option<&s
         let credential_source = match backend {
             BackendKind::ArceeAuth => "managed Arcee auth uses arcee_auth.json",
             BackendKind::ChatGptCodexResponses => "Codex uses stored OAuth from auth.json",
+            BackendKind::XaiAuth => "xAI SuperGrok uses stored OAuth from xai_auth.json",
             _ => unreachable!("all API-key backends handled above"),
         };
         return Err(model_configuration_error(format!(

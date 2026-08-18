@@ -59,6 +59,16 @@ fn none_through_high_levels() -> ThinkingLevelMap {
     ])
 }
 
+fn none_through_xhigh_levels() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+    ])
+}
+
 /// openai-responses / chatgpt-codex-responses: every level, sent verbatim.
 fn all_levels() -> ThinkingLevelMap {
     levels(&[
@@ -402,6 +412,62 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
     models
 }
 
+fn xai_seed_models() -> Vec<ModelMetadata> {
+    let provider = BackendKind::XaiAuth;
+    let model = |id: &str,
+                 display_name: &str,
+                 context_window: u64,
+                 max_tokens: u64,
+                 cost: ModelCostRates,
+                 thinking_level_map: ThinkingLevelMap| {
+        seeded_model(
+            provider,
+            id,
+            display_name,
+            context_window,
+            max_tokens,
+            cost,
+            true,
+            thinking_level_map,
+            Compat::default(),
+        )
+    };
+    vec![
+        model(
+            "grok-4.6",
+            "Grok 4.6",
+            500_000,
+            128_000,
+            rates(2.0, 6.0, 0.5, 0.0),
+            none_through_xhigh_levels(),
+        ),
+        model(
+            "grok-4.5",
+            "Grok 4.5",
+            500_000,
+            128_000,
+            rates(2.0, 6.0, 0.3, 0.0),
+            none_through_high_levels(),
+        ),
+        model(
+            "grok-4.3",
+            "Grok 4.3",
+            1_000_000,
+            128_000,
+            rates(1.25, 2.5, 0.2, 0.0),
+            none_through_high_levels(),
+        ),
+        model(
+            "grok-build-0.1",
+            "Grok Build 0.1",
+            256_000,
+            128_000,
+            rates(1.0, 2.0, 0.2, 0.0),
+            none_through_high_levels(),
+        ),
+    ]
+}
+
 pub(super) fn seed_catalog() -> ModelCatalog {
     let mut providers: BTreeMap<BackendKind, ProviderCatalog> = BTreeMap::new();
     let mut register = |default: ModelMetadata,
@@ -566,6 +632,18 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             (backend == BackendKind::ArceeApi).then_some("https://api.arcee.ai/api/v1"),
         );
     }
+    register(
+        entry(
+            BackendKind::XaiAuth,
+            PROVIDER_DEFAULT_MODEL_ID,
+            true,
+            none_through_xhigh_levels(),
+            Compat::default(),
+        ),
+        &xai_seed_models(),
+        None,
+        None,
+    );
 
     ModelCatalog { providers }
 }

@@ -51,6 +51,7 @@ mod stream;
 #[cfg(test)]
 pub(crate) mod test_http;
 mod types;
+mod xai;
 
 pub use api_key_store::{list_stored_api_keys, remove_api_key, store_api_key, StoredApiKeySummary};
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
@@ -71,6 +72,7 @@ pub use providers::{
 pub(crate) use redact::{
     redact_credentials, redact_credentials_with_extra_headers, redact_json_body_with_extra_headers,
 };
+use xai::{xai_auth_login, xai_auth_logout, xai_auth_status};
 
 /// Resolve the API key a backend would use at run time.
 ///
@@ -89,7 +91,7 @@ pub(crate) use types::{
 };
 pub use types::{
     managed_backend_base_url, resolve_model_base_url, EffectiveModelSettings,
-    ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
+    ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL, XAI_AUTH_CANONICAL_BASE_URL,
 };
 pub use types::{BackendKind, DispatchWeight, ReasoningEffort};
 
@@ -158,6 +160,20 @@ fn classify_stored_codex_auth_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
+fn classify_stored_xai_auth_error(error: anyhow::Error) -> anyhow::Error {
+    if error
+        .downcast_ref::<xai::StoredXaiAuthConfigurationError>()
+        .is_some()
+        || error
+            .downcast_ref::<auth_store::UnsafeCredentialPermissionsError>()
+            .is_some()
+    {
+        model_configuration_error(error.to_string())
+    } else {
+        error.context("failed to load stored xAI SuperGrok credentials")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexAuthAction {
     Login,
@@ -188,22 +204,42 @@ pub async fn run_arcee_auth_action(action: ArceeAuthAction) -> Result<()> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XaiAuthAction {
+    Login,
+    Status,
+    Logout,
+}
+
+pub async fn run_xai_auth_action(action: XaiAuthAction) -> Result<()> {
+    match action {
+        XaiAuthAction::Login => xai_auth_login().await,
+        XaiAuthAction::Status => xai_auth_status(),
+        XaiAuthAction::Logout => xai_auth_logout(),
+    }
+}
+
 /// A provider that authenticates from a browser login rather than an API key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManagedAuthProvider {
     Arcee,
     Codex,
+    Xai,
 }
 
 /// Every provider a login can be performed for, in the order they are listed.
-pub const MANAGED_AUTH_PROVIDERS: [ManagedAuthProvider; 2] =
-    [ManagedAuthProvider::Arcee, ManagedAuthProvider::Codex];
+pub const MANAGED_AUTH_PROVIDERS: [ManagedAuthProvider; 3] = [
+    ManagedAuthProvider::Arcee,
+    ManagedAuthProvider::Codex,
+    ManagedAuthProvider::Xai,
+];
 
 impl ManagedAuthProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Arcee => "arcee",
             Self::Codex => "codex",
+            Self::Xai => "xai",
         }
     }
 
@@ -213,6 +249,7 @@ impl ManagedAuthProvider {
         match value {
             "arcee" | "arcee-auth" => Some(Self::Arcee),
             "codex" | "chatgpt-codex-responses" => Some(Self::Codex),
+            "xai" | "xai-auth" | "grok-auth" => Some(Self::Xai),
             _ => None,
         }
     }
@@ -221,6 +258,7 @@ impl ManagedAuthProvider {
         match self {
             Self::Arcee => BackendKind::ArceeAuth,
             Self::Codex => BackendKind::ChatGptCodexResponses,
+            Self::Xai => BackendKind::XaiAuth,
         }
     }
 
@@ -229,6 +267,7 @@ impl ManagedAuthProvider {
         match backend {
             BackendKind::ArceeAuth => Some(Self::Arcee),
             BackendKind::ChatGptCodexResponses => Some(Self::Codex),
+            BackendKind::XaiAuth => Some(Self::Xai),
             _ => None,
         }
     }
@@ -293,6 +332,7 @@ enum PendingDeviceLoginKind {
     Arcee(arcee::ArceeDeviceLogin),
     Codex(chatgpt_codex::CodexDeviceLogin),
     CodexLoopback(chatgpt_codex::CodexLoopbackLogin),
+    Xai(xai::XaiDeviceLogin),
 }
 
 impl PendingDeviceLogin {
@@ -302,6 +342,7 @@ impl PendingDeviceLogin {
             PendingDeviceLoginKind::Codex(_) | PendingDeviceLoginKind::CodexLoopback(_) => {
                 ManagedAuthProvider::Codex
             }
+            PendingDeviceLoginKind::Xai(_) => ManagedAuthProvider::Xai,
         }
     }
 
@@ -310,6 +351,7 @@ impl PendingDeviceLogin {
             PendingDeviceLoginKind::Arcee(login) => login.prompt(),
             PendingDeviceLoginKind::Codex(login) => login.prompt(),
             PendingDeviceLoginKind::CodexLoopback(login) => login.prompt(),
+            PendingDeviceLoginKind::Xai(login) => login.prompt(),
         }
     }
 
@@ -321,6 +363,7 @@ impl PendingDeviceLogin {
             PendingDeviceLoginKind::Arcee(login) => login.complete().await,
             PendingDeviceLoginKind::Codex(login) => login.complete().await,
             PendingDeviceLoginKind::CodexLoopback(login) => login.complete().await,
+            PendingDeviceLoginKind::Xai(login) => login.complete().await,
         }
     }
 }
@@ -351,6 +394,9 @@ pub async fn begin_login(
         (ManagedAuthProvider::Codex, LoginStyle::DeviceCode) => {
             PendingDeviceLoginKind::Codex(chatgpt_codex::begin_codex_device_login().await?)
         }
+        (ManagedAuthProvider::Xai, _) => {
+            PendingDeviceLoginKind::Xai(xai::begin_xai_device_login().await?)
+        }
     };
     Ok(PendingDeviceLogin { inner })
 }
@@ -359,6 +405,7 @@ pub fn managed_auth_snapshot(provider: ManagedAuthProvider) -> Result<ManagedAut
     match provider {
         ManagedAuthProvider::Arcee => arcee::arcee_auth_snapshot(),
         ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_snapshot(),
+        ManagedAuthProvider::Xai => xai::xai_auth_snapshot(),
     }
 }
 
@@ -367,6 +414,7 @@ pub fn managed_auth_logout(provider: ManagedAuthProvider) -> Result<bool> {
     match provider {
         ManagedAuthProvider::Arcee => arcee::arcee_auth_remove(),
         ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_remove(),
+        ManagedAuthProvider::Xai => xai::xai_auth_remove(),
     }
 }
 

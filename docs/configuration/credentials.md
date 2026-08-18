@@ -1,6 +1,10 @@
 # Providers and logins
 
-Arcee device login, ChatGPT Codex OAuth, and API-key backends. Managed logins reject `api_key_env`; API-key providers select a credential environment variable instead. See [Model configuration](model.md) for selector rules.
+Arcee device login, ChatGPT Codex OAuth, xAI SuperGrok OAuth, and API-key backends. Managed logins reject `api_key_env`; API-key providers select a credential environment variable instead. See [Model configuration](model.md) for selector rules.
+
+## xAI SuperGrok OAuth
+
+Run `nac-web xai-auth login`, `nac-web xai-auth status`, or `nac-web xai-auth logout` to manage SuperGrok OAuth. `nac-web grok-auth` is an alias. Login requests a device code from `https://auth.x.ai/oauth2/device/code`, opens `https://accounts.x.ai/oauth2/device` for browser verification, and polls `https://auth.x.ai/oauth2/token`. The `xai-auth` backend materializes `base_url = "https://api.x.ai/v1"` when the setting is absent; an explicitly supplied value must still pass the managed SuperGrok endpoint checks (an optional trailing slash is accepted). It posts streaming Responses requests to `https://api.x.ai/v1/responses`, reads OAuth only from `xai_auth.json`, and never accepts an API-key selector. This is the SuperGrok / SuperGrok Heavy subscription path, not an `XAI_API_KEY`.
 
 ## ChatGPT Codex OAuth
 
@@ -38,6 +42,6 @@ To use a different key variable, set a per-session `api_key_env = "MY_ARCEE_KEY"
 
 ## Credential files
 
-Managed credentials live in the NAC home directory: `$NAC_HOME` when set, otherwise `$XDG_CONFIG_HOME/nac` when set, otherwise `~/.config/nac`. Arcee uses only `arcee_auth.json`; ChatGPT Codex uses only `auth.json`.
+Managed credentials live in the NAC home directory: `$NAC_HOME` when set, otherwise `$XDG_CONFIG_HOME/nac` when set, otherwise `~/.config/nac`. Arcee uses only `arcee_auth.json`; ChatGPT Codex uses only `auth.json`; SuperGrok uses only `xai_auth.json`.
 
 Credential reads reject symlinks and non-regular files, and writes use locking plus atomic replacement. On Unix, managed credential files must have no group or other permission bits; reads reject files such as mode `0644` or `0660`, and writes create owner-only mode-`0600` files. Non-Unix platforms retain the symlink, regular-file, locking, and atomic-write checks without the Unix mode-bit policy. Each logout command removes only its own credential path and does not follow a symlink target.

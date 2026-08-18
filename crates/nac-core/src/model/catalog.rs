@@ -65,7 +65,7 @@ pub(crate) fn api_kind_for(provider: BackendKind) -> ApiKind {
         | BackendKind::TogetherChat
         | BackendKind::ArceeAuth
         | BackendKind::ArceeApi => ApiKind::OpenAiCompletions,
-        BackendKind::OpenAiResponses => ApiKind::OpenAiResponses,
+        BackendKind::OpenAiResponses | BackendKind::XaiAuth => ApiKind::OpenAiResponses,
         BackendKind::ChatGptCodexResponses => ApiKind::ChatGptCodexResponses,
         BackendKind::AnthropicMessages => ApiKind::AnthropicMessages,
     }
@@ -426,6 +426,7 @@ fn provider_auth(provider: BackendKind) -> ProviderAuth {
     match provider {
         BackendKind::ArceeAuth => ProviderAuth::ManagedArcee,
         BackendKind::ChatGptCodexResponses => ProviderAuth::CodexOauth,
+        BackendKind::XaiAuth => ProviderAuth::XaiOauth,
         other => unreachable!("non-API-key backend '{other}' has managed auth"),
     }
 }

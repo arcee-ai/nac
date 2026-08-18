@@ -13,6 +13,7 @@ const PROVIDER_LABELS = {
   "together-chat": "Together Chat",
   "arcee-auth": "Arcee API (Sign in)",
   "arcee-api": "Arcee API (Key)",
+  "xai-auth": "xAI SuperGrok",
 } satisfies Record<BackendKind, string>;
 
 /** Display order shared by every provider list in the UI. */
@@ -25,6 +26,7 @@ export const PROVIDER_KINDS: BackendKind[] = [
   "deepseek-chat",
   "fireworks-chat",
   "together-chat",
+  "xai-auth",
 ];
 
 /** Stable rank for sorting provider lists; unknown backends sink to the end. */
@@ -65,6 +67,7 @@ interface ManagedAuthProviderByBackend {
 const MANAGED_AUTH_PROVIDERS = {
   "arcee-auth": "arcee",
   "chatgpt-codex-responses": "codex",
+  "xai-auth": "xai",
 } satisfies Partial<Record<BackendKind, ManagedAuthProvider>>;
 
 export function managedAuthProvider(backend: string): ManagedAuthProvider | null {
@@ -81,6 +84,7 @@ export function managedAuthProvider(backend: string): ManagedAuthProvider | null
 const MANAGED_AUTH_LABELS = {
   arcee: "Arcee",
   codex: "ChatGPT",
+  xai: "SuperGrok",
 } satisfies Record<ManagedAuthProvider, string>;
 
 export function managedAuthLabel(provider: ManagedAuthProvider): string {
