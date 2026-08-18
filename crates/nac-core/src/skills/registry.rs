@@ -51,6 +51,12 @@ impl SkillRegistry {
                     shadowed.insert(parsed.name);
                     continue;
                 }
+                if is_env_var_style_name(&parsed.name) {
+                    eprintln!(
+                        "Skill '{}' has an env-var-style name; writing '${}' in a prompt will expand this skill",
+                        parsed.name, parsed.name
+                    );
+                }
                 skills.insert(parsed.name.clone(), record);
             }
         }
@@ -139,6 +145,19 @@ impl SkillRegistry {
 
         Some(content)
     }
+}
+
+/// Env-var-style names — all uppercase letters, digits, and underscores
+/// (`HOME`, `PATH`, `VIRTUAL_ENV`), including all-digit names (`5`) —
+/// collide with shell syntax: `$HOME` in a prompt is indistinguishable
+/// from a skill reference, and the registered skill wins. Loading still
+/// succeeds; the registry warns at load time so the collision is visible
+/// to whoever installed the skill.
+pub(super) fn is_env_var_style_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// Skill-controlled text (body, compatibility, and the on-disk skill
