@@ -445,6 +445,12 @@ impl Agent {
         }
     }
 
+    /// The session's skill registry, when any skills were discovered at
+    /// launch. The clone is cheap (the registry is behind `Arc`).
+    pub fn skills(&self) -> Option<Arc<SkillRegistry>> {
+        self.tool_runtime.skills.clone()
+    }
+
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
         self.send_inner(prompt, None).await
     }

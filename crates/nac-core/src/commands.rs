@@ -1,5 +1,20 @@
 use serde::{Deserialize, Serialize};
 
+use crate::skills::SkillRegistry;
+
+/// Sentinel element wrapping the skill blocks that `$skillname` prompt
+/// expansion appends to the agent-facing prompt. The expanded form is
+/// `{raw}\n\n<invoked_skills>\n{blocks}\n</invoked_skills>` where each block
+/// is one `<skill_content name="...">...</skill_content>` rendering (blocks
+/// are joined by a single `\n`). `display_prompt_from_message` collapses an
+/// expanded prompt back to what the user typed by truncating at
+/// `INVOKED_SKILLS_SEPARATOR`, but only when the message ends with
+/// `INVOKED_SKILLS_CLOSE`, so user text that merely mentions the sentinel
+/// is left alone. The frontend mirrors this format byte-for-byte.
+pub(crate) const INVOKED_SKILLS_OPEN: &str = "<invoked_skills>";
+pub(crate) const INVOKED_SKILLS_CLOSE: &str = "</invoked_skills>";
+pub(crate) const INVOKED_SKILLS_SEPARATOR: &str = "\n\n<invoked_skills>\n";
+
 /// Slash commands understood by NAC.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -57,6 +72,17 @@ pub enum PreparedUserInput {
 }
 
 pub fn prepare_user_input(input: &str) -> PreparedUserInput {
+    prepare_user_input_with_skills(input, None)
+}
+
+/// Like `prepare_user_input`, but `$skillname` references in a submitted
+/// prompt are resolved against the session's skill registry: the raw and
+/// display prompts stay exactly what the user typed, while the agent prompt
+/// gets the recognized skills' rendered content appended.
+pub(crate) fn prepare_user_input_with_skills(
+    input: &str,
+    skills: Option<&SkillRegistry>,
+) -> PreparedUserInput {
     if input.trim().is_empty() {
         return PreparedUserInput::Empty;
     }
@@ -67,7 +93,7 @@ pub fn prepare_user_input(input: &str) -> PreparedUserInput {
         None => PreparedUserInput::SubmitPrompt(PreparedPrompt {
             raw_prompt: input.to_string(),
             display_prompt: input.to_string(),
-            agent_prompt: input.to_string(),
+            agent_prompt: expand_user_prompt_with_skills(input, skills),
         }),
     }
 }
@@ -97,11 +123,99 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
 }
 
 pub fn expand_user_prompt(prompt: &str) -> String {
-    prompt.to_string()
+    expand_user_prompt_with_skills(prompt, None)
+}
+
+/// Expands top-level `$skillname` references into an appended skill block.
+///
+/// A reference is a `$` immediately followed by a name token matching
+/// `[A-Za-z0-9][A-Za-z0-9_-]*`; the whole greedy run is the candidate name,
+/// so with both `code` and `code-review` registered, `$code-review` resolves
+/// to `code-review`. `$` before anything else (`{`, `(`, whitespace, end of
+/// input, another `$`, ...) is never a reference, and a candidate that is
+/// not a registered skill stays ordinary text — `$HOME`, `${VAR}`,
+/// `$(cmd)`, `$5`, and `$$` all pass through byte-identical. Recognized
+/// skills are deduplicated and appended in first-reference order; the
+/// literal `$skillname` stays in the original sentence.
+pub(crate) fn expand_user_prompt_with_skills(
+    prompt: &str,
+    skills: Option<&SkillRegistry>,
+) -> String {
+    let Some(skills) = skills else {
+        return prompt.to_string();
+    };
+
+    let mut invoked: Vec<&str> = Vec::new();
+    let bytes = prompt.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'$' {
+            index += 1;
+            continue;
+        }
+        let name_start = index + 1;
+        // All name characters are ASCII, so byte slicing stays on char
+        // boundaries; a `$` not followed by a name start is literal text.
+        if name_start >= bytes.len() || !bytes[name_start].is_ascii_alphanumeric() {
+            index += 1;
+            continue;
+        }
+        let mut name_end = name_start + 1;
+        while name_end < bytes.len() && is_skill_name_char(bytes[name_end]) {
+            name_end += 1;
+        }
+        let name = &prompt[name_start..name_end];
+        if skills.has_skill(name) && !invoked.contains(&name) {
+            invoked.push(name);
+        }
+        index = name_end;
+    }
+
+    if invoked.is_empty() {
+        return prompt.to_string();
+    }
+
+    let mut expanded = String::with_capacity(prompt.len() + 256);
+    expanded.push_str(prompt);
+    expanded.push_str("\n\n");
+    expanded.push_str(INVOKED_SKILLS_OPEN);
+    expanded.push('\n');
+    for (position, name) in invoked.iter().enumerate() {
+        if position > 0 {
+            expanded.push('\n');
+        }
+        let block = skills
+            .render_for_prompt(name)
+            .expect("has_skill guaranteed the skill is registered");
+        expanded.push_str(&block);
+    }
+    expanded.push('\n');
+    expanded.push_str(INVOKED_SKILLS_CLOSE);
+    expanded
+}
+
+fn is_skill_name_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
 }
 
 pub fn display_prompt_from_message(content: &str) -> String {
+    if let Some(collapsed) = invoked_skills_display_prompt(content) {
+        return collapsed;
+    }
     workset_command_display_prompt(content).unwrap_or_else(|| content.to_string())
+}
+
+/// Collapses a `$skillname`-expanded prompt back to what the user typed.
+/// The appended block is recognized by the closing tag at the very end of
+/// the message plus the last separator before it, so user text that merely
+/// mentions the sentinel — or even ends with the closing tag without an
+/// appended block — is left alone.
+fn invoked_skills_display_prompt(content: &str) -> Option<String> {
+    if !content.ends_with(INVOKED_SKILLS_CLOSE) {
+        return None;
+    }
+    let (head, _) = content.rsplit_once(INVOKED_SKILLS_SEPARATOR)?;
+    Some(head.to_string())
 }
 
 fn workset_command_display_prompt(content: &str) -> Option<String> {
@@ -123,6 +237,28 @@ fn workset_command_display_prompt(content: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::skills::SkillRecord;
+    use std::path::PathBuf;
+
+    fn test_registry(skills: &[(&str, &str)]) -> SkillRegistry {
+        SkillRegistry::load_for_test(
+            skills
+                .iter()
+                .map(|(name, body)| SkillRecord {
+                    name: name.to_string(),
+                    description: format!("{name} description"),
+                    compatibility: None,
+                    skill_root_visible: PathBuf::from(format!("/skills/{name}")),
+                    body: body.to_string(),
+                    resources: Vec::new(),
+                })
+                .collect(),
+        )
+    }
+
+    fn expand(prompt: &str, skills: Option<&SkillRegistry>) -> String {
+        expand_user_prompt_with_skills(prompt, skills)
+    }
 
     #[test]
     fn registered_slash_commands_parse_by_canonical_name() {
@@ -181,5 +317,152 @@ mod tests {
             display_prompt_from_message(expanded_run),
             "/run auth-refresh"
         );
+    }
+
+    #[test]
+    fn single_skill_reference_appends_rendered_skill() {
+        let registry = test_registry(&[("demo", "DEMO BODY")]);
+        let raw = "Use $demo to review this change.";
+
+        let expanded = expand(raw, Some(&registry));
+
+        let expected = format!(
+            "{raw}\n\n{INVOKED_SKILLS_OPEN}\n{}\n{INVOKED_SKILLS_CLOSE}",
+            registry.render_for_prompt("demo").unwrap()
+        );
+        assert_eq!(expanded, expected);
+        // The literal reference stays in the original sentence.
+        assert!(expanded.starts_with(raw));
+        assert!(expanded.contains("<skill_content name=\"demo\">"));
+        assert!(expanded.contains("DEMO BODY"));
+    }
+
+    #[test]
+    fn repeated_skill_reference_expands_once() {
+        let registry = test_registry(&[("demo", "DEMO BODY")]);
+
+        let expanded = expand("$demo then $demo again", Some(&registry));
+
+        assert_eq!(expanded.matches("<skill_content").count(), 1);
+        assert_eq!(expanded.matches(INVOKED_SKILLS_OPEN).count(), 1);
+    }
+
+    #[test]
+    fn multiple_skills_append_in_first_reference_order() {
+        let registry = test_registry(&[("alpha", "ALPHA BODY"), ("beta", "BETA BODY")]);
+
+        let expanded = expand("first $beta, then $alpha, then $beta again", Some(&registry));
+
+        let beta_block = expanded.find("BETA BODY").unwrap();
+        let alpha_block = expanded.find("ALPHA BODY").unwrap();
+        assert!(
+            beta_block < alpha_block,
+            "blocks follow first-reference order, not registration order"
+        );
+        assert_eq!(expanded.matches("<skill_content").count(), 2);
+    }
+
+    #[test]
+    fn overlapping_skill_names_resolve_to_the_greedy_longest_run() {
+        let registry = test_registry(&[("code", "CODE BODY"), ("code-review", "REVIEW BODY")]);
+
+        let expanded = expand("run $code-review please", Some(&registry));
+        assert!(expanded.contains("<skill_content name=\"code-review\">"));
+        assert!(!expanded.contains("CODE BODY"));
+
+        let expanded = expand("run $code please", Some(&registry));
+        assert!(expanded.contains("<skill_content name=\"code\">"));
+        assert!(!expanded.contains("REVIEW BODY"));
+
+        // A run that matches no registered skill is ordinary text, even
+        // when a registered name is a prefix of it.
+        let expanded = expand("run $codebase please", Some(&registry));
+        assert_eq!(expanded, "run $codebase please");
+    }
+
+    #[test]
+    fn unrecognized_dollar_tokens_pass_through_byte_identical() {
+        let registry = test_registry(&[("demo", "DEMO BODY")]);
+        for prompt in [
+            "echo $HOME",
+            "echo ${VAR}",
+            "echo $(cmd)",
+            "it costs $5",
+            "$$ literal",
+            "trailing $",
+            "$ demo with space",
+            "template {{ $var }}",
+            "no dollars at all",
+        ] {
+            assert_eq!(expand(prompt, Some(&registry)), prompt, "prompt: {prompt:?}");
+        }
+    }
+
+    #[test]
+    fn no_registry_returns_input_unchanged() {
+        assert_eq!(expand("Use $demo here", None), "Use $demo here");
+        let PreparedUserInput::SubmitPrompt(prompt) = prepare_user_input("Use $demo here") else {
+            panic!("expected a submittable prompt");
+        };
+        assert_eq!(prompt.agent_prompt, "Use $demo here");
+    }
+
+    #[test]
+    fn skill_reference_inside_shell_heavy_prompt_expands_only_the_skill() {
+        let registry = test_registry(&[("demo", "DEMO BODY")]);
+        let raw = "Run $demo with $HOME, ${ARGS:-x}, $(date), and $$ intact";
+
+        let expanded = expand(raw, Some(&registry));
+
+        assert!(expanded.starts_with(raw));
+        assert!(expanded.contains("$HOME, ${ARGS:-x}, $(date), and $$ intact"));
+        assert_eq!(expanded.matches("<skill_content").count(), 1);
+    }
+
+    #[test]
+    fn prepare_user_input_with_skills_splits_display_from_agent_prompt() {
+        let registry = test_registry(&[("demo", "DEMO BODY")]);
+        let raw = "Use $demo to review this change.";
+
+        let PreparedUserInput::SubmitPrompt(prompt) =
+            prepare_user_input_with_skills(raw, Some(&registry))
+        else {
+            panic!("expected a submittable prompt");
+        };
+
+        assert_eq!(prompt.raw_prompt, raw);
+        assert_eq!(prompt.display_prompt, raw);
+        assert_ne!(prompt.agent_prompt, raw);
+        assert!(prompt.agent_prompt.contains("DEMO BODY"));
+    }
+
+    #[test]
+    fn expanded_prompt_collapses_back_to_the_raw_prompt() {
+        let registry = test_registry(&[("alpha", "ALPHA BODY"), ("beta", "BETA BODY")]);
+        for raw in [
+            "Use $demo to review this change.",
+            "multi\nline $alpha prompt\nwith $beta too",
+            "mentions <invoked_skills> and <skill_content in prose, uses $alpha",
+        ] {
+            let expanded = expand(raw, Some(&registry));
+            assert_eq!(
+                display_prompt_from_message(&expanded),
+                raw,
+                "round trip failed for {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_text_mentioning_the_sentinel_is_not_collapsed() {
+        // No trailing closing tag: not an expanded prompt.
+        let prose = "the <invoked_skills> element wraps appended skills";
+        assert_eq!(display_prompt_from_message(prose), prose);
+        // A closing tag without the appended-block separator is not an
+        // expanded prompt either.
+        let prose = "user text that ends with </invoked_skills>";
+        assert_eq!(display_prompt_from_message(prose), prose);
+        let prose = "user text mentioning <skill_content name=\"x\"> inline";
+        assert_eq!(display_prompt_from_message(prose), prose);
     }
 }

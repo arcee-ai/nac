@@ -23,6 +23,7 @@ pub use crate::events::{
 };
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
+use crate::skills::SkillRegistry;
 use crate::types::Message;
 use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
@@ -523,6 +524,10 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    /// The session's skill registry, captured from the agent at construction
+    /// so `prepare_user_input` can expand top-level `$skillname` references
+    /// without taking the agent lock.
+    skills: Option<Arc<SkillRegistry>>,
     /// True when this session executes inside a sandbox container. Dropping
     /// the last service reference drops the `SandboxSession`, and an owned
     /// container's `Drop` runs `podman rm -f`; the next resume builds a fresh
@@ -712,6 +717,7 @@ impl SessionService {
         let active_threads = run_config.agent.active_threads_handle();
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
+        let skills = run_config.agent.skills();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
         // pass; later scans read only the newly appended tail rows.
@@ -733,6 +739,7 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            skills,
             has_sandbox,
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
@@ -959,7 +966,7 @@ impl SessionService {
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
-        commands::prepare_user_input(input)
+        commands::prepare_user_input_with_skills(input, self.skills.as_deref())
     }
 
     #[allow(clippy::result_large_err)]
@@ -4267,6 +4274,150 @@ pub(super) mod tests {
         }
         assert_eq!(appended_lens, vec![2, 3, 4, 5]);
         drop(handle);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn skill_references_expand_into_the_agent_prompt_only() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let store_path = test_store_path("skill_prompt_expansion");
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            serde_json::json!({
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "done"}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+            .to_string(),
+        )]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "skill-expansion-session".to_string();
+        let registry = Arc::new(SkillRegistry::load_for_test(vec![
+            crate::skills::SkillRecord {
+                name: "demo".to_string(),
+                description: "demo skill".to_string(),
+                compatibility: None,
+                skill_root_visible: PathBuf::from("/skills/demo"),
+                body: "DEMO SKILL BODY".to_string(),
+                resources: Vec::new(),
+            },
+        ]));
+        let agent = Agent::with_config(
+            client.clone(),
+            AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
+                mode: AgentMode::Orchestrator,
+                store_path: store_path.clone(),
+                session_id: Some(session_id.clone()),
+                orchestrator_compaction_threshold: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                dispatch_id: None,
+                event_sink: EventSink::none(),
+                workspace_cwd: PathBuf::from("/repo"),
+                config_cwd: PathBuf::from("/repo"),
+                working_directory: "/repo".to_string(),
+                worker_executable: None,
+                sandbox: None,
+                ssh: None,
+                mcp: None,
+                skills: Some(registry),
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
+            },
+        )
+        .expect("agent config must be valid");
+        let snapshot = sessions::new_snapshot(
+            session_id.clone(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.clone(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_git: Some(GitTarget::local("/repo")),
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+
+        // Preparation keeps the raw/display prompt exactly as typed and
+        // appends the rendered skill to the agent-facing prompt only.
+        let raw = "Use $demo to say hi";
+        let PreparedUserInput::SubmitPrompt(prompt) = parts.service.prepare_user_input(raw) else {
+            panic!("expected a submittable prompt");
+        };
+        assert_eq!(prompt.raw_prompt, raw);
+        assert_eq!(prompt.display_prompt, raw);
+        assert!(prompt.agent_prompt.starts_with(raw));
+        assert!(prompt.agent_prompt.contains("\n\n<invoked_skills>\n"));
+        assert!(prompt.agent_prompt.contains("<skill_content name=\"demo\">"));
+        assert!(prompt.agent_prompt.contains("DEMO SKILL BODY"));
+        assert!(prompt.agent_prompt.ends_with("</invoked_skills>"));
+        let expanded = prompt.agent_prompt.clone();
+
+        let handle = parts.service.try_submit_prepared_prompt(prompt).unwrap();
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+        drop(handle);
+
+        // The provider request carried the expanded prompt.
+        let requests = server.finish();
+        assert_eq!(requests.len(), 1);
+        let body = String::from_utf8(requests[0].body.clone()).unwrap();
+        assert!(body.contains("Use $demo to say hi"));
+        assert!(body.contains("DEMO SKILL BODY"));
+        assert!(body.contains("<invoked_skills>"));
+
+        // The stored transcript holds the expanded form...
+        let transcript = parts.service.store_backed_transcript().await.unwrap();
+        let message_idx = transcript
+            .iter()
+            .position(|message| matches!(message, Message::User { .. }))
+            .expect("the run committed a user message");
+        assert!(
+            matches!(&transcript[message_idx], Message::User { content } if content == &expanded)
+        );
+
+        // ...while the resend read path collapses it back to the raw input,
+        // and re-preparing that collapses-then-expands exactly once (no
+        // nested wrappers).
+        let collapsed = parts.service.user_input_at(message_idx).await.unwrap();
+        assert_eq!(collapsed, raw);
+        let PreparedUserInput::SubmitPrompt(reprepared) =
+            parts.service.prepare_user_input(&collapsed)
+        else {
+            panic!("expected a submittable prompt");
+        };
+        assert_eq!(reprepared.agent_prompt, expanded);
+        assert_eq!(
+            reprepared.agent_prompt.matches("<invoked_skills>").count(),
+            1
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

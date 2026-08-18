@@ -90,12 +90,25 @@ impl SkillRegistry {
     }
 
     pub fn activate(&self, name: &str) -> ToolResult {
-        let Some(skill) = self.skills.get(name) else {
+        let Some(content) = self.render_for_prompt(name) else {
             return ToolResult {
                 content: (format!("Error: unknown skill '{}'", name)).into(),
                 is_error: true,
             };
         };
+
+        ToolResult {
+            content: content.into(),
+            is_error: false,
+        }
+    }
+
+    /// Renders the skill in the `<skill_content>` format for injection into
+    /// a user prompt, or `None` when the name is not registered. This is the
+    /// exact rendering `activate` returns, so a `$skill` prompt expansion
+    /// reads identically to a tool activation.
+    pub(crate) fn render_for_prompt(&self, name: &str) -> Option<String> {
+        let skill = self.skills.get(name)?;
 
         let mut content = format!("<skill_content name=\"{}\">\n", escape_xml(&skill.name));
         if let Some(compatibility) = &skill.compatibility {
@@ -121,10 +134,7 @@ impl SkillRegistry {
         }
         content.push_str("</skill_content>");
 
-        ToolResult {
-            content: content.into(),
-            is_error: false,
-        }
+        Some(content)
     }
 }
 
