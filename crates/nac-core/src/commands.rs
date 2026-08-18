@@ -134,7 +134,10 @@ pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -
         return prompt.to_string();
     };
 
-    let mut invoked: Vec<&str> = Vec::new();
+    // Collect (name, rendered block) pairs as the scan finds them: each
+    // recognized skill is looked up and rendered exactly once, blocks are
+    // deduplicated, and first-reference order is preserved.
+    let mut invoked: Vec<(&str, String)> = Vec::new();
     let bytes = prompt.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -154,8 +157,10 @@ pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -
             name_end += 1;
         }
         let name = &prompt[name_start..name_end];
-        if skills.has_skill(name) && !invoked.contains(&name) {
-            invoked.push(name);
+        if !invoked.iter().any(|(seen, _)| *seen == name) {
+            if let Some(block) = skills.render_for_prompt(name) {
+                invoked.push((name, block));
+            }
         }
         index = name_end;
     }
@@ -164,19 +169,26 @@ pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -
         return prompt.to_string();
     }
 
-    let mut expanded = String::with_capacity(prompt.len() + 256);
+    // Exact size: the prompt, the separator, one block per skill plus one
+    // '\n' per block (the joins and the newline before the close tag), and
+    // the close tag.
+    let capacity = prompt.len()
+        + INVOKED_SKILLS_SEPARATOR.len()
+        + invoked
+            .iter()
+            .map(|(_, block)| block.len() + 1)
+            .sum::<usize>()
+        + INVOKED_SKILLS_CLOSE.len();
+    let mut expanded = String::with_capacity(capacity);
     expanded.push_str(prompt);
     expanded.push_str("\n\n");
     expanded.push_str(INVOKED_SKILLS_OPEN);
     expanded.push('\n');
-    for (position, name) in invoked.iter().enumerate() {
+    for (position, (_, block)) in invoked.iter().enumerate() {
         if position > 0 {
             expanded.push('\n');
         }
-        let block = skills
-            .render_for_prompt(name)
-            .expect("has_skill guaranteed the skill is registered");
-        expanded.push_str(&block);
+        expanded.push_str(block);
     }
     expanded.push('\n');
     expanded.push_str(INVOKED_SKILLS_CLOSE);
