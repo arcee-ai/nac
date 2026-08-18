@@ -15,26 +15,32 @@ import {
   StickyInputVariant,
   Tooltip,
 } from "@/app/atoms";
-import { SessionCard, type SessionReorderStart } from "@/app/components/sessions/SessionCard";
+import { ProjectCard, type ProjectReorderStart } from "@/app/components/projects/ProjectCard";
+import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
-import { SessionsEmptyState } from "@/app/components/sessions/SessionsEmptyState";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
+import { toRunError } from "@/app/lib/providerError";
+import { projectListItemId, projectListItems, type ProjectListItem } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
-import { NEW_SESSION_KEYS } from "@/app/lib/shortcuts";
-import { isNoOpMove, pinGroup, targetIndexInGroup, type DropEdge } from "@/app/lib/sessionOrder";
+import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
+import { type DropEdge } from "@/app/lib/sessionOrder";
+import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useMoveSessionOrder, useSessionsWithWorkspaceStats } from "@/app/services/queries";
-import { clearAttention, trackAttention, useAttention } from "@/app/store/attentionStore";
+import {
+  useMoveProjectOrder,
+  useProjects,
+  useSessionsWithWorkspaceStats,
+} from "@/app/services/queries";
+import { clearAttentionAll, trackAttention, useAnyAttention } from "@/app/store/attentionStore";
 import {
   setQuery,
   useFilterQuery,
   useIsDefaultSort,
-  useVisibleSessions,
+  useVisibleProjectItems,
 } from "@/app/store/sessionFiltersStore";
-import type { ManagedSessionSummary } from "@/app/types/api";
-import { toRunError } from "@/app/lib/providerError";
+import type { ProjectRecord } from "@/app/types/api";
 
 // Columns are 360px at minimum and stretch to fill the row, so the design's
 // 3-up layout falls out naturally at the 1520px reference width and wider
@@ -70,13 +76,24 @@ function DropSlot() {
   );
 }
 
+/** Chats a card answers for: its own, or every one inside the project. */
+function attentionIds(item: ProjectListItem): string[] {
+  return item.kind === "project"
+    ? item.entry.sessions.map((entry) => entry.summary.session_id)
+    : [item.session.summary.session_id];
+}
+
+function isPinned(item: ProjectListItem): boolean {
+  return item.kind === "project" ? item.entry.project.pinned : Boolean(item.session.summary.pinned);
+}
+
 interface DropTarget {
-  sessionId: string;
+  itemId: string;
   edge: DropEdge;
 }
 
 interface DragState {
-  sessionId: string;
+  projectId: string;
   offsetX: number;
   offsetY: number;
   width: number;
@@ -87,7 +104,7 @@ interface DragState {
 
 /** Wrapper so each card can subscribe to its own attention flag. */
 function GridCard({
-  entry,
+  item,
   onOpen,
   reorderable,
   dragging,
@@ -97,41 +114,52 @@ function GridCard({
   onMoveDown,
   onReorderStart,
 }: {
-  entry: ManagedSessionSummary;
-  onOpen: (id: string) => void;
+  item: ProjectListItem;
+  onOpen: (item: ProjectListItem) => void;
   reorderable: boolean;
   dragging: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMoveUp: () => void;
   onMoveDown: () => void;
-  onReorderStart: (start: SessionReorderStart) => void;
+  onReorderStart: (start: ProjectReorderStart) => void;
 }) {
-  const actions = useSessionActions();
-  const attention = useAttention(entry.summary.session_id);
+  const projectActions = useProjectActions();
+  const sessionActions = useSessionActions();
+  const attention = useAnyAttention(attentionIds(item));
 
+  const common = {
+    item,
+    selected: false,
+    attention,
+    dragging,
+    onOpen: () => onOpen(item),
+    reorder: reorderable
+      ? { canMoveUp, canMoveDown, onMoveUp, onMoveDown, onReorderStart }
+      : undefined,
+  };
+
+  if (item.kind === "project") {
+    const { project } = item.entry;
+    return (
+      <ProjectCard
+        {...common}
+        onTogglePin={() => void projectActions.togglePin(project)}
+        onRename={() => projectActions.rename(project)}
+        onDelete={() => projectActions.remove(project)}
+      />
+    );
+  }
+
+  const { summary } = item.session;
   return (
-    <SessionCard
-      entry={entry}
-      selected={false}
-      attention={attention}
-      onOpen={onOpen}
-      onTogglePin={(e) => void actions.togglePin(e.summary)}
-      onRename={(e) => actions.rename(e.summary)}
-      onDelete={(e) => actions.remove(e.summary)}
-      onStop={(e) => void actions.stopRun(e.summary)}
-      dragging={dragging}
-      reorder={
-        reorderable
-          ? {
-              canMoveUp,
-              canMoveDown,
-              onMoveUp,
-              onMoveDown,
-              onReorderStart,
-            }
-          : undefined
-      }
+    <ProjectCard
+      {...common}
+      onTogglePin={() => void sessionActions.togglePin(summary)}
+      onRename={() => sessionActions.rename(summary)}
+      onDelete={() => sessionActions.remove(summary)}
+      onAssign={() => projectActions.assign(summary)}
+      onStop={() => void sessionActions.stopRun(summary)}
     />
   );
 }
@@ -145,27 +173,36 @@ function hitTestDropTarget(
   for (const node of stack) {
     if (!(node instanceof HTMLElement)) continue;
     if (node.dataset.pinDropZone === "true") return "pin-zone";
-    const card = node.closest<HTMLElement>("[data-session-id]");
+    const card = node.closest<HTMLElement>("[data-item-id]");
     if (!card) continue;
-    const sessionId = card.dataset.sessionId;
-    if (!sessionId || sessionId === draggingId) continue;
+    const itemId = card.dataset.itemId;
+    if (!itemId || itemId === draggingId) continue;
+    // Only a project has a place in the order; a loose chat is just passed over.
+    if (card.dataset.itemKind !== "project") continue;
     // Skip the floating ghost (fixed + data-dragging).
     if (card.dataset.dragging === "true") continue;
     const rect = card.getBoundingClientRect();
     const edge: DropEdge = clientX < rect.left + rect.width / 2 ? "before" : "after";
-    return { sessionId, edge };
+    return { itemId, edge };
   }
   return null;
 }
 
-export default function SessionsListPage() {
+/** Projects of one pin group, in the order the backend keeps them. */
+function pinnedGroup(projects: ProjectRecord[], pinned: boolean): ProjectRecord[] {
+  return projects
+    .filter((project) => project.pinned === pinned)
+    .sort((a, b) => a.sort_order - b.sort_order);
+}
+
+export default function ProjectsListPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const actions = useSessionActions();
+  const projectActions = useProjectActions();
   const toast = useToast();
   const query = useFilterQuery();
   const isDefaultSort = useIsDefaultSort();
-  const moveOrder = useMoveSessionOrder();
+  const moveOrder = useMoveProjectOrder();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -175,31 +212,29 @@ export default function SessionsListPage() {
   const pinZoneRef = useRef(false);
 
   const { data, isLoading, error, refetch } = useSessionsWithWorkspaceStats();
-  const all = useMemo(() => data ?? [], [data]);
-  const sessions = useVisibleSessions(all);
+  const projectsQuery = useProjects();
+  const allSessions = useMemo(() => data ?? [], [data]);
+  const projects = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data]);
+  const all = useMemo(() => projectListItems(projects, allSessions), [projects, allSessions]);
+  const items = useVisibleProjectItems(all);
 
   useEffect(() => {
     if (data) trackAttention(data, null);
   }, [data]);
 
-  const openSession = (id: string) => {
-    clearAttention(id);
-    navigate(routes.session(id));
+  const open = (item: ProjectListItem) => {
+    const id = projectListItemId(item);
+    clearAttentionAll(attentionIds(item));
+    navigate(item.kind === "project" ? routes.project(id) : routes.session(id));
   };
 
-  const pinned = sessions.filter((entry) => entry.summary.pinned);
-  const unpinned = sessions.filter((entry) => !entry.summary.pinned);
-  const countLabel = `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}`;
+  const pinned = items.filter(isPinned);
+  const unpinned = items.filter((item) => !isPinned(item));
+  const projectCount = items.filter((item) => item.kind === "project").length;
+  const countLabel = `${projectCount} ${projectCount === 1 ? "project" : "projects"}`;
 
-  const fullPinned = useMemo(() => pinGroup(all, true), [all]);
-  const fullUnpinned = useMemo(() => pinGroup(all, false), [all]);
-  const entriesById = useMemo(() => {
-    const map = new Map<string, ManagedSessionSummary>();
-    for (const entry of sessions) {
-      map.set(entry.summary.session_id, entry);
-    }
-    return map;
-  }, [sessions]);
+  const fullPinned = useMemo(() => pinnedGroup(projects, true), [projects]);
+  const fullUnpinned = useMemo(() => pinnedGroup(projects, false), [projects]);
 
   const clearDrag = useCallback(() => {
     dragRef.current = null;
@@ -211,63 +246,60 @@ export default function SessionsListPage() {
   }, []);
 
   const moveTo = useCallback(
-    async (sessionId: string, targetPinned: boolean, targetIndex: number) => {
-      if (isNoOpMove(all, sessionId, targetPinned, targetIndex)) {
+    async (projectId: string, targetPinned: boolean, targetIndex: number) => {
+      const group = pinnedGroup(projects, targetPinned);
+      const current = group.findIndex((project) => project.project_id === projectId);
+      const moving = projects.find((project) => project.project_id === projectId);
+      if (moving && moving.pinned === targetPinned && current === targetIndex) {
         clearDrag();
         return;
       }
       try {
-        await moveOrder.mutateAsync({
-          sessions: all,
-          sessionId,
-          targetPinned,
-          targetIndex,
-        });
+        await moveOrder.mutateAsync({ projects, projectId, targetPinned, targetIndex });
       } catch (err) {
-        toast.error(`Failed to reorder sessions: ${errorMessage(toRunError(err))}`);
+        toast.error(`Failed to reorder projects: ${errorMessage(toRunError(err))}`);
       } finally {
         clearDrag();
       }
     },
-    [all, clearDrag, moveOrder, toast],
+    [projects, clearDrag, moveOrder, toast],
   );
 
   const moveByArrow = useCallback(
-    (entry: ManagedSessionSummary, delta: -1 | 1) => {
-      const pinnedGroup = Boolean(entry.summary.pinned);
-      const group = pinnedGroup ? fullPinned : fullUnpinned;
-      const index = group.findIndex((e) => e.summary.session_id === entry.summary.session_id);
+    (project: ProjectRecord, delta: -1 | 1) => {
+      const group = project.pinned ? fullPinned : fullUnpinned;
+      const index = group.findIndex((p) => p.project_id === project.project_id);
       if (index < 0) return;
       const next = index + delta;
       if (next < 0 || next >= group.length) return;
-      void moveTo(entry.summary.session_id, pinnedGroup, next);
+      void moveTo(project.project_id, project.pinned, next);
     },
     [fullPinned, fullUnpinned, moveTo],
   );
 
   const applyDropTarget = useCallback(
     (dragId: string, target: DropTarget) => {
-      if (target.sessionId === dragId) {
+      const targetProject = projects.find((project) => project.project_id === target.itemId);
+      if (!targetProject || target.itemId === dragId) {
         clearDrag();
         return;
       }
-      const targetEntry = entriesById.get(target.sessionId);
-      if (!targetEntry) {
+      const group = pinnedGroup(projects, targetProject.pinned);
+      const ids = group.map((project) => project.project_id).filter((id) => id !== dragId);
+      const at = ids.indexOf(target.itemId);
+      if (at < 0) {
         clearDrag();
         return;
       }
-      const targetPinned = Boolean(targetEntry.summary.pinned);
-      const group = targetPinned ? fullPinned : fullUnpinned;
-      const targetIndex = targetIndexInGroup(group, target.sessionId, target.edge, dragId);
-      void moveTo(dragId, targetPinned, targetIndex);
+      void moveTo(dragId, targetProject.pinned, target.edge === "before" ? at : at + 1);
     },
-    [clearDrag, entriesById, fullPinned, fullUnpinned, moveTo],
+    [clearDrag, projects, moveTo],
   );
 
-  const beginDrag = useCallback((start: SessionReorderStart) => {
-    if (!start.sessionId) return;
+  const beginDrag = useCallback((start: ProjectReorderStart) => {
+    if (!start.itemId) return;
     const next: DragState = {
-      sessionId: start.sessionId,
+      projectId: start.itemId,
       offsetX: start.offsetX,
       offsetY: start.offsetY,
       width: start.width,
@@ -294,7 +326,7 @@ export default function SessionsListPage() {
       dragRef.current = next;
       setDrag(next);
 
-      const hit = hitTestDropTarget(e.clientX, e.clientY, current.sessionId);
+      const hit = hitTestDropTarget(e.clientX, e.clientY, current.projectId);
       if (hit === "pin-zone") {
         pinZoneRef.current = true;
         dropTargetRef.current = null;
@@ -306,9 +338,7 @@ export default function SessionsListPage() {
       setPinZoneActive(false);
       if (!hit) return;
       dropTargetRef.current = hit;
-      setDropTarget((prev) =>
-        prev?.sessionId === hit.sessionId && prev.edge === hit.edge ? prev : hit,
-      );
+      setDropTarget((prev) => (prev?.itemId === hit.itemId && prev.edge === hit.edge ? prev : hit));
     };
 
     const onUp = () => {
@@ -318,12 +348,12 @@ export default function SessionsListPage() {
         return;
       }
       if (pinZoneRef.current) {
-        void moveTo(current.sessionId, true, 0);
+        void moveTo(current.projectId, true, 0);
         return;
       }
       const target = dropTargetRef.current;
       if (target) {
-        applyDropTarget(current.sessionId, target);
+        applyDropTarget(current.projectId, target);
         return;
       }
       clearDrag();
@@ -339,19 +369,20 @@ export default function SessionsListPage() {
     };
   }, [applyDropTarget, clearDrag, drag, moveTo]);
 
-  const renderCard = (entry: ManagedSessionSummary, group: "pinned" | "unpinned") => {
-    const fullGroup = group === "pinned" ? fullPinned : fullUnpinned;
-    const index = fullGroup.findIndex((e) => e.summary.session_id === entry.summary.session_id);
-    const id = entry.summary.session_id;
-    const isDragging = drag?.sessionId === id;
-    const dropEdge = !isDragging && dropTarget?.sessionId === id ? dropTarget.edge : null;
+  const renderCard = (item: ProjectListItem) => {
+    const id = projectListItemId(item);
+    const project = item.kind === "project" ? item.entry.project : null;
+    const group = project ? (project.pinned ? fullPinned : fullUnpinned) : [];
+    const index = project ? group.findIndex((p) => p.project_id === project.project_id) : -1;
+    const isDragging = drag?.projectId === id;
+    const dropEdge = !isDragging && dropTarget?.itemId === id ? dropTarget.edge : null;
 
     return (
       <Fragment key={id}>
         {dropEdge === "before" ? <DropSlot /> : null}
         <div
-          data-session-card
-          data-session-id={id}
+          data-item-id={id}
+          data-item-kind={item.kind}
           data-dragging={isDragging ? "true" : undefined}
           className="relative"
           style={
@@ -369,14 +400,15 @@ export default function SessionsListPage() {
           }
         >
           <GridCard
-            entry={entry}
-            onOpen={openSession}
-            reorderable={isDefaultSort}
+            item={item}
+            onOpen={open}
+            // A loose chat has no place in the project order to move within.
+            reorderable={isDefaultSort && project != null}
             dragging={isDragging}
             canMoveUp={index > 0}
-            canMoveDown={index >= 0 && index < fullGroup.length - 1}
-            onMoveUp={() => moveByArrow(entry, -1)}
-            onMoveDown={() => moveByArrow(entry, 1)}
+            canMoveDown={index >= 0 && index < group.length - 1}
+            onMoveUp={() => project && moveByArrow(project, -1)}
+            onMoveDown={() => project && moveByArrow(project, 1)}
             onReorderStart={beginDrag}
           />
         </div>
@@ -387,15 +419,15 @@ export default function SessionsListPage() {
 
   const newButton = (
     <Tooltip
-      title="New session"
-      keyboardShortcuts={NEW_SESSION_KEYS}
+      title="New project"
+      keyboardShortcuts={NEW_PROJECT_KEYS}
       position={Tooltip.Position.BottomLeft}
     >
       <Button
         variant={ButtonVariant.Primary}
         size={ButtonSize.Medium}
         content={ButtonContent.IconLeft}
-        onClick={actions.launch}
+        onClick={projectActions.create}
       >
         <Icon iconName={IconName.Add} size={16} /> New
       </Button>
@@ -409,11 +441,11 @@ export default function SessionsListPage() {
       <StickyInput
         className="flex-1 min-w-0"
         variant={StickyInputVariant.Search}
-        placeholder="Search sessions…"
+        placeholder="Search projects…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onClear={() => setQuery("")}
-        aria-label="Search sessions"
+        aria-label="Search projects"
       />
       <StickyButton
         variant={ButtonVariant.Secondary}
@@ -437,7 +469,7 @@ export default function SessionsListPage() {
       bodyClassName="p-0"
     >
       <SessionFilters
-        sessions={all}
+        sessions={allSessions}
         showSearch={false}
         mobile
         onChange={() => setFiltersOpen(false)}
@@ -452,19 +484,19 @@ export default function SessionsListPage() {
       className="h-full"
       bodyClassName="overflow-auto"
     >
-      <SessionFilters sessions={all} />
+      <SessionFilters sessions={allSessions} />
     </BoxSurface>
   );
 
   if (!isLoading && !error && all.length === 0) {
-    return <SessionsEmptyState mobile={isMobile} onStart={actions.launch} />;
+    return <ProjectsEmptyState mobile={isMobile} onStart={projectActions.create} />;
   }
 
   const showPinDropZone =
     isDefaultSort &&
     drag != null &&
     pinned.length === 0 &&
-    !all.find((e) => e.summary.session_id === drag.sessionId)?.summary.pinned;
+    !projects.find((project) => project.project_id === drag.projectId)?.pinned;
 
   return (
     <div className="flex h-full min-h-0">
@@ -501,15 +533,15 @@ export default function SessionsListPage() {
             </div>
           ) : null}
 
-          {!isLoading && !error && sessions.length === 0 ? (
+          {!isLoading && !error && items.length === 0 ? (
             <div className="label-small text-basic-muted text-center py-16">
-              No sessions match the current filters.
+              No projects match the current filters.
             </div>
           ) : null}
 
           {pinned.length > 0 || showPinDropZone ? (
             <CardGrid single={isMobile}>
-              {pinned.map((entry) => renderCard(entry, "pinned"))}
+              {pinned.map(renderCard)}
               {showPinDropZone ? (
                 <div
                   data-pin-drop-zone="true"
@@ -523,9 +555,7 @@ export default function SessionsListPage() {
             </CardGrid>
           ) : null}
           {unpinned.length > 0 ? (
-            <CardGrid single={isMobile}>
-              {unpinned.map((entry) => renderCard(entry, "unpinned"))}
-            </CardGrid>
+            <CardGrid single={isMobile}>{unpinned.map(renderCard)}</CardGrid>
           ) : null}
         </div>
       </div>

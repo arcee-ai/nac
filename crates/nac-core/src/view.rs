@@ -719,6 +719,17 @@ fn run_git(target: &GitTarget, args: &[&str]) -> Option<String> {
     )
 }
 
+/// `owner/repo` for a local checkout, taken from its origin remote.
+///
+/// Returns `None` when the directory is not a git repository or has no origin,
+/// which lets callers fall back to naming a location after its folder.
+pub fn local_repo_label(cwd: &Path) -> Option<String> {
+    let target = GitTarget::local(cwd);
+    run_git(&target, &["config", "--get", "remote.origin.url"])
+        .as_deref()
+        .and_then(parse_remote_label)
+}
+
 pub fn parse_remote_label(remote: &str) -> Option<String> {
     let trimmed = remote.trim().trim_end_matches(".git");
     if trimmed.is_empty() {

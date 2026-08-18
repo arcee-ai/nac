@@ -5,7 +5,9 @@ export { default as Button, ButtonContent, ButtonSize, ButtonVariant } from "./b
 export { default as CopyButton } from "./button/CopyButton";
 export { default as StickyButton } from "./button/StickyButton";
 export { default as ChatLoader, ChatLoaderSize } from "./chat-loader";
+export { default as ChatSessionButton } from "./chat-session-button";
 export { default as ChatSessionMessage, ChatSessionMessageVariant } from "./chat-session-message";
+export { default as ChatSessionTab } from "./chat-session-tab";
 export { default as Checkbox } from "./checkbox";
 export { default as CodeBlock, CodeBlockSize } from "./code-block";
 export { default as CoverBackground } from "./cover-background";
@@ -36,6 +38,7 @@ export { default as ModelPill, ModelPillSize } from "./model-pill";
 export { default as NumberInput } from "./number-input";
 export { default as Pagination } from "./pagination";
 export { default as Popover, PopoverPlacement, PopoverSize } from "./popover";
+export { default as ProjectButton, ProjectButtonVariant } from "./project-button";
 export { default as BottomSheet } from "./popover/BottomSheet";
 export { default as Radio } from "./radio";
 export { default as RangeInput } from "./range-input";

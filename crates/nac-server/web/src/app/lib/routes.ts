@@ -35,6 +35,8 @@ export const routes = {
   list: () => "/",
   session: (sessionId: string, panel: SessionPanel = DEFAULT_SESSION_PANEL) =>
     `/session/${encodeURIComponent(sessionId)}/${panel}`,
+  /** Redirects to the project's newest session, or offers to start one. */
+  project: (projectId: string) => `/project/${encodeURIComponent(projectId)}`,
   designPreview: () => "/design",
 };
 
@@ -46,5 +48,12 @@ export const routes = {
 export function sessionIdFromPath(pathname: string): string | null {
   const [, section, id] = pathname.split("/");
   if (section !== "session" || !id) return null;
+  return decodeURIComponent(id);
+}
+
+/** Project the path points at, for the same reason as `sessionIdFromPath`. */
+export function projectIdFromPath(pathname: string): string | null {
+  const [, section, id] = pathname.split("/");
+  if (section !== "project" || !id) return null;
   return decodeURIComponent(id);
 }

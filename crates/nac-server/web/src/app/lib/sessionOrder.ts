@@ -6,11 +6,11 @@ import type {
 
 export type DropEdge = "before" | "after";
 
-/** Insert `sessionId` at `index` in `ids`, removing any prior occurrence. */
-export function placeSessionId(ids: string[], sessionId: string, index: number): string[] {
-  const without = ids.filter((id) => id !== sessionId);
+/** Insert `id` at `index` in `ids`, removing any prior occurrence. */
+export function placeIdAt(ids: string[], id: string, index: number): string[] {
+  const without = ids.filter((other) => other !== id);
   const clamped = Math.max(0, Math.min(index, without.length));
-  return [...without.slice(0, clamped), sessionId, ...without.slice(clamped)];
+  return [...without.slice(0, clamped), id, ...without.slice(clamped)];
 }
 
 export function compareSortOrder(a: SessionSummarySnapshot, b: SessionSummarySnapshot): number {
@@ -87,7 +87,7 @@ export function isNoOpMove(
   if (Boolean(entry.summary.pinned) !== targetPinned) return false;
   const group = pinGroup(sessions, targetPinned);
   const currentIds = group.map((e) => e.summary.session_id);
-  const nextIds = placeSessionId(currentIds, sessionId, targetIndex);
+  const nextIds = placeIdAt(currentIds, sessionId, targetIndex);
   return sameOrder(currentIds, nextIds);
 }
 

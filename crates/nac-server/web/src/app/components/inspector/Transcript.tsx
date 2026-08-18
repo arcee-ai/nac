@@ -399,12 +399,13 @@ export function Transcript({
         </div>
       ) : null}
       <div ref={scrollRef} className={cn("h-full overflow-auto", fade, !revealed && "invisible")}>
-        {/* The top bar is fixed over this scroll region, so the first message
-            needs to clear it. */}
+        {/* The phone has the fixed top bar over this scroll region, so its
+            first message has to clear it. Wider layouts put the tab strip
+            between the two, and only need breathing room under it. */}
         <div
           ref={contentRef}
           className={cn(
-            "flex flex-col pt-[96px] md:pt-[72px] [&>*]:shrink-0 px-4 md:px-0",
+            "flex flex-col pt-[96px] md:pt-6 [&>*]:shrink-0 px-4 md:px-0",
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it.
             isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[840px]",

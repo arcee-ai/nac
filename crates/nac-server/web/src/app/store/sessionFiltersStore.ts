@@ -7,7 +7,8 @@ import { createStore } from "@/app/lib/store";
 import { useNow } from "@/app/hooks/useNow";
 import { displaySessionTitle, sessionEnvLabel, type SessionEnv } from "@/app/lib/format";
 import { providersFromBackends } from "@/app/lib/providers";
-import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
+import type { ProjectListItem } from "@/app/lib/projects";
+import type { ManagedSessionSummary, ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
 
 /** Backend `sort_order` within each pin group (API list order). */
 export const SORT_DEFAULT = "default";
@@ -172,6 +173,82 @@ export function useVisibleSessions(sessions: ManagedSessionSummary[]): ManagedSe
     if (compare) visible.sort((a, b) => compare(a.summary, b.summary));
     return visible;
   }, [sessions, filters, now]);
+}
+
+function projectMatchesQuery(project: ProjectRecord, needle: string): boolean {
+  if (!needle) return true;
+  const haystack = [project.name, project.description, project.cwd, project.ssh_host];
+  return haystack.some((v) => v && String(v).toLowerCase().includes(needle));
+}
+
+function itemTitle(item: ProjectListItem): string {
+  return item.kind === "project"
+    ? item.entry.project.name
+    : displaySessionTitle(item.session.summary);
+}
+
+function itemTimes(item: ProjectListItem): { createdAt: string; updatedAt: string } {
+  return item.kind === "project"
+    ? { createdAt: item.entry.project.created_at, updatedAt: item.entry.updatedAt }
+    : {
+        createdAt: item.session.summary.created_at,
+        updatedAt: item.session.summary.updated_at,
+      };
+}
+
+/**
+ * The same filters, applied to the project listing. A project answers for the
+ * chats inside it: the environment and provider facets keep it while any of its
+ * chats qualifies, and the search box matches its own name as well as theirs.
+ *
+ * Default sort keeps the order the caller passed in, which is the backend's —
+ * pinned projects first, then the unassigned chats.
+ */
+export function useVisibleProjectItems(items: ProjectListItem[]): ProjectListItem[] {
+  const filters = useStore();
+  const now = useNow(RANGE_TICK_MS);
+  return useMemo(() => {
+    const needle = filters.query.trim().toLowerCase();
+    const facetPasses = (summary: SessionSummarySnapshot) => {
+      if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
+        return false;
+      }
+      return filters.providers.length === 0 || filters.providers.includes(summary.backend);
+    };
+    const facetsActive = filters.envs.length > 0 || filters.providers.length > 0;
+
+    const visible = items.filter((item) => {
+      const { createdAt, updatedAt } = itemTimes(item);
+      if (!withinRange(createdAt, filters.createdRange, now)) return false;
+      if (!withinRange(updatedAt, filters.modifiedRange, now)) return false;
+
+      if (item.kind === "orphan") {
+        const { summary } = item.session;
+        return facetPasses(summary) && matchesQuery(summary, needle);
+      }
+
+      const { project, sessions } = item.entry;
+      if (facetsActive && !sessions.some((entry) => facetPasses(entry.summary))) return false;
+      return (
+        projectMatchesQuery(project, needle) ||
+        sessions.some((entry) => matchesQuery(entry.summary, needle))
+      );
+    });
+
+    if (filters.sort === "title_asc") {
+      visible.sort((a, b) =>
+        itemTitle(a).localeCompare(itemTitle(b), undefined, { sensitivity: "base" }),
+      );
+    } else if (filters.sort !== SORT_DEFAULT) {
+      const key = filters.sort === "updated_desc" ? "updatedAt" : "createdAt";
+      const ascending = filters.sort === "created_asc";
+      visible.sort((a, b) => {
+        const delta = Date.parse(itemTimes(b)[key]) - Date.parse(itemTimes(a)[key]);
+        return ascending ? -delta : delta;
+      });
+    }
+    return visible;
+  }, [items, filters, now]);
 }
 
 /** Provider chips are derived from the data so they never list unused ones. */

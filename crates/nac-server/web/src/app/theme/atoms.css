@@ -688,6 +688,18 @@
   border-bottom-color: var(--color-border-primary);
 }
 
+/* Same unlayered-wins reasoning as the tabs above: the strip lives next to
+   buttons whose `.btn` rules would otherwise take the border and the radius.
+   The inactive border is transparent rather than absent so switching tabs does
+   not shift the strip by two pixels. */
+.chat-session-tab {
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+}
+.chat-session-tab-active {
+  border-bottom-color: var(--color-border-primary);
+}
+
 /* ============================ TOOLTIP ============================ */
 .tooltip-box {
   pointer-events: none;

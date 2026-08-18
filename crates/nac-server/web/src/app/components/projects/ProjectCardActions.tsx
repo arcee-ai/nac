@@ -45,13 +45,18 @@ function IconAction({
   );
 }
 
-interface SessionCardActionsProps {
+interface ProjectCardActionsProps {
+  /** A card for a chat that belongs to no project gets its own verbs. */
+  orphan: boolean;
   pinned: boolean;
   running: boolean;
   onTogglePin: () => void;
   onRename: () => void;
   onDelete: () => void;
-  onStop: () => void;
+  /** Files an unassigned chat; only meaningful on an orphan card. */
+  onAssign?: () => void;
+  /** Stops the run of an unassigned chat, in place of deleting it. */
+  onStop?: () => void;
   /** Tablet/mobile reorder controls (Default sort). */
   reorder?: {
     canMoveUp: boolean;
@@ -62,18 +67,23 @@ interface SessionCardActionsProps {
 }
 
 /**
- * Row of per-card actions. A running session offers "stop" instead of "delete",
- * mirroring the design and avoiding a destructive action mid-run.
+ * Row of per-card actions. A running chat offers "stop" instead of "delete",
+ * mirroring the design and avoiding a destructive action mid-run. A project is
+ * never itself running, so its delete never turns into a stop — the dialog it
+ * opens keeps the chats anyway.
  */
-export function SessionCardActions({
+export function ProjectCardActions({
+  orphan,
   pinned,
   running,
   onTogglePin,
   onRename,
   onDelete,
+  onAssign,
   onStop,
   reorder,
-}: SessionCardActionsProps) {
+}: ProjectCardActionsProps) {
+  const noun = orphan ? "chat" : "project";
   return (
     <div
       className={
@@ -98,13 +108,16 @@ export function SessionCardActions({
           />
         </>
       ) : null}
+      {orphan && onAssign ? (
+        <IconAction title="Assign to a project" icon={IconName.Folders} onClick={onAssign} />
+      ) : null}
       <IconAction
-        title={pinned ? "Unpin session" : "Pin session"}
+        title={pinned ? `Unpin ${noun}` : `Pin ${noun}`}
         icon={pinned ? IconName.Unpin : IconName.Pin}
         onClick={onTogglePin}
       />
-      <IconAction title="Rename session" icon={IconName.Edit} onClick={onRename} />
-      {running ? (
+      <IconAction title={`Rename ${noun}`} icon={IconName.Edit} onClick={onRename} />
+      {running && onStop ? (
         <IconAction
           title="Stop run"
           icon={IconName.Stop}
@@ -113,7 +126,7 @@ export function SessionCardActions({
         />
       ) : (
         <IconAction
-          title="Delete session"
+          title={`Delete ${noun}`}
           icon={IconName.Trash}
           variant={ButtonVariant.GhostDestructive}
           onClick={onDelete}

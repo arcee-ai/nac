@@ -17,6 +17,7 @@ import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
+import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
@@ -30,6 +31,7 @@ import {
   type SessionPanel,
 } from "@/app/lib/routes";
 import {
+  useSessions,
   useSessionSnapshot,
   useSessionSummary,
   useSshConnect,
@@ -113,6 +115,7 @@ export default function SessionPage() {
 
   const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
+  const { data: allSessions = [] } = useSessions();
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
@@ -182,6 +185,13 @@ export default function SessionPage() {
     <SessionSideBox sessionId={id} snapshot={snapshot} panel={panel} onPanelChange={goToPanel} />
   );
 
+  const projectId = entry?.summary.project_id ?? null;
+  const projectSessions = projectId
+    ? allSessions
+        .filter((session) => session.summary.project_id === projectId)
+        .sort((a, b) => Date.parse(b.summary.updated_at) - Date.parse(a.summary.updated_at))
+    : [];
+
   return (
     <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
       {/* A phone has no room for the split: the chat takes the screen and the
@@ -232,6 +242,35 @@ export default function SessionPage() {
           isMobile ? "px-0" : collapsed ? "pl-2 pr-2" : isDesktop ? "pl-6 pr-2" : "pl-2 pr-2",
         )}
       >
+        {/* The phone reaches the same chats through the header's sheet; there
+            is no width here for a strip of tabs. The padding clears the fixed
+            52px header the shell puts above everything. */}
+        {isMobile ? null : (
+          <div className="w-full shrink-0 pt-[52px]">
+            <ProjectSessionTabs
+              projectId={projectId}
+              sessions={projectSessions}
+              activeSessionId={id}
+              summary={entry?.summary ?? null}
+              leading={
+                collapsed ? (
+                  <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
+                    <Button
+                      size={ButtonSize.Medium}
+                      variant={ButtonVariant.Ghost}
+                      content={ButtonContent.Icon}
+                      aria-label="Show panel"
+                      onClick={toggleSidePanelCollapsed}
+                    >
+                      <Icon iconName={IconName.OpenSidebar} />
+                    </Button>
+                  </Tooltip>
+                ) : null
+              }
+            />
+          </div>
+        )}
+
         <div className="flex flex-col flex-1 min-h-0 w-full relative">
           <Transcript
             sessionId={id}
@@ -253,23 +292,6 @@ export default function SessionPage() {
           </div>
         </div>
       </div>
-
-      {/* Floats where the box's own header sat, so the toggle stays put. */}
-      {collapsed && !isMobile ? (
-        <div className="fade absolute left-2 top-[77px] z-10">
-          <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
-            <Button
-              size={ButtonSize.Medium}
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label="Show panel"
-              onClick={toggleSidePanelCollapsed}
-            >
-              <Icon iconName={IconName.OpenSidebar} />
-            </Button>
-          </Tooltip>
-        </div>
-      ) : null}
 
       {isMobile ? (
         <Modal

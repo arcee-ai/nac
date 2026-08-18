@@ -19,8 +19,8 @@ import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServ
 import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import { routes, sessionIdFromPath } from "@/app/lib/routes";
-import { useSessionActions } from "@/app/providers/SessionActionsProvider";
+import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
+import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 
 // Figma "HeaderSurface": the same ground-to-transparent gradient stacked twice,
 // spanning the bar plus an overhang that fades the content scrolling below.
@@ -35,8 +35,8 @@ export function TopBar() {
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const { pathname } = useLocation();
-  const actions = useSessionActions();
-  const inSession = sessionIdFromPath(pathname) !== null;
+  const actions = useProjectActions();
+  const inTrail = sessionIdFromPath(pathname) !== null || projectIdFromPath(pathname) !== null;
 
   return (
     <>
@@ -61,7 +61,7 @@ export function TopBar() {
             isMobile ? "flex-1 min-w-0 gap-6" : isTablet ? "shrink-0 gap-4" : "shrink-0 gap-8",
           )}
         >
-          <Link to={routes.list()} className="shrink-0" aria-label="All sessions">
+          <Link to={routes.list()} className="shrink-0" aria-label="All projects">
             <Logo
               height={isMobile ? 36 : isTablet ? 36 : 36}
               markOnly={isMobile || isTablet}
@@ -71,16 +71,16 @@ export function TopBar() {
           <Breadcrumbs />
         </div>
         <div className="relative flex items-center shrink-0 gap-2">
-          {/* On the list a phone has no filter rail to launch from, so the
+          {/* On the list a phone has no filter rail to create from, so the
               primary action rides in the bar. */}
-          {isMobile && !inSession ? (
+          {isMobile && !inTrail ? (
             <Button
               variant={ButtonVariant.Primary}
               size={ButtonSize.Medium}
               content={ButtonContent.Icon}
               className="btn-round"
-              aria-label="New session"
-              onClick={actions.launch}
+              aria-label="New project"
+              onClick={actions.create}
             >
               <Icon iconName={IconName.Add} />
             </Button>
