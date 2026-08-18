@@ -114,6 +114,8 @@ impl From<anyhow::Error> for SessionConfigUpdateError {
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub session_id: String,
+    /// Explicit project association, stored authoritatively in `session_projects`.
+    pub project_id: Option<String>,
     pub cwd: PathBuf,
     pub model: String,
     pub base_url: String,
@@ -153,6 +155,7 @@ pub struct SessionSnapshot {
 #[derive(Debug, Clone)]
 pub struct SessionSummary {
     pub session_id: String,
+    pub project_id: Option<String>,
     pub cwd: PathBuf,
     pub workspace_host_path: Option<PathBuf>,
     pub model: String,
@@ -356,6 +359,77 @@ mod tests {
                 .orchestrator_context_tokens,
             330
         );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn project_link_is_atomic_authoritative_and_session_owned() {
+        let store_path = temp_store_path("project_link");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_project(
+            &store_path,
+            crate::store::NewProject {
+                project_id: "project-a".to_string(),
+                name: Some("Project A".to_string()),
+                description: None,
+                cwd: PathBuf::from("/repo"),
+                ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
+                default_model_config_id: None,
+            },
+        )
+        .unwrap();
+
+        let mut snapshot = test_snapshot(
+            "linked",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        snapshot.project_id = Some("project-a".to_string());
+        create_session(&store_path, &snapshot).unwrap();
+        assert_eq!(
+            load_session(&store_path, "linked")
+                .unwrap()
+                .project_id
+                .as_deref(),
+            Some("project-a")
+        );
+        assert_eq!(
+            list_sessions(&store_path).unwrap()[0].project_id.as_deref(),
+            Some("project-a")
+        );
+
+        snapshot.project_id = None;
+        save_session(&store_path, &snapshot).unwrap();
+        assert_eq!(
+            load_session(&store_path, "linked")
+                .unwrap()
+                .project_id
+                .as_deref(),
+            Some("project-a"),
+            "generic snapshot saves must not rewrite membership"
+        );
+        delete_session(&store_path, "linked").unwrap();
+        let conn = crate::store::open_connection(&store_path).unwrap();
+        let link_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_projects WHERE session_id = ?1",
+                rusqlite::params!["linked"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(link_count, 0);
+
+        let mut missing = test_snapshot(
+            "missing-project",
+            "2026-01-01 00:00:00.000000000",
+            "2026-01-01 00:00:00.000000000",
+        );
+        missing.project_id = Some("does-not-exist".to_string());
+        assert!(create_session(&store_path, &missing).is_err());
+        assert!(!session_exists(&store_path, "missing-project").unwrap());
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

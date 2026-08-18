@@ -96,6 +96,12 @@ pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     }
 
     insert_or_replace_session(&tx, path, snapshot)?;
+    if let Some(project_id) = snapshot.project_id.as_deref() {
+        tx.execute(
+            "INSERT INTO session_projects (session_id, project_id) VALUES (?1, ?2)",
+            params![snapshot.session_id, project_id],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -312,9 +318,16 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file, light_model_json
-             FROM sessions
-             WHERE session_id = ?1",
+            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.reasoning_effort,
+                    s.sandbox_json, s.messages_json, s.last_response_duration_ms,
+                    s.previous_response_duration_ms, s.response_durations_ms_json,
+                    s.created_at, s.updated_at, s.host_id, s.api_key_env,
+                    s.extra_headers_json, s.token_usages_json, s.config_version,
+                    s.orchestrator_compaction_threshold, s.ssh_port,
+                    s.ssh_identity_file, s.light_model_json, sp.project_id
+             FROM sessions s
+             LEFT JOIN session_projects sp ON sp.session_id = s.session_id
+             WHERE s.session_id = ?1",
             params![session_id],
             map_session_row,
         )
@@ -424,9 +437,16 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, cwd, model, base_url, backend, reasoning_effort, sandbox_json, messages_json, last_response_duration_ms, previous_response_duration_ms, response_durations_ms_json, created_at, updated_at, host_id, api_key_env, extra_headers_json, token_usages_json, config_version, orchestrator_compaction_threshold, ssh_port, ssh_identity_file, light_model_json
-             FROM sessions
-             ORDER BY updated_at DESC, created_at DESC
+            "SELECT s.session_id, s.cwd, s.model, s.base_url, s.backend, s.reasoning_effort,
+                    s.sandbox_json, s.messages_json, s.last_response_duration_ms,
+                    s.previous_response_duration_ms, s.response_durations_ms_json,
+                    s.created_at, s.updated_at, s.host_id, s.api_key_env,
+                    s.extra_headers_json, s.token_usages_json, s.config_version,
+                    s.orchestrator_compaction_threshold, s.ssh_port,
+                    s.ssh_identity_file, s.light_model_json, sp.project_id
+             FROM sessions s
+             LEFT JOIN session_projects sp ON sp.session_id = s.session_id
+             ORDER BY s.updated_at DESC, s.created_at DESC
              LIMIT 1",
             [],
             map_session_row,
@@ -493,6 +513,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         ssh_port: row.get(19)?,
         ssh_identity_file: row.get(20)?,
         light_model_json: row.get(21)?,
+        project_id: row.get(22)?,
     })
 }
 
@@ -733,9 +754,11 @@ SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
        s.extra_headers_json, s.sandbox_json, s.created_at, s.updated_at, s.host_id,
        p.title, COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0),
        COALESCE(p.version, 0), s.visible_message_count, s.last_user_prompt,
-       s.token_usages_json, COALESCE(s.run_count, 0), s.ssh_port, s.ssh_identity_file
+       s.token_usages_json, COALESCE(s.run_count, 0), s.ssh_port, s.ssh_identity_file,
+       sp.project_id
 FROM sessions s
 LEFT JOIN session_presentations p ON p.session_id = s.session_id
+LEFT JOIN session_projects sp ON sp.session_id = s.session_id
 "#;
 
 fn query_session_summary(
@@ -805,6 +828,7 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         run_count: row.get(17)?,
         ssh_port: row.get(18)?,
         ssh_identity_file: row.get(19)?,
+        project_id: row.get(20)?,
     })
 }
 
@@ -829,6 +853,7 @@ struct SessionSummaryRow {
     run_count: i64,
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
+    project_id: Option<String>,
 }
 
 impl SessionSummaryRow {
@@ -864,6 +889,7 @@ impl SessionSummaryRow {
         let total_cost_micros = aggregated.as_ref().map(|usage| usage.cost.total);
         Ok(SessionSummary {
             session_id: self.session_id,
+            project_id: self.project_id,
             cwd,
             workspace_host_path,
             model: self.model,
@@ -997,6 +1023,7 @@ fn insert_or_replace_session(
 
 struct SessionRow {
     session_id: String,
+    project_id: Option<String>,
     cwd: String,
     model: String,
     base_url: String,
@@ -1038,6 +1065,7 @@ impl SessionRow {
             deserialize_token_accounting(self.token_usages_json.as_deref())?;
         Ok(SessionSnapshot {
             session_id: self.session_id,
+            project_id: self.project_id,
             cwd: PathBuf::from(self.cwd),
             model: self.model,
             base_url,

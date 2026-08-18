@@ -28,6 +28,8 @@ pub type NumstatSummary = (NumstatPairs, u64, u64);
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionSummarySnapshot {
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub cwd: PathBuf,
     #[serde(skip)]
@@ -202,6 +204,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
     fn from(summary: sessions::SessionSummary) -> Self {
         Self {
             session_id: summary.session_id,
+            project_id: summary.project_id,
             cwd: summary.cwd,
             workspace_host_path: summary.workspace_host_path,
             model: summary.model,

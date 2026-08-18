@@ -119,6 +119,7 @@ export type MessageRole = Message["role"];
 
 export interface SessionSummarySnapshot {
   session_id: string;
+  project_id?: string;
   cwd: string;
   model: string;
   backend: string;
@@ -179,6 +180,7 @@ export interface SessionMetadata {
   model: string;
   backend: string;
   session_id: string | null;
+  project_id?: string;
   sandbox_status: string;
   agents_md_status: string;
   base_url?: string;
@@ -1130,6 +1132,7 @@ export interface SandboxRequest {
 }
 
 export interface CreateSessionRequest {
+  project_id?: string | null;
   cwd?: string | null;
   model?: RequestField<string>;
   base_url?: RequestField<string>;

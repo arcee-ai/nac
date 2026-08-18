@@ -64,6 +64,7 @@ use nac_core::{
         ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
+    projects::{self, ProjectRecord, ProjectStoreError},
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
         RunOptions, SandboxOptions, StoreOptions,
@@ -295,6 +296,7 @@ pub struct ManagedSessionSummary {
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ListSessionsQuery {
+    pub project_id: Option<String>,
     #[serde(default)]
     pub workspace_stats: bool,
 }
@@ -324,6 +326,14 @@ where
             Some(value) => Self::Value(value),
             None => Self::Null,
         })
+    }
+}
+
+fn request_field_patch<T>(field: RequestField<T>) -> Option<Option<T>> {
+    match field {
+        RequestField::Omitted => None,
+        RequestField::Null => Some(None),
+        RequestField::Value(value) => Some(Some(value)),
     }
 }
 
@@ -435,6 +445,8 @@ impl utoipa::ToSchema for HeadersRequest {
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct CreateSessionRequest {
+    /// Explicit project selection. Projects are never inferred from `cwd`.
+    pub project_id: Option<String>,
     #[schema(value_type = Option<String>)]
     pub cwd: Option<PathBuf>,
     #[serde(default)]
@@ -471,6 +483,36 @@ pub struct CreateSessionRequest {
     pub sandbox: SandboxRequest,
 }
 
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct ProjectList {
+    pub projects: Vec<ProjectRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct CreateProjectRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    #[schema(value_type = String)]
+    pub cwd: PathBuf,
+    #[serde(default, alias = "host_id")]
+    pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_identity_file: Option<String>,
+    pub default_model_config_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
+pub struct UpdateProjectRequest {
+    #[serde(default)]
+    pub name: RequestField<String>,
+    #[serde(default)]
+    pub description: RequestField<String>,
+    #[serde(default)]
+    pub default_model_config_id: RequestField<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct SandboxRequest {
     #[serde(default)]
@@ -495,6 +537,65 @@ pub struct SandboxRequest {
     /// `sandbox_requested`: it correlates progress reporting, nothing else.
     #[serde(default)]
     pub activity_key: Option<String>,
+}
+
+fn project_location_conflicts(request: &CreateSessionRequest) -> bool {
+    request
+        .cwd
+        .as_ref()
+        .is_some_and(|cwd| !cwd.as_os_str().to_string_lossy().trim().is_empty())
+        || nonblank(request.ssh_host.clone()).is_some()
+        || request.ssh_port.is_some()
+        || nonblank(request.ssh_identity_file.clone()).is_some()
+}
+
+fn inherit_project_field<T>(field: &mut RequestField<T>, inherited: RequestField<T>) {
+    if matches!(field, RequestField::Omitted) {
+        *field = inherited;
+    }
+}
+
+fn apply_project_model_defaults(
+    request: &mut CreateSessionRequest,
+    defaults: ModelConfigurationRecord,
+) {
+    inherit_project_field(&mut request.model, RequestField::Value(defaults.model));
+    inherit_project_field(
+        &mut request.base_url,
+        RequestField::Value(defaults.base_url),
+    );
+    inherit_project_field(&mut request.backend, RequestField::Value(defaults.backend));
+    inherit_project_field(
+        &mut request.reasoning_effort,
+        defaults
+            .reasoning_effort
+            .map(RequestField::Value)
+            .unwrap_or(RequestField::Null),
+    );
+    inherit_project_field(
+        &mut request.api_key_env,
+        defaults
+            .api_key_env
+            .map(RequestField::Value)
+            .unwrap_or(RequestField::Null),
+    );
+    inherit_project_field(
+        &mut request.extra_headers,
+        RequestField::Value(HeadersRequest(defaults.extra_headers)),
+    );
+    if let Some(threshold) = defaults.orchestrator_compaction_threshold {
+        inherit_project_field(
+            &mut request.orchestrator_compaction_threshold,
+            RequestField::Value(threshold),
+        );
+    }
+    inherit_project_field(
+        &mut request.light_model,
+        defaults
+            .light_model
+            .map(RequestField::Value)
+            .unwrap_or(RequestField::Null),
+    );
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -986,6 +1087,100 @@ impl SessionManager {
     /// Succeeding is also the evidence the launch form needs that the host, the
     /// port and the key work together, and the connection it opens is reused by
     /// the session created next.
+    pub async fn create_project(
+        &self,
+        request: CreateProjectRequest,
+    ) -> std::result::Result<ProjectRecord, ApiError> {
+        let requested_cwd = request.cwd.as_os_str().to_string_lossy().trim().to_string();
+        if requested_cwd.is_empty() {
+            return Err(ApiError::bad_request(
+                "project cwd must not be empty or whitespace-only".to_string(),
+            ));
+        }
+
+        let ssh = SshRequest {
+            host: request.ssh_host,
+            port: request.ssh_port,
+            identity_file: request.ssh_identity_file,
+        }
+        .into_options();
+        let host = ssh.host();
+        let (cwd, ssh_host, ssh_port, ssh_identity_file) = if host.is_some() {
+            let listing = runtime::browse_ssh_directory(
+                &ssh,
+                Some(&requested_cwd),
+                false,
+                &self.inner.root_cwd,
+            )
+            .await?;
+            let connection = ssh
+                .resolved_connection(&self.inner.root_cwd)
+                .expect("normalized SSH host must produce a connection");
+            (
+                PathBuf::from(listing.path),
+                Some(connection.host),
+                connection.port,
+                connection
+                    .identity_file
+                    .map(|path| path.to_string_lossy().into_owned()),
+            )
+        } else {
+            if ssh.port.is_some() || ssh.identity_file.is_some() {
+                return Err(ApiError::bad_request(
+                    "an ssh port or private key needs an ssh host as well".to_string(),
+                ));
+            }
+            let listing = filesystem::browse(
+                &BrowseQuery {
+                    path: Some(requested_cwd),
+                    kind: BrowseKind::Directory,
+                    hidden: false,
+                },
+                &self.inner.root_cwd,
+            )?;
+            (PathBuf::from(listing.path), None, None, None)
+        };
+
+        Ok(projects::insert_project(
+            &self.inner.store_path,
+            projects::NewProject {
+                project_id: uuid::Uuid::new_v4().to_string(),
+                name: request.name,
+                description: request.description,
+                cwd,
+                ssh_host,
+                ssh_port,
+                ssh_identity_file,
+                default_model_config_id: request.default_model_config_id,
+            },
+        )?)
+    }
+
+    pub fn update_project(
+        &self,
+        project_id: &str,
+        request: UpdateProjectRequest,
+    ) -> std::result::Result<ProjectRecord, ProjectStoreError> {
+        let name = match request.name {
+            RequestField::Omitted => None,
+            RequestField::Null => {
+                return Err(ProjectStoreError::InvalidInput(
+                    "project name cannot be null".to_string(),
+                ))
+            }
+            RequestField::Value(name) => Some(name),
+        };
+        projects::update_project(
+            &self.inner.store_path,
+            project_id,
+            projects::ProjectPatch {
+                name,
+                description: request_field_patch(request.description),
+                default_model_config_id: request_field_patch(request.default_model_config_id),
+            },
+        )
+    }
+
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -1043,6 +1238,15 @@ impl SessionManager {
         &self,
         include_workspace_stats: bool,
     ) -> Result<Vec<ManagedSessionSummary>> {
+        self.list_sessions_for_project(include_workspace_stats, None)
+            .await
+    }
+
+    pub async fn list_sessions_for_project(
+        &self,
+        include_workspace_stats: bool,
+        project_id: Option<&str>,
+    ) -> Result<Vec<ManagedSessionSummary>> {
         if !self.inner.store_path.exists() {
             return Ok(Vec::new());
         }
@@ -1055,6 +1259,10 @@ impl SessionManager {
             let active = self.inner.active_sessions.read().await;
             summaries
                 .into_iter()
+                .filter(|summary| {
+                    project_id
+                        .is_none_or(|project_id| summary.project_id.as_deref() == Some(project_id))
+                })
                 .map(|summary| {
                     let active_service = active.get(&summary.session_id);
                     ManagedSessionSummary {
@@ -1348,17 +1556,57 @@ impl SessionManager {
 
     pub async fn create_session(
         &self,
-        request: CreateSessionRequest,
+        mut request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
         self.sweep_idle_sessions(None).await;
-        let location = self.resolve_launch_location(
-            request.cwd,
-            SshRequest {
-                host: request.ssh_host,
-                port: request.ssh_port,
-                identity_file: request.ssh_identity_file,
-            },
-        )?;
+        let project_context = request
+            .project_id
+            .as_deref()
+            .map(|project_id| {
+                projects::load_project_launch_context(&self.inner.store_path, project_id)
+            })
+            .transpose()?;
+        let (project_id, location) = if let Some(context) = project_context {
+            if project_location_conflicts(&request) {
+                return Err(anyhow!(
+                    "invalid request: project_id cannot be combined with cwd or ssh location fields"
+                ));
+            }
+            if let Some(defaults) = context.default_model_config {
+                apply_project_model_defaults(&mut request, defaults);
+            }
+            let project = context.project;
+            let ssh = runtime::SshOptions {
+                host: project.ssh_host,
+                port: project.ssh_port,
+                identity_file: project.ssh_identity_file.map(PathBuf::from),
+            };
+            let config_cwd = if ssh.host().is_some() {
+                self.inner.root_cwd.clone()
+            } else {
+                project.cwd.clone()
+            };
+            (
+                Some(project.project_id),
+                ResolvedLaunchLocation {
+                    workspace_cwd: project.cwd,
+                    config_cwd,
+                    ssh,
+                },
+            )
+        } else {
+            (
+                None,
+                self.resolve_launch_location(
+                    request.cwd.take(),
+                    SshRequest {
+                        host: request.ssh_host.take(),
+                        port: request.ssh_port.take(),
+                        identity_file: request.ssh_identity_file.take(),
+                    },
+                )?,
+            )
+        };
         if location.ssh.host().is_some() && sandbox_requested(&request.sandbox) {
             return Err(anyhow!(
                 "invalid request: ssh_host and sandbox options cannot both be set"
@@ -1415,7 +1663,7 @@ impl SessionManager {
             model.api_base_url.as_deref(),
             &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
         )?;
-        let run_config = runtime::build_run_config(
+        let run_config = runtime::build_run_config_for_project(
             RunOptions {
                 workspace_cwd: location.workspace_cwd,
                 config_cwd: Some(location.config_cwd.clone()),
@@ -1429,6 +1677,7 @@ impl SessionManager {
                 ssh: location.ssh,
             },
             &config,
+            project_id,
         )
         .await
         .map_err(|error| {
@@ -2567,6 +2816,8 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
             list_model_configs_handler,
             create_model_config_handler
         ))
+        .routes(routes!(list_projects_handler, create_project_handler))
+        .routes(routes!(update_project_handler))
         .routes(routes!(model_config_from_file_handler))
         .routes(routes!(
             update_model_config_handler,
@@ -2953,6 +3204,58 @@ async fn provider_models_handler(
             message: error.to_string(),
         })?;
     Ok(Json(ProviderModelList { base_url, models }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects",
+    operation_id = "get_projects",
+    tag = "projects",
+    responses((status = 200, description = "Success", body = ProjectList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn list_projects_handler(
+    State(manager): State<SessionManager>,
+) -> std::result::Result<Json<ProjectList>, ApiError> {
+    Ok(Json(ProjectList {
+        projects: projects::list_projects(&manager.inner.store_path)?,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/projects",
+    operation_id = "post_projects",
+    tag = "projects",
+    request_body(content = CreateProjectRequest, content_type = "application/json"),
+    responses((status = 201, description = "Success", body = ProjectRecord, content_type = "application/json"), (status = 400, description = "Invalid project metadata or location", body = ApiErrorBody, content_type = "application/json"), (status = 403, description = "Remote directory is unreadable", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Directory or default model configuration was not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "A project already uses this canonical location", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Remote host or command failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn create_project_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<CreateProjectRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ProjectRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(manager.create_project(request).await?),
+    ))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/projects/{project_id}",
+    operation_id = "patch_projects_project_id",
+    tag = "projects",
+    params(("project_id" = String, Path)),
+    request_body(content = UpdateProjectRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ProjectRecord, content_type = "application/json"), (status = 400, description = "Invalid project metadata", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Project or default model configuration was not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn update_project_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(project_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdateProjectRequest>, JsonRejection>,
+) -> std::result::Result<Json<ProjectRecord>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(manager.update_project(&project_id, request)?))
 }
 
 #[utoipa::path(
@@ -3469,7 +3772,7 @@ async fn resolve_configuration(
     operation_id = "delete_model_configs_config_id",
     tag = "model-configs",
     params(("config_id" = String, Path)),
-    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Configuration is a project default", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
 )]
 async fn delete_model_config_handler(
     State(manager): State<SessionManager>,
@@ -3742,7 +4045,11 @@ async fn list_sessions(
     State(manager): State<SessionManager>,
     Query(query): Query<ListSessionsQuery>,
 ) -> std::result::Result<Json<Vec<ManagedSessionSummary>>, ApiError> {
-    Ok(Json(manager.list_sessions(query.workspace_stats).await?))
+    Ok(Json(
+        manager
+            .list_sessions_for_project(query.workspace_stats, query.project_id.as_deref())
+            .await?,
+    ))
 }
 
 #[utoipa::path(
@@ -4788,9 +5095,27 @@ impl From<ModelConfigurationStoreError> for ApiError {
     fn from(error: ModelConfigurationStoreError) -> Self {
         let status = match &error {
             ModelConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-            ModelConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
+            ModelConfigurationStoreError::DuplicateName(_)
+            | ModelConfigurationStoreError::InUse(_) => StatusCode::CONFLICT,
             ModelConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             ModelConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<ProjectStoreError> for ApiError {
+    fn from(error: ProjectStoreError) -> Self {
+        let status = match &error {
+            ProjectStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            ProjectStoreError::DuplicateLocation => StatusCode::CONFLICT,
+            ProjectStoreError::NotFound(_) | ProjectStoreError::ModelConfigurationNotFound(_) => {
+                StatusCode::NOT_FOUND
+            }
+            ProjectStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {
             status,
@@ -4957,6 +5282,7 @@ mod tests {
         ("GET", "/mcp_library/library"),
         ("GET", "/mcp_library/servers"),
         ("GET", "/model-configs"),
+        ("GET", "/projects"),
         ("GET", "/models"),
         ("GET", "/sandbox/activity"),
         ("GET", "/sandbox/availability"),
@@ -4980,6 +5306,7 @@ mod tests {
         ("GET", "/store"),
         ("PATCH", "/mcp_library/servers/{server_name}"),
         ("PATCH", "/model-configs/{config_id}"),
+        ("PATCH", "/projects/{project_id}"),
         ("PATCH", "/sessions/{session_id}/config"),
         ("PATCH", "/ssh-configs/{config_id}"),
         ("POST", "/auth/{provider}/login"),
@@ -4989,6 +5316,7 @@ mod tests {
         ("POST", "/model-configs"),
         ("POST", "/model-configs/from-file"),
         ("POST", "/model-configs/{config_id}/models"),
+        ("POST", "/projects"),
         ("POST", "/providers/models"),
         ("POST", "/sessions"),
         ("POST", "/sessions/launch-defaults"),
@@ -5105,6 +5433,31 @@ mod tests {
             serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(document["openapi"], "3.1.0");
+        assert!(
+            document["components"]["schemas"]["CreateSessionRequest"]["properties"]
+                .get("project_id")
+                .is_some()
+        );
+        assert!(
+            document["components"]["schemas"]["SessionSummarySnapshot"]["properties"]
+                .get("project_id")
+                .is_some()
+        );
+        assert!(
+            document["components"]["schemas"]["SessionMetadata"]["properties"]
+                .get("project_id")
+                .is_some()
+        );
+        assert!(
+            document["components"]["schemas"]["ProjectRecord"]["properties"]
+                .get("project_id")
+                .is_some()
+        );
+        assert!(document["paths"]["/sessions"]["get"]["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|parameter| parameter["name"] == "project_id"));
 
         let mut documented = std::collections::BTreeSet::new();
         for (path, item) in document["paths"].as_object().expect("OpenAPI paths") {
@@ -6844,6 +7197,7 @@ mod tests {
         let manager = test_manager(&root);
 
         let request = CreateSessionRequest {
+            project_id: None,
             cwd: None,
             model: RequestField::Omitted,
             base_url: RequestField::Omitted,
@@ -6880,6 +7234,7 @@ mod tests {
         for backend in ["arcee", "auto"] {
             let error = manager
                 .create_session(CreateSessionRequest {
+                    project_id: None,
                     cwd: None,
                     model: RequestField::Omitted,
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
@@ -9776,6 +10131,7 @@ model = "gpt-5.2"
 
         let create_error = manager
             .create_session(CreateSessionRequest {
+                project_id: None,
                 cwd: None,
                 model: RequestField::Omitted,
                 base_url: RequestField::Value("http://api.arcee.ai/insecure".to_string()),
@@ -9898,6 +10254,7 @@ model = "gpt-5.2"
 
         let created = manager
             .create_session(CreateSessionRequest {
+                project_id: None,
                 cwd: None,
                 model: RequestField::Value("test-model".to_string()),
                 base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
@@ -10549,6 +10906,230 @@ model = "gpt-5.2"
 
         let boundary_frame = body.split("\n\n").next().unwrap();
         assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));
+    }
+
+    #[tokio::test]
+    async fn project_http_create_list_patch_and_location_conflict() {
+        let root = temp_root("project_http");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(workspace.join("nested")).unwrap();
+        let manager = test_manager(&root);
+        let app = router(manager);
+
+        let created_response = post_json(
+            app.clone(),
+            "/projects",
+            serde_json::json!({
+                "cwd": workspace.join("nested").join(".."),
+                "description": "Initial description"
+            }),
+        )
+        .await;
+        assert_eq!(created_response.status(), StatusCode::CREATED);
+        let created: ProjectRecord =
+            serde_json::from_slice(&response_body(created_response).await).unwrap();
+        assert_eq!(created.cwd, workspace.canonicalize().unwrap());
+        assert_eq!(created.name, "workspace");
+        assert_eq!(created.description.as_deref(), Some("Initial description"));
+
+        let listed = get_response(app.clone(), "/projects", None).await;
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed: serde_json::Value =
+            serde_json::from_slice(&response_body(listed).await).unwrap();
+        assert_eq!(listed["projects"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["projects"][0]["project_id"], created.project_id);
+
+        let patched = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/projects/{}", created.project_id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"Renamed","description":null}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(patched.status(), StatusCode::OK);
+        let patched: ProjectRecord = serde_json::from_slice(&response_body(patched).await).unwrap();
+        assert_eq!(patched.name, "Renamed");
+        assert_eq!(patched.description, None);
+
+        let null_name = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/projects/{}", created.project_id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":null}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(null_name.status(), StatusCode::BAD_REQUEST);
+
+        let duplicate = post_json(
+            app.clone(),
+            "/projects",
+            serde_json::json!({"cwd": workspace}),
+        )
+        .await;
+        assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+
+        let missing = post_json(
+            app,
+            "/projects",
+            serde_json::json!({"cwd": root.join("missing")}),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn project_session_materializes_defaults_and_filters_membership() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("project_session");
+        let workspace = root.join("workspace");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("project-test-key"));
+        let manager = test_manager(&root);
+        let store_path = root.join("store.db");
+
+        model_configurations::insert_model_configuration(
+            &store_path,
+            "project-default",
+            model_configurations::NewModelConfiguration {
+                name: "Project default".to_string(),
+                backend: "openai-responses".to_string(),
+                model: "gpt-5.2".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                api_key_env: Some("OPENAI_API_KEY".to_string()),
+                reasoning_effort: Some("high".to_string()),
+                extra_headers: BTreeMap::from([("X-Project".to_string(), "selected".to_string())]),
+                orchestrator_compaction_threshold: Some(64_000),
+                initial_prompt: Some("ignored during creation".to_string()),
+                light_model: None,
+            },
+        )
+        .unwrap();
+        let project = manager
+            .create_project(CreateProjectRequest {
+                name: Some("Backend".to_string()),
+                description: None,
+                cwd: workspace.clone(),
+                ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
+                default_model_config_id: Some("project-default".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                project_id: Some(project.project_id.clone()),
+                reasoning_effort: RequestField::Value("low".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .unwrap();
+        let session_id = created.metadata.session_id.clone().unwrap();
+        assert_eq!(
+            created.metadata.project_id.as_deref(),
+            Some(project.project_id.as_str())
+        );
+        let stored = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(stored.project_id, Some(project.project_id.clone()));
+        assert_eq!(stored.cwd, workspace.canonicalize().unwrap());
+        assert_eq!(stored.model, "gpt-5.2");
+        assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Low));
+        assert_eq!(
+            stored.extra_headers.get("X-Project").map(String::as_str),
+            Some("selected")
+        );
+        assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
+
+        let filtered = manager
+            .list_sessions_for_project(false, Some(&project.project_id))
+            .await
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(
+            filtered[0].summary.project_id.as_deref(),
+            Some(project.project_id.as_str())
+        );
+
+        let conflict = manager
+            .create_session(CreateSessionRequest {
+                project_id: Some(project.project_id.clone()),
+                cwd: Some(workspace),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(conflict.to_string().contains("cannot be combined"));
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+
+        let missing = manager
+            .create_session(CreateSessionRequest {
+                project_id: Some("missing".to_string()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(missing.to_string().contains("was not found"));
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+
+        let required_null = manager
+            .create_session(CreateSessionRequest {
+                project_id: Some(project.project_id.clone()),
+                model: RequestField::Null,
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(required_null.to_string().contains("model"));
+        assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+
+        let deletion = delete_model_config_handler(
+            State(manager.clone()),
+            AxumPath("project-default".to_string()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(deletion.status, StatusCode::CONFLICT);
+        assert!(
+            model_configurations::load_model_configuration(&store_path, "project-default").is_ok()
+        );
+        manager
+            .update_project(
+                &project.project_id,
+                UpdateProjectRequest {
+                    default_model_config_id: RequestField::Null,
+                    ..UpdateProjectRequest::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            delete_model_config_handler(
+                State(manager.clone()),
+                AxumPath("project-default".to_string()),
+            )
+            .await
+            .unwrap(),
+            StatusCode::NO_CONTENT
+        );
+        let reloaded = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(reloaded.model, "gpt-5.2");
+        assert_eq!(reloaded.project_id, Some(project.project_id));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> Response {

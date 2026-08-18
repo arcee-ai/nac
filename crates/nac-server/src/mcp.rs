@@ -39,9 +39,15 @@ pub struct NacMcpService {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct CreateSessionParams {
+    #[schemars(
+        description = "Project id. When set, the project supplies the working directory and any default model configuration."
+    )]
+    project_id: Option<String>,
     #[schemars(description = "Working directory for the session")]
     cwd: Option<String>,
-    #[schemars(description = "Model id, e.g. \"claude-sonnet-4-20250514\". Call list_models first.")]
+    #[schemars(
+        description = "Model id, e.g. \"claude-sonnet-4-20250514\". Call list_models first."
+    )]
     model: Option<String>,
     #[schemars(description = "Backend kind: \"anthropic\", \"openai\", \"deepseek\", etc.")]
     backend: Option<String>,
@@ -61,9 +67,13 @@ struct CreateSessionParams {
     ssh_identity_file: Option<String>,
     #[schemars(description = "Enable sandbox mode (restricts file access and tool execution)")]
     sandbox: Option<bool>,
-    #[schemars(description = "Extra HTTP headers to send with model API requests (JSON object of header name to value)")]
+    #[schemars(
+        description = "Extra HTTP headers to send with model API requests (JSON object of header name to value)"
+    )]
     extra_headers: Option<serde_json::Value>,
-    #[schemars(description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)")]
+    #[schemars(
+        description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)"
+    )]
     compaction_threshold: Option<u64>,
 }
 
@@ -159,7 +169,10 @@ struct UpdateSessionParams {
 
 #[tool_router]
 impl NacMcpService {
-    #[tool(name = "create_session", description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true.")]
+    #[tool(
+        name = "create_session",
+        description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. Pass project_id by itself to use a project's directory and defaults; do not combine it with cwd or SSH fields. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true."
+    )]
     async fn create_session(
         &self,
         Parameters(params): Parameters<CreateSessionParams>,
@@ -171,15 +184,16 @@ impl NacMcpService {
                     match serde_json::from_value(v) {
                         Ok(map) => map,
                         Err(e) => {
-                            return Ok(CallToolResult::error(vec![Content::text(
-                                format!("Invalid extra_headers: {e}"),
-                            )]));
+                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                                "Invalid extra_headers: {e}"
+                            ))]));
                         }
                     };
                 RequestField::Value(HeadersRequest(map))
             }
         };
         let request = CreateSessionRequest {
+            project_id: params.project_id,
             cwd: params.cwd.map(std::path::PathBuf::from),
             model: field(params.model),
             base_url: field(params.base_url),
@@ -207,6 +221,7 @@ impl NacMcpService {
                 let result = json!({
                     "session_id": session_id,
                     "model": model,
+                    "project_id": snapshot.metadata.project_id,
                 });
                 Ok(CallToolResult::success(vec![Content::text(
                     serde_json::to_string_pretty(&result)
@@ -755,5 +770,23 @@ fn message_content(msg: &nac_core::types::Message) -> String {
         nac_core::types::Message::User { content } => content.clone(),
         nac_core::types::Message::Assistant { content, .. } => content.clone().unwrap_or_default(),
         nac_core::types::Message::Tool { content, .. } => content.preview(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_session_schema_exposes_optional_project_id() {
+        let schema = serde_json::to_value(schemars::schema_for!(CreateSessionParams)).unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+        assert!(properties.contains_key("project_id"));
+        assert!(properties.contains_key("cwd"));
+        assert!(!schema["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|field| field == "project_id"));
     }
 }

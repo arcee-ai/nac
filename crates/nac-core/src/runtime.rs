@@ -436,6 +436,12 @@ impl SshOptions {
         })
     }
 
+    /// Resolve the connection exactly as a session launch rooted at `config_cwd`
+    /// would, so callers can persist stable host-side key paths.
+    pub fn resolved_connection(&self, config_cwd: &Path) -> Option<SshConnection> {
+        self.connection(&PathContext::new(config_cwd))
+    }
+
     /// Rejects what would otherwise fail later as an opaque ssh error.
     ///
     /// nac runs ssh in batch mode, where a missing key is reported as a refused
@@ -825,6 +831,22 @@ pub async fn build_run_config(
     options: RunOptions,
     config: &NacConfig,
 ) -> Result<OrchestratorRunConfig> {
+    build_run_config_inner(options, config, None).await
+}
+
+pub async fn build_run_config_for_project(
+    options: RunOptions,
+    config: &NacConfig,
+    project_id: Option<String>,
+) -> Result<OrchestratorRunConfig> {
+    build_run_config_inner(options, config, project_id).await
+}
+
+async fn build_run_config_inner(
+    options: RunOptions,
+    config: &NacConfig,
+    project_id: Option<String>,
+) -> Result<OrchestratorRunConfig> {
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
@@ -903,6 +925,7 @@ pub async fn build_run_config(
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
+        session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
         sessions::create_session(&store_path, &session_snapshot)?;
@@ -996,6 +1019,7 @@ pub async fn build_run_config(
         settings.api_key_env.clone(),
         settings.extra_headers.clone(),
     );
+    session_snapshot.project_id = project_id;
     session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
     session_snapshot.light_model = light_model;
     sessions::create_session(&store_path, &session_snapshot)?;

@@ -48,6 +48,7 @@ pub struct NewModelConfiguration {
 pub enum ModelConfigurationStoreError {
     InvalidInput(String),
     DuplicateName(String),
+    InUse(String),
     NotFound(String),
     Store(anyhow::Error),
 }
@@ -58,6 +59,9 @@ impl std::fmt::Display for ModelConfigurationStoreError {
             Self::InvalidInput(message) => formatter.write_str(message),
             Self::DuplicateName(name) => {
                 write!(formatter, "a configuration named '{name}' already exists")
+            }
+            Self::InUse(id) => {
+                write!(formatter, "configuration '{id}' is used by a project")
             }
             Self::NotFound(id) => write!(formatter, "configuration '{id}' was not found"),
             Self::Store(error) => write!(formatter, "{error}"),
@@ -130,11 +134,12 @@ fn encode_light_model(
 /// setup as single-model.
 fn decode_light_model(
     raw: Option<&str>,
+    column_index: usize,
 ) -> rusqlite::Result<Option<crate::light_model::LightModelSettings>> {
     raw.map(|json| {
         serde_json::from_str(json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                12,
+                column_index,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
@@ -150,28 +155,46 @@ fn is_unique_violation(error: &rusqlite::Error) -> bool {
     )
 }
 
-fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfigurationRecord> {
-    let extra_headers: String = row.get(7)?;
+pub(crate) fn row_to_record_at(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<ModelConfigurationRecord> {
+    let extra_headers: String = row.get(offset + 7)?;
     Ok(ModelConfigurationRecord {
-        config_id: row.get(0)?,
-        name: row.get(1)?,
-        backend: row.get(2)?,
-        model: row.get(3)?,
-        base_url: row.get(4)?,
-        api_key_env: row.get(5)?,
-        reasoning_effort: row.get(6)?,
+        config_id: row.get(offset)?,
+        name: row.get(offset + 1)?,
+        backend: row.get(offset + 2)?,
+        model: row.get(offset + 3)?,
+        base_url: row.get(offset + 4)?,
+        api_key_env: row.get(offset + 5)?,
+        reasoning_effort: row.get(offset + 6)?,
         extra_headers: decode_headers(&extra_headers),
-        orchestrator_compaction_threshold: row.get(8)?,
-        initial_prompt: row.get(9)?,
-        light_model: decode_light_model(row.get::<_, Option<String>>(12)?.as_deref())?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        orchestrator_compaction_threshold: row.get(offset + 8)?,
+        initial_prompt: row.get(offset + 9)?,
+        light_model: decode_light_model(
+            row.get::<_, Option<String>>(offset + 12)?.as_deref(),
+            offset + 12,
+        )?,
+        created_at: row.get(offset + 10)?,
+        updated_at: row.get(offset + 11)?,
     })
+}
+
+fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfigurationRecord> {
+    row_to_record_at(row, 0)
 }
 
 const SELECT_COLUMNS: &str = "config_id, name, backend, model, base_url, api_key_env,
      reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
      initial_prompt, created_at, updated_at, light_model_json";
+
+pub(crate) fn model_configuration_columns(alias: &str) -> String {
+    SELECT_COLUMNS
+        .split(',')
+        .map(|column| format!("{alias}.{}", column.trim()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 pub fn list_model_configurations(
     path: &Path,
@@ -349,7 +372,22 @@ pub fn delete_model_configuration(path: &Path, config_id: &str) -> Configuration
             "DELETE FROM model_configurations WHERE config_id = ?1",
             params![config_id],
         )
-        .map_err(|error| ModelConfigurationStoreError::Store(error.into()))?;
+        .map_err(|error| {
+            let referenced = matches!(
+                &error,
+                rusqlite::Error::SqliteFailure(code, message)
+                    if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY
+                        || (code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_TRIGGER
+                            && message
+                                .as_deref()
+                                .is_some_and(|message| message.contains("FOREIGN KEY")))
+            );
+            if referenced {
+                ModelConfigurationStoreError::InUse(config_id.to_string())
+            } else {
+                ModelConfigurationStoreError::Store(error.into())
+            }
+        })?;
     Ok(removed > 0)
 }
 
