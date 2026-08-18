@@ -246,10 +246,7 @@ describe("re-dispatched thread cards", () => {
   it("renders typed image results as bounded placeholders", () => {
     const cards = waveCards(
       buildTranscript(
-        snapshot([
-          threadCall("worker", "call-image"),
-          imageToolResult("call-image"),
-        ]),
+        snapshot([threadCall("worker", "call-image"), imageToolResult("call-image")]),
         {},
       ),
     );

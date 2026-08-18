@@ -276,16 +276,10 @@ function eventsForEpisode(
   return episodes[episode - dropped];
 }
 
-function toolContentPreview(
-  content: Extract<Message, { role: "tool" }>["content"],
-): string {
+function toolContentPreview(content: Extract<Message, { role: "tool" }>["content"]): string {
   if (typeof content === "string") return content;
   return content
-    .map((part) =>
-      part.type === "text"
-        ? part.text
-        : `[Image: ${part.image.mime_type}]`,
-    )
+    .map((part) => (part.type === "text" ? part.text : `[Image: ${part.image.mime_type}]`))
     .join("\n\n");
 }
 
