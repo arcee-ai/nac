@@ -1,27 +1,31 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
-import SessionAvatar from "../session-avatar";
+import Loader, { LoaderSize, LoaderVariant } from "../loader";
 
-interface ChatSessionButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  /** Seeds the identicon and identifies the row. */
-  sessionId: string;
+interface ChatSessionButtonProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "title"
+> {
   title: string;
   active?: boolean;
+  /** Swaps the label for a shimmering one and shows a spinner. */
   running?: boolean;
-  /** Pin, rename and delete controls, revealed on hover and focus. */
+  /** Rename and delete controls, revealed on hover and on keyboard focus. */
   actions?: React.ReactNode;
 }
 
 /**
  * One session as a list row, used by the chat popover and the mobile modal.
  *
+ * The row is the title and nothing else — the strip's tabs and this list are
+ * read as one set of names, so neither carries a mark of its own.
+ *
  * The actions live outside the button so they stay clickable, and they hold
  * their space at all times so a hover does not re-truncate the title beside
  * them.
  */
 const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
-  sessionId,
   title,
   active = false,
   running = false,
@@ -32,28 +36,38 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
 }) => (
   <div
     className={cn(
-      "group flex items-center gap-2 h-9 px-2 min-w-0 rounded-[4px] hover:bg-btn-ghost-hovered",
-      active && "bg-btn-ghost-highlighted",
+      "group flex items-center gap-1.5 h-9 px-2 py-1 min-w-0 rounded-[4px]",
+      active
+        ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered"
+        : "hover:bg-btn-ghost-hovered",
       className,
     )}
   >
     <button
       type={type}
-      className="flex flex-1 items-center gap-2 min-w-0 text-left cursor-pointer"
+      title={title}
+      aria-current={active ? "page" : undefined}
+      className="flex flex-1 items-center gap-1.5 min-w-0 text-left"
       {...props}
     >
-      <SessionAvatar id={sessionId} size={20} isRunning={running} className="rounded-[2px]" />
+      {running ? (
+        <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} className="shrink-0" />
+      ) : null}
       <span
         className={cn(
           "label-small truncate",
-          running ? "text-shimmer-basic" : "text-basic-primary",
+          running
+            ? "text-shimmer-basic"
+            : active
+              ? "text-btn-secondary-pressed"
+              : "text-btn-secondary group-hover:text-btn-secondary-hovered",
         )}
       >
         {title}
       </span>
     </button>
     {actions ? (
-      <div className="flex items-center gap-1 shrink-0 invisible opacity-0 transition-opacity duration-150 ease-out group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+      <div className="flex items-center gap-1 shrink-0 invisible opacity-0 transition-opacity duration-150 ease-out group-hover:visible group-hover:opacity-100 group-has-[:focus-visible]:visible group-has-[:focus-visible]:opacity-100">
         {actions}
       </div>
     ) : null}

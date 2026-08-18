@@ -20,6 +20,8 @@ const API_PREFIXES = [
   "/health",
   "/store",
   "/sessions",
+  "/projects",
+  "/sandbox",
   "/auth",
   "/credentials",
   "/fs",

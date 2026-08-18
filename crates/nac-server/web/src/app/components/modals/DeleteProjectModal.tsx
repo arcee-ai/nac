@@ -1,11 +1,14 @@
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
+import { toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useDeleteProject } from "@/app/services/queries";
-import type { ProjectRecord } from "@/app/types/api";
-import { toRunError } from "@/app/lib/providerError";
+import type { DeleteProjectSessions, ProjectRecord } from "@/app/types/api";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
+
+const plural = (count: number) => (count === 1 ? "chat" : "chats");
 
 export function DeleteProjectModal({
   open,
@@ -20,19 +23,26 @@ export function DeleteProjectModal({
   const navigate = useNavigate();
   const location = useLocation();
   const remove = useDeleteProject();
-
-  const submit = async () => {
+  const isMobile = useIsMobile();
+  const submit = async (sessions: DeleteProjectSessions) => {
     if (!project || remove.isPending) return;
     try {
-      const { released_session_ids } = await remove.mutateAsync(project.project_id);
+      const result = await remove.mutateAsync({
+        projectId: project.project_id,
+        sessions,
+      });
       // Any screen scoped to this project has nothing left to show.
       if (location.pathname.startsWith(`/project/${encodeURIComponent(project.project_id)}`)) {
         navigate(routes.list(), { replace: true });
       }
+      const kept = result.released_session_ids.length;
+      const deleted = result.deleted_session_ids.length;
       toast.success(
-        released_session_ids.length > 0
-          ? `Project deleted; ${released_session_ids.length} chat${released_session_ids.length === 1 ? "" : "s"} kept`
-          : "Project deleted",
+        deleted > 0
+          ? `Project and ${deleted} ${plural(deleted)} deleted`
+          : kept > 0
+            ? `Project deleted; ${kept} ${plural(kept)} kept`
+            : "Project deleted",
       );
       onClose();
     } catch (error) {
@@ -45,31 +55,42 @@ export function DeleteProjectModal({
       open={open}
       onClose={onClose}
       title="Delete project"
-      size={ModalSize.Small}
+      size={ModalSize.Medium}
       footer={
         <>
+          {!isMobile && (
+            <Button
+              variant={ButtonVariant.Tertiary}
+              content={ButtonContent.Text}
+              onClick={onClose}
+              disabled={remove.isPending}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
-            variant={ButtonVariant.Tertiary}
+            variant={ButtonVariant.Secondary}
             content={ButtonContent.Text}
-            onClick={onClose}
+            onClick={() => void submit("keep")}
             disabled={remove.isPending}
           >
-            Cancel
+            Delete and keep sessions
           </Button>
           <Button
             variant={ButtonVariant.SecondaryDestructive}
             content={ButtonContent.Text}
-            onClick={submit}
+            onClick={() => void submit("delete")}
             loading={remove.isPending}
           >
-            Delete project
+            Delete All
           </Button>
         </>
       }
     >
       <p>
         Delete the project <span className="text-basic-primary">&quot;{project?.name}&quot;</span>?
-        Its chats are kept and become unassigned, so nothing said in them is lost.
+        Its chats can stay behind as unassigned, so nothing said in them is lost, or go down with it
+        — which cannot be undone.
       </p>
     </Modal>
   );

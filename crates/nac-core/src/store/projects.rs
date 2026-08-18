@@ -462,7 +462,9 @@ pub fn assign_session_to_project(
     let project = load_project_with_connection(&tx, project_id)?;
     let location = tx
         .query_row(
-            "SELECT cwd, ssh_host, ssh_port, ssh_identity_file FROM sessions
+            // A session records its host under `host_id`; the matching column on
+            // a project is `ssh_host`.
+            "SELECT cwd, host_id, ssh_port, ssh_identity_file FROM sessions
              WHERE session_id = ?1",
             params![session_id],
             |row| {

@@ -11,7 +11,8 @@ import {
 } from "@/app/atoms";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { useNow } from "@/app/hooks/useNow";
-import { displaySessionTitle, isActiveRun } from "@/app/lib/format";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency } from "@/app/lib/projects";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
@@ -41,6 +42,7 @@ export function ChatSessionList({
   emptyLabel = "No chats",
 }: ChatSessionListProps) {
   const now = useNow(RECENCY_TICK_MS);
+  const sessionTitle = useSessionTitle();
   const groups = useMemo(
     () =>
       groupByRecency(
@@ -59,54 +61,54 @@ export function ChatSessionList({
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-8">
       {groups.map((group) => (
-        <div key={group.label} className="flex flex-col gap-1">
-          {/* A single unpinned group needs no heading to tell it from anything. */}
-          {groups.length > 1 ? <GroupLabel>{group.label}</GroupLabel> : null}
-          {group.items.map((entry) => {
-            const title = displaySessionTitle(entry.summary);
-            return (
-              <ChatSessionButton
-                key={entry.summary.session_id}
-                sessionId={entry.summary.session_id}
-                title={title}
-                active={entry.summary.session_id === activeSessionId}
-                running={isActiveRun(entry.active_run)}
-                onClick={() => onOpen(entry)}
-                actions={
-                  onRename || onDelete ? (
-                    <>
-                      {onRename ? (
-                        <Button
-                          variant={ButtonVariant.Ghost}
-                          size={ButtonSize.Small}
-                          content={ButtonContent.Icon}
-                          title="Rename chat"
-                          aria-label={`Rename ${title}`}
-                          onClick={() => onRename(entry)}
-                        >
-                          <Icon iconName={IconName.Edit} />
-                        </Button>
-                      ) : null}
-                      {onDelete ? (
-                        <Button
-                          variant={ButtonVariant.GhostDestructive}
-                          size={ButtonSize.Small}
-                          content={ButtonContent.Icon}
-                          title="Delete chat"
-                          aria-label={`Delete ${title}`}
-                          onClick={() => onDelete(entry)}
-                        >
-                          <Icon iconName={IconName.Trash} />
-                        </Button>
-                      ) : null}
-                    </>
-                  ) : null
-                }
-              />
-            );
-          })}
+        <div key={group.label} className="flex flex-col gap-2">
+          <GroupLabel className="px-2">{group.label}</GroupLabel>
+          <div className="flex flex-col gap-1">
+            {group.items.map((entry) => {
+              const title = sessionTitle(entry.summary);
+              return (
+                <ChatSessionButton
+                  key={entry.summary.session_id}
+                  title={title}
+                  active={entry.summary.session_id === activeSessionId}
+                  running={isActiveRun(entry.active_run)}
+                  onClick={() => onOpen(entry)}
+                  actions={
+                    onRename || onDelete ? (
+                      <>
+                        {onRename ? (
+                          <Button
+                            variant={ButtonVariant.Ghost}
+                            size={ButtonSize.Small}
+                            content={ButtonContent.Icon}
+                            title="Rename chat"
+                            aria-label={`Rename ${title}`}
+                            onClick={() => onRename(entry)}
+                          >
+                            <Icon iconName={IconName.Edit} />
+                          </Button>
+                        ) : null}
+                        {onDelete ? (
+                          <Button
+                            variant={ButtonVariant.GhostDestructive}
+                            size={ButtonSize.Small}
+                            content={ButtonContent.Icon}
+                            title="Delete chat"
+                            aria-label={`Delete ${title}`}
+                            onClick={() => onDelete(entry)}
+                          >
+                            <Icon iconName={IconName.Trash} />
+                          </Button>
+                        ) : null}
+                      </>
+                    ) : null
+                  }
+                />
+              );
+            })}
+          </div>
         </div>
       ))}
     </div>

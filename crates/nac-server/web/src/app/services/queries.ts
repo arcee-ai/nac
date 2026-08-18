@@ -44,6 +44,7 @@ import type {
   CreateModelConfigurationRequest,
   CreateProjectRequest,
   CreateSessionRequest,
+  DeleteProjectSessions,
   ManagedSessionSummary,
   ModelCatalog,
   ModelConfigurationList,
@@ -964,11 +965,18 @@ export function useToggleProjectPin() {
   };
 }
 
-/** Deleting releases the project's sessions, so the session list moves too. */
+export interface DeleteProjectVariables {
+  projectId: string;
+  /** Whether the project's chats go with it. Defaults to keeping them. */
+  sessions?: DeleteProjectSessions;
+}
+
+/** Either way the project's sessions move, so the session list moves too. */
 export function useDeleteProject() {
   const invalidate = useInvalidators();
   return useMutation({
-    mutationFn: (projectId: string) => api.deleteProject(projectId),
+    mutationFn: ({ projectId, sessions }: DeleteProjectVariables) =>
+      api.deleteProject(projectId, sessions),
     onSuccess: () => Promise.all([invalidate.projects(), invalidate.sessions()]),
   });
 }

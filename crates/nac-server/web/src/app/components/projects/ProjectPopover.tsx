@@ -20,7 +20,37 @@ import { displaySessionTitle } from "@/app/lib/format";
 import { projectListItems, type ProjectListItem } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
+import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useProjects, useSessions } from "@/app/services/queries";
+
+/** One control of a row, at the size the popover's rows are built to. */
+function RowAction({
+  tooltip,
+  label,
+  icon,
+  onClick,
+  variant = ButtonVariant.Ghost,
+}: {
+  tooltip: string;
+  /** Spoken name, which carries the row's own name so the list reads apart. */
+  label: string;
+  icon: IconName;
+  onClick: () => void;
+  variant?: ButtonVariant;
+}) {
+  return (
+    <Button
+      variant={variant}
+      size={ButtonSize.Small}
+      content={ButtonContent.Icon}
+      title={tooltip}
+      aria-label={label}
+      onClick={onClick}
+    >
+      <Icon iconName={icon} />
+    </Button>
+  );
+}
 
 function matches(item: ProjectListItem, needle: string): boolean {
   const haystack =
@@ -47,6 +77,7 @@ export function ProjectPopover({
 }) {
   const navigate = useNavigate();
   const actions = useProjectActions();
+  const sessionActions = useSessionActions();
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const { data: projectList } = useProjects();
@@ -74,17 +105,6 @@ export function ProjectPopover({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <Button
-          size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-          className="w-full justify-start"
-          onClick={() => {
-            onClose();
-            actions.create();
-          }}
-        >
-          <Icon iconName={IconName.Add} className="shrink-0" />
-          <span className="flex-1 min-w-0 truncate text-left">New project</span>
-        </Button>
         <Separator />
       </div>
       <div className="flex-1 min-h-0 overflow-auto [&>*]:shrink-0 pt-1">
@@ -101,49 +121,75 @@ export function ProjectPopover({
             onClose();
             navigate(routes.session(sessionId));
           }}
-          renderActions={(item) =>
-            item.kind === "project" ? (
+          renderActions={(item) => {
+            if (item.kind === "project") {
+              const { project } = item.entry;
+              return (
+                <>
+                  <RowAction
+                    tooltip={project.pinned ? "Unpin project" : "Pin project"}
+                    label={`${project.pinned ? "Unpin" : "Pin"} ${project.name}`}
+                    icon={project.pinned ? IconName.Unpin : IconName.Pin}
+                    onClick={() => void actions.togglePin(project)}
+                  />
+                  <RowAction
+                    tooltip="Rename project"
+                    label={`Rename ${project.name}`}
+                    icon={IconName.Edit}
+                    onClick={() => {
+                      onClose();
+                      actions.rename(project);
+                    }}
+                  />
+                  <RowAction
+                    tooltip="Delete project"
+                    label={`Delete ${project.name}`}
+                    icon={IconName.Trash}
+                    variant={ButtonVariant.GhostDestructive}
+                    onClick={() => {
+                      onClose();
+                      actions.remove(project);
+                    }}
+                  />
+                </>
+              );
+            }
+
+            const { summary } = item.session;
+            const title = displaySessionTitle(summary);
+            return (
               <>
-                <Button
-                  variant={ButtonVariant.Ghost}
-                  size={ButtonSize.Small}
-                  content={ButtonContent.Icon}
-                  title={item.entry.project.pinned ? "Unpin project" : "Pin project"}
-                  aria-label={`${item.entry.project.pinned ? "Unpin" : "Pin"} ${item.entry.project.name}`}
-                  onClick={() => void actions.togglePin(item.entry.project)}
-                >
-                  <Icon iconName={item.entry.project.pinned ? IconName.Unpin : IconName.Pin} />
-                </Button>
-                <Button
-                  variant={ButtonVariant.GhostDestructive}
-                  size={ButtonSize.Small}
-                  content={ButtonContent.Icon}
-                  title="Delete project"
-                  aria-label={`Delete ${item.entry.project.name}`}
+                <RowAction
+                  tooltip="Rename chat"
+                  label={`Rename ${title}`}
+                  icon={IconName.Edit}
                   onClick={() => {
                     onClose();
-                    actions.remove(item.entry.project);
+                    sessionActions.rename(summary);
                   }}
-                >
-                  <Icon iconName={IconName.Trash} />
-                </Button>
+                />
+                <RowAction
+                  tooltip="Delete chat"
+                  label={`Delete ${title}`}
+                  icon={IconName.Trash}
+                  variant={ButtonVariant.GhostDestructive}
+                  onClick={() => {
+                    onClose();
+                    sessionActions.remove(summary);
+                  }}
+                />
+                <RowAction
+                  tooltip="Assign to a project"
+                  label={`Assign ${title} to a project`}
+                  icon={IconName.Folders}
+                  onClick={() => {
+                    onClose();
+                    actions.assign(summary);
+                  }}
+                />
               </>
-            ) : (
-              <Button
-                variant={ButtonVariant.Ghost}
-                size={ButtonSize.Small}
-                content={ButtonContent.Icon}
-                title="Assign to a project"
-                aria-label={`Assign ${displaySessionTitle(item.session.summary)} to a project`}
-                onClick={() => {
-                  onClose();
-                  actions.assign(item.session.summary);
-                }}
-              >
-                <Icon iconName={IconName.Folders} />
-              </Button>
-            )
-          }
+            );
+          }}
         />
       </div>
     </div>

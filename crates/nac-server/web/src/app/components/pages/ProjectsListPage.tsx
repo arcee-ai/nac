@@ -10,11 +10,13 @@ import {
   Icon,
   IconName,
   Modal,
+  Separator,
   StickyButton,
   StickyInput,
   StickyInputVariant,
   Tooltip,
 } from "@/app/atoms";
+import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { ProjectCard, type ProjectReorderStart } from "@/app/components/projects/ProjectCard";
 import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
@@ -83,8 +85,9 @@ function attentionIds(item: ProjectListItem): string[] {
     : [item.session.summary.session_id];
 }
 
+/** Pinning orders the project grid; a loose chat has no place in that order. */
 function isPinned(item: ProjectListItem): boolean {
-  return item.kind === "project" ? item.entry.project.pinned : Boolean(item.session.summary.pinned);
+  return item.kind === "project" && item.entry.project.pinned;
 }
 
 interface DropTarget {
@@ -155,11 +158,8 @@ function GridCard({
   return (
     <ProjectCard
       {...common}
-      onTogglePin={() => void sessionActions.togglePin(summary)}
-      onRename={() => sessionActions.rename(summary)}
       onDelete={() => sessionActions.remove(summary)}
       onAssign={() => projectActions.assign(summary)}
-      onStop={() => void sessionActions.stopRun(summary)}
     />
   );
 }
@@ -229,7 +229,8 @@ export default function ProjectsListPage() {
   };
 
   const pinned = items.filter(isPinned);
-  const unpinned = items.filter((item) => !isPinned(item));
+  const unpinned = items.filter((item) => item.kind === "project" && !isPinned(item));
+  const orphans = items.filter((item) => item.kind === "orphan");
   const projectCount = items.filter((item) => item.kind === "project").length;
   const countLabel = `${projectCount} ${projectCount === 1 ? "project" : "projects"}`;
 
@@ -255,7 +256,12 @@ export default function ProjectsListPage() {
         return;
       }
       try {
-        await moveOrder.mutateAsync({ projects, projectId, targetPinned, targetIndex });
+        await moveOrder.mutateAsync({
+          projects,
+          projectId,
+          targetPinned,
+          targetIndex,
+        });
       } catch (err) {
         toast.error(`Failed to reorder projects: ${errorMessage(toRunError(err))}`);
       } finally {
@@ -540,22 +546,33 @@ export default function ProjectsListPage() {
           ) : null}
 
           {pinned.length > 0 || showPinDropZone ? (
-            <CardGrid single={isMobile}>
-              {pinned.map(renderCard)}
-              {showPinDropZone ? (
-                <div
-                  data-pin-drop-zone="true"
-                  className={cn(
-                    "min-h-[112px] rounded-[8px] border-2 border-dashed",
-                    pinZoneActive && "bg-info-primary/10",
-                  )}
-                  style={{ borderColor: "var(--blue-500)" }}
-                />
-              ) : null}
-            </CardGrid>
+            <>
+              <CardGrid single={isMobile}>
+                {pinned.map(renderCard)}
+                {showPinDropZone ? (
+                  <div
+                    data-pin-drop-zone="true"
+                    className={cn(
+                      "min-h-[112px] rounded-[8px] border-2 border-dashed",
+                      pinZoneActive && "bg-info-primary/10",
+                    )}
+                    style={{ borderColor: "var(--blue-500)" }}
+                  />
+                ) : null}
+              </CardGrid>
+              <Separator />
+            </>
           ) : null}
           {unpinned.length > 0 ? (
             <CardGrid single={isMobile}>{unpinned.map(renderCard)}</CardGrid>
+          ) : null}
+          {/* Only the loose chats are announced: the projects above them are
+              what the page is, and pinning is already legible from the cards. */}
+          {orphans.length > 0 ? (
+            <>
+              <GroupLabel>Unassigned chat sessions</GroupLabel>
+              <CardGrid single={isMobile}>{orphans.map(renderCard)}</CardGrid>
+            </>
           ) : null}
         </div>
       </div>

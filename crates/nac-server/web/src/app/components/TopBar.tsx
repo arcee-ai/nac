@@ -51,7 +51,7 @@ export function TopBar() {
             "absolute inset-x-0 top-0 pointer-events-none",
             // On a phone the fade also has to cover the search bar sitting
             // directly under the bar.
-            isMobile ? "-bottom-[76px]" : "-bottom-[28px]",
+            isMobile ? "-bottom-[76px]" : "-bottom-[8px]",
           )}
           style={SURFACE_STYLE}
         />

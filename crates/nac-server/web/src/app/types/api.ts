@@ -1182,9 +1182,14 @@ export interface AssignSessionRequest {
   session_id: string;
 }
 
+/** What a project delete does with the chats inside it. */
+export type DeleteProjectSessions = "keep" | "delete";
+
 export interface DeleteProjectResponse {
   /** Sessions that survived the delete and are now unassigned. */
   released_session_ids: string[];
+  /** Sessions deleted along with the project. */
+  deleted_session_ids: string[];
 }
 
 export interface ReorderProjectsRequest {

@@ -4,8 +4,6 @@ import {
   Button,
   ButtonContent,
   ButtonVariant,
-  Icon,
-  IconName,
   Input,
   InputSize,
   Modal,
@@ -101,8 +99,8 @@ export function AssignToProjectModal({
       }
     >
       <div className="flex flex-col gap-4">
-        <p>
-          <span className="text-basic-primary">&quot;{displaySessionTitle(summary)}&quot;</span>{" "}
+        <p className="text-small">
+          <span className="text-basic-primary font-bold">{displaySessionTitle(summary)}</span>{" "}
           belongs to no project yet.
         </p>
 
@@ -116,13 +114,6 @@ export function AssignToProjectModal({
           </div>
         ) : (
           <>
-            <div className="flex items-start gap-2 text-micro text-basic-muted">
-              <Icon iconName={IconName.Info} size={16} className="shrink-0 mt-0.5" />
-              <span>
-                No project covers <span className="font-mono">{summary?.cwd}</span> yet, so one is
-                created for it.
-              </span>
-            </div>
             <Input
               label="Project name"
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}

@@ -1,21 +1,32 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { AssignToProjectModal } from "@/app/components/modals/AssignToProjectModal";
 import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
 import { DeleteProjectModal } from "@/app/components/modals/DeleteProjectModal";
 import { RenameProjectModal } from "@/app/components/modals/RenameProjectModal";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
+import { projectForSessionLocation } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
-import { routes } from "@/app/lib/routes";
-import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
+import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
+import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useCreateSession, useToggleProjectPin } from "@/app/services/queries";
+import {
+  useAssignSessionToProject,
+  useCreateSession,
+  useProjects,
+  useSessions,
+  useToggleProjectPin,
+} from "@/app/services/queries";
 import type { ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
 
 interface ProjectActions {
   create: () => void;
-  /** Adopts a session that belongs to no project. */
+  /**
+   * Files a session that belongs to no project. Asks nothing when a project
+   * already covers the session's location — there is only ever the one it can
+   * go to — and opens the dialog to name a new project otherwise.
+   */
   assign: (summary: SessionSummarySnapshot) => void;
   rename: (project: ProjectRecord) => void;
   remove: (project: ProjectRecord) => void;
@@ -35,14 +46,34 @@ type ModalKind = "create" | "assign" | "rename" | "delete";
 export function ProjectActionsProvider({ children }: { children: React.ReactNode }) {
   const toast = useToast();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { data: sessions = [] } = useSessions();
+  const { data: projectList } = useProjects();
   const pin = useToggleProjectPin();
   const createSession = useCreateSession();
+  const assignSession = useAssignSessionToProject();
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [session, setSession] = useState<SessionSummarySnapshot | null>(null);
 
   const togglePin = pin.toggle;
   const startSession = createSession.mutateAsync;
+  const adoptSession = assignSession.mutateAsync;
+
+  const adopt = useCallback(
+    async (target: ProjectRecord, summary: SessionSummarySnapshot) => {
+      try {
+        await adoptSession({
+          projectId: target.project_id,
+          sessionId: summary.session_id,
+        });
+        toast.success(`Assigned to ${target.name}`);
+      } catch (error) {
+        toast.error(`Failed to assign the chat: ${humanErrorText(toRunError(error))}`);
+      }
+    },
+    [adoptSession, toast],
+  );
 
   const newChat = useCallback(
     async (projectId: string) => {
@@ -63,6 +94,14 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     () => ({
       create: () => setModal("create"),
       assign: (summary) => {
+        // A session keeps its own working directory and the backend refuses to
+        // file it anywhere else, so a project covering that location is not a
+        // choice to present — it is the answer.
+        const covering = projectForSessionLocation(projectList?.projects ?? [], summary);
+        if (covering) {
+          void adopt(covering, summary);
+          return;
+        }
         setSession(summary);
         setModal("assign");
       },
@@ -83,14 +122,35 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
       },
       newChat,
     }),
-    [togglePin, newChat, toast],
+    [togglePin, newChat, toast, adopt, projectList],
   );
 
-  // Creating a project is the one action reachable from anywhere, so it is the
-  // one bound to a key; the rest all need a project or chat picked out first.
-  useKeyboardShortcuts(
-    useMemo(() => [{ keys: NEW_PROJECT_KEYS, onTrigger: () => setModal("create") }], []),
-  );
+  // Which project the screen is about, whether it was reached by its own route
+  // or through one of its chats.
+  const openSessionId = sessionIdFromPath(pathname);
+  const openProjectId =
+    projectIdFromPath(pathname) ??
+    sessions.find((entry) => entry.summary.session_id === openSessionId)?.summary.project_id ??
+    null;
+
+  // "Make me a new one" is the single gesture bound to a key, and it means
+  // whatever the screen is a list of: another chat inside an open project,
+  // another project everywhere else. The two can never both apply, so the same
+  // chord is unambiguous.
+  useKeyboardShortcuts([
+    {
+      keys: NEW_CHAT_KEYS,
+      enabled: openProjectId != null,
+      onTrigger: () => {
+        if (openProjectId) void newChat(openProjectId);
+      },
+    },
+    {
+      keys: NEW_PROJECT_KEYS,
+      enabled: openProjectId == null,
+      onTrigger: () => setModal("create"),
+    },
+  ]);
 
   const close = () => setModal(null);
 

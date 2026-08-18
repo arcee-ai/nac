@@ -50,7 +50,11 @@ historical-backfill API, so reassignment requires no membership to exist yet.
 
 `DELETE /projects/{project_id}` releases rather than destroys. Its sessions keep
 their transcripts and reappear as unassigned, and the response lists them in
-`released_session_ids`.
+`released_session_ids`. Pass `?sessions=delete` to take them down with the
+project instead; they are deleted one by one before the project row goes, and
+the response lists them in `deleted_session_ids`. A session that refuses to be
+deleted fails the whole request with the project still standing, so the rest are
+never left orphaned.
 
 Projects carry the same presentation fields as sessions: `pinned`, `sort_order`,
 and `presentation_version`. `PATCH` toggles `pinned`, which moves the project to

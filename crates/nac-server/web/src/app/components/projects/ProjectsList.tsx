@@ -3,7 +3,8 @@ import { useMemo } from "react";
 import { ProjectButton, ProjectButtonVariant } from "@/app/atoms";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { useNow } from "@/app/hooks/useNow";
-import { displaySessionTitle, isActiveRun } from "@/app/lib/format";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency, projectListItemId, type ProjectListItem } from "@/app/lib/projects";
 
 /** Date buckets only shift once a day, so a minute of resolution is plenty. */
@@ -35,6 +36,7 @@ export function ProjectsList({
   emptyLabel = "No projects",
 }: ProjectsListProps) {
   const now = useNow(RECENCY_TICK_MS);
+  const sessionTitle = useSessionTitle();
   const groups = useMemo(
     () =>
       groupByRecency(
@@ -56,7 +58,9 @@ export function ProjectsList({
     <div className="flex flex-col gap-1">
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-1">
-          {groups.length > 1 ? <GroupLabel>{group.label}</GroupLabel> : null}
+          {groups.length > 1 ? (
+            <GroupLabel className="px-2 pt-3 pb-1 first:pt-1">{group.label}</GroupLabel>
+          ) : null}
           {group.items.map((item) => {
             const id = projectListItemId(item);
             const actions = renderActions?.(item);
@@ -76,7 +80,7 @@ export function ProjectsList({
               <ProjectButton
                 key={id}
                 entityId={id}
-                name={displaySessionTitle(item.session.summary)}
+                name={sessionTitle(item.session.summary)}
                 variant={ProjectButtonVariant.Orphan}
                 active={id === activeId}
                 running={isActiveRun(item.session.active_run)}

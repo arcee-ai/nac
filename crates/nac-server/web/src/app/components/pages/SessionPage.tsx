@@ -214,7 +214,7 @@ export default function SessionPage() {
           <div
             className={cn(
               "absolute inset-y-0 left-0 flex flex-col w-1/2 min-w-0",
-              "pt-[72px] pb-2 pl-2 pr-2 xl:pr-6",
+              "pt-[56px] pb-2 pl-2 pr-2 xl:pr-6",
               "transition-transform duration-150 ease-out",
               collapsed && "-translate-x-full",
             )}
@@ -246,7 +246,7 @@ export default function SessionPage() {
             is no width here for a strip of tabs. The padding clears the fixed
             52px header the shell puts above everything. */}
         {isMobile ? null : (
-          <div className="w-full shrink-0 pt-[52px]">
+          <div className="w-full shrink-0 pt-[60px]">
             <ProjectSessionTabs
               projectId={projectId}
               sessions={projectSessions}

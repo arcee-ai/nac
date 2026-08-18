@@ -694,7 +694,7 @@
    not shift the strip by two pixels. */
 .chat-session-tab {
   border-bottom: 2px solid transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: 4px 4px 0 0;
 }
 .chat-session-tab-active {
   border-bottom-color: var(--color-border-primary);

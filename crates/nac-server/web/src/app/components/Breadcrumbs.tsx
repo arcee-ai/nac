@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -6,6 +6,7 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
+  ChatSessionOrphanAvatar,
   Icon,
   IconName,
   Popover,
@@ -18,7 +19,8 @@ import { MobileProjectSessionModal } from "@/app/components/modals/MobileProject
 import { ProjectPopover } from "@/app/components/projects/ProjectPopover";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import { displaySessionTitle, isActiveRun } from "@/app/lib/format";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { isActiveRun } from "@/app/lib/format";
 import { findProject } from "@/app/lib/projects";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
@@ -39,6 +41,7 @@ export function Breadcrumbs() {
   const navigate = useNavigate();
   const actions = useProjectActions();
   const isMobile = useIsMobile();
+  const sessionTitle = useSessionTitle();
   const { data: projectList } = useProjects();
   const { data: sessions = [] } = useSessions();
   const [open, setOpen] = useState(false);
@@ -47,25 +50,18 @@ export function Breadcrumbs() {
     ? sessions.find((entry) => entry.summary.session_id === sessionId)
     : undefined;
   const projectId = routeProjectId ?? currentEntry?.summary.project_id ?? null;
-  const project = useMemo(
-    () => findProject(projectList?.projects ?? [], projectId),
-    [projectList, projectId],
-  );
+  const project = findProject(projectList?.projects ?? [], projectId);
   // Only the phone's sheet lists them; the desktop popover fetches its own.
-  const projectSessions = useMemo(
-    () =>
-      projectId
-        ? sessions
-            .filter((entry) => entry.summary.project_id === projectId)
-            .sort((a, b) => Date.parse(b.summary.updated_at) - Date.parse(a.summary.updated_at))
-        : [],
-    [sessions, projectId],
-  );
+  const projectSessions = projectId
+    ? sessions
+        .filter((entry) => entry.summary.project_id === projectId)
+        .sort((a, b) => Date.parse(b.summary.updated_at) - Date.parse(a.summary.updated_at))
+    : [];
 
   const inTrail = Boolean(projectId || sessionId);
   // An orphan has a chat but no project, so the trail falls back to its title
-  // and its identicon.
-  const label = project?.name ?? displaySessionTitle(currentEntry?.summary) ?? sessionId ?? "";
+  // and the neutral chat tile.
+  const label = project?.name ?? sessionTitle(currentEntry?.summary) ?? sessionId ?? "";
   const avatarId = project?.project_id ?? sessionId ?? "";
   // The project chip pulses only for the chat actually running under it.
   const running = isActiveRun(currentEntry?.active_run);
@@ -152,17 +148,23 @@ export function Breadcrumbs() {
                 variant={ButtonVariant.Ghost}
                 size={ButtonSize.Medium}
                 content={ButtonContent.Text}
-                className="px-2 max-w-[320px]"
+                // The atom's own padding is unlayered CSS, so a plain `px-2`
+                // never reaches it.
+                className="!px-2 max-w-[320px]"
                 onClick={() => setOpen((v) => !v)}
                 aria-expanded={open}
                 aria-label="Switch project"
               >
-                <SessionAvatar
-                  id={avatarId}
-                  size={24}
-                  isRunning={running}
-                  className="rounded-[2px]"
-                />
+                {project ? (
+                  <SessionAvatar
+                    id={avatarId}
+                    size={24}
+                    isRunning={running}
+                    className="rounded-[2px]"
+                  />
+                ) : (
+                  <ChatSessionOrphanAvatar size={24} isRunning={running} />
+                )}
                 <span className={cn("truncate max-w-[120px]", running && "text-shimmer-basic")}>
                   {label}
                 </span>
@@ -178,17 +180,19 @@ export function Breadcrumbs() {
           {isMobile ? null : (
             <Tooltip
               title="New project"
-              keyboardShortcuts={NEW_PROJECT_KEYS}
+              // Inside a project the chord starts a chat instead, so promising
+              // it here would be a lie.
+              keyboardShortcuts={project ? undefined : NEW_PROJECT_KEYS}
               position={Tooltip.Position.BottomCenter}
             >
               <Button
-                variant={ButtonVariant.Primary}
+                variant={ButtonVariant.Ghost}
                 size={ButtonSize.Small}
                 content={ButtonContent.Icon}
                 aria-label="New project"
                 onClick={actions.create}
               >
-                <Icon iconName={IconName.Add} />
+                <Icon iconName={IconName.AddCircle} />
               </Button>
             </Tooltip>
           )}

@@ -9,63 +9,111 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   active?: boolean;
   /** Swaps the label for a shimmering one and shows a spinner. */
   running?: boolean;
-  /** Omit to make the tab uncloseable; the last tab of a project is. */
-  onClose?: () => void;
+  onRename?: () => void;
+  /** Takes the tab off the strip. The chat itself is untouched. */
+  onDismiss?: () => void;
 }
 
 /**
- * One session in the tab strip above a project's transcript.
+ * One session in the tab strip above a project's transcript. The tab is a fixed
+ * width so the strip's rhythm survives titles of any length, and the underline
+ * on the active one is the only thing marking it.
  *
- * The close button keeps its slot at all times and only becomes visible on
- * hover or focus, so moving the pointer along the strip does not make the
- * titles beside it re-truncate tab by tab.
+ * Pointing at a tab reveals its rename and close controls, which take their room
+ * from the title rather than being held in reserve — a strip of tabs is read at
+ * a glance, so the untouched ones show as much of their name as they can.
  */
 const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   title,
   active = false,
   running = false,
-  onClose,
+  onRename,
+  onDismiss,
   className = "",
   type = "button",
   ...props
 }) => (
   <div
     className={cn(
-      "chat-session-tab group flex items-center gap-2 h-10 w-32 shrink-0 px-2",
-      active ? "chat-session-tab-active bg-elevation-level-1" : "hover:bg-btn-ghost-hovered",
+      "chat-session-tab group flex h-10 w-32 shrink-0 items-center justify-center gap-1 px-2 py-1",
+      active
+        ? "chat-session-tab-active bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered"
+        : "hover:bg-btn-ghost-hovered",
       className,
     )}
   >
     <button
       type={type}
-      className="flex flex-1 items-center gap-1.5 min-w-0 text-left cursor-pointer"
       title={title}
+      aria-current={active ? "page" : undefined}
+      className="flex flex-1 min-w-0 items-center justify-center gap-1"
       {...props}
     >
       {running ? (
-        <Loader size={LoaderSize.XSmall} variant={LoaderVariant.Neutral} className="shrink-0" />
+        <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} className="shrink-0" />
       ) : null}
       <span
         className={cn(
-          "label-small truncate",
-          running ? "text-shimmer-basic" : active ? "text-basic-primary" : "text-basic-secondary",
+          "label-small flex-1 min-w-0 truncate text-center",
+          running
+            ? "text-shimmer-basic"
+            : active
+              ? "text-btn-secondary-pressed"
+              : "text-btn-secondary",
         )}
       >
         {title}
       </span>
     </button>
-    {onClose ? (
-      <button
-        type="button"
-        aria-label={`Close ${title}`}
-        title="Close chat"
-        onClick={onClose}
-        className="shrink-0 rounded-[2px] p-0.5 text-basic-muted cursor-pointer hover:bg-btn-ghost-hovered hover:text-basic-primary invisible opacity-0 transition-opacity duration-150 ease-out group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
-      >
-        <Icon iconName={IconName.Close} size={14} />
-      </button>
+    {onRename ? (
+      <TabAction
+        iconName={IconName.Edit}
+        label={`Rename ${title}`}
+        tooltip="Rename chat"
+        onClick={onRename}
+      />
+    ) : null}
+    {onDismiss ? (
+      <TabAction
+        iconName={IconName.Close}
+        label={`Close ${title}`}
+        tooltip="Close tab"
+        onClick={onDismiss}
+      />
     ) : null}
   </div>
 );
+
+/**
+ * Hidden rather than transparent, so the title gets the room back whenever the
+ * pointer is elsewhere.
+ *
+ * Keyboard focus reveals it too, but only the visible kind: clicking a tab
+ * leaves its title button focused, and plain `:focus` would strand the controls
+ * on screen long after the pointer moved away.
+ */
+function TabAction({
+  iconName,
+  label,
+  tooltip,
+  onClick,
+}: {
+  iconName: IconName;
+  label: string;
+  tooltip: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={tooltip}
+      aria-label={label}
+      onClick={onClick}
+      className="hidden shrink-0 p-1 rounded-[4px] text-basic-muted hover:text-basic-primary hover:bg-btn-ghost-hovered group-hover:block group-has-[:focus-visible]:block"
+    >
+      <Icon iconName={iconName} size={16} />
+    </button>
+  );
+}
 
 export default ChatSessionTab;

@@ -5,7 +5,12 @@ import { useMemo } from "react";
 
 import { createStore } from "@/app/lib/store";
 import { useNow } from "@/app/hooks/useNow";
-import { displaySessionTitle, sessionEnvLabel, type SessionEnv } from "@/app/lib/format";
+import {
+  SESSION_ENVS,
+  displaySessionTitle,
+  sessionEnvLabel,
+  type SessionEnv,
+} from "@/app/lib/format";
 import { providersFromBackends } from "@/app/lib/providers";
 import type { ProjectListItem } from "@/app/lib/projects";
 import type { ManagedSessionSummary, ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
@@ -257,6 +262,35 @@ export function useSessionProviders(sessions: ManagedSessionSummary[]): string[]
     () => providersFromBackends(sessions.map(({ summary }) => summary.backend)),
     [sessions],
   );
+}
+
+/** The same for environments, in the canonical order rather than first-seen. */
+export function useSessionEnvs(sessions: ManagedSessionSummary[]): SessionEnv[] {
+  return useMemo(() => {
+    const present = new Set(sessions.map(({ summary }) => sessionEnvLabel(summary)));
+    return SESSION_ENVS.filter((env) => present.has(env));
+  }, [sessions]);
+}
+
+/**
+ * Forgets facet selections that no longer have a chip.
+ *
+ * A facet whose values all vanished — the last SSH project deleted, say — would
+ * otherwise keep narrowing the list from a control the user can no longer see,
+ * leaving an empty page with nothing to click to fill it again.
+ */
+export function pruneUnavailableFacets(
+  availableEnvs: readonly SessionEnv[],
+  availableProviders: readonly string[],
+): void {
+  setState((state) => {
+    const envs = state.envs.filter((env) => availableEnvs.includes(env));
+    const providers = state.providers.filter((provider) => availableProviders.includes(provider));
+    if (envs.length === state.envs.length && providers.length === state.providers.length) {
+      return null;
+    }
+    return { envs, providers };
+  });
 }
 
 export const useFilterQuery = () => useStore((s) => s.query);

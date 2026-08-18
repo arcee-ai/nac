@@ -7,6 +7,7 @@ export { default as StickyButton } from "./button/StickyButton";
 export { default as ChatLoader, ChatLoaderSize } from "./chat-loader";
 export { default as ChatSessionButton } from "./chat-session-button";
 export { default as ChatSessionMessage, ChatSessionMessageVariant } from "./chat-session-message";
+export { default as ChatSessionOrphanAvatar } from "./chat-session-orphan-avatar";
 export { default as ChatSessionTab } from "./chat-session-tab";
 export { default as Checkbox } from "./checkbox";
 export { default as CodeBlock, CodeBlockSize } from "./code-block";

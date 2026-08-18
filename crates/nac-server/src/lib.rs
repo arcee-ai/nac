@@ -25,7 +25,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex as StdMutex, Weak},
     time::{Duration, Instant},
 };
@@ -530,10 +530,30 @@ pub struct ReorderProjectsResponse {
     pub projects: Vec<ProjectRecord>,
 }
 
+/// What a project delete does with the chats inside it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteProjectSessions {
+    /// Hand them back as unassigned, so nothing said in them is lost.
+    #[default]
+    Keep,
+    /// Delete them along with the project.
+    Delete,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DeleteProjectQuery {
+    #[serde(default)]
+    pub sessions: DeleteProjectSessions,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct DeleteProjectResponse {
     /// Sessions that stayed behind and are now unassigned.
     pub released_session_ids: Vec<String>,
+    /// Sessions deleted along with the project.
+    pub deleted_session_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
@@ -615,6 +635,74 @@ fn apply_project_model_defaults(
     inherit_project_field(
         &mut request.light_model,
         defaults
+            .light_model
+            .map(RequestField::Value)
+            .unwrap_or(RequestField::Null),
+    );
+}
+
+/// The chat a project's model settings are read off when the project names no
+/// default configuration of its own.
+///
+/// A project set up from a one-off model pick has no saved configuration to
+/// point at, which used to leave its every later chat unlaunchable: nothing said
+/// what to run it on. Its existing chats do say, so the newest one stands in —
+/// and being the newest, it also tracks the project as its chats are retuned,
+/// rather than pinning it to whatever was chosen the day it was created.
+///
+/// A chat whose own stored configuration no longer parses has nothing to lend,
+/// and is passed over so one broken row cannot make the project unusable.
+fn newest_project_session(
+    store_path: &Path,
+    project_id: &str,
+) -> Option<sessions::SessionSnapshot> {
+    sessions::list_sessions(store_path)
+        .ok()?
+        .into_iter()
+        .filter(|summary| summary.project_id.as_deref() == Some(project_id))
+        .max_by(|left, right| left.created_at.cmp(&right.created_at))
+        .and_then(|summary| sessions::load_session(store_path, &summary.session_id).ok())
+}
+
+/// Same inheritance as `apply_project_model_defaults`, sourced from a sibling
+/// chat instead of a saved configuration.
+fn apply_sibling_model_defaults(
+    request: &mut CreateSessionRequest,
+    sibling: sessions::SessionSnapshot,
+) {
+    inherit_project_field(&mut request.model, RequestField::Value(sibling.model));
+    inherit_project_field(&mut request.base_url, RequestField::Value(sibling.base_url));
+    inherit_project_field(
+        &mut request.backend,
+        RequestField::Value(sibling.backend.as_str().to_string()),
+    );
+    inherit_project_field(
+        &mut request.reasoning_effort,
+        sibling
+            .reasoning_effort
+            .map(|effort| RequestField::Value(effort.as_str().to_string()))
+            .unwrap_or(RequestField::Null),
+    );
+    inherit_project_field(
+        &mut request.api_key_env,
+        sibling
+            .api_key_env
+            .map(RequestField::Value)
+            .unwrap_or(RequestField::Null),
+    );
+    inherit_project_field(
+        &mut request.extra_headers,
+        RequestField::Value(HeadersRequest(sibling.extra_headers)),
+    );
+    if let Some(threshold) = sibling.orchestrator_compaction_threshold {
+        inherit_project_field(
+            &mut request.orchestrator_compaction_threshold,
+            RequestField::Value(threshold),
+        );
+    }
+    inherit_project_field(
+        &mut request.light_model,
+        sibling
             .light_model
             .map(RequestField::Value)
             .unwrap_or(RequestField::Null),
@@ -1231,6 +1319,25 @@ impl SessionManager {
         projects::delete_project(&self.inner.store_path, project_id)
     }
 
+    /// Drops the project along with every chat in it.
+    ///
+    /// The chats go first: membership is recorded against the project row, so
+    /// once that is gone there is nothing left saying which sessions were its.
+    /// A chat that refuses to be deleted — one mid-run that will not cancel —
+    /// leaves the project standing rather than orphaning the rest.
+    pub async fn delete_project_with_sessions(&self, project_id: &str) -> Result<Vec<String>> {
+        let session_ids: Vec<String> = sessions::list_sessions(&self.inner.store_path)?
+            .into_iter()
+            .filter(|summary| summary.project_id.as_deref() == Some(project_id))
+            .map(|summary| summary.session_id)
+            .collect();
+        for session_id in &session_ids {
+            self.delete_session(session_id).await?;
+        }
+        self.delete_project(project_id)?;
+        Ok(session_ids)
+    }
+
     pub fn assign_session_to_project(
         &self,
         project_id: &str,
@@ -1646,6 +1753,10 @@ impl SessionManager {
             }
             if let Some(defaults) = context.default_model_config {
                 apply_project_model_defaults(&mut request, defaults);
+            } else if let Some(sibling) =
+                newest_project_session(&self.inner.store_path, &context.project.project_id)
+            {
+                apply_sibling_model_defaults(&mut request, sibling);
             }
             let project = context.project;
             let ssh = runtime::SshOptions {
@@ -2837,6 +2948,9 @@ async fn secure_docs(request: axum::extract::Request, next: Next) -> Response {
     ),
     components(schemas(
         filesystem::BrowseKind,
+        // Only ever referenced from a query parameter, which utoipa does not
+        // walk for schemas the way it walks bodies and responses.
+        DeleteProjectSessions,
         ReplayBoundaryEvent,
         ReplayGapEvent,
         SessionEventEnvelope,
@@ -3332,24 +3446,33 @@ async fn update_project_handler(
     Ok(Json(manager.update_project(&project_id, request)?))
 }
 
-/// Remove a project without touching the work done inside it.
+/// Remove a project, by default without touching the work done inside it.
 ///
 /// Its sessions are released rather than deleted, so they reappear in the
-/// listing as unassigned and can be assigned somewhere else.
+/// listing as unassigned and can be assigned somewhere else. Pass
+/// `?sessions=delete` to take them down with the project instead.
 #[utoipa::path(
     delete,
     path = "/projects/{project_id}",
     operation_id = "delete_projects_project_id",
     tag = "projects",
-    params(("project_id" = String, Path)),
-    responses((status = 200, description = "Success", body = DeleteProjectResponse, content_type = "application/json"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Project was not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+    params(DeleteProjectQuery, ("project_id" = String, Path)),
+    responses((status = 200, description = "Success", body = DeleteProjectResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Project was not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
 )]
 async fn delete_project_handler(
     State(manager): State<SessionManager>,
     AxumPath(project_id): AxumPath<String>,
+    Query(query): Query<DeleteProjectQuery>,
 ) -> std::result::Result<Json<DeleteProjectResponse>, ApiError> {
-    Ok(Json(DeleteProjectResponse {
-        released_session_ids: manager.delete_project(&project_id)?,
+    Ok(Json(match query.sessions {
+        DeleteProjectSessions::Keep => DeleteProjectResponse {
+            released_session_ids: manager.delete_project(&project_id)?,
+            deleted_session_ids: Vec::new(),
+        },
+        DeleteProjectSessions::Delete => DeleteProjectResponse {
+            released_session_ids: Vec::new(),
+            deleted_session_ids: manager.delete_project_with_sessions(&project_id).await?,
+        },
     }))
 }
 

@@ -16,6 +16,7 @@ import type {
   CreateProjectRequest,
   CreateSessionRequest,
   DeleteProjectResponse,
+  DeleteProjectSessions,
   DeviceLoginStarted,
   DeviceLoginState,
   LaunchModelDefaults,
@@ -364,9 +365,12 @@ export const api = {
       body: payload,
     }),
 
-  /** Releases the project's sessions instead of deleting them. */
-  deleteProject: (projectId: string) =>
-    request<DeleteProjectResponse>("DELETE", `/projects/${encodeURIComponent(projectId)}`),
+  /** Releases the project's sessions unless asked to delete them too. */
+  deleteProject: (projectId: string, sessions: DeleteProjectSessions = "keep") =>
+    request<DeleteProjectResponse>(
+      "DELETE",
+      `/projects/${encodeURIComponent(projectId)}?sessions=${sessions}`,
+    ),
 
   assignSessionToProject: (projectId: string, payload: AssignSessionRequest) =>
     request<ProjectRecord>("POST", `/projects/${encodeURIComponent(projectId)}/sessions`, {
