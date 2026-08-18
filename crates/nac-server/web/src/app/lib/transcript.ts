@@ -5,7 +5,10 @@
 // it dispatched. Thread tool calls from one assistant message form one package;
 // in-batch `threads` deps split that package into stacked DAG rows.
 
-import { displayPromptFromMessageText } from "@/app/lib/format";
+import {
+  displayPromptFromMessageText,
+  invokedSkillNames,
+} from "@/app/lib/format";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
@@ -76,6 +79,11 @@ export interface UserTurn {
   kind: "user";
   key: string;
   text: string;
+  /**
+   * Skills expanded into this prompt, parsed from the stored message — null
+   * for an ordinary prompt. Shown as the bubble's expansion indicator.
+   */
+  invokedSkills: string[] | null;
   /** Raw snapshot index, which is what a revert addresses the turn by. */
   messageIndex: number;
   /** When the message entered the transcript log, if the backend knows. */
@@ -527,6 +535,7 @@ export function buildTranscript(
         kind: "user",
         key: `user-${absoluteIndex}`,
         text: displayPromptFromMessageText(message.content),
+        invokedSkills: invokedSkillNames(message.content),
         messageIndex: absoluteIndex,
         createdAt: createdAt[index] ?? null,
       });
