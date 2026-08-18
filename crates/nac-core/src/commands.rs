@@ -521,4 +521,50 @@ mod tests {
         assert!(activation.content.contains("&lt;invoked_skills&gt;"));
         assert!(!activation.content.contains("\n\n<invoked_skills>\n"));
     }
+
+    #[test]
+    fn invoked_skills_wire_format_matches_the_shared_fixture() {
+        // The web frontend mirrors the expand/collapse wire format
+        // byte-for-byte; fixtures/invoked-skills-format.json at the repo
+        // root is the shared pin both sides test against, so drifting the
+        // format on either side fails loudly. Every vector must stay true
+        // under a stricter collapse (one that only fires on a well-formed
+        // appended block), so keep no-collapse vectors conservative.
+        #[derive(Deserialize)]
+        struct CollapseVector {
+            name: String,
+            message: String,
+            display: String,
+        }
+        #[derive(Deserialize)]
+        struct InvokedSkillsFixture {
+            separator: String,
+            open: String,
+            close: String,
+            collapse_vectors: Vec<CollapseVector>,
+        }
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/invoked-skills-format.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
+        let fixture: InvokedSkillsFixture = serde_json::from_str(&raw)
+            .unwrap_or_else(|error| panic!("parsing {}: {error}", path.display()));
+
+        assert_eq!(fixture.separator, INVOKED_SKILLS_SEPARATOR);
+        assert_eq!(fixture.open, INVOKED_SKILLS_OPEN);
+        assert_eq!(fixture.close, INVOKED_SKILLS_CLOSE);
+        assert!(
+            !fixture.collapse_vectors.is_empty(),
+            "the shared fixture must pin at least one collapse vector"
+        );
+        for vector in &fixture.collapse_vectors {
+            assert_eq!(
+                display_prompt_from_message(&vector.message),
+                vector.display,
+                "collapse vector {:?} failed",
+                vector.name
+            );
+        }
+    }
 }

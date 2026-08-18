@@ -1,0 +1,33 @@
+{
+  "description": "Wire format for $skillname prompt expansion, shared by nac-core (crates/nac-core/src/commands.rs) and the web frontend (crates/nac-server/web/src/app/lib/format.ts). An expanded prompt is {raw}{separator}{blocks}\\n{close} where each block is one <skill_content name=\"...\">...</skill_content> rendering and blocks are joined by a single \\n. Collapse truncates at the last separator, but only when the message ends with the close tag. Consumers: Rust test invoked_skills_wire_format_matches_the_shared_fixture in commands.rs (via env!(\"CARGO_MANIFEST_DIR\") + ../../fixtures), vitest suite (../../../fixtures relative to crates/nac-server/web). Every collapse vector must stay true under a stricter collapse that only fires on a well-formed appended block: expansion vectors use well-formed blocks, and no-collapse vectors must keep not collapsing.",
+  "separator": "\n\n<invoked_skills>\n",
+  "open": "<invoked_skills>",
+  "close": "</invoked_skills>",
+  "collapse_vectors": [
+    {
+      "name": "single_skill_expansion",
+      "message": "Use $demo to review this change.\n\n<invoked_skills>\n<skill_content name=\"demo\">\nDEMO BODY\n\nSkill directory: /skills/demo\nRelative paths in this skill are relative to the skill directory.\n</skill_content>\n</invoked_skills>",
+      "display": "Use $demo to review this change."
+    },
+    {
+      "name": "multi_skill_expansion",
+      "message": "first $beta, then $alpha\n\n<invoked_skills>\n<skill_content name=\"beta\">\nBETA BODY\n\nSkill directory: /skills/beta\nRelative paths in this skill are relative to the skill directory.\n</skill_content>\n<skill_content name=\"alpha\">\nALPHA BODY\n\nSkill directory: /skills/alpha\nRelative paths in this skill are relative to the skill directory.\n</skill_content>\n</invoked_skills>",
+      "display": "first $beta, then $alpha"
+    },
+    {
+      "name": "prose_mentioning_sentinel_without_trailing_close",
+      "message": "the <invoked_skills> element wraps appended skills",
+      "display": "the <invoked_skills> element wraps appended skills"
+    },
+    {
+      "name": "separator_in_prose_without_trailing_close",
+      "message": "the separator\n\n<invoked_skills>\nmentioned in prose stays",
+      "display": "the separator\n\n<invoked_skills>\nmentioned in prose stays"
+    },
+    {
+      "name": "trailing_close_without_separator",
+      "message": "user text that ends with </invoked_skills>",
+      "display": "user text that ends with </invoked_skills>"
+    }
+  ]
+}
