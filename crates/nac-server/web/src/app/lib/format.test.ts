@@ -51,8 +51,7 @@ describe("displayPromptFromMessageText", () => {
   });
 
   it("collapses an expansion whose raw prompt mentions the sentinel", () => {
-    const raw =
-      "mentions <invoked_skills> and <skill_content in prose, uses $alpha";
+    const raw = "mentions <invoked_skills> and <skill_content in prose, uses $alpha";
     const expanded = expand(raw, skillBlock("alpha", "ALPHA BODY"));
     expect(displayPromptFromMessageText(expanded)).toBe(raw);
   });
@@ -121,10 +120,7 @@ describe("displayPromptFromMessageText", () => {
 
 describe("invokedSkillNames", () => {
   it("returns the skill names of a single-skill expansion", () => {
-    const expanded = expand(
-      "Use $demo to review this change.",
-      skillBlock("demo", "DEMO BODY"),
-    );
+    const expanded = expand("Use $demo to review this change.", skillBlock("demo", "DEMO BODY"));
     expect(invokedSkillNames(expanded)).toEqual(["demo"]);
   });
 
@@ -140,9 +136,7 @@ describe("invokedSkillNames", () => {
   it("returns null for plain text, prose with the sentinel, and nullish", () => {
     expect(invokedSkillNames("just a prompt")).toBeNull();
     expect(invokedSkillNames("the <invoked_skills> element")).toBeNull();
-    expect(
-      invokedSkillNames("notes\n\n<invoked_skills>\nprose\n</invoked_skills>"),
-    ).toBeNull();
+    expect(invokedSkillNames("notes\n\n<invoked_skills>\nprose\n</invoked_skills>")).toBeNull();
     expect(invokedSkillNames(null)).toBeNull();
     expect(invokedSkillNames(undefined)).toBeNull();
   });
@@ -167,9 +161,7 @@ describe("invoked-skills shared fixture", () => {
 
   for (const vector of fixture.collapse_vectors) {
     it(`collapse vector ${vector.name}`, () => {
-      expect(displayPromptFromMessageText(vector.message)).toBe(
-        vector.display,
-      );
+      expect(displayPromptFromMessageText(vector.message)).toBe(vector.display);
     });
   }
 });
@@ -190,8 +182,6 @@ describe("displaySessionTitle", () => {
   });
 
   it("falls back to the short session id without a title or prompt", () => {
-    expect(displaySessionTitle(summaryWithPrompt(null))).toBe(
-      "session-:7890",
-    );
+    expect(displaySessionTitle(summaryWithPrompt(null))).toBe("session-:7890");
   });
 });

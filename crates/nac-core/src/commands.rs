@@ -78,10 +78,7 @@ pub enum PreparedUserInput {
 /// submitted prompt are resolved against the session's skill registry: the
 /// raw and display prompts stay exactly what the user typed, while the
 /// agent prompt gets the recognized skills' rendered content appended.
-pub(crate) fn prepare_user_input(
-    input: &str,
-    skills: Option<&SkillRegistry>,
-) -> PreparedUserInput {
+pub(crate) fn prepare_user_input(input: &str, skills: Option<&SkillRegistry>) -> PreparedUserInput {
     if input.trim().is_empty() {
         return PreparedUserInput::Empty;
     }
@@ -404,7 +401,10 @@ mod tests {
     fn multiple_skills_append_in_first_reference_order() {
         let registry = test_registry(&[("alpha", "ALPHA BODY"), ("beta", "BETA BODY")]);
 
-        let expanded = expand("first $beta, then $alpha, then $beta again", Some(&registry));
+        let expanded = expand(
+            "first $beta, then $alpha, then $beta again",
+            Some(&registry),
+        );
 
         let beta_block = expanded.find("BETA BODY").unwrap();
         let alpha_block = expanded.find("ALPHA BODY").unwrap();
@@ -447,7 +447,11 @@ mod tests {
             "template {{ $var }}",
             "no dollars at all",
         ] {
-            assert_eq!(expand(prompt, Some(&registry)), prompt, "prompt: {prompt:?}");
+            assert_eq!(
+                expand(prompt, Some(&registry)),
+                prompt,
+                "prompt: {prompt:?}"
+            );
         }
     }
 

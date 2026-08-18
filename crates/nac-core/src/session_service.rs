@@ -4367,7 +4367,9 @@ pub(super) mod tests {
         // frontend mirrors byte-for-byte, so drifting the Rust consts
         // fails this test.
         assert!(prompt.agent_prompt.contains("\n\n<invoked_skills>\n"));
-        assert!(prompt.agent_prompt.contains("<skill_content name=\"demo\">"));
+        assert!(prompt
+            .agent_prompt
+            .contains("<skill_content name=\"demo\">"));
         assert!(prompt.agent_prompt.contains("DEMO SKILL BODY"));
         assert!(prompt.agent_prompt.ends_with("</invoked_skills>"));
         let expanded = prompt.agent_prompt.clone();

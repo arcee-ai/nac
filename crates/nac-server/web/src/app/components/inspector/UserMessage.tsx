@@ -80,11 +80,7 @@ export const UserMessage = memo(function UserMessage({
           className="flex items-center gap-1 pt-1.5 pr-1 label-micro text-basic-tertiary"
           title="Skill content was expanded into the prompt sent to the agent"
         >
-          <Icon
-            iconName={IconName.Bolt}
-            size={12}
-            color="var(--color-fill-basic-tertiary)"
-          />
+          <Icon iconName={IconName.Bolt} size={12} color="var(--color-fill-basic-tertiary)" />
           <span>
             {invokedSkills.length === 1 ? "Skill" : "Skills"} expanded:{" "}
             {invokedSkills.map((name) => `$${name}`).join(", ")}

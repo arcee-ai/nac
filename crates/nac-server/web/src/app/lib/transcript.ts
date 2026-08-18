@@ -5,10 +5,7 @@
 // it dispatched. Thread tool calls from one assistant message form one package;
 // in-batch `threads` deps split that package into stacked DAG rows.
 
-import {
-  displayPromptFromMessageText,
-  invokedSkillNames,
-} from "@/app/lib/format";
+import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";

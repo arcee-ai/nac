@@ -19,7 +19,7 @@ export function shortId(id: string | null | undefined): string {
 export const INVOKED_SKILLS_OPEN = "<invoked_skills>";
 export const INVOKED_SKILLS_CLOSE = "</invoked_skills>";
 export const INVOKED_SKILLS_SEPARATOR = "\n\n<invoked_skills>\n";
-const SKILL_CONTENT_OPEN = "<skill_content name=\"";
+const SKILL_CONTENT_OPEN = '<skill_content name="';
 const SKILL_CONTENT_CLOSE = "</skill_content>";
 
 /** A stored user message recognized as a `$skillname`-expanded prompt. */
@@ -39,9 +39,7 @@ interface InvokedSkillsExpansion {
  * `</skill_content>` (rendered bodies have the tag neutralized, so the first
  * one closes the block).
  */
-function parseSkillContentBlock(
-  text: string,
-): { name: string; rest: string } | null {
+function parseSkillContentBlock(text: string): { name: string; rest: string } | null {
   if (!text.startsWith(SKILL_CONTENT_OPEN)) return null;
   const afterOpen = text.slice(SKILL_CONTENT_OPEN.length);
   const quote = afterOpen.indexOf('"');
@@ -65,9 +63,7 @@ function parseSkillContentBlock(
  * expansion appends. Anything else (prose that happens to end with the
  * closing tag, a malformed tail) is user text and returns null.
  */
-function parseInvokedSkillsExpansion(
-  text: string,
-): InvokedSkillsExpansion | null {
+function parseInvokedSkillsExpansion(text: string): InvokedSkillsExpansion | null {
   if (!text.endsWith(INVOKED_SKILLS_CLOSE)) return null;
   const withoutClose = text.slice(0, text.length - INVOKED_SKILLS_CLOSE.length);
   if (!withoutClose.endsWith("\n")) return null;
@@ -102,9 +98,7 @@ function invokedSkillsDisplayPrompt(text: string): string | null {
  * from the same structural region the collapse recognizes, so the bubble's
  * indicator and its collapsed text always agree.
  */
-export function invokedSkillNames(
-  content: string | null | undefined,
-): string[] | null {
+export function invokedSkillNames(content: string | null | undefined): string[] | null {
   if (content == null) return null;
   const expansion = parseInvokedSkillsExpansion(String(content));
   return expansion ? expansion.names : null;
