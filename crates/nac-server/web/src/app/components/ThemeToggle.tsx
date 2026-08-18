@@ -19,10 +19,7 @@ const THEME_ICON = {
 export function ThemeToggle({ size = ButtonSize.Small }: { size?: ButtonSize }) {
   const { theme, toggleTheme } = useTheme();
   return (
-    <Tooltip
-      title={`Theme: ${theme} (click to cycle)`}
-      position={TooltipPosition.BottomLeft}
-    >
+    <Tooltip title={`Theme: ${theme} (click to cycle)`} position={TooltipPosition.BottomLeft}>
       <Button
         variant={ButtonVariant.Ghost}
         size={size}

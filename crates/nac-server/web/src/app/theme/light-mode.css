@@ -346,8 +346,7 @@
   /* Shadows */
   --shadow-xs:
     0 0 4px 0 rgba(1, 80, 80, 0.08), -1px -1px 0 0 rgba(71, 104, 104, 0.05),
-    1px 1px 0 0 rgba(71, 104, 104, 0.05),
-    0 0 0 1px rgba(71, 104, 104, 0.1) inset;
+    1px 1px 0 0 rgba(71, 104, 104, 0.05), 0 0 0 1px rgba(71, 104, 104, 0.1) inset;
   --shadow-sm:
     -1px -1px 0 0 rgba(89, 71, 104, 0.04), 0 1px 6px 0 rgba(43, 1, 80, 0.1),
     0 0 1px 0 rgba(43, 1, 80, 0.06), 1px 1px 0 0 rgba(89, 71, 104, 0.04),
@@ -373,14 +372,10 @@
     0 1px 8px 0 rgba(1, 80, 80, 0.08), 1px 1px 0 0 rgba(71, 104, 104, 0.02),
     0 -1px 0 0 rgba(71, 104, 104, 0.08) inset;
   --shadow-convex:
-    0 0 1px 0 rgba(71, 104, 104, 0.15),
-    0 0 0 1px rgba(71, 104, 104, 0.15) inset,
+    0 0 1px 0 rgba(71, 104, 104, 0.15), 0 0 0 1px rgba(71, 104, 104, 0.15) inset,
     0 -1px 0 0 rgba(71, 104, 104, 0.1) inset;
   --shadow-concave:
-    0 0 0 1px rgba(71, 104, 104, 0.08) inset,
-    0 1px 0 0 rgba(71, 104, 104, 0.04) inset;
-  --left-sidebar-closed:
-    2px 0 4px 0 rgba(1, 80, 80, 0.03), 1px 0 0 0 rgba(71, 104, 104, 0.06);
-  --left-sidebar-open:
-    2px 0 16px 0 rgba(1, 80, 80, 0.08), 1px 0 0 0 rgba(71, 104, 104, 0.06);
+    0 0 0 1px rgba(71, 104, 104, 0.08) inset, 0 1px 0 0 rgba(71, 104, 104, 0.04) inset;
+  --left-sidebar-closed: 2px 0 4px 0 rgba(1, 80, 80, 0.03), 1px 0 0 0 rgba(71, 104, 104, 0.06);
+  --left-sidebar-open: 2px 0 16px 0 rgba(1, 80, 80, 0.08), 1px 0 0 0 rgba(71, 104, 104, 0.06);
 }

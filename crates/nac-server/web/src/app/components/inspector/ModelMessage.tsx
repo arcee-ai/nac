@@ -15,10 +15,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
-import {
-  SnapshotBadge,
-  type FilesPanelLink,
-} from "@/app/components/inspector/SnapshotBadge";
+import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
@@ -33,10 +30,7 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
  * model is doing rather than what it produced. Once it is over the badge carries
  * how long the model spent on it, whenever the backend timed the call.
  */
-function thoughtsLabel(block: {
-  streaming: boolean;
-  durationMs: number | null;
-}): string {
+function thoughtsLabel(block: { streaming: boolean; durationMs: number | null }): string {
   if (block.streaming) return "Thinking";
   if (block.durationMs == null) return "Thoughts";
   return `Thoughts, ${formatSeconds(block.durationMs)}`;
@@ -125,8 +119,7 @@ export const ModelMessage = memo(function ModelMessage({
   // already written, so it closes the turn below the snapshot rather than
   // sitting wherever the marker happens to fall between the blocks.
   const cancelled = turn.blocks.some(
-    (block) =>
-      block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
+    (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
   const isMobile = useIsMobile();
   return (
@@ -139,9 +132,7 @@ export const ModelMessage = memo(function ModelMessage({
       <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
         <div className="flex gap-3 items-center mb-4 min-w-0">
           <ModelPill active={active} />
-          <span className="label-small text-basic-primary truncate">
-            {model}
-          </span>
+          <span className="label-small text-basic-primary truncate">{model}</span>
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
           {active && activity ? (
@@ -189,11 +180,7 @@ export const ModelMessage = memo(function ModelMessage({
                 return (
                   <ChatBadge
                     key={block.key}
-                    label={
-                      block.pending
-                        ? "Defining worksets…"
-                        : `Worksets_${block.worksetId}`
-                    }
+                    label={block.pending ? "Defining worksets…" : `Worksets_${block.worksetId}`}
                     pending={block.pending}
                     active={selectedWorkset === block.worksetId}
                     onClick={() => onSelectWorkset(block.worksetId)}
@@ -248,9 +235,7 @@ export const ModelMessage = memo(function ModelMessage({
               <Tooltip title="Resend" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                   content={ButtonContent.Icon}
                   aria-label="Resend"
                   disabled={actionsDisabled}
@@ -263,15 +248,10 @@ export const ModelMessage = memo(function ModelMessage({
             ) : null}
 
             {canRevert ? (
-              <Tooltip
-                title="Revert to this snapshot"
-                position={TooltipPosition.BottomRight}
-              >
+              <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
@@ -289,9 +269,7 @@ export const ModelMessage = memo(function ModelMessage({
                 <span className="inline-flex">
                   <Button
                     size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                    variant={
-                      isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                    }
+                    variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled

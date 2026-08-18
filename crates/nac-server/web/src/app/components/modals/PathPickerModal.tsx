@@ -18,11 +18,7 @@ import {
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
-import {
-  useBrowsePath,
-  useSshBrowsePath,
-  type BrowseKind,
-} from "@/app/services/queries";
+import { useBrowsePath, useSshBrowsePath, type BrowseKind } from "@/app/services/queries";
 import type { SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -51,11 +47,7 @@ interface PathPickerProps {
   onSelect: (path: string) => void;
 }
 
-export function PathPickerModal({
-  open,
-  ssh,
-  ...props
-}: PathPickerProps & { open: boolean }) {
+export function PathPickerModal({ open, ssh, ...props }: PathPickerProps & { open: boolean }) {
   const mounted = useExitTransition(open);
   if (!mounted) return null;
   return <PathPicker open={open} ssh={ssh ?? null} {...props} />;
@@ -84,12 +76,7 @@ function PathPicker({
   // Both hooks are called every render, as hooks must be; the one that is not
   // the source of this listing is disabled and never fetches.
   const local = useBrowsePath(directory || null, kind, hidden, !ssh);
-  const remote = useSshBrowsePath(
-    ssh ?? null,
-    directory || null,
-    hidden,
-    Boolean(ssh),
-  );
+  const remote = useSshBrowsePath(ssh ?? null, directory || null, hidden, Boolean(ssh));
   const { data, error, isFetching } = ssh ? remote : local;
 
   const goTo = (path: string) => {
@@ -219,30 +206,20 @@ function PathPicker({
             }}
           />
           <Button
-            variant={
-              hidden
-                ? ButtonVariant.SecondaryHighlighted
-                : ButtonVariant.Secondary
-            }
+            variant={hidden ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary}
             size={ButtonSize.Medium}
             content={ButtonContent.Icon}
             onClick={() => setHidden((on) => !on)}
             aria-pressed={hidden}
             title={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
-            aria-label={
-              hidden ? "Hide dot-prefixed entries" : "Show hidden entries"
-            }
+            aria-label={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
           >
-            <Icon
-              iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough}
-            />
+            <Icon iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough} />
           </Button>
         </div>
 
         {error ? (
-          <p className="label-micro text-error-primary shrink-0">
-            {errorMessage(error)}
-          </p>
+          <p className="label-micro text-error-primary shrink-0">{errorMessage(error)}</p>
         ) : null}
 
         <div className="flex-1 min-h-0 overflow-auto rounded-[4px] bg-input shadow-concave p-1 flex flex-col [&>*]:shrink-0">
@@ -270,9 +247,7 @@ function PathPicker({
                 "hover:bg-elevation-sublevel-variant-A",
                 file === entry.path && "bg-elevation-sublevel-variant-A",
               )}
-              onClick={() =>
-                entry.is_directory ? goTo(entry.path) : setFile(entry.path)
-              }
+              onClick={() => (entry.is_directory ? goTo(entry.path) : setFile(entry.path))}
               onDoubleClick={() => {
                 if (!entry.is_directory) onSelect(entry.path);
               }}

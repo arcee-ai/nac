@@ -29,8 +29,7 @@ const STATUS_TONE: StatusToneMap = {
   failed: "text-error-primary",
 };
 
-const statusTone = (status: string) =>
-  STATUS_TONE[status.toLowerCase()] ?? "text-basic-secondary";
+const statusTone = (status: string) => STATUS_TONE[status.toLowerCase()] ?? "text-basic-secondary";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -44,19 +43,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function Item({ item }: { item: WorksetItemSnapshot }) {
   return (
     <div className="flex flex-col gap-4 p-4 rounded-[8px] border border-muted bg-elevation-level-1">
-      {item.role ? (
-        <Badge
-          text={item.role}
-          color={BadgeColor.Blue}
-          className="self-start"
-        />
-      ) : null}
+      {item.role ? <Badge text={item.role} color={BadgeColor.Blue} className="self-start" /> : null}
       <div className="flex flex-col gap-1">
         <span className="header-small text-basic-primary">{item.title}</span>
         {item.scope ? (
-          <span className="code code-small text-danger-primary break-words">
-            {item.scope}
-          </span>
+          <span className="code code-small text-danger-primary break-words">{item.scope}</span>
         ) : null}
         {item.description ? (
           <p className="text-small text-basic-secondary">{item.description}</p>
@@ -69,14 +60,10 @@ function Item({ item }: { item: WorksetItemSnapshot }) {
       ) : null}
       {item.depends_on.length > 0 ? (
         <Field label="Depends on">
-          <span className="code code-small text-basic-tertiary">
-            {item.depends_on.join(", ")}
-          </span>
+          <span className="code code-small text-basic-tertiary">{item.depends_on.join(", ")}</span>
         </Field>
       ) : null}
-      {item.notes ? (
-        <p className="text-small text-basic-muted italic">{item.notes}</p>
-      ) : null}
+      {item.notes ? <p className="text-small text-basic-muted italic">{item.notes}</p> : null}
     </div>
   );
 }
@@ -85,9 +72,7 @@ function Detail({ workset }: { workset: WorksetSnapshot }) {
   return (
     <div className="flex flex-col gap-6 flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0">
       <Field label="ID">
-        <span className="header-medium text-basic-primary break-words">
-          {workset.id}
-        </span>
+        <span className="header-medium text-basic-primary break-words">{workset.id}</span>
       </Field>
       {workset.goal ? (
         <Field label="Goal">
@@ -103,9 +88,7 @@ function Detail({ workset }: { workset: WorksetSnapshot }) {
       ) : null}
       {workset.summary ? (
         <Field label="Summary">
-          <p className="paragraph-small text-basic-primary">
-            {workset.summary}
-          </p>
+          <p className="paragraph-small text-basic-primary">{workset.summary}</p>
         </Field>
       ) : null}
       {workset.verification_recipe ? (
@@ -143,15 +126,10 @@ export function WorksetsView({
 
   const worksets = snapshot.worksets;
   if (worksets.error) {
-    return (
-      <div className="p-6 label-small text-error-primary">{worksets.error}</div>
-    );
+    return <div className="p-6 label-small text-error-primary">{worksets.error}</div>;
   }
 
-  const current =
-    worksets.items.find((item) => item.id === selected) ??
-    worksets.items[0] ??
-    null;
+  const current = worksets.items.find((item) => item.id === selected) ?? worksets.items[0] ?? null;
 
   return (
     <PanelSplit

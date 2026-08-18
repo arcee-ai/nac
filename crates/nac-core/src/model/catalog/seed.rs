@@ -144,6 +144,7 @@ fn rates(input: f64, output: f64, cache_read: f64, cache_write: f64) -> ModelCos
 /// A hand-maintained known-model entry for the providers models.dev does
 /// not cover: documented display name, limits, and pricing over the shared
 /// `entry` base.
+#[allow(clippy::too_many_arguments)]
 fn seeded_model(
     provider: BackendKind,
     id: &str,

@@ -16,14 +16,10 @@ export enum MessageBoxSize {
 }
 
 const variantClasses = {
-  [MessageBoxVariant.Info]:
-    "bg-info-primary text-info-primary border-info-primary",
-  [MessageBoxVariant.Error]:
-    "bg-error-primary text-error-primary border-error-primary",
-  [MessageBoxVariant.Danger]:
-    "bg-danger-primary text-danger-primary border-danger-primary",
-  [MessageBoxVariant.Success]:
-    "bg-success-primary text-success-primary border-success-primary",
+  [MessageBoxVariant.Info]: "bg-info-primary text-info-primary border-info-primary",
+  [MessageBoxVariant.Error]: "bg-error-primary text-error-primary border-error-primary",
+  [MessageBoxVariant.Danger]: "bg-danger-primary text-danger-primary border-danger-primary",
+  [MessageBoxVariant.Success]: "bg-success-primary text-success-primary border-success-primary",
 } satisfies Record<MessageBoxVariant, string>;
 
 const variantIcons = {
@@ -64,10 +60,7 @@ const iconSizes = {
   [MessageBoxSize.Large]: 24,
 } satisfies Record<MessageBoxSize, number>;
 
-interface MessageBoxProps extends Omit<
-  React.HTMLAttributes<HTMLDivElement>,
-  "title"
-> {
+interface MessageBoxProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
   title?: React.ReactNode;
   variant?: MessageBoxVariant;
   size?: MessageBoxSize;
@@ -102,9 +95,7 @@ const MessageBox: React.FC<MessageBoxProps> & {
     />
     <div className="flex-1 min-w-0 flex flex-col gap-1">
       {title ? <div className={titleClasses[size]}>{title}</div> : null}
-      {children ? (
-        <div className={cn("opacity-80", bodyClasses[size])}>{children}</div>
-      ) : null}
+      {children ? <div className={cn("opacity-80", bodyClasses[size])}>{children}</div> : null}
     </div>
   </div>
 );

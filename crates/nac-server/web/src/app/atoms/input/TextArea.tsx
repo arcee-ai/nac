@@ -8,8 +8,7 @@ export enum TextAreaSize {
   Large = "p-4 text-medium",
 }
 
-interface TextAreaProps
-  extends Omit<React.ComponentPropsWithRef<"textarea">, "size"> {
+interface TextAreaProps extends Omit<React.ComponentPropsWithRef<"textarea">, "size"> {
   textAreaSize?: TextAreaSize;
   label?: React.ReactNode;
   required?: boolean;

@@ -145,8 +145,6 @@ it("keeps the cursor absent when no event has been observed", async () => {
   first.onerror?.();
   await vi.advanceTimersByTimeAsync(1_000);
 
-  expect(FakeEventSource.instances[1].url).toBe(
-    "/sessions/session-a/events/stream",
-  );
+  expect(FakeEventSource.instances[1].url).toBe("/sessions/session-a/events/stream");
   dispose();
 });

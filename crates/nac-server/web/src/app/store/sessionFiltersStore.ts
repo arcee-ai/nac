@@ -5,11 +5,7 @@ import { useMemo } from "react";
 
 import { createStore } from "@/app/lib/store";
 import { useNow } from "@/app/hooks/useNow";
-import {
-  displaySessionTitle,
-  sessionEnvLabel,
-  type SessionEnv,
-} from "@/app/lib/format";
+import { displaySessionTitle, sessionEnvLabel, type SessionEnv } from "@/app/lib/format";
 import { providersFromBackends } from "@/app/lib/providers";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
@@ -74,17 +70,14 @@ export const sessionFiltersStore = createStore<FiltersState>({
 
 const { getState, setState, useStore } = sessionFiltersStore;
 
-const toggle = <T,>(list: T[], value: T): T[] =>
+const toggle = <T>(list: T[], value: T): T[] =>
   list.includes(value) ? list.filter((v) => v !== value) : list.concat(value);
 
 export const setQuery = (query: string) => setState({ query });
 export const setSort = (sort: SortId) => setState({ sort });
-export const setCreatedRange = (createdRange: RangeId) =>
-  setState({ createdRange });
-export const setModifiedRange = (modifiedRange: RangeId) =>
-  setState({ modifiedRange });
-export const toggleEnv = (env: SessionEnv) =>
-  setState((s) => ({ envs: toggle(s.envs, env) }));
+export const setCreatedRange = (createdRange: RangeId) => setState({ createdRange });
+export const setModifiedRange = (modifiedRange: RangeId) => setState({ modifiedRange });
+export const toggleEnv = (env: SessionEnv) => setState((s) => ({ envs: toggle(s.envs, env) }));
 export const toggleProvider = (provider: string) =>
   setState((s) => ({ providers: toggle(s.providers, provider) }));
 
@@ -118,10 +111,7 @@ function withinRange(value: string, range: RangeId, now: number): boolean {
   return now - ts <= span;
 }
 
-function matchesQuery(
-  summary: SessionSummarySnapshot,
-  needle: string,
-): boolean {
+function matchesQuery(summary: SessionSummarySnapshot, needle: string): boolean {
   if (!needle) return true;
   const haystack = [
     displaySessionTitle(summary),
@@ -135,10 +125,7 @@ function matchesQuery(
   return haystack.some((v) => v && String(v).toLowerCase().includes(needle));
 }
 
-type Comparator = (
-  a: SessionSummarySnapshot,
-  b: SessionSummarySnapshot,
-) => number;
+type Comparator = (a: SessionSummarySnapshot, b: SessionSummarySnapshot) => number;
 
 const comparators = {
   // Mirrors the API: pinned grouping is applied by the page; within a group
@@ -162,9 +149,7 @@ const comparators = {
  * Filtered and sorted entries. Pinned grouping stays in the page, which renders
  * pinned sessions as their own block above the rest.
  */
-export function useVisibleSessions(
-  sessions: ManagedSessionSummary[],
-): ManagedSessionSummary[] {
+export function useVisibleSessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
   const filters = useStore();
   // Relative ranges span hours, so re-evaluating them once a minute is plenty.
   const now = useNow(RANGE_TICK_MS);
@@ -174,16 +159,10 @@ export function useVisibleSessions(
       if (!matchesQuery(summary, needle)) return false;
       if (!withinRange(summary.created_at, filters.createdRange, now)) return false;
       if (!withinRange(summary.updated_at, filters.modifiedRange, now)) return false;
-      if (
-        filters.envs.length > 0 &&
-        !filters.envs.includes(sessionEnvLabel(summary))
-      ) {
+      if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
         return false;
       }
-      if (
-        filters.providers.length > 0 &&
-        !filters.providers.includes(summary.backend)
-      ) {
+      if (filters.providers.length > 0 && !filters.providers.includes(summary.backend)) {
         return false;
       }
       return true;
@@ -196,9 +175,7 @@ export function useVisibleSessions(
 }
 
 /** Provider chips are derived from the data so they never list unused ones. */
-export function useSessionProviders(
-  sessions: ManagedSessionSummary[],
-): string[] {
+export function useSessionProviders(sessions: ManagedSessionSummary[]): string[] {
   return useMemo(
     () => providersFromBackends(sessions.map(({ summary }) => summary.backend)),
     [sessions],

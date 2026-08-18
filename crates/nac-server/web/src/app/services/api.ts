@@ -165,7 +165,6 @@ export interface SessionSnapshotOptions {
   signal?: AbortSignal;
 }
 
-
 export interface MessagesPageOptions {
   before?: number;
   limit?: number;
@@ -180,11 +179,9 @@ export interface ThreadEventsOptions {
 }
 
 export const api = {
-  health: (signal?: AbortSignal) =>
-    request<{ status: string }>("GET", "/health", { signal }),
+  health: (signal?: AbortSignal) => request<{ status: string }>("GET", "/health", { signal }),
 
-  getStore: (signal?: AbortSignal) =>
-    request<StoreInfo>("GET", "/store", { signal }),
+  getStore: (signal?: AbortSignal) => request<StoreInfo>("GET", "/store", { signal }),
 
   // Probing spawns podman subprocesses, so callers query this on demand (the
   // launch form's sandbox mode) rather than on page load.
@@ -195,11 +192,9 @@ export const api = {
   // the launch id sent with the create request, so concurrent launches never
   // show each other's phase.
   getSandboxActivity: (key: string, signal?: AbortSignal) =>
-    request<SandboxActivity | null>(
-      "GET",
-      `/sandbox/activity?${new URLSearchParams({ key })}`,
-      { signal },
-    ),
+    request<SandboxActivity | null>("GET", `/sandbox/activity?${new URLSearchParams({ key })}`, {
+      signal,
+    }),
 
   // Credentials are write-only: the value is sent to the server and never
   // read back, so the UI only ever learns which names have a key stored.
@@ -221,20 +216,12 @@ export const api = {
   // Managed providers sign in with a device login: the server hands back a
   // code to show, waits for the browser approval on its own, and the outcome
   // is collected by polling.
-  listManagedAuth: (signal?: AbortSignal) =>
-    request<ManagedAuthList>("GET", "/auth", { signal }),
+  listManagedAuth: (signal?: AbortSignal) => request<ManagedAuthList>("GET", "/auth", { signal }),
 
   startManagedLogin: (provider: ManagedAuthProvider) =>
-    request<DeviceLoginStarted>(
-      "POST",
-      `/auth/${encodeURIComponent(provider)}/login`,
-    ),
+    request<DeviceLoginStarted>("POST", `/auth/${encodeURIComponent(provider)}/login`),
 
-  pollManagedLogin: (
-    provider: ManagedAuthProvider,
-    loginId: string,
-    signal?: AbortSignal,
-  ) =>
+  pollManagedLogin: (provider: ManagedAuthProvider, loginId: string, signal?: AbortSignal) =>
     request<DeviceLoginState>(
       "GET",
       `/auth/${encodeURIComponent(provider)}/login/${encodeURIComponent(loginId)}`,
@@ -248,10 +235,7 @@ export const api = {
     ),
 
   managedLogout: (provider: ManagedAuthProvider) =>
-    request<ManagedAuthStatus>(
-      "DELETE",
-      `/auth/${encodeURIComponent(provider)}`,
-    ),
+    request<ManagedAuthStatus>("DELETE", `/auth/${encodeURIComponent(provider)}`),
 
   // Browsers withhold absolute paths from every file-picking API, so a local
   // path is chosen against the filesystem the server sees.
@@ -271,12 +255,7 @@ export const api = {
    * The same listing for a directory on an SSH host. Also the connection test
    * the launch form runs first: only a working connection can answer.
    */
-  browseSshPath: (
-    target: SshTarget,
-    path: string | null,
-    hidden = false,
-    signal?: AbortSignal,
-  ) =>
+  browseSshPath: (target: SshTarget, path: string | null, hidden = false, signal?: AbortSignal) =>
     request<BrowseListing>("POST", "/ssh/browse", {
       body: { ...target, path, hidden } satisfies SshBrowseRequest,
       signal,
@@ -291,8 +270,7 @@ export const api = {
    * it knows about. Local and credential-free, so it answers for every provider
    * at once — unlike `listProviderModels`, which asks one provider.
    */
-  getModelCatalog: (signal?: AbortSignal) =>
-    request<ModelCatalog>("GET", "/models", { signal }),
+  getModelCatalog: (signal?: AbortSignal) => request<ModelCatalog>("GET", "/models", { signal }),
 
   listCommands: (signal?: AbortSignal) =>
     request<SlashCommandDefinition[]>("GET", "/commands", { signal }),
@@ -303,15 +281,10 @@ export const api = {
   createModelConfig: (payload: CreateModelConfigurationRequest) =>
     request<ModelConfigurationRecord>("POST", "/model-configs", { body: payload }),
 
-  updateModelConfig: (
-    configId: string,
-    payload: UpdateModelConfigurationRequest,
-  ) =>
-    request<ModelConfigurationRecord>(
-      "PATCH",
-      `/model-configs/${encodeURIComponent(configId)}`,
-      { body: payload },
-    ),
+  updateModelConfig: (configId: string, payload: UpdateModelConfigurationRequest) =>
+    request<ModelConfigurationRecord>("PATCH", `/model-configs/${encodeURIComponent(configId)}`, {
+      body: payload,
+    }),
 
   deleteModelConfig: (configId: string) =>
     request<void>("DELETE", `/model-configs/${encodeURIComponent(configId)}`),
@@ -323,11 +296,9 @@ export const api = {
     request<SshConfigurationRecord>("POST", "/ssh-configs", { body: payload }),
 
   updateSshConfig: (configId: string, payload: UpdateSshConfigurationRequest) =>
-    request<SshConfigurationRecord>(
-      "PATCH",
-      `/ssh-configs/${encodeURIComponent(configId)}`,
-      { body: payload },
-    ),
+    request<SshConfigurationRecord>("PATCH", `/ssh-configs/${encodeURIComponent(configId)}`, {
+      body: payload,
+    }),
 
   deleteSshConfig: (configId: string) =>
     request<void>("DELETE", `/ssh-configs/${encodeURIComponent(configId)}`),
@@ -344,17 +315,12 @@ export const api = {
     request<McpServerView>("POST", "/mcp_library/servers", { body: payload }),
 
   updateMcpServer: (serverName: string, payload: UpdateMcpServerRequest) =>
-    request<McpServerView>(
-      "PATCH",
-      `/mcp_library/servers/${encodeURIComponent(serverName)}`,
-      { body: payload },
-    ),
+    request<McpServerView>("PATCH", `/mcp_library/servers/${encodeURIComponent(serverName)}`, {
+      body: payload,
+    }),
 
   deleteMcpServer: (serverName: string) =>
-    request<void>(
-      "DELETE",
-      `/mcp_library/servers/${encodeURIComponent(serverName)}`,
-    ),
+    request<void>("DELETE", `/mcp_library/servers/${encodeURIComponent(serverName)}`),
 
   /** Connects and lists tools without saving anything. */
   testMcpServer: (payload: TestMcpServerRequest) =>
@@ -441,11 +407,7 @@ export const api = {
     );
   },
 
-  getThreadEvents: (
-    id: string,
-    threadName: string,
-    options: ThreadEventsOptions = {},
-  ) => {
+  getThreadEvents: (id: string, threadName: string, options: ThreadEventsOptions = {}) => {
     const params = new URLSearchParams();
     if (options.beforeId !== undefined) {
       params.set("before_id", String(options.beforeId));
@@ -479,25 +441,14 @@ export const api = {
     );
   },
 
-  getWorkspaceFiles: (
-    id: string,
-    revision: number | null,
-    signal?: AbortSignal,
-  ) => {
+  getWorkspaceFiles: (id: string, revision: number | null, signal?: AbortSignal) => {
     const query = revision == null ? "" : `?revision=${revision}`;
-    return request<WorkspaceFileList>(
-      "GET",
-      `${sessionPath(id)}/workspace/files${query}`,
-      { signal },
-    );
+    return request<WorkspaceFileList>("GET", `${sessionPath(id)}/workspace/files${query}`, {
+      signal,
+    });
   },
 
-  getWorkspaceFile: (
-    id: string,
-    path: string,
-    revision: number | null,
-    signal?: AbortSignal,
-  ) => {
+  getWorkspaceFile: (id: string, path: string, revision: number | null, signal?: AbortSignal) => {
     const params = new URLSearchParams({ path });
     if (revision != null) params.set("revision", String(revision));
     return request<WorkspaceFileContent>(
@@ -509,24 +460,14 @@ export const api = {
 
   /** Ask nac-web to open a local workspace path with the OS default handler. */
   openWorkspacePath: (id: string, path: string) =>
-    request<OpenWorkspacePathResult>(
-      "POST",
-      `${sessionPath(id)}/workspace/open`,
-      { body: { path } },
-    ),
+    request<OpenWorkspacePathResult>("POST", `${sessionPath(id)}/workspace/open`, {
+      body: { path },
+    }),
 
   getWorkspaceRevisions: (id: string, signal?: AbortSignal) =>
-    request<WorkspaceRevision[]>(
-      "GET",
-      `${sessionPath(id)}/workspace/revisions`,
-      { signal },
-    ),
+    request<WorkspaceRevision[]>("GET", `${sessionPath(id)}/workspace/revisions`, { signal }),
 
-  getWorkspaceRevisionChanges: (
-    id: string,
-    revision: number,
-    signal?: AbortSignal,
-  ) =>
+  getWorkspaceRevisionChanges: (id: string, revision: number, signal?: AbortSignal) =>
     request<WorkspaceRevisionChanges>(
       "GET",
       `${sessionPath(id)}/workspace/revisions/${revision}/changes`,
@@ -549,18 +490,14 @@ export const api = {
     }),
 
   generateOverview: (id: string) =>
-    request<{ session_id: string; summary: string }>(
-      "POST",
-      `${sessionPath(id)}/overview`,
-    ),
+    request<{ session_id: string; summary: string }>("POST", `${sessionPath(id)}/overview`),
 
   submitRun: (id: string, prompt: string) =>
     request<SubmitPromptResponse>("POST", `${sessionPath(id)}/runs`, {
       body: { prompt },
     }),
 
-  cancelActiveRun: (id: string) =>
-    request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
+  cancelActiveRun: (id: string) => request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
 
   compactSession: (id: string) =>
     request<CompactSessionResponse>("POST", `${sessionPath(id)}/compact`),

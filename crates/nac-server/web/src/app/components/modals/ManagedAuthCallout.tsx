@@ -13,10 +13,7 @@ import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
 import { cn } from "@/app/lib/cn";
 import { humanErrorText } from "@/app/lib/providerError";
 import { managedAuthLabel } from "@/app/lib/providers";
-import {
-  useManagedLogout,
-  useManagedProviderModels,
-} from "@/app/services/queries";
+import { useManagedLogout, useManagedProviderModels } from "@/app/services/queries";
 import type { BackendKind, ManagedAuthProvider } from "@/app/types/api";
 
 const PROVIDER_ICONS = {
@@ -47,10 +44,7 @@ export function ManagedAuthCallout({
   // Being signed in only says the credential is on file. Whether it still works
   // is answered by the one request that spends it, so this asks for the model
   // index rather than reporting success on the strength of a file existing.
-  const reach = useManagedProviderModels(
-    backend,
-    Boolean(provider) && signedIn,
-  );
+  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
 
   if (!provider) return null;
 
@@ -72,9 +66,7 @@ export function ManagedAuthCallout({
           </span>
         </>
       ) : (
-        <span className="text-micro text-basic-muted">
-          Waiting for the browser
-        </span>
+        <span className="text-micro text-basic-muted">Waiting for the browser</span>
       )}
       <Button
         variant={ButtonVariant.Ghost}
@@ -88,10 +80,7 @@ export function ManagedAuthCallout({
   ) : settled ? (
     <div className="flex items-center gap-2">
       <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
-        <Icon
-          iconName={IconName.CheckCircle}
-          className="text-success-primary"
-        />
+        <Icon iconName={IconName.CheckCircle} className="text-success-primary" />
         <span className="label-small text-success-primary">Signed in</span>
       </div>
       <Button
@@ -134,17 +123,11 @@ export function ManagedAuthCallout({
       <div className="flex items-start gap-2 min-w-0">
         <Icon
           iconName={PROVIDER_ICONS[provider]}
-          className={cn(
-            "shrink-0",
-            invalid ? "text-error-primary" : "text-basic-secondary",
-          )}
+          className={cn("shrink-0", invalid ? "text-error-primary" : "text-basic-secondary")}
         />
         <div className="flex flex-col gap-0.5 min-w-0">
           <span
-            className={cn(
-              "label-small",
-              invalid ? "text-error-primary" : "text-basic-primary",
-            )}
+            className={cn("label-small", invalid ? "text-error-primary" : "text-basic-primary")}
           >
             {label} sign-in
           </span>

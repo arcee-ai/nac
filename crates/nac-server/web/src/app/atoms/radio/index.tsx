@@ -59,9 +59,7 @@ const Radio: React.FC<RadioProps> = ({
         />
       ) : null}
     </span>
-    {children ? (
-      <span className="label-small text-basic-primary">{children}</span>
-    ) : null}
+    {children ? <span className="label-small text-basic-primary">{children}</span> : null}
   </label>
 );
 

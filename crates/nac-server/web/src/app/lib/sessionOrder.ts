@@ -7,27 +7,15 @@ import type {
 export type DropEdge = "before" | "after";
 
 /** Insert `sessionId` at `index` in `ids`, removing any prior occurrence. */
-export function placeSessionId(
-  ids: string[],
-  sessionId: string,
-  index: number,
-): string[] {
+export function placeSessionId(ids: string[], sessionId: string, index: number): string[] {
   const without = ids.filter((id) => id !== sessionId);
   const clamped = Math.max(0, Math.min(index, without.length));
-  return [
-    ...without.slice(0, clamped),
-    sessionId,
-    ...without.slice(clamped),
-  ];
+  return [...without.slice(0, clamped), sessionId, ...without.slice(clamped)];
 }
 
-export function compareSortOrder(
-  a: SessionSummarySnapshot,
-  b: SessionSummarySnapshot,
-): number {
+export function compareSortOrder(a: SessionSummarySnapshot, b: SessionSummarySnapshot): number {
   return (
-    (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
-    Date.parse(b.created_at) - Date.parse(a.created_at)
+    (a.sort_order ?? 0) - (b.sort_order ?? 0) || Date.parse(b.created_at) - Date.parse(a.created_at)
   );
 }
 
@@ -46,9 +34,7 @@ export function reorderRequest(
   sessionIds: string[],
   entries: ManagedSessionSummary[],
 ): ReorderSessionsRequest {
-  const byId = new Map(
-    entries.map((entry) => [entry.summary.session_id, entry]),
-  );
+  const byId = new Map(entries.map((entry) => [entry.summary.session_id, entry]));
   const expected_versions: Record<string, number> = {};
   for (const id of sessionIds) {
     expected_versions[id] = byId.get(id)?.summary.presentation_version ?? 0;
@@ -65,9 +51,7 @@ export function withUpdatedSummary(
   summary: SessionSummarySnapshot,
 ): ManagedSessionSummary[] {
   return entries.map((entry) =>
-    entry.summary.session_id === summary.session_id
-      ? { ...entry, summary }
-      : entry,
+    entry.summary.session_id === summary.session_id ? { ...entry, summary } : entry,
   );
 }
 
@@ -81,18 +65,12 @@ export function targetIndexInGroup(
   // Dropping on the dragged card itself must keep its current index (no-op),
   // not fall through to "end of group".
   if (targetSessionId === movingSessionId) {
-    const current = group.findIndex(
-      (entry) => entry.summary.session_id === movingSessionId,
-    );
+    const current = group.findIndex((entry) => entry.summary.session_id === movingSessionId);
     return current < 0 ? group.length : current;
   }
 
-  const withoutMover = group.filter(
-    (entry) => entry.summary.session_id !== movingSessionId,
-  );
-  const targetPos = withoutMover.findIndex(
-    (entry) => entry.summary.session_id === targetSessionId,
-  );
+  const withoutMover = group.filter((entry) => entry.summary.session_id !== movingSessionId);
+  const targetPos = withoutMover.findIndex((entry) => entry.summary.session_id === targetSessionId);
   if (targetPos < 0) return withoutMover.length;
   return edge === "before" ? targetPos : targetPos + 1;
 }

@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   STICK_TOLERANCE_PX,
@@ -38,14 +32,7 @@ const PROGRAMMATIC_SETTLE_MS = 50;
 /** How long an input event vouches for the scrolling that follows it. */
 const USER_INTENT_WINDOW_MS = 150;
 /** Keys that scroll a container rather than acting on what is focused. */
-const SCROLL_KEYS = new Set([
-  "ArrowUp",
-  "ArrowDown",
-  "PageUp",
-  "PageDown",
-  "Home",
-  "End",
-]);
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
 export interface StickToBottomOptions {
   /**
@@ -365,12 +352,7 @@ export function useStickToBottom({
         settleTimeout.current = null;
       }
     };
-  }, [
-    beginProgrammaticScroll,
-    cancelFollow,
-    endProgrammaticScroll,
-    syncJumpButton,
-  ]);
+  }, [beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, syncJumpButton]);
 
   // Opening a transcript is a fresh start however the last one was left: an
   // abandoned follow-mode must not carry over, and the arriving content has to
@@ -389,22 +371,15 @@ export function useStickToBottom({
     stuck.current = true;
     setShowJumpButton(false);
     beginProgrammaticScroll();
-    void smoothScrollTo(element, element.scrollHeight, JUMP_DURATION_MS).then(
-      (completed) => {
-        endProgrammaticScroll();
-        // An interrupted animation means the user took over on the way down.
-        if (!completed) {
-          stuck.current = distanceFromBottom(element) <= STICK_TOLERANCE_PX;
-          syncJumpButton();
-        }
-      },
-    );
-  }, [
-    beginProgrammaticScroll,
-    cancelFollow,
-    endProgrammaticScroll,
-    syncJumpButton,
-  ]);
+    void smoothScrollTo(element, element.scrollHeight, JUMP_DURATION_MS).then((completed) => {
+      endProgrammaticScroll();
+      // An interrupted animation means the user took over on the way down.
+      if (!completed) {
+        stuck.current = distanceFromBottom(element) <= STICK_TOLERANCE_PX;
+        syncJumpButton();
+      }
+    });
+  }, [beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, syncJumpButton]);
 
   return { scrollRef, contentRef, showJumpButton, jumpToLatest };
 }

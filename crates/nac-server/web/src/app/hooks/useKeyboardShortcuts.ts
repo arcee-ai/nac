@@ -27,9 +27,7 @@ function isTyping(target: EventTarget | null): boolean {
  * is never what the keystroke meant. A binding without a modifier also steps
  * aside while the caret is in a field, where a bare letter is text.
  */
-export function useKeyboardShortcuts(
-  bindings: KeyboardShortcutBinding[],
-): void {
+export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void {
   // Read through a ref, so a caller may pass a fresh array each render without
   // the listener being torn down and rebuilt along with it.
   const latest = useRef(bindings);

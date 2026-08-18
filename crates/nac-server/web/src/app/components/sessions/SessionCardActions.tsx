@@ -103,11 +103,7 @@ export function SessionCardActions({
         icon={pinned ? IconName.Unpin : IconName.Pin}
         onClick={onTogglePin}
       />
-      <IconAction
-        title="Rename session"
-        icon={IconName.Edit}
-        onClick={onRename}
-      />
+      <IconAction title="Rename session" icon={IconName.Edit} onClick={onRename} />
       {running ? (
         <IconAction
           title="Stop run"

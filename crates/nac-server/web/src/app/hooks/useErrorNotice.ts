@@ -18,10 +18,7 @@ export interface ErrorNotice {
  * caller supplies. A fix nothing here can perform is dropped, leaving the
  * wording to stand on its own.
  */
-export function useErrorNotice(
-  sessionId: string | null,
-  backend?: string | null,
-) {
+export function useErrorNotice(sessionId: string | null, backend?: string | null) {
   const actions = useSessionActions();
   const { start } = useDeviceLogin();
   const provider = backend ? managedAuthProvider(backend) : null;
@@ -54,24 +51,17 @@ function noticeAction(
   if (!fix) return undefined;
   switch (fix.kind) {
     case "login":
-      return handlers.login
-        ? { label: fix.label, onClick: handlers.login }
-        : undefined;
+      return handlers.login ? { label: fix.label, onClick: handlers.login } : undefined;
     case "settings":
-      return handlers.settings
-        ? { label: fix.label, onClick: handlers.settings }
-        : undefined;
+      return handlers.settings ? { label: fix.label, onClick: handlers.settings } : undefined;
     case "retry":
-      return handlers.retry
-        ? { label: fix.label, onClick: handlers.retry }
-        : undefined;
+      return handlers.retry ? { label: fix.label, onClick: handlers.retry } : undefined;
     case "link":
       return fix.url === undefined
         ? undefined
         : {
             label: fix.label,
-            onClick: () =>
-              window.open(fix.url, "_blank", "noopener,noreferrer"),
+            onClick: () => window.open(fix.url, "_blank", "noopener,noreferrer"),
           };
   }
 }

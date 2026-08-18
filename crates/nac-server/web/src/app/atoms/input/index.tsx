@@ -63,8 +63,7 @@ const trailingIconPos = {
   [InputSize.Large]: "top-3 right-3",
 } satisfies Record<InputSize, string>;
 
-interface InputProps
-  extends Omit<React.ComponentPropsWithRef<"input">, "size"> {
+interface InputProps extends Omit<React.ComponentPropsWithRef<"input">, "size"> {
   inputSize?: InputSize;
   leading?: InputLeading;
   leadingOnClick?: () => void;
@@ -115,12 +114,8 @@ const Input: React.FC<InputProps> & {
     inputSize,
     inputClassName,
     rounded ? "rounded-full" : "rounded-[4px]",
-    leading === InputLeading.None && !leadingSlot
-      ? padLeft[inputSize]
-      : padLeftIcon[inputSize],
-    trailing === InputTrailing.None
-      ? padRight[inputSize]
-      : padRightIcon[inputSize],
+    leading === InputLeading.None && !leadingSlot ? padLeft[inputSize] : padLeftIcon[inputSize],
+    trailing === InputTrailing.None ? padRight[inputSize] : padRightIcon[inputSize],
     isDisabled && "input-disabled",
     validation && "input-validation",
   );
@@ -140,10 +135,7 @@ const Input: React.FC<InputProps> & {
       <div className="input-wrapper relative w-full h-fit">
         {leadingSlot ? (
           <div
-            className={cn(
-              "absolute flex items-center justify-center",
-              leadingIconPos[inputSize],
-            )}
+            className={cn("absolute flex items-center justify-center", leadingIconPos[inputSize])}
             style={{
               width: iconSizeFor[inputSize],
               height: iconSizeFor[inputSize],

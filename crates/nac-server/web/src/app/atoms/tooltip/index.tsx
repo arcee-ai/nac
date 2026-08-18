@@ -56,9 +56,7 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
       <div
         className={cn(
           "w-fit h-fit",
-          inverted
-            ? "text-micro text-basic-secondary-inverse"
-            : "text-medium text-basic-secondary",
+          inverted ? "text-micro text-basic-secondary-inverse" : "text-medium text-basic-secondary",
         )}
       >
         {description}
@@ -95,9 +93,7 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
 }) => {
   const isMobile = useIsMobile();
   const [trigger, setTrigger] = useState<DOMRect | null>(null);
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(
-    null,
-  );
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [wasMobile, setWasMobile] = useState(isMobile);
   const justOpenedRef = useRef(false);

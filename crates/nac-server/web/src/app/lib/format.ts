@@ -18,9 +18,7 @@ export function shortId(id: string | null | undefined): string {
  * Collapse a `/plan` or `/run` command message back to its short human form.
  * Non-command text is returned unchanged.
  */
-export function displayPromptFromMessageText(
-  content: string | null | undefined,
-): string {
+export function displayPromptFromMessageText(content: string | null | undefined): string {
   const text = String(content ?? "");
   const normalized = text.replaceAll("\r\n", "\n");
   const header = normalized.split("\n", 1)[0] ?? "";
@@ -52,9 +50,7 @@ export function formatSeconds(ms: number | null | undefined): string {
   return `${(Math.round(ms / 10) / 100).toFixed(2)}s`;
 }
 
-export function displaySessionTitle(
-  summary: SessionSummarySnapshot | null | undefined,
-): string {
+export function displaySessionTitle(summary: SessionSummarySnapshot | null | undefined): string {
   if (!summary) return "";
   if (summary.title != null && summary.title.trim()) {
     return summary.title.trim();
@@ -158,23 +154,14 @@ export type SessionEnv = (typeof SESSION_ENVS)[number];
  * Where the session runs. Sandbox and ssh are mutually exclusive in practice,
  * and sandbox wins because it is the more specific isolation.
  */
-export function sessionEnvLabel(
-  summary: SessionSummarySnapshot | null | undefined,
-): SessionEnv {
+export function sessionEnvLabel(summary: SessionSummarySnapshot | null | undefined): SessionEnv {
   if (!summary) return ENV_LOCAL;
   if (summary.sandboxed) return ENV_SANDBOX;
   if (summary.ssh_host) return ENV_SSH;
   return ENV_LOCAL;
 }
 
-const TERMINAL_RUN_STATES = [
-  "done",
-  "completed",
-  "cancelled",
-  "canceled",
-  "failed",
-  "error",
-];
+const TERMINAL_RUN_STATES = ["done", "completed", "cancelled", "canceled", "failed", "error"];
 
 /** A truthy active run without a terminal state still counts as running. */
 export function isActiveRun(
@@ -225,20 +212,16 @@ export function addTokenUsage(
     input_tokens: (base?.input_tokens ?? 0) + delta.input_tokens,
     output_tokens: (base?.output_tokens ?? 0) + delta.output_tokens,
     cache_read_tokens: (base?.cache_read_tokens ?? 0) + delta.cache_read_tokens,
-    cache_write_tokens:
-      (base?.cache_write_tokens ?? 0) + delta.cache_write_tokens,
-    reasoning_tokens:
-      (base?.reasoning_tokens ?? 0) + (delta.reasoning_tokens ?? 0),
+    cache_write_tokens: (base?.cache_write_tokens ?? 0) + delta.cache_write_tokens,
+    reasoning_tokens: (base?.reasoning_tokens ?? 0) + (delta.reasoning_tokens ?? 0),
     total_tokens: contextTokens,
     cost:
       base?.cost || delta.cost
         ? {
             input: (base?.cost?.input ?? 0) + (delta.cost?.input ?? 0),
             output: (base?.cost?.output ?? 0) + (delta.cost?.output ?? 0),
-            cache_read:
-              (base?.cost?.cache_read ?? 0) + (delta.cost?.cache_read ?? 0),
-            cache_write:
-              (base?.cost?.cache_write ?? 0) + (delta.cost?.cache_write ?? 0),
+            cache_read: (base?.cost?.cache_read ?? 0) + (delta.cost?.cache_read ?? 0),
+            cache_write: (base?.cost?.cache_write ?? 0) + (delta.cost?.cache_write ?? 0),
             total: (base?.cost?.total ?? 0) + (delta.cost?.total ?? 0),
           }
         : undefined,
@@ -280,11 +263,7 @@ export function runMetrics(
     startedAt: active && activeRun ? activeRun.started_at_epoch_ms : null,
     lastResponseMs: snapshot?.response_timing.last_response_duration_ms ?? null,
     usage: runUsage
-      ? addTokenUsage(
-          persisted,
-          runUsage,
-          runUsage.total_tokens || (persisted?.total_tokens ?? 0),
-        )
+      ? addTokenUsage(persisted, runUsage, runUsage.total_tokens || (persisted?.total_tokens ?? 0))
       : persisted,
   };
 }

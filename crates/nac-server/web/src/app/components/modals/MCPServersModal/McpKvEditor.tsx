@@ -29,9 +29,7 @@ export function KvEditor({
 }) {
   const isMobile = useIsMobile();
   const update = (index: number, patch: Partial<KvRow>) => {
-    onChange(
-      rows.map((row, at) => (at === index ? { ...row, ...patch } : row)),
-    );
+    onChange(rows.map((row, at) => (at === index ? { ...row, ...patch } : row)));
   };
   return (
     <div className="flex flex-col gap-4 md:gap-2">

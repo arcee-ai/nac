@@ -49,14 +49,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 
-const SAMPLE_IDS = [
-  "9f2c1ab4",
-  "3de77c01",
-  "b81004ff",
-  "22aa93de",
-  "7c0518ba",
-  "e4419d27",
-];
+const SAMPLE_IDS = ["9f2c1ab4", "3de77c01", "b81004ff", "22aa93de", "7c0518ba", "e4419d27"];
 
 const MODELS = [
   { id: "sonnet", label: "Claude Sonnet", icon: IconName.Brain },
@@ -110,19 +103,14 @@ export default function DesignPreviewPage() {
             <Button variant={ButtonVariant.Secondary}>Secondary</Button>
             <Button variant={ButtonVariant.Tertiary}>Tertiary</Button>
             <Button variant={ButtonVariant.Ghost}>Ghost</Button>
-            <Button variant={ButtonVariant.GhostDestructive}>
-              Destructive
-            </Button>
+            <Button variant={ButtonVariant.GhostDestructive}>Destructive</Button>
             <Button variant={ButtonVariant.Primary} loading>
               Loading
             </Button>
             <Button variant={ButtonVariant.Secondary} disabled>
               Disabled
             </Button>
-            <Button
-              variant={ButtonVariant.Secondary}
-              content={ButtonContent.IconLeft}
-            >
+            <Button variant={ButtonVariant.Secondary} content={ButtonContent.IconLeft}>
               <Icon iconName={IconName.Add} />
               With icon
             </Button>
@@ -173,10 +161,7 @@ export default function DesignPreviewPage() {
               onValueChange={setModel}
               placeholder="Pick a model"
             />
-            <Button
-              variant={ButtonVariant.Secondary}
-              onClick={() => setModalOpen(true)}
-            >
+            <Button variant={ButtonVariant.Secondary} onClick={() => setModalOpen(true)}>
               Open modal
             </Button>
           </div>
@@ -192,12 +177,10 @@ export default function DesignPreviewPage() {
               sticky
               content={
                 <>
-                  <div className="label-small text-basic-primary px-2 py-1">
-                    Anchored panel
-                  </div>
+                  <div className="label-small text-basic-primary px-2 py-1">Anchored panel</div>
                   <div className="text-micro text-basic-muted px-2 pb-1">
-                    Closes on Escape or a click outside. On a phone it becomes a
-                    bottom sheet instead.
+                    Closes on Escape or a click outside. On a phone it becomes a bottom sheet
+                    instead.
                   </div>
                 </>
               }
@@ -432,9 +415,7 @@ export default function DesignPreviewPage() {
             <div className="paragraph-medium text-basic-secondary">
               Paragraph medium on the secondary text token.
             </div>
-            <div className="code code-small text-basic-muted">
-              code-small / IBM Plex Mono
-            </div>
+            <div className="code code-small text-basic-muted">code-small / IBM Plex Mono</div>
           </div>
         </BoxSurface>
       </main>
@@ -445,10 +426,7 @@ export default function DesignPreviewPage() {
         title="Delete session"
         footer={
           <>
-            <Button
-              variant={ButtonVariant.Secondary}
-              onClick={() => setModalOpen(false)}
-            >
+            <Button variant={ButtonVariant.Secondary} onClick={() => setModalOpen(false)}>
               Cancel
             </Button>
             <Button
@@ -460,8 +438,8 @@ export default function DesignPreviewPage() {
           </>
         }
       >
-        This is the shared modal shell: overlay click, Escape and a Tab focus
-        trap all come from the atom.
+        This is the shared modal shell: overlay click, Escape and a Tab focus trap all come from the
+        atom.
       </Modal>
     </div>
   );

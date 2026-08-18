@@ -5,11 +5,7 @@
 
 import { createStore } from "@/app/lib/store";
 import { addTokenUsage, isActiveRun } from "@/app/lib/format";
-import {
-  threadLogLine,
-  toolCallFailed,
-  type ThreadLogLine,
-} from "@/app/lib/threadLog";
+import { threadLogLine, toolCallFailed, type ThreadLogLine } from "@/app/lib/threadLog";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
   ActiveRunSnapshot,
@@ -20,7 +16,13 @@ import type {
 } from "@/app/types/api";
 
 export type RuntimeEventKind =
-  "run" | "tool" | "thread" | "assistant" | "steering" | "compaction" | "error";
+  | "run"
+  | "tool"
+  | "thread"
+  | "assistant"
+  | "steering"
+  | "compaction"
+  | "error";
 
 export interface RuntimeEvent {
   seq: number | null;
@@ -179,9 +181,7 @@ export function setStreamStatus(streamStatus: StreamStatus): void {
  * the middle of a run would show the session as idle until the next event, the
  * way the legacy UI did.
  */
-export function syncRunFromSnapshot(
-  activeRun: ActiveRunSnapshot | null | undefined,
-): void {
+export function syncRunFromSnapshot(activeRun: ActiveRunSnapshot | null | undefined): void {
   const running = isActiveRun(activeRun);
   const state = getState();
   if (state.running === running) return;
@@ -189,22 +189,13 @@ export function syncRunFromSnapshot(
 }
 
 /** Record a client-side event so the Events tab shows the full interaction. */
-export function pushLocalEvent(
-  kind: RuntimeEventKind,
-  text: string,
-  isError = false,
-): void {
+export function pushLocalEvent(kind: RuntimeEventKind, text: string, isError = false): void {
   pushEvent({ seq: null, kind, text, isError, local: true });
 }
 
-function pushEvent(
-  event: Omit<RuntimeEvent, "ts" | "local"> & { local?: boolean },
-) {
+function pushEvent(event: Omit<RuntimeEvent, "ts" | "local"> & { local?: boolean }) {
   setState((state) => {
-    const events =
-      state.events.length >= MAX_EVENTS
-        ? state.events.slice(1)
-        : state.events.slice();
+    const events = state.events.length >= MAX_EVENTS ? state.events.slice(1) : state.events.slice();
     events.push({ ts: Date.now(), local: false, ...event });
     return { events };
   });
@@ -261,9 +252,7 @@ function pushThreadLog(name: string | undefined, event: AgentEvent) {
 }
 
 /** Marks every still-running thread finished once the run itself is over. */
-function terminalizeThreads(
-  threads: Record<string, RuntimeThread>,
-): Record<string, RuntimeThread> {
+function terminalizeThreads(threads: Record<string, RuntimeThread>): Record<string, RuntimeThread> {
   return Object.fromEntries(
     Object.entries(threads).map(([name, thread]) => [
       name,
@@ -417,9 +406,7 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
           event.usage,
           // The gauge measures the orchestrator's own context window, so a
           // worker's reading of its private one must not stand in for it.
-          event.thread_name
-            ? (state.runUsage?.total_tokens ?? 0)
-            : event.usage.total_tokens,
+          event.thread_name ? (state.runUsage?.total_tokens ?? 0) : event.usage.total_tokens,
         ),
       }));
       return "none";
@@ -558,6 +545,5 @@ export const useRunUsage = () => useStore((s) => s.runUsage);
 export const useWorkspaceEpoch = () => useStore((s) => s.workspaceEpoch);
 export const useStreamText = () => useStore((s) => s.streamText);
 export const useStreamReasoning = () => useStore((s) => s.streamReasoning);
-export const useOptimisticUserPrompt = () =>
-  useStore((s) => s.optimisticUserPrompt);
+export const useOptimisticUserPrompt = () => useStore((s) => s.optimisticUserPrompt);
 export { getState as getRuntimeState };

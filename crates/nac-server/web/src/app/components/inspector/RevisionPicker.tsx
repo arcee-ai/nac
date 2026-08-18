@@ -43,9 +43,7 @@ function Row({
       <span className="flex-1 min-w-0 flex flex-col">
         <span className="label-micro text-btn-secondary truncate">{title}</span>
         {subtitle ? (
-          <span className="label-micro text-basic-muted truncate">
-            {subtitle}
-          </span>
+          <span className="label-micro text-basic-muted truncate">{subtitle}</span>
         ) : null}
       </span>
       {trailing ? (
@@ -80,10 +78,7 @@ export function RevisionPicker({
   const revisions = data ?? [];
   const ordinalOf = (index: number) => revisionOrdinal(index, revisions.length);
   const selectedIndex = revisions.findIndex((item) => item.id === selected);
-  const label =
-    selectedIndex >= 0
-      ? revisionTitle(ordinalOf(selectedIndex))
-      : "Working tree";
+  const label = selectedIndex >= 0 ? revisionTitle(ordinalOf(selectedIndex)) : "Working tree";
 
   const pick = (revision: number | null) => {
     onSelect(revision);
@@ -114,9 +109,7 @@ export function RevisionPicker({
           ) : null}
 
           {error ? (
-            <div className="p-1 label-micro text-error-primary">
-              {errorMessage(error)}
-            </div>
+            <div className="p-1 label-micro text-error-primary">{errorMessage(error)}</div>
           ) : null}
 
           {!isLoading && !error ? (

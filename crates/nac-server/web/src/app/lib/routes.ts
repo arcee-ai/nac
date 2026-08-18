@@ -4,12 +4,7 @@
 // The session screen always shows the chat; the URL only selects which panel
 // the side box has open.
 // Order is also the tab order in the side box.
-export const SESSION_PANELS = [
-  "threads",
-  "files",
-  "worksets",
-  "history",
-] as const;
+export const SESSION_PANELS = ["threads", "files", "worksets", "history"] as const;
 
 export type SessionPanel = (typeof SESSION_PANELS)[number];
 
@@ -26,9 +21,7 @@ export const SESSION_PANEL_LABEL = {
  * Panels the wide side box tabs between. A wide box carries the revisions in
  * its footer chip, so History is a phone-only panel of the bottom bar.
  */
-export const WIDE_SESSION_PANELS = SESSION_PANELS.filter(
-  (panel) => panel !== "history",
-);
+export const WIDE_SESSION_PANELS = SESSION_PANELS.filter((panel) => panel !== "history");
 
 export const DEFAULT_SESSION_PANEL: SessionPanel = "threads";
 

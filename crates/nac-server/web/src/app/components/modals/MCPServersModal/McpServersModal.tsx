@@ -12,13 +12,7 @@ import type { McpLibraryEntry } from "@/app/types/api";
 
 const DRAFT = "__new__";
 
-export function McpServersModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export function McpServersModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const mounted = useExitTransition(open);
   const isMobile = useIsMobile();
   if (!mounted) return null;
@@ -28,13 +22,7 @@ export function McpServersModal({
   return <McpServersManager open={open} onClose={onClose} />;
 }
 
-function McpServersManager({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+function McpServersManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   // Warms the catalog as soon as the modal opens, so the picker's grouped
   // sections are already there when "Add server" is selected.
   const { data: library } = useMcpLibrary();
@@ -60,8 +48,7 @@ function McpServersManager({
     template ??
     (record
       ? (library?.entries.find(
-          (entry) =>
-            entry.id === record.library_id || entry.name === record.name,
+          (entry) => entry.id === record.library_id || entry.name === record.name,
         ) ?? null)
       : null);
 

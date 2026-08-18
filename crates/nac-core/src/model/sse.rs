@@ -232,8 +232,7 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
 
     while let Some(frame) = reader.next_frame().await {
         let frame = frame.map_err(|error| {
-            let message =
-                redact_request_credentials(&format!("{error:#}"), secrets, extra_headers);
+            let message = redact_request_credentials(&format!("{error:#}"), secrets, extra_headers);
             SseError::retryable(
                 format!(
                     "model stream from {} failed: {message}",

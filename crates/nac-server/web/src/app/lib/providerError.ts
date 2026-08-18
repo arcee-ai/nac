@@ -35,12 +35,7 @@ export interface HumanError {
  * A failure as it reaches the UI: an `Error`, prose, or a payload carrying a
  * status code. `null`/`undefined` stand for "no failure".
  */
-export type RunError =
-  | Error
-  | string
-  | { status?: unknown }
-  | null
-  | undefined;
+export type RunError = Error | string | { status?: unknown } | null | undefined;
 
 /**
  * Decode a caught value into the failure domain at the catch boundary, so the
@@ -142,9 +137,7 @@ function parsedMessage(body: string): string | null {
  * enough to be worth reading anyway.
  */
 function truncatedMessage(body: string): string | null {
-  const found = body.match(
-    /"(?:message|detail|error_description)"\s*:\s*"((?:[^"\\]|\\.)*)/,
-  );
+  const found = body.match(/"(?:message|detail|error_description)"\s*:\s*"((?:[^"\\]|\\.)*)/);
   if (!found) return null;
   try {
     // SAFETY: the capture is the inside of a JSON string literal, so wrapping
@@ -178,15 +171,11 @@ const SIGN_IN_AGAIN: HumanError = {
  * again, an API key by pasting a working one — and can be left out where the
  * session is not known.
  */
-export function humanError(
-  error: RunError,
-  backend?: string | null,
-): HumanError {
+export function humanError(error: RunError, backend?: string | null): HumanError {
   const raw = rawMessage(error);
   const status = hasStatus(error) ? error.status : null;
   const text = raw.toLowerCase();
-  const has = (...needles: string[]) =>
-    needles.some((needle) => text.includes(needle));
+  const has = (...needles: string[]) => needles.some((needle) => text.includes(needle));
   const codes = statusCodes(raw, status);
 
   // nac's own configuration errors say exactly what is wrong with the setup,
@@ -262,8 +251,7 @@ export function humanError(
     if (keyRejected || backend === "arcee-api") {
       return {
         title: "There was a problem with authentication",
-        description:
-          "The API key was rejected. Add a valid Arcee API key to continue.",
+        description: "The API key was rejected. Add a valid Arcee API key to continue.",
         fix: { kind: "settings", label: "Open settings" },
       };
     }
@@ -272,8 +260,7 @@ export function humanError(
   if (has("permission_error") || codes.has(403)) {
     return {
       title: "This account is not allowed to do that",
-      description:
-        "Ask the workspace owner for access, or pick a model the account can use.",
+      description: "Ask the workspace owner for access, or pick a model the account can use.",
       fix: { kind: "settings", label: "Open settings" },
     };
   }
@@ -289,17 +276,11 @@ export function humanError(
   }
 
   if (
-    has(
-      "context_window_exceeded",
-      "context window exceeded",
-      "context length",
-      "maximum context",
-    )
+    has("context_window_exceeded", "context window exceeded", "context length", "maximum context")
   ) {
     return {
       title: "The conversation is too long",
-      description:
-        "Compact the context with /compact, or start a new session to continue.",
+      description: "Compact the context with /compact, or start a new session to continue.",
     };
   }
   if (has("content_policy_blocked", "content policy")) {
@@ -318,24 +299,19 @@ export function humanError(
   ) {
     return {
       title: "This model is not available",
-      description:
-        "The account cannot use the selected model. Pick a different one to continue.",
+      description: "The account cannot use the selected model. Pick a different one to continue.",
       fix: { kind: "settings", label: "Open settings" },
     };
   }
   if (has("provider.unprocessable") || codes.has(422)) {
     return {
       title: "The request was rejected",
-      description:
-        "One or more request parameters are invalid or out of range.",
+      description: "One or more request parameters are invalid or out of range.",
     };
   }
 
   if (
-    has(
-      "could not reach the provider",
-      "failed to refresh arcee access token",
-    ) ||
+    has("could not reach the provider", "failed to refresh arcee access token") ||
     has("failed to fetch", "load failed", "networkerror", "err_connection")
   ) {
     return {
@@ -350,8 +326,7 @@ export function humanError(
   ) {
     return {
       title: "Arcee is having trouble",
-      description:
-        "The provider returned a server error. Try again in a moment.",
+      description: "The provider returned a server error. Try again in a moment.",
       fix: { kind: "retry", label: "Try again" },
     };
   }
@@ -370,10 +345,7 @@ export function humanError(
 }
 
 /** One line for a toast, footer, or hint, where there is no room for a fix. */
-export function humanErrorText(
-  error: RunError,
-  backend?: string | null,
-): string {
+export function humanErrorText(error: RunError, backend?: string | null): string {
   const { title, description } = humanError(error, backend);
   return description ? `${title}. ${description}` : title;
 }
@@ -384,12 +356,7 @@ function sentence(text: string): string {
 }
 
 function isStatusPayload(error: RunError): error is { status?: unknown } {
-  return (
-    error !== null &&
-    error !== undefined &&
-    !(error instanceof Error) &&
-    !isString(error)
-  );
+  return error !== null && error !== undefined && !(error instanceof Error) && !isString(error);
 }
 
 function hasStatus(error: RunError): error is { status: number } {

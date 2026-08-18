@@ -5,12 +5,7 @@ interface HintProps extends React.HTMLAttributes<HTMLParagraphElement> {
   className?: string;
 }
 
-const Hint: React.FC<HintProps> = ({
-  text,
-  className = "",
-  children,
-  ...props
-}) => {
+const Hint: React.FC<HintProps> = ({ text, className = "", children, ...props }) => {
   const baseClasses = "text-basic-tertiary text-micro";
   const combinedClasses = `${baseClasses} ${className}`.trim();
 

@@ -41,9 +41,7 @@ const DEFAULT_PICK_BACKENDS: BackendKind[] = ["arcee-auth", "arcee-api"];
  * provider the server can already authenticate as wins; otherwise the stored
  * login one opens and asks for its login.
  */
-export function defaultCatalogPick(
-  catalog: ModelCatalog | undefined,
-): CatalogPick | null {
+export function defaultCatalogPick(catalog: ModelCatalog | undefined): CatalogPick | null {
   const candidates = DEFAULT_PICK_BACKENDS.flatMap((backend) => {
     const provider = findProvider(catalog, backend);
     if (!provider) return [];
@@ -51,8 +49,7 @@ export function defaultCatalogPick(
     return baseUrl ? [{ provider, baseUrl }] : [];
   });
   const chosen =
-    candidates.find((entry) => entry.provider.auth_status === "ready") ??
-    candidates[0];
+    candidates.find((entry) => entry.provider.auth_status === "ready") ?? candidates[0];
   if (!chosen) return null;
   return {
     backend: chosen.provider.id,
@@ -88,17 +85,11 @@ function snapshotFamily(model: string): string | null {
   return suffix.length === 8 && /^\d{8}$/.test(suffix) ? model.slice(0, cut) : null;
 }
 
-function findProvider(
-  catalog: ModelCatalog | undefined,
-  backend: string,
-): CatalogProvider | null {
+function findProvider(catalog: ModelCatalog | undefined, backend: string): CatalogProvider | null {
   return catalog?.providers?.find((provider) => provider.id === backend) ?? null;
 }
 
-function findEntry(
-  provider: CatalogProvider,
-  model: string,
-): CatalogModel | null {
+function findEntry(provider: CatalogProvider, model: string): CatalogModel | null {
   const exact = provider.models.find((entry) => entry.id === model);
   if (exact) return exact;
   const family = snapshotFamily(model);

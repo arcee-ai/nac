@@ -5,8 +5,7 @@ import Icon, { IconName } from "../icon";
 import Tooltip from "../tooltip";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "./index";
 
-interface CopyButtonProps
-  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> {
+interface CopyButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> {
   /** Text placed on the clipboard when the button is pressed. */
   value: string;
   size?: ButtonSize;
@@ -50,10 +49,7 @@ const CopyButton: React.FC<CopyButtonProps> = ({
         {...props}
       >
         {children ?? (
-          <Icon
-            iconName={copied ? IconName.Check : IconName.FileCopy}
-            className="fade"
-          />
+          <Icon iconName={copied ? IconName.Check : IconName.FileCopy} className="fade" />
         )}
       </Button>
     </Tooltip>

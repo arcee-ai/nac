@@ -67,9 +67,7 @@ const MANAGED_AUTH_PROVIDERS = {
   "chatgpt-codex-responses": "codex",
 } satisfies Partial<Record<BackendKind, ManagedAuthProvider>>;
 
-export function managedAuthProvider(
-  backend: string,
-): ManagedAuthProvider | null {
+export function managedAuthProvider(backend: string): ManagedAuthProvider | null {
   // SAFETY: the satisfies above constrains the map's keys to BackendKind, so
   // the string-indexed read yields ManagedAuthProvider or undefined.
   const providers = MANAGED_AUTH_PROVIDERS as ManagedAuthProviderByBackend;

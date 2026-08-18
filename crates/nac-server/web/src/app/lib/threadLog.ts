@@ -52,10 +52,7 @@ export function toolCallFailed(event: {
  * carry no id of their own; only the worker's own output does, and that is never
  * persisted, so a counter from the live stream is identity enough.
  */
-export function threadLogLine(
-  event: AgentEvent,
-  seq: number,
-): ThreadLogLine | null {
+export function threadLogLine(event: AgentEvent, seq: number): ThreadLogLine | null {
   switch (event.type) {
     case "tool_call_started": {
       // The server reduces the arguments to the one worth reading; the full
@@ -112,9 +109,7 @@ export function threadLogLine(
 }
 
 /** The log a snapshot persisted for one thread, oldest first. */
-export function persistedThreadLog(
-  events: AgentEvent[] | undefined,
-): ThreadLogLine[] {
+export function persistedThreadLog(events: AgentEvent[] | undefined): ThreadLogLine[] {
   const lines: ThreadLogLine[] = [];
   (events ?? []).forEach((event, index) => {
     const line = threadLogLine(event, index);
@@ -139,10 +134,7 @@ export function persistedThreadLog(
  * result ended up on the far side of that seam then reads as a command still
  * in flight.
  */
-export function mergeThreadLog(
-  persisted: ThreadLogLine[],
-  live: ThreadLogLine[],
-): ThreadLogLine[] {
+export function mergeThreadLog(persisted: ThreadLogLine[], live: ThreadLogLine[]): ThreadLogLine[] {
   if (!live.length) return persisted;
   if (!persisted.length) return live;
   const seen = new Set(persisted.map((line) => line.key));
@@ -165,9 +157,7 @@ export function mergeThreadEventPages(pages: ThreadEventPage[]): AgentEvent[] {
   for (const page of pages) {
     for (const record of page.events) byId.set(record.id, record.event);
   }
-  return [...byId.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([, event]) => event);
+  return [...byId.entries()].sort(([left], [right]) => left - right).map(([, event]) => event);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,10 +257,7 @@ export function groupThreadLog(lines: ThreadLogLine[]): LogEntry[] {
  * still working, but no tool call is in flight — so the model is between steps
  * (or preparing the next one). Without this the log looks stuck after a ✓.
  */
-export function threadIsThinking(
-  running: boolean,
-  lines: ThreadLogLine[],
-): boolean {
+export function threadIsThinking(running: boolean, lines: ThreadLogLine[]): boolean {
   if (!running) return false;
   const finished = new Set<string>();
   for (const line of lines) {
@@ -279,10 +266,7 @@ export function threadIsThinking(
     }
   }
   for (const line of lines) {
-    if (
-      line.key.startsWith("call-") &&
-      !finished.has(line.key.slice("call-".length))
-    ) {
+    if (line.key.startsWith("call-") && !finished.has(line.key.slice("call-".length))) {
       return false;
     }
   }

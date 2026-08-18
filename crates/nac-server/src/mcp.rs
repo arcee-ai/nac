@@ -41,7 +41,9 @@ pub struct NacMcpService {
 struct CreateSessionParams {
     #[schemars(description = "Working directory for the session")]
     cwd: Option<String>,
-    #[schemars(description = "Model id, e.g. \"claude-sonnet-4-20250514\". Call list_models first.")]
+    #[schemars(
+        description = "Model id, e.g. \"claude-sonnet-4-20250514\". Call list_models first."
+    )]
     model: Option<String>,
     #[schemars(description = "Backend kind: \"anthropic\", \"openai\", \"deepseek\", etc.")]
     backend: Option<String>,
@@ -61,9 +63,13 @@ struct CreateSessionParams {
     ssh_identity_file: Option<String>,
     #[schemars(description = "Enable sandbox mode (restricts file access and tool execution)")]
     sandbox: Option<bool>,
-    #[schemars(description = "Extra HTTP headers to send with model API requests (JSON object of header name to value)")]
+    #[schemars(
+        description = "Extra HTTP headers to send with model API requests (JSON object of header name to value)"
+    )]
     extra_headers: Option<serde_json::Value>,
-    #[schemars(description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)")]
+    #[schemars(
+        description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)"
+    )]
     compaction_threshold: Option<u64>,
 }
 
@@ -159,7 +165,10 @@ struct UpdateSessionParams {
 
 #[tool_router]
 impl NacMcpService {
-    #[tool(name = "create_session", description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true.")]
+    #[tool(
+        name = "create_session",
+        description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true."
+    )]
     async fn create_session(
         &self,
         Parameters(params): Parameters<CreateSessionParams>,
@@ -171,9 +180,9 @@ impl NacMcpService {
                     match serde_json::from_value(v) {
                         Ok(map) => map,
                         Err(e) => {
-                            return Ok(CallToolResult::error(vec![Content::text(
-                                format!("Invalid extra_headers: {e}"),
-                            )]));
+                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                                "Invalid extra_headers: {e}"
+                            ))]));
                         }
                     };
                 RequestField::Value(HeadersRequest(map))
@@ -478,7 +487,7 @@ impl NacMcpService {
                 let grouped =
                     nac_core::store::load_all_retained_episodes(&store_path, &session_id)?;
                 let mut all: Vec<_> = Vec::new();
-                for (_thread, episodes) in &grouped {
+                for episodes in grouped.values() {
                     for e in episodes {
                         all.push(json!({
                             "id": e.id,

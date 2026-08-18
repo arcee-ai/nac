@@ -146,10 +146,7 @@ function written(source: string, span: MathSpan): string {
   const lines = span.content
     .split("\n")
     .map((line) =>
-      (line.startsWith(prefix)
-        ? line.slice(prefix.length)
-        : line.trimStart()
-      ).trimEnd(),
+      (line.startsWith(prefix) ? line.slice(prefix.length) : line.trimStart()).trimEnd(),
     );
   while (lines.length > 0 && !lines[0]) lines.shift();
   while (lines.length > 0 && !lines[lines.length - 1]) lines.pop();

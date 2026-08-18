@@ -54,8 +54,6 @@ export function reasoningOptionsFor(
   const allowed = new Set<string>(supported);
   return options.filter(
     (item) =>
-      REASONING_ACTIONS.has(String(item.id)) ||
-      allowed.has(String(item.id)) ||
-      item.id === current,
+      REASONING_ACTIONS.has(String(item.id)) || allowed.has(String(item.id)) || item.id === current,
   );
 }

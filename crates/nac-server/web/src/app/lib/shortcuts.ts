@@ -34,18 +34,9 @@ const GLYPHS: KeyGlyphMap = {
   right: "→",
 };
 
-export const keyGlyph = (key: string): string =>
-  GLYPHS[key.toLowerCase()] ?? key.toUpperCase();
+export const keyGlyph = (key: string): string => GLYPHS[key.toLowerCase()] ?? key.toUpperCase();
 
-const MODIFIERS = new Set([
-  "ctrl",
-  "control",
-  "meta",
-  "cmd",
-  "command",
-  "alt",
-  "option",
-]);
+const MODIFIERS = new Set(["ctrl", "control", "meta", "cmd", "command", "alt", "option"]);
 
 /** Whether a shortcut is one the browser would not have delivered on its own. */
 export const hasModifier = (keys: string[]): boolean =>
@@ -71,9 +62,7 @@ export function matchesShortcut(event: KeyboardEvent, keys: string[]): boolean {
   if (event.shiftKey) pressed.add("shift");
   if (event.key) pressed.add(event.key.toLowerCase());
   const wanted = new Set(keys.map(normalize));
-  return (
-    pressed.size === wanted.size && [...wanted].every((key) => pressed.has(key))
-  );
+  return pressed.size === wanted.size && [...wanted].every((key) => pressed.has(key));
 }
 
 /**

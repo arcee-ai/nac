@@ -72,10 +72,7 @@ export function Breadcrumbs() {
       {sessionId ? (
         <>
           {showRoot ? (
-            <Icon
-              iconName={IconName.Right}
-              className="text-basic-muted shrink-0"
-            />
+            <Icon iconName={IconName.Right} className="text-basic-muted shrink-0" />
           ) : null}
           <Popover
             open={open}
@@ -85,12 +82,7 @@ export function Breadcrumbs() {
             className="min-w-0"
             panelClassName="max-h-[420px] overflow-auto"
             sheetClassName="px-2"
-            content={
-              <SessionSwitcher
-                sessionId={sessionId}
-                onClose={() => setOpen(false)}
-              />
-            }
+            content={<SessionSwitcher sessionId={sessionId} onClose={() => setOpen(false)} />}
           >
             {isMobile ? (
               // The design gives the phone a fixed 128px slot holding just the
@@ -111,11 +103,7 @@ export function Breadcrumbs() {
                 >
                   {displaySessionTitle(current) || sessionId}
                 </span>
-                <Icon
-                  iconName={IconName.Right}
-                  size={24}
-                  className="shrink-0"
-                />
+                <Icon iconName={IconName.Right} size={24} className="shrink-0" />
               </button>
             ) : (
               <Button
@@ -134,19 +122,13 @@ export function Breadcrumbs() {
                   className="rounded-[2px]"
                 />
                 <span
-                  className={cn(
-                    "truncate max-w-[120px]",
-                    currentRunning && "text-shimmer-basic",
-                  )}
+                  className={cn("truncate max-w-[120px]", currentRunning && "text-shimmer-basic")}
                 >
                   {displaySessionTitle(current) || sessionId}
                 </span>
                 <Icon
                   iconName={IconName.Down}
-                  className={cn(
-                    "transition-transform",
-                    open ? "rotate-180" : undefined,
-                  )}
+                  className={cn("transition-transform", open ? "rotate-180" : undefined)}
                 />
               </Button>
             )}

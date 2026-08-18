@@ -88,11 +88,7 @@ export function splitMarkdownBlocks(source: string): string[] {
       kind ??= "other";
       continue;
     }
-    kind ??= LIST_ITEM.test(line)
-      ? "list"
-      : INDENTED_CODE.test(line)
-        ? "code"
-        : "other";
+    kind ??= LIST_ITEM.test(line) ? "list" : INDENTED_CODE.test(line) ? "code" : "other";
   }
 
   const tail = lines.slice(start).join("\n");

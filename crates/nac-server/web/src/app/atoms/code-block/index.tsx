@@ -35,12 +35,7 @@ interface CodeBodyProps {
   wrap: boolean;
 }
 
-const CodeBody: React.FC<CodeBodyProps> = ({
-  code,
-  lines,
-  lineNumbers,
-  wrap,
-}) => {
+const CodeBody: React.FC<CodeBodyProps> = ({ code, lines, lineNumbers, wrap }) => {
   const plain = code.split("\n");
   const count = lines?.length ?? plain.length;
 
@@ -69,18 +64,13 @@ const CodeBody: React.FC<CodeBodyProps> = ({
                   {tokens.length === 0
                     ? "\u00a0"
                     : tokens.map((token, position) => (
-                        <span
-                          key={position}
-                          className={token.className ?? undefined}
-                        >
+                        <span key={position} className={token.className ?? undefined}>
                           {token.text}
                         </span>
                       ))}
                 </div>
               ))
-            : plain.map((line, index) => (
-                <div key={index}>{line || "\u00a0"}</div>
-              ))}
+            : plain.map((line, index) => <div key={index}>{line || "\u00a0"}</div>)}
         </code>
       </pre>
     </div>
@@ -125,13 +115,9 @@ const CodeBlock: React.FC<CodeBlockProps> & { Size: typeof CodeBlockSize } = ({
   }, [language, code]);
 
   const lines =
-    highlighted?.code === code && highlighted.language === language
-      ? highlighted.lines
-      : null;
+    highlighted?.code === code && highlighted.language === language ? highlighted.lines : null;
 
-  const body = (
-    <CodeBody code={code} lines={lines} lineNumbers={lineNumbers} wrap={wrap} />
-  );
+  const body = <CodeBody code={code} lines={lines} lineNumbers={lineNumbers} wrap={wrap} />;
   const header = title || copyable || expandable;
 
   return (

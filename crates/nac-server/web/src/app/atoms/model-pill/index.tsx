@@ -59,10 +59,7 @@ const ModelPill: React.FC<ModelPillProps> & { Size: typeof ModelPillSize } = ({
       className="relative"
     />
     {active ? (
-      <CircularLoader
-        size={sizeLoaderSize[size]}
-        className="absolute inset-0 m-auto"
-      />
+      <CircularLoader size={sizeLoaderSize[size]} className="absolute inset-0 m-auto" />
     ) : null}
   </div>
 );

@@ -150,10 +150,7 @@ function threadFinished(name: string): AgentEvent {
   return { type: "thread_finished", name, exit_code: 0, timed_out: false };
 }
 
-function liveThread(
-  name: string,
-  status: RuntimeThread["status"],
-): RuntimeThread {
+function liveThread(name: string, status: RuntimeThread["status"]): RuntimeThread {
   return {
     name,
     status,
@@ -164,14 +161,10 @@ function liveThread(
   };
 }
 
-function waveCards(
-  turns: ReturnType<typeof buildTranscript>,
-): TranscriptThread[] {
+function waveCards(turns: ReturnType<typeof buildTranscript>): TranscriptThread[] {
   return turns.flatMap((turn) =>
     turn.kind === "model"
-      ? turn.blocks.flatMap((block) =>
-          block.kind === "wave" ? block.rows.flat() : [],
-        )
+      ? turn.blocks.flatMap((block) => (block.kind === "wave" ? block.rows.flat() : []))
       : [],
   );
 }
@@ -219,11 +212,7 @@ describe("re-dispatched thread cards", () => {
   it("reads the caught-up window without leaning on the live stream", () => {
     const value = redispatchSnapshot();
     value.thread_events = {
-      worker: [
-        threadStarted("worker"),
-        threadFinished("worker"),
-        threadStarted("worker"),
-      ],
+      worker: [threadStarted("worker"), threadFinished("worker"), threadStarted("worker")],
     };
 
     const cards = waveCards(buildTranscript(value, {}));
@@ -246,9 +235,7 @@ describe("re-dispatched thread cards", () => {
       source: [threadStarted("source"), threadFinished("source")],
     };
 
-    const cards = waveCards(
-      buildTranscript(value, { source: liveThread("source", "running") }),
-    );
+    const cards = waveCards(buildTranscript(value, { source: liveThread("source", "running") }));
 
     const source = cards.filter((card) => card.name === "source").at(-1);
     const dependent = cards.find((card) => card.name === "dependent");
@@ -259,10 +246,7 @@ describe("re-dispatched thread cards", () => {
   it("renders typed image results as bounded placeholders", () => {
     const cards = waveCards(
       buildTranscript(
-        snapshot([
-          threadCall("worker", "call-image"),
-          imageToolResult("call-image"),
-        ]),
+        snapshot([threadCall("worker", "call-image"), imageToolResult("call-image")]),
         {},
       ),
     );
@@ -283,9 +267,7 @@ describe("thread call decoding", () => {
 
   it("ignores non-string dependency entries", () => {
     const first = rawThreadCall('{"name":"first","action":"x"}');
-    const second = rawThreadCall(
-      '{"name":"second","action":"y","threads":[{"toString":null}]}',
-    );
+    const second = rawThreadCall('{"name":"second","action":"y","threads":[{"toString":null}]}');
 
     expect(partitionThreadCalls([first, second])).toEqual([[first, second]]);
   });

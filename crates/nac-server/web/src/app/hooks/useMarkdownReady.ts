@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 
-import {
-  loadMarkdownRenderer,
-  markdownRendererArrived,
-} from "@/app/lib/markdownChunk";
+import { loadMarkdownRenderer, markdownRendererArrived } from "@/app/lib/markdownChunk";
 
 /**
  * Whether markdown can be painted as prose, and a request for the chunk that

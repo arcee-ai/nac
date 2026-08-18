@@ -21,17 +21,13 @@ export const ANCHOR_GAP = 8;
 /** For a box positioned `absolute` inside a `relative` trigger wrapper. */
 export const anchorClasses = {
   [AnchorPlacement.TopRight]: "top-[-8px] left-0 -translate-y-full",
-  [AnchorPlacement.TopCenter]:
-    "top-[-8px] left-1/2 -translate-y-full -translate-x-1/2",
+  [AnchorPlacement.TopCenter]: "top-[-8px] left-1/2 -translate-y-full -translate-x-1/2",
   [AnchorPlacement.TopLeft]: "top-[-8px] right-0 -translate-y-full",
-  [AnchorPlacement.CenterLeft]:
-    "top-1/2 right-[calc(100%+8px)] -translate-y-1/2",
+  [AnchorPlacement.CenterLeft]: "top-1/2 right-[calc(100%+8px)] -translate-y-1/2",
   [AnchorPlacement.BottomLeft]: "bottom-[-8px] right-0 translate-y-full",
-  [AnchorPlacement.BottomCenter]:
-    "bottom-[-8px] left-1/2 translate-y-full -translate-x-1/2",
+  [AnchorPlacement.BottomCenter]: "bottom-[-8px] left-1/2 translate-y-full -translate-x-1/2",
   [AnchorPlacement.BottomRight]: "bottom-[-8px] left-0 translate-y-full",
-  [AnchorPlacement.CenterRight]:
-    "top-1/2 left-[calc(100%+8px)] -translate-y-1/2",
+  [AnchorPlacement.CenterRight]: "top-1/2 left-[calc(100%+8px)] -translate-y-1/2",
 } satisfies Record<AnchorPlacement, string>;
 
 type HorizontalAnchor = "start" | "center" | "end" | "before" | "after";
@@ -48,13 +44,9 @@ const anchors = {
   [AnchorPlacement.BottomLeft]: { x: "end", y: "below" },
   [AnchorPlacement.CenterLeft]: { x: "before", y: "middle" },
   [AnchorPlacement.CenterRight]: { x: "after", y: "middle" },
-} satisfies Record<
-  AnchorPlacement,
-  { x: HorizontalAnchor; y: VerticalAnchor }
->;
+} satisfies Record<AnchorPlacement, { x: HorizontalAnchor; y: VerticalAnchor }>;
 
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max);
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 /** Region a floating box is kept inside, in viewport coordinates. */
 export interface AnchorBounds {
@@ -76,11 +68,7 @@ interface Span {
  */
 export function clippingAncestors(element: Element | null): HTMLElement[] {
   const clippers: HTMLElement[] = [];
-  for (
-    let node = element?.parentElement ?? null;
-    node;
-    node = node.parentElement
-  ) {
+  for (let node = element?.parentElement ?? null; node; node = node.parentElement) {
     const style = window.getComputedStyle(node);
     if (style.overflowX !== "visible" || style.overflowY !== "visible") {
       clippers.push(node);
@@ -121,16 +109,9 @@ export function visibleBounds(clippers: HTMLElement[]): AnchorBounds | null {
  * the box has the room to fit there — a box too big for the region it was
  * anchored in is better off overhanging it than squeezed into it.
  */
-function fit(
-  start: number,
-  size: number,
-  limit: Span,
-  preferred?: Span,
-): number {
+function fit(start: number, size: number, limit: Span, preferred?: Span): number {
   const span =
-    preferred && size + 2 * ANCHOR_GAP <= preferred.end - preferred.start
-      ? preferred
-      : limit;
+    preferred && size + 2 * ANCHOR_GAP <= preferred.end - preferred.start ? preferred : limit;
   const min = span.start + ANCHOR_GAP;
   return clamp(start, min, Math.max(min, span.end - size - ANCHOR_GAP));
 }

@@ -1,10 +1,4 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-} from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 import { DeleteModal } from "@/app/components/modals/DeleteModal";
 import { LaunchModal } from "@/app/components/modals/LaunchModal";
@@ -35,11 +29,7 @@ type ModalKind = "rename" | "delete" | "settings" | "launch";
  * Owns the actions a session card and the inspector header share, along with
  * the two small modals they open, so both surfaces behave identically.
  */
-export function SessionActionsProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export function SessionActionsProvider({ children }: { children: React.ReactNode }) {
   const toast = useToast();
   const pin = useTogglePin();
   const cancelRun = useCancelRun();
@@ -88,10 +78,7 @@ export function SessionActionsProvider({
   // Launching is the one action reachable from anywhere, so it is the one bound
   // to a key; the rest all need a session picked out first.
   useKeyboardShortcuts(
-    useMemo(
-      () => [{ keys: NEW_SESSION_KEYS, onTrigger: () => setModal("launch") }],
-      [],
-    ),
+    useMemo(() => [{ keys: NEW_SESSION_KEYS, onTrigger: () => setModal("launch") }], []),
   );
 
   const close = () => setModal(null);
@@ -102,11 +89,7 @@ export function SessionActionsProvider({
       <LaunchModal open={modal === "launch"} onClose={close} />
       <RenameModal open={modal === "rename"} onClose={close} summary={target} />
       <DeleteModal open={modal === "delete"} onClose={close} summary={target} />
-      <SettingsModal
-        open={modal === "settings"}
-        id={settingsId}
-        onClose={close}
-      />
+      <SettingsModal open={modal === "settings"} id={settingsId} onClose={close} />
     </SessionActionsContext.Provider>
   );
 }
@@ -114,9 +97,7 @@ export function SessionActionsProvider({
 export function useSessionActions(): SessionActions {
   const ctx = useContext(SessionActionsContext);
   if (!ctx) {
-    throw new Error(
-      "useSessionActions must be used within SessionActionsProvider",
-    );
+    throw new Error("useSessionActions must be used within SessionActionsProvider");
   }
   return ctx;
 }

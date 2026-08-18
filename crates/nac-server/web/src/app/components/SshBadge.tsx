@@ -27,25 +27,10 @@ export function SshBadge({
 }) {
   const broken = state !== "connected";
   return (
-    <div
-      className={cn(
-        "flex items-center h-4 shrink-0",
-        broken ? "gap-1" : null,
-        className,
-      )}
-    >
-      {broken ? (
-        <Icon
-          iconName={IconName.Danger}
-          size={16}
-          className="text-error-primary"
-        />
-      ) : null}
+    <div className={cn("flex items-center h-4 shrink-0", broken ? "gap-1" : null, className)}>
+      {broken ? <Icon iconName={IconName.Danger} size={16} className="text-error-primary" /> : null}
       <span
-        className={cn(
-          "tag-label uppercase",
-          broken ? "text-error-primary" : "text-info-primary",
-        )}
+        className={cn("tag-label uppercase", broken ? "text-error-primary" : "text-info-primary")}
       >
         SSH
       </span>

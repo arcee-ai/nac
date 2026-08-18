@@ -67,12 +67,7 @@ export function SnapshotFiles({
   return (
     <div className="flex flex-col gap-1 md:gap-0 w-full pl-2 pr-4 pb-1 items-start">
       {shown.map((file) => (
-        <FileChip
-          key={file.path}
-          file={file}
-          active={selected === file.path}
-          onOpen={onOpen}
-        />
+        <FileChip key={file.path} file={file} active={selected === file.path} onOpen={onOpen} />
       ))}
       {rest > 0 ? (
         <button

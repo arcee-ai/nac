@@ -19,12 +19,7 @@ import { KvEditor } from "@/app/components/modals/MCPServersModal/McpKvEditor";
 import { FooterButton } from "@/app/components/modals/ModalFooterButton";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import {
-  literalsOnly,
-  mapFromRows,
-  rowsFromRecord,
-  type KvRow,
-} from "@/app/lib/mcpKvRows";
+import { literalsOnly, mapFromRows, rowsFromRecord, type KvRow } from "@/app/lib/mcpKvRows";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { toRunError } from "@/app/lib/providerError";
 import {
@@ -33,12 +28,7 @@ import {
   useTestMcpServer,
   useUpdateMcpServer,
 } from "@/app/services/queries";
-import type {
-  McpLibraryEntry,
-  McpProbedTool,
-  McpServerView,
-  McpTransport,
-} from "@/app/types/api";
+import type { McpLibraryEntry, McpProbedTool, McpServerView, McpTransport } from "@/app/types/api";
 
 const TRANSPORT_ITEMS: { id: McpTransport; label: string }[] = [
   { id: "streamable_http", label: "Streamable HTTP" },
@@ -104,9 +94,7 @@ export function McpServerForm({
     }
     return [];
   });
-  const [env, setEnv] = useState<KvRow[]>(
-    record ? rowsFromRecord(record.env) : [],
-  );
+  const [env, setEnv] = useState<KvRow[]>(record ? rowsFromRecord(record.env) : []);
   const [tools, setTools] = useState<McpProbedTool[] | null>(null);
 
   const busy =
@@ -117,10 +105,8 @@ export function McpServerForm({
 
   const validate = (): string | null => {
     if (!name.trim()) return "A name is required.";
-    if (transport === "streamable_http" && !url.trim())
-      return "A URL is required.";
-    if (transport === "stdio" && !command.trim())
-      return "A command is required.";
+    if (transport === "streamable_http" && !url.trim()) return "A URL is required.";
+    if (transport === "stdio" && !command.trim()) return "A command is required.";
     return null;
   };
 
@@ -142,8 +128,7 @@ export function McpServerForm({
           args: transport === "stdio" ? splitArgs(argsText) : [],
           env: transport === "stdio" ? literalsOnly(envMap) : {},
           url: transport === "streamable_http" ? url.trim() : null,
-          headers:
-            transport === "streamable_http" ? literalsOnly(headerMap) : {},
+          headers: transport === "streamable_http" ? literalsOnly(headerMap) : {},
           library_id: template?.id ?? null,
         });
         onSaved(created.name);
@@ -326,11 +311,7 @@ export function McpServerForm({
                 <Button
                   key={item.id}
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    transport === item.id
-                      ? ButtonVariant.Primary
-                      : ButtonVariant.Secondary
-                  }
+                  variant={transport === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
                   content={ButtonContent.Text}
                   aria-pressed={transport === item.id}
                   onClick={() => setTransport(item.id)}
@@ -414,17 +395,10 @@ export function McpServerForm({
         {tools && tools.length ? (
           <div className="flex flex-col gap-1">
             {tools.map((tool) => (
-              <div
-                key={tool.name}
-                className="flex items-baseline gap-2 min-w-0"
-              >
-                <span className="code code-small text-basic-primary shrink-0">
-                  {tool.name}
-                </span>
+              <div key={tool.name} className="flex items-baseline gap-2 min-w-0">
+                <span className="code code-small text-basic-primary shrink-0">{tool.name}</span>
                 {tool.description ? (
-                  <span className="text-small text-basic-muted truncate">
-                    {tool.description}
-                  </span>
+                  <span className="text-small text-basic-muted truncate">{tool.description}</span>
                 ) : null}
               </div>
             ))}

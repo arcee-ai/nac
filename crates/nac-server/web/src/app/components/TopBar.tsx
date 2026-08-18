@@ -58,18 +58,10 @@ export function TopBar() {
         <div
           className={cn(
             "relative flex items-center",
-            isMobile
-              ? "flex-1 min-w-0 gap-6"
-              : isTablet
-                ? "shrink-0 gap-4"
-                : "shrink-0 gap-8",
+            isMobile ? "flex-1 min-w-0 gap-6" : isTablet ? "shrink-0 gap-4" : "shrink-0 gap-8",
           )}
         >
-          <Link
-            to={routes.list()}
-            className="shrink-0"
-            aria-label="All sessions"
-          >
+          <Link to={routes.list()} className="shrink-0" aria-label="All sessions">
             <Logo
               height={isMobile ? 36 : isTablet ? 36 : 36}
               markOnly={isMobile || isTablet}
@@ -101,10 +93,7 @@ export function TopBar() {
           />
         </div>
       </header>
-      <ConfigurationsModal
-        open={configuring}
-        onClose={() => setConfiguring(false)}
-      />
+      <ConfigurationsModal open={configuring} onClose={() => setConfiguring(false)} />
       <SshConfigsModal open={sshConfigs} onClose={() => setSshConfigs(false)} />
       <McpServersModal open={mcpServers} onClose={() => setMcpServers(false)} />
     </>

@@ -1193,6 +1193,16 @@ fn publish(
     Ok(())
 }
 
+// `mode_t` is `u16` on macOS and `u32` on Linux; the explicit casts keep
+// `MetadataExt::mode()` arithmetic portable across both CI targets.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
+const SET_USER_ID_MODE_BIT: u32 = libc::S_ISUID as u32;
+
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
+const SET_GROUP_ID_MODE_BIT: u32 = libc::S_ISGID as u32;
+
 #[cfg(unix)]
 fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
     let result = unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) };
@@ -1221,10 +1231,10 @@ fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
     let current = file.metadata()?;
     let mut mode = metadata.mode() & 0o7777;
     if current.uid() != metadata.uid() {
-        mode &= !(libc::S_ISUID as u32);
+        mode &= !SET_USER_ID_MODE_BIT;
     }
     if current.gid() != metadata.gid() {
-        mode &= !(libc::S_ISGID as u32);
+        mode &= !SET_GROUP_ID_MODE_BIT;
     }
     file.set_permissions(fs::Permissions::from_mode(mode))
 }

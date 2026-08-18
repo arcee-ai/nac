@@ -425,6 +425,7 @@ pub fn codex_auth_status() -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn send_responses(
     client: &Client,
     base_url: &str,
@@ -1037,10 +1038,7 @@ async fn post_codex_json_with_retry_delay(
                 "HTTP {} from {}: {}",
                 status.as_u16(),
                 redact_credentials(url, &[]),
-                truncate(&redact_credentials(
-                    &response_body,
-                    &[auth.access.as_str()],
-                ))
+                truncate(&redact_credentials(&response_body, &[auth.access.as_str()],))
             ),
             retryable_stream: false,
             observable_delta: false,

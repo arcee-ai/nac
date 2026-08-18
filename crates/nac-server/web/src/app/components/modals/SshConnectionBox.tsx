@@ -22,15 +22,8 @@ import { FieldLabel } from "@/app/components/modals/ConfigRow";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import {
-  useCreateSshConfig,
-  useSshConfigs,
-  useSshConnect,
-} from "@/app/services/queries";
-import {
-  markSshConnected,
-  markSshDisconnected,
-} from "@/app/store/sshConnectionStore";
+import { useCreateSshConfig, useSshConfigs, useSshConnect } from "@/app/services/queries";
+import { markSshConnected, markSshDisconnected } from "@/app/store/sshConnectionStore";
 import type { SshConfigurationRecord, SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { toRunError } from "@/app/lib/providerError";
@@ -67,11 +60,7 @@ function nullable(value: string): string | null {
   return trimmed ? trimmed : null;
 }
 
-function targetFromFields(
-  host: string,
-  port: string,
-  key: string,
-): SshTarget | { error: string } {
+function targetFromFields(host: string, port: string, key: string): SshTarget | { error: string } {
   const sshHost = nullable(host);
   if (!sshHost) return { error: "An SSH host is required." };
   const portErr = sshPortError(port);
@@ -92,10 +81,7 @@ function nextDefaultName(configurations: SshConfigurationRecord[]): string {
 
 function targetsMatch(
   left: SshTarget,
-  right: Pick<
-    SshConfigurationRecord,
-    "ssh_host" | "ssh_port" | "ssh_identity_file"
-  >,
+  right: Pick<SshConfigurationRecord, "ssh_host" | "ssh_port" | "ssh_identity_file">,
 ): boolean {
   return (
     left.ssh_host === right.ssh_host &&
@@ -164,19 +150,14 @@ export function SshConnectionBox({
   const isManage = mode === "manage";
   const matchedSeedId = useMemo(() => {
     if (isManage || !seedTarget?.ssh_host.trim()) return null;
-    return (
-      configurations.find((entry) => targetsMatch(seedTarget, entry))
-        ?.config_id ?? null
-    );
+    return configurations.find((entry) => targetsMatch(seedTarget, entry))?.config_id ?? null;
   }, [isManage, seedTarget, configurations]);
 
   // Null means "follow the seed match"; a concrete id is the user's pick.
   const [userSelectedId, setUserSelectedId] = useState<string | null>(null);
   const selectedId = userSelectedId ?? matchedSeedId ?? CREATE_NEW;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [draftName, setDraftName] = useState(() =>
-    nextDefaultName(configurations),
-  );
+  const [draftName, setDraftName] = useState(() => nextDefaultName(configurations));
   const [draftHost, setDraftHost] = useState(seedTarget?.ssh_host ?? "");
   const [draftPort, setDraftPort] = useState(
     seedTarget?.ssh_port ? String(seedTarget.ssh_port) : "",
@@ -193,8 +174,7 @@ export function SshConnectionBox({
   const selectedConfig =
     selectedId === CREATE_NEW
       ? null
-      : (configurations.find((entry) => entry.config_id === selectedId) ??
-        null);
+      : (configurations.find((entry) => entry.config_id === selectedId) ?? null);
 
   const name = isManage ? (controlledName ?? "") : draftName;
   const host = isManage
@@ -233,9 +213,7 @@ export function SshConnectionBox({
   };
 
   const selectorLabel =
-    selectedId === CREATE_NEW
-      ? "Create New"
-      : (selectedConfig?.name ?? "SSH config");
+    selectedId === CREATE_NEW ? "Create New" : (selectedConfig?.name ?? "SSH config");
 
   const pickConfig = (id: string) => {
     setUserSelectedId(id);
@@ -318,15 +296,9 @@ export function SshConnectionBox({
     >
       {showSelector ? (
         <div className="flex items-center gap-4 h-12 pl-3 pr-1.5 py-1 border-b border-muted bg-elevation-sublevel-variant-A">
-          <p className="label-small text-basic-primary flex-1 min-w-0">
-            SSH config
-          </p>
+          <p className="label-small text-basic-primary flex-1 min-w-0">SSH config</p>
           {connected ? (
-            <Badge
-              text="Connected"
-              color={BadgeColor.Blue}
-              className="!py-0.5 !px-1"
-            />
+            <Badge text="Connected" color={BadgeColor.Blue} className="!py-0.5 !px-1" />
           ) : null}
           <Popover
             open={menuOpen && !fieldsLocked}
@@ -347,9 +319,7 @@ export function SshConnectionBox({
                   <TabButton
                     size={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
                     variant={
-                      selectedId === CREATE_NEW
-                        ? TabButtonVariant.Accent
-                        : TabButtonVariant.Regular
+                      selectedId === CREATE_NEW ? TabButtonVariant.Accent : TabButtonVariant.Regular
                     }
                     active={selectedId === CREATE_NEW}
                     onClick={() => pickConfig(CREATE_NEW)}
@@ -365,11 +335,7 @@ export function SshConnectionBox({
                       {configurations.map((entry) => (
                         <TabButton
                           key={entry.config_id}
-                          size={
-                            isMobile
-                              ? TabButtonSize.Large
-                              : TabButtonSize.Medium
-                          }
+                          size={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
                           variant={
                             selectedId === entry.config_id
                               ? TabButtonVariant.Accent
@@ -379,9 +345,7 @@ export function SshConnectionBox({
                           onClick={() => pickConfig(entry.config_id)}
                         >
                           <Icon iconName={IconName.Globe} />
-                          <span className="text-left flex-grow truncate">
-                            {entry.name}
-                          </span>
+                          <span className="text-left flex-grow truncate">{entry.name}</span>
                         </TabButton>
                       ))}
                     </div>
@@ -440,10 +404,7 @@ export function SshConnectionBox({
             />
           </div>
           <div className="flex flex-col gap-1 w-full md:w-[98px] shrink-0">
-            <FieldLabel
-              label="Port"
-              hint="Blank uses OpenSSH's default (usually 22)."
-            />
+            <FieldLabel label="Port" hint="Blank uses OpenSSH's default (usually 22)." />
             <Input
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               value={port}
@@ -513,9 +474,7 @@ export function SshConnectionBox({
           </div>
         </div>
 
-        {error ? (
-          <p className="text-micro text-error-primary">{error}</p>
-        ) : null}
+        {error ? <p className="text-micro text-error-primary">{error}</p> : null}
       </div>
 
       {/* The key is read by this machine's ssh client, so it is always browsed

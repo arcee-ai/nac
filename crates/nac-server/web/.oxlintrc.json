@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["src/app/atoms/file-icon/manifest.generated.ts"],
+  "overrides": [
+    {
+      "files": ["src/app/atoms/icon/index.tsx"],
+      "rules": {
+        "typescript/no-duplicate-enum-values": "off"
+      }
+    }
+  ]
+}

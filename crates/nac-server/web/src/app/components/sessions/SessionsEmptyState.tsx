@@ -1,10 +1,4 @@
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  SessionIllustration,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant, SessionIllustration } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 interface SessionsEmptyStateProps {
@@ -18,10 +12,7 @@ interface SessionsEmptyStateProps {
  * account has no sessions at all, which is how the design frames the state at
  * every width. A filtered-away list keeps the regular chrome instead.
  */
-export function SessionsEmptyState({
-  onStart,
-  mobile,
-}: SessionsEmptyStateProps) {
+export function SessionsEmptyState({ onStart, mobile }: SessionsEmptyStateProps) {
   return (
     <div
       className={cn(
@@ -33,9 +24,7 @@ export function SessionsEmptyState({
         <SessionIllustration />
         <div className="w-full text-center">
           <p className="header-2xl text-basic-primary">No sessions yet</p>
-          <p className="text-medium text-basic-tertiary">
-            Create your first and start building!
-          </p>
+          <p className="text-medium text-basic-tertiary">Create your first and start building!</p>
         </div>
         <Button
           variant={ButtonVariant.Primary}

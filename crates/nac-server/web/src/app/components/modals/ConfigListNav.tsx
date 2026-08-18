@@ -110,12 +110,8 @@ export function ConfigListNav({
             aria-label="Choose configuration"
             onClick={() => setOpen((value) => !value)}
           >
-            {draftSelected ? (
-              <Icon iconName={IconName.Add} className="shrink-0" />
-            ) : null}
-            <span className="text-left flex-grow truncate">
-              {selectedLabel}
-            </span>
+            {draftSelected ? <Icon iconName={IconName.Add} className="shrink-0" /> : null}
+            <span className="text-left flex-grow truncate">{selectedLabel}</span>
             <Icon
               iconName={IconName.Down}
               className={cn(

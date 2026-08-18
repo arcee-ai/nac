@@ -1,9 +1,6 @@
 import { useMemo } from "react";
 
-import {
-  ChatBadge,
-  CodeChangesBadge,
-} from "@/app/components/inspector/ChatBadge";
+import { ChatBadge, CodeChangesBadge } from "@/app/components/inspector/ChatBadge";
 import { SnapshotFiles } from "@/app/components/inspector/SnapshotFiles";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
 import type { WorkspaceRevision } from "@/app/types/api";
@@ -37,8 +34,7 @@ export function SnapshotBadge({
   // Git reports an untracked directory as one entry; the panel spreads it over
   // the files inside, so the directory itself has no row to open.
   const files = useMemo(
-    () =>
-      (data?.changed_files ?? []).filter((file) => !file.path.endsWith("/")),
+    () => (data?.changed_files ?? []).filter((file) => !file.path.endsWith("/")),
     [data],
   );
   const pointedAt = panel.selectedRevision === revision.id;
@@ -46,12 +42,7 @@ export function SnapshotBadge({
   return (
     <ChatBadge
       label="Snapshot"
-      trailing={
-        <CodeChangesBadge
-          additions={revision.additions}
-          deletions={revision.deletions}
-        />
-      }
+      trailing={<CodeChangesBadge additions={revision.additions} deletions={revision.deletions} />}
       preface={
         <SnapshotFiles
           files={files}

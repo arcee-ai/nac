@@ -10,8 +10,7 @@ export enum StickyInputVariant {
   Search = "search",
 }
 
-interface StickyInputProps
-  extends Omit<React.ComponentPropsWithRef<"input">, "size"> {
+interface StickyInputProps extends Omit<React.ComponentPropsWithRef<"input">, "size"> {
   variant?: StickyInputVariant;
   leading?: InputLeading;
   leadingOnClick?: () => void;
@@ -65,8 +64,7 @@ const StickyInput: React.FC<StickyInputProps> & {
   const actualTrailingIconName = isSearch ? IconName.Close : trailingIconName;
   const actualTrailingOnClick = isSearch ? onClear : trailingOnClick;
 
-  const stretches =
-    className.includes("flex-grow") || className.includes("flex-1");
+  const stretches = className.includes("flex-grow") || className.includes("flex-1");
   const radius = rounded ? "rounded-full" : "rounded-[4px]";
   const iconColor = isDisabled
     ? "var(--color-fill-basic-muted)"

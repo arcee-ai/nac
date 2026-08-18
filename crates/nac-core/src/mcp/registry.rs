@@ -176,10 +176,7 @@ impl McpRegistry {
                         "timed out during connect after {}s",
                         MCP_CONNECT_TIMEOUT.as_secs()
                     );
-                    eprintln!(
-                        "MCP server '{}' {reason} and will be skipped",
-                        server_name
-                    );
+                    eprintln!("MCP server '{}' {reason} and will be skipped", server_name);
                     skipped.push(McpSkippedServer {
                         name: server_name,
                         reason,
@@ -188,38 +185,34 @@ impl McpRegistry {
                 }
             };
 
-            let listed_tools = match timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools())
-                .await
-            {
-                Ok(Ok(tools)) => tools,
-                Ok(Err(error)) => {
-                    let reason = format!("{error:#}");
-                    eprintln!(
-                        "MCP server '{}' could not list tools and will be skipped: {reason}",
-                        server_name
-                    );
-                    skipped.push(McpSkippedServer {
-                        name: server_name,
-                        reason,
-                    });
-                    continue;
-                }
-                Err(_) => {
-                    let reason = format!(
-                        "timed out while listing tools after {}s",
-                        MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
-                    );
-                    eprintln!(
-                        "MCP server '{}' {reason} and will be skipped",
-                        server_name
-                    );
-                    skipped.push(McpSkippedServer {
-                        name: server_name,
-                        reason,
-                    });
-                    continue;
-                }
-            };
+            let listed_tools =
+                match timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools()).await {
+                    Ok(Ok(tools)) => tools,
+                    Ok(Err(error)) => {
+                        let reason = format!("{error:#}");
+                        eprintln!(
+                            "MCP server '{}' could not list tools and will be skipped: {reason}",
+                            server_name
+                        );
+                        skipped.push(McpSkippedServer {
+                            name: server_name,
+                            reason,
+                        });
+                        continue;
+                    }
+                    Err(_) => {
+                        let reason = format!(
+                            "timed out while listing tools after {}s",
+                            MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
+                        );
+                        eprintln!("MCP server '{}' {reason} and will be skipped", server_name);
+                        skipped.push(McpSkippedServer {
+                            name: server_name,
+                            reason,
+                        });
+                        continue;
+                    }
+                };
 
             seen_endpoints.insert(endpoint, server_name.clone());
             let server = Arc::new(McpServer {

@@ -30,10 +30,7 @@ import {
 } from "@/app/components/modals/ConfigurationsPanel";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
-import {
-  LightModelSection,
-  type LightSelection,
-} from "@/app/components/modals/LightModelSection";
+import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
@@ -41,11 +38,7 @@ import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
-import {
-  isGeneratedCredentialName,
-  MASKED_KEY,
-  type Validation,
-} from "@/app/lib/apiKey";
+import { isGeneratedCredentialName, MASKED_KEY, type Validation } from "@/app/lib/apiKey";
 import {
   inheritPrimaryCredential,
   buildSettingsPatch,
@@ -69,10 +62,7 @@ import {
   useUpdateConfig,
   useUpdatePresentation,
 } from "@/app/services/queries";
-import {
-  sshTargetFromSummary,
-  useSshConnectionStatus,
-} from "@/app/store/sshConnectionStore";
+import { sshTargetFromSummary, useSshConnectionStatus } from "@/app/store/sshConnectionStore";
 import type {
   BackendKind,
   LightModelSettings,
@@ -84,15 +74,11 @@ import type {
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 function headersToText(headers: Record<string, string>): string {
-  return Object.keys(headers).length === 0
-    ? ""
-    : JSON.stringify(headers, null, 2);
+  return Object.keys(headers).length === 0 ? "" : JSON.stringify(headers, null, 2);
 }
 
 /** The persisted column is a JSON string; unparsable content means "repair me". */
-function parseHeadersJson(
-  json: string | null | undefined,
-): Record<string, string> {
+function parseHeadersJson(json: string | null | undefined): Record<string, string> {
   if (!json) return {};
   try {
     const parsed: unknown = JSON.parse(json);
@@ -183,9 +169,7 @@ export function SettingsModal({
   // dialog starts closing would blank the form out mid-slide.
   const mounted = useExitTransition(open);
   const { data: snapshot } = useSessionSnapshot(mounted ? id : null);
-  const { data: entry, isLoading: isSummaryLoading } = useSessionSummary(
-    mounted ? id : null,
-  );
+  const { data: entry, isLoading: isSummaryLoading } = useSessionSummary(mounted ? id : null);
   // Fetched for diagnostics ("repair required") and as a fallback source when
   // the live snapshot is unavailable.
   const { data: config, isLoading } = useSessionConfig(mounted ? id : null);
@@ -198,8 +182,7 @@ export function SettingsModal({
         ...initialFromMetadata(meta),
         // Metadata lacks the compaction threshold, but the config row (always
         // fetched) carries it, so the field shows the live value.
-        orchestrator_compaction_threshold:
-          config?.orchestrator_compaction_threshold ?? null,
+        orchestrator_compaction_threshold: config?.orchestrator_compaction_threshold ?? null,
       }
     : config
       ? initialFromConfig(config)
@@ -280,9 +263,7 @@ function SettingsForm({
       ? String(initial.orchestrator_compaction_threshold)
       : "",
   );
-  const compactionAutoRef = useRef(
-    initial.orchestrator_compaction_threshold == null,
-  );
+  const compactionAutoRef = useRef(initial.orchestrator_compaction_threshold == null);
   const [error, setError] = useState("");
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({
@@ -298,21 +279,18 @@ function SettingsForm({
     diagnostic.startsWith("malformed stored light model"),
   );
 
-  const onConfigurationChange = useCallback(
-    (next: LaunchModelSelection | null) => {
-      setSelection(next);
-      if (!next) return;
-      const values = next.kind === "resolved" ? next : next.request;
-      setBackend(values.backend);
-      setModel(values.model);
-      setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
-      if (next.kind === "resolved") {
-        setReasoning(next.reasoning_effort ?? "");
-        setHeaders(headersToText(next.extra_headers ?? {}));
-      }
-    },
-    [],
-  );
+  const onConfigurationChange = useCallback((next: LaunchModelSelection | null) => {
+    setSelection(next);
+    if (!next) return;
+    const values = next.kind === "resolved" ? next : next.request;
+    setBackend(values.backend);
+    setModel(values.model);
+    setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
+    if (next.kind === "resolved") {
+      setReasoning(next.reasoning_effort ?? "");
+      setHeaders(headersToText(next.extra_headers ?? {}));
+    }
+  }, []);
 
   // Only the levels this model actually accepts: the backend rejects the rest,
   // so offering them would only produce a save that fails.
@@ -345,23 +323,15 @@ function SettingsForm({
 
   const blocked = !selection;
   const busy =
-    updateConfig.isPending ||
-    updatePresentation.isPending ||
-    createModelConfig.isPending;
+    updateConfig.isPending || updatePresentation.isPending || createModelConfig.isPending;
 
   const seedTarget = sshTargetFromSummary(openingSummary);
   const sshStatus = useSshConnectionStatus(seedTarget);
   // Null means "follow the shared store"; a concrete value is the user's last
   // Connect/Disconnect action in this dialog.
-  const [sshConnection, setSshConnection] = useState<
-    SshTarget | null | undefined
-  >(undefined);
+  const [sshConnection, setSshConnection] = useState<SshTarget | null | undefined>(undefined);
   const connectedTarget =
-    sshConnection === undefined
-      ? sshStatus === "connected"
-        ? seedTarget
-        : null
-      : sshConnection;
+    sshConnection === undefined ? (sshStatus === "connected" ? seedTarget : null) : sshConnection;
 
   const onSshConnectionChange = (target: SshTarget | null) => {
     setSshConnection(target);
@@ -377,8 +347,7 @@ function SettingsForm({
         expectedVersion: openingSummary.presentation_version ?? 0,
       });
     } catch (saveError) {
-      const conflict =
-        saveError instanceof ApiError && saveError.status === 409;
+      const conflict = saveError instanceof ApiError && saveError.status === 409;
       toast.error(
         conflict
           ? "The title was not saved — the session changed in the meantime"
@@ -411,9 +380,7 @@ function SettingsForm({
         selected = selection;
       }
     } catch (saveError) {
-      setError(
-        `The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`,
-      );
+      setError(`The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`);
       return;
     }
 
@@ -534,9 +501,7 @@ function SettingsForm({
       footer={footer}
       titleExtra={
         seedTarget ? (
-          <SshBadge
-            state={sshStatus === "connected" ? "connected" : "disconnected"}
-          />
+          <SshBadge state={sshStatus === "connected" ? "connected" : "disconnected"} />
         ) : null
       }
     >
@@ -596,13 +561,8 @@ function SettingsForm({
               onClick={() => setAdvanced((value) => !value)}
             >
               <Icon iconName={IconName.Gear} size={20} />
-              <span className="label-small flex-1 text-left">
-                Advanced Configurations
-              </span>
-              <Icon
-                iconName={advanced ? IconName.Down : IconName.Right}
-                size={20}
-              />
+              <span className="label-small flex-1 text-left">Advanced Configurations</span>
+              <Icon iconName={advanced ? IconName.Down : IconName.Right} size={20} />
             </button>
             {advanced ? (
               <>
@@ -625,9 +585,7 @@ function SettingsForm({
                   control={
                     <div className="flex items-center gap-2">
                       <Input
-                        inputSize={
-                          isMobile ? InputSize.Large : InputSize.Medium
-                        }
+                        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                         className={CONTROL_WIDTH}
                         inputClassName="md:text-right"
                         placeholder={compactionPlaceholder}
@@ -639,18 +597,14 @@ function SettingsForm({
                           setCompaction(event.target.value);
                         }}
                       />
-                      <span className="shrink-0 text-micro text-basic-muted">
-                        tokens
-                      </span>
+                      <span className="shrink-0 text-micro text-basic-muted">tokens</span>
                     </div>
                   }
                 />
                 <Separator />
                 <TextArea
                   label="Extra headers (JSON object)"
-                  textAreaSize={
-                    isMobile ? TextAreaSize.Large : TextAreaSize.Medium
-                  }
+                  textAreaSize={isMobile ? TextAreaSize.Large : TextAreaSize.Medium}
                   hintText="Blank sends none; header values must be strings."
                   placeholder='{ "X-Title": "NAC" }'
                   value={headers}
@@ -662,9 +616,7 @@ function SettingsForm({
           </div>
         </ConfigurationsPanel>
 
-        {error ? (
-          <p className="text-error-primary text-micro">{error}</p>
-        ) : null}
+        {error ? <p className="text-error-primary text-micro">{error}</p> : null}
       </div>
     </SettingsShell>
   );
@@ -743,10 +695,7 @@ function ApiKeyField({
             <Icon iconName={editing ? IconName.Close : IconName.Edit} />
           </Button>
         </Tooltip>
-        <Tooltip
-          title="Remove the key from this session"
-          position={TooltipPosition.TopCenter}
-        >
+        <Tooltip title="Remove the key from this session" position={TooltipPosition.TopCenter}>
           <Button
             variant={ButtonVariant.SecondaryDestructive}
             size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
@@ -778,10 +727,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
   const logout = useManagedLogout();
   // A credential on file is not the same as a working one, so the row leans on
   // the request that actually spends it rather than on the file being there.
-  const reach = useManagedProviderModels(
-    backend,
-    Boolean(provider) && signedIn,
-  );
+  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
 
   if (!provider) return null;
 
@@ -800,9 +746,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
             </span>
           </>
         ) : (
-          <span className="text-micro text-basic-muted">
-            Waiting for the browser
-          </span>
+          <span className="text-micro text-basic-muted">Waiting for the browser</span>
         )}
         <Button
           variant={ButtonVariant.Ghost}
@@ -832,10 +776,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
             // size the buttons beside it take.
             className={`flex items-center gap-1.5 rounded-[4px] bg-success-secondary pl-2 pr-4 ${isMobile ? "h-12" : "py-2"}`}
           >
-            <Icon
-              iconName={IconName.CheckCircle}
-              className="text-success-primary"
-            />
+            <Icon iconName={IconName.CheckCircle} className="text-success-primary" />
             <span className="label-small text-success-primary">Success</span>
           </div>
         )}

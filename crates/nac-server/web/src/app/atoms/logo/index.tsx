@@ -20,11 +20,7 @@ const WORDMARK_PATH =
  * `currentColor` so they follow the surrounding text color (theme-aware),
  * unlike the source SVGs which hard-code a light fill.
  */
-const Logo: React.FC<LogoProps> = ({
-  height = 20,
-  markOnly = false,
-  className = "",
-}) =>
+const Logo: React.FC<LogoProps> = ({ height = 20, markOnly = false, className = "" }) =>
   markOnly ? (
     <svg
       height={height}
@@ -47,12 +43,7 @@ const Logo: React.FC<LogoProps> = ({
       role="img"
       aria-label="NAC"
     >
-      <path
-        fill="currentColor"
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d={WORDMARK_PATH}
-      />
+      <path fill="currentColor" fillRule="evenodd" clipRule="evenodd" d={WORDMARK_PATH} />
     </svg>
   );
 

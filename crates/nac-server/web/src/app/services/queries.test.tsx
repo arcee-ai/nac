@@ -1,13 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  fireEvent,
-  render,
-  type RenderResult,
-  waitFor,
-} from "@testing-library/react";
+import { act, fireEvent, render, type RenderResult, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { api } from "@/app/services/api";
@@ -34,27 +28,15 @@ const requests = {
   getThreadEvents: vi.fn(),
 };
 
-vi.spyOn(api, "listSessions").mockImplementation((...args) =>
-  requests.listSessions(...args),
-);
-vi.spyOn(api, "getMessages").mockImplementation((...args) =>
-  requests.getMessages(...args),
-);
-vi.spyOn(api, "getThreadEvents").mockImplementation((...args) =>
-  requests.getThreadEvents(...args),
-);
-
+vi.spyOn(api, "listSessions").mockImplementation((...args) => requests.listSessions(...args));
+vi.spyOn(api, "getMessages").mockImplementation((...args) => requests.getMessages(...args));
+vi.spyOn(api, "getThreadEvents").mockImplementation((...args) => requests.getThreadEvents(...args));
 
 function deferred<T>() {
   return Promise.withResolvers<T>();
 }
 
-
-function session(
-  id: string,
-  title: string,
-  changed?: number,
-): ManagedSessionSummary {
+function session(id: string, title: string, changed?: number): ManagedSessionSummary {
   // SAFETY: test fixture — the merge reads only summary.session_id/title and
   // moves workspace_diff opaquely; the remaining summary fields are omitted.
   return {
@@ -64,10 +46,7 @@ function session(
       pinned: false,
       presentation_version: 1,
     },
-    workspace_diff:
-      changed === undefined
-        ? undefined
-        : { added: changed, removed: 0, changed: 0 },
+    workspace_diff: changed === undefined ? undefined : { added: changed, removed: 0, changed: 0 },
   } as ManagedSessionSummary;
 }
 
@@ -125,25 +104,13 @@ function OlderMessagesHarness({
   onResult: (accepted: boolean) => void;
 }) {
   const loadOlder = useLoadOlderMessages(id);
-  return (
-    <button onClick={() => void loadOlder.mutateAsync().then(onResult)}>
-      Load
-    </button>
-  );
+  return <button onClick={() => void loadOlder.mutateAsync().then(onResult)}>Load</button>;
 }
 
-function ThreadPageHarness({
-  id,
-  threadName,
-}: {
-  id: string;
-  threadName: string;
-}) {
+function ThreadPageHarness({ id, threadName }: { id: string; threadName: string }) {
   const result = useThreadEventPages(id, threadName);
   return (
-    <output data-testid="thread-page">
-      {result.data?.pages[0]?.events[0]?.id ?? "loading"}
-    </output>
+    <output data-testid="thread-page">{result.data?.pages[0]?.events[0]?.id ?? "loading"}</output>
   );
 }
 
@@ -252,9 +219,7 @@ describe("paged read fencing", () => {
     await waitFor(() => expect(accepted).toBe(false));
     expect(
       client
-        .getQueryData<SessionSnapshotResponse>(
-          queryKeys.sessionSnapshot(id),
-        )
+        .getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id))
         ?.messages.map((message) => message.content),
     ).toEqual(["kept-old", "kept-new"]);
     renderer.unmount();
@@ -263,9 +228,8 @@ describe("paged read fencing", () => {
   it("keeps a late page for thread A out of selected thread B", async () => {
     const pageA = deferred<ThreadEventPage>();
     const pageB = deferred<ThreadEventPage>();
-    requests.getThreadEvents.mockImplementation(
-      (_id: string, threadName: string) =>
-        threadName === "A" ? pageA.promise : pageB.promise,
+    requests.getThreadEvents.mockImplementation((_id: string, threadName: string) =>
+      threadName === "A" ? pageA.promise : pageB.promise,
     );
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -281,9 +245,7 @@ describe("paged read fencing", () => {
         <ThreadPageHarness id="session" threadName="B" />
       </QueryClientProvider>,
     );
-    await waitFor(() =>
-      expect(requests.getThreadEvents).toHaveBeenCalledTimes(2),
-    );
+    await waitFor(() => expect(requests.getThreadEvents).toHaveBeenCalledTimes(2));
 
     await act(async () => {
       pageB.resolve({
@@ -304,9 +266,7 @@ describe("paged read fencing", () => {
       });
       await pageB.promise;
     });
-    await waitFor(() =>
-      expect(renderer.getByTestId("thread-page").textContent).toBe("20"),
-    );
+    await waitFor(() => expect(renderer.getByTestId("thread-page").textContent).toBe("20"));
     await act(async () => {
       pageA.resolve({
         events: [

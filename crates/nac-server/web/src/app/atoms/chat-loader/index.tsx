@@ -26,13 +26,7 @@ const ChatLoader: React.FC<ChatLoaderProps> & { Size: typeof ChatLoaderSize } = 
     className={cn("flex items-end gap-1 fade", className)}
   >
     {[0, 1, 2].map((index) => (
-      <span
-        key={index}
-        className={cn(
-          "chat-loader-dot rounded-full bg-divider-secondary",
-          size,
-        )}
-      />
+      <span key={index} className={cn("chat-loader-dot rounded-full bg-divider-secondary", size)} />
     ))}
   </div>
 );

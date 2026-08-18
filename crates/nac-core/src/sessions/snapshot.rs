@@ -52,6 +52,7 @@ fn now_utc() -> String {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn new_snapshot(
     session_id: String,
     cwd: PathBuf,

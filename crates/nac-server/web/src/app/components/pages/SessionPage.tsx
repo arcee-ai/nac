@@ -18,10 +18,7 @@ import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
-import {
-  useRunStateSync,
-  useSessionStream,
-} from "@/app/hooks/useSessionStream";
+import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -114,11 +111,7 @@ export default function SessionPage() {
 
   perfRender("SessionPage");
 
-  const {
-    data: snapshot = null,
-    error,
-    refetch: refetchSnapshot,
-  } = useSessionSnapshot(id);
+  const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
@@ -154,9 +147,7 @@ export default function SessionPage() {
   // The repair notice already explains a broken config, and that is exactly why
   // the snapshot request fails, so only report an unexplained fetch failure.
   const failure = configError ?? (!snapshot && error ? error : null);
-  const errorNotice = failure
-    ? toNotice(failure, () => void refetchSnapshot())
-    : null;
+  const errorNotice = failure ? toNotice(failure, () => void refetchSnapshot()) : null;
 
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
 
@@ -175,15 +166,10 @@ export default function SessionPage() {
     ? changedFiles.find((file) => file.path === currentFilePath)
     : undefined;
   const fileBadge =
-    currentChangedFile &&
-    (currentChangedFile.additions || currentChangedFile.deletions) ? (
+    currentChangedFile && (currentChangedFile.additions || currentChangedFile.deletions) ? (
       <div className="flex items-center gap-2 shrink-0 code code-small">
-        <span className="text-success-primary">
-          +{currentChangedFile.additions ?? 0}
-        </span>
-        <span className="text-error-primary">
-          -{currentChangedFile.deletions ?? 0}
-        </span>
+        <span className="text-success-primary">+{currentChangedFile.additions ?? 0}</span>
+        <span className="text-error-primary">-{currentChangedFile.deletions ?? 0}</span>
       </div>
     ) : null;
 
@@ -193,12 +179,7 @@ export default function SessionPage() {
   const threadTitleRunning = panel === "threads" && selectedThreadRunning;
 
   const sideBox = (
-    <SessionSideBox
-      sessionId={id}
-      snapshot={snapshot}
-      panel={panel}
-      onPanelChange={goToPanel}
-    />
+    <SessionSideBox sessionId={id} snapshot={snapshot} panel={panel} onPanelChange={goToPanel} />
   );
 
   return (
@@ -248,13 +229,7 @@ export default function SessionPage() {
         className={cn(
           "flex flex-col items-center flex-1 min-w-0 h-full",
           "transition-[padding] duration-150 ease-out",
-          isMobile
-            ? "px-0"
-            : collapsed
-              ? "pl-2 pr-2"
-              : isDesktop
-                ? "pl-6 pr-2"
-                : "pl-2 pr-2",
+          isMobile ? "px-0" : collapsed ? "pl-2 pr-2" : isDesktop ? "pl-6 pr-2" : "pl-2 pr-2",
         )}
       >
         <div className="flex flex-col flex-1 min-h-0 w-full relative">
@@ -311,9 +286,7 @@ export default function SessionPage() {
                   <span
                     className={cn(
                       "header-small",
-                      threadTitleRunning
-                        ? "text-shimmer-basic"
-                        : "text-basic-primary",
+                      threadTitleRunning ? "text-shimmer-basic" : "text-basic-primary",
                     )}
                   >
                     {panel === "threads"
@@ -324,9 +297,7 @@ export default function SessionPage() {
                           SESSION_PANEL_LABEL.worksets)
                         : panel === "files"
                           ? (selectedFile?.split("/").pop() ??
-                            snapshot?.workspace?.changed_files?.[0]?.path
-                              .split("/")
-                              .pop() ??
+                            snapshot?.workspace?.changed_files?.[0]?.path.split("/").pop() ??
                             SESSION_PANEL_LABEL.files)
                           : SESSION_PANEL_LABEL.history}
                   </span>
@@ -335,10 +306,7 @@ export default function SessionPage() {
               </div>
 
               {snapshot?.workspace?.branch ? (
-                <BranchPicker
-                  sessionId={id}
-                  branch={snapshot.workspace.branch}
-                />
+                <BranchPicker sessionId={id} branch={snapshot.workspace.branch} />
               ) : null}
             </div>
           }
