@@ -20,7 +20,6 @@ import { isActiveRun } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { dismissChatTab, restoreChatTab, useDismissedChatTabs } from "@/app/store/chatTabsStore";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
@@ -51,7 +50,6 @@ export function ProjectSessionTabs({
 }) {
   const navigate = useNavigate();
   const projectActions = useProjectActions();
-  const sessionActions = useSessionActions();
   const sessionTitle = useSessionTitle();
   const dismissed = useDismissedChatTabs();
   const [open, setOpen] = useState(false);
@@ -128,7 +126,6 @@ export function ProjectSessionTabs({
               active={entry.summary.session_id === activeSessionId}
               running={isActiveRun(entry.active_run)}
               onClick={() => navigate(routes.session(entry.summary.session_id))}
-              onRename={() => sessionActions.rename(entry.summary)}
               // The last tab has nowhere to hand the screen over to.
               onDismiss={visible.length > 1 ? () => closeTab(entry.summary.session_id) : undefined}
             />

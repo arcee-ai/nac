@@ -20,7 +20,7 @@ import { ProjectPopover } from "@/app/components/projects/ProjectPopover";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
-import { isActiveRun } from "@/app/lib/format";
+import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { findProject } from "@/app/lib/projects";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
@@ -55,13 +55,17 @@ export function Breadcrumbs() {
   const projectSessions = projectId
     ? sessions
         .filter((entry) => entry.summary.project_id === projectId)
-        .sort((a, b) => Date.parse(b.summary.updated_at) - Date.parse(a.summary.updated_at))
+        .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];
 
   const inTrail = Boolean(projectId || sessionId);
   // An orphan has a chat but no project, so the trail falls back to its title
   // and the neutral chat tile.
   const label = project?.name ?? sessionTitle(currentEntry?.summary) ?? sessionId ?? "";
+  // A phone names the chat and puts its project underneath, because the tab
+  // strip that says which chat is open on a wider screen is not there to say
+  // it. An orphan has only the one line, which is all it has to give.
+  const chatTitle = currentEntry ? sessionTitle(currentEntry.summary) : null;
   const avatarId = project?.project_id ?? sessionId ?? "";
   // The project chip pulses only for the chat actually running under it.
   const running = isActiveRun(currentEntry?.active_run);
@@ -71,7 +75,10 @@ export function Breadcrumbs() {
   const showRoot = !isMobile || !inTrail;
 
   return (
-    <nav className="flex items-center min-w-0 gap-1" aria-label="Breadcrumb">
+    <nav
+      className={cn("flex items-center min-w-0 gap-1", isMobile && inTrail && "flex-1")}
+      aria-label="Breadcrumb"
+    >
       {showRoot ? (
         isMobile ? (
           // The phone drops the button chrome and steps the label up to 16px.
@@ -104,23 +111,23 @@ export function Breadcrumbs() {
           ) : null}
           {isMobile ? (
             <>
-              {/* The design gives the phone a fixed slot holding just the title
-                  and a chevron — no avatar, and 16px text that the button
-                  atom's own font size would override. */}
+              {/* The design gives the phone a slot holding the two names and a
+                  chevron — no avatar, and type the button atom's own font size
+                  would override. */}
               <button
                 type="button"
-                className="flex items-center gap-2 rounded-[8px] text-btn-secondary"
+                className="flex flex-1 min-w-0 items-center gap-2 rounded-[8px] text-btn-secondary"
                 onClick={() => setOpen(true)}
                 aria-expanded={open}
-                aria-label="Switch project"
+                aria-label="Switch chat or project"
               >
-                <span
-                  className={cn(
-                    "label-medium min-w-0 max-w-[96px] truncate text-left",
-                    running && "text-shimmer-basic",
-                  )}
-                >
-                  {label}
+                <span className="flex flex-col flex-1 min-w-0 text-left">
+                  <span className={cn("label-medium truncate", running && "text-shimmer-basic")}>
+                    {chatTitle ?? label}
+                  </span>
+                  {chatTitle && project ? (
+                    <span className="text-micro truncate opacity-50">{project.name}</span>
+                  ) : null}
                 </span>
                 <Icon iconName={IconName.Right} size={24} className="shrink-0" />
               </button>

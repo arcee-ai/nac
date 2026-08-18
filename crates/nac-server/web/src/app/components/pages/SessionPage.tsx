@@ -21,6 +21,7 @@ import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
+import { parseStoreTime } from "@/app/lib/format";
 import { perfRender } from "@/app/lib/perfDebug";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
@@ -189,7 +190,7 @@ export default function SessionPage() {
   const projectSessions = projectId
     ? allSessions
         .filter((session) => session.summary.project_id === projectId)
-        .sort((a, b) => Date.parse(b.summary.updated_at) - Date.parse(a.summary.updated_at))
+        .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];
 
   return (

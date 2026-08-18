@@ -9,7 +9,6 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   active?: boolean;
   /** Swaps the label for a shimmering one and shows a spinner. */
   running?: boolean;
-  onRename?: () => void;
   /** Takes the tab off the strip. The chat itself is untouched. */
   onDismiss?: () => void;
 }
@@ -19,15 +18,15 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
  * width so the strip's rhythm survives titles of any length, and the underline
  * on the active one is the only thing marking it.
  *
- * Pointing at a tab reveals its rename and close controls, which take their room
- * from the title rather than being held in reserve — a strip of tabs is read at
- * a glance, so the untouched ones show as much of their name as they can.
+ * Pointing at a tab reveals its close control, which takes its room from the
+ * title rather than being held in reserve — a strip of tabs is read at a glance,
+ * so the untouched ones show as much of their name as they can. Renaming lives
+ * in the chat list, where there is room to say what the button does.
  */
 const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   title,
   active = false,
   running = false,
-  onRename,
   onDismiss,
   className = "",
   type = "button",
@@ -65,14 +64,6 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
         {title}
       </span>
     </button>
-    {onRename ? (
-      <TabAction
-        iconName={IconName.Edit}
-        label={`Rename ${title}`}
-        tooltip="Rename chat"
-        onClick={onRename}
-      />
-    ) : null}
     {onDismiss ? (
       <TabAction
         iconName={IconName.Close}

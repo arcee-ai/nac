@@ -2,7 +2,7 @@
 // counts, spend and running state every project surface shows are joined here
 // from the session list the app already polls.
 
-import { isActiveRun } from "@/app/lib/format";
+import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 /** A project together with the sessions that belong to it. */
@@ -20,7 +20,7 @@ export interface ProjectEntry {
 function newestUpdate(sessions: ManagedSessionSummary[], fallback: string): string {
   let newest = fallback;
   for (const entry of sessions) {
-    if (Date.parse(entry.summary.updated_at) > Date.parse(newest)) {
+    if (parseStoreTime(entry.summary.updated_at) > parseStoreTime(newest)) {
       newest = entry.summary.updated_at;
     }
   }
@@ -28,7 +28,7 @@ function newestUpdate(sessions: ManagedSessionSummary[], fallback: string): stri
 }
 
 function bySessionRecency(a: ManagedSessionSummary, b: ManagedSessionSummary): number {
-  return Date.parse(b.summary.updated_at) - Date.parse(a.summary.updated_at);
+  return parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at);
 }
 
 /**
@@ -145,7 +145,7 @@ function startOfDay(at: number): number {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function bucketFor(updatedAt: string, now: number): RecencyBucket {
-  const timestamp = Date.parse(updatedAt);
+  const timestamp = parseStoreTime(updatedAt);
   if (!Number.isFinite(timestamp)) return "Older";
   const today = startOfDay(now);
   if (timestamp >= today) return "Today";

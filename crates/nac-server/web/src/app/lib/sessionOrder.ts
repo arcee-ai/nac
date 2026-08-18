@@ -1,3 +1,4 @@
+import { parseStoreTime } from "@/app/lib/format";
 import type {
   ManagedSessionSummary,
   ReorderSessionsRequest,
@@ -15,7 +16,8 @@ export function placeIdAt(ids: string[], id: string, index: number): string[] {
 
 export function compareSortOrder(a: SessionSummarySnapshot, b: SessionSummarySnapshot): number {
   return (
-    (a.sort_order ?? 0) - (b.sort_order ?? 0) || Date.parse(b.created_at) - Date.parse(a.created_at)
+    (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+    parseStoreTime(b.created_at) - parseStoreTime(a.created_at)
   );
 }
 

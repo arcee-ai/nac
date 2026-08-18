@@ -8,6 +8,7 @@ import { useNow } from "@/app/hooks/useNow";
 import {
   SESSION_ENVS,
   displaySessionTitle,
+  parseStoreTime,
   sessionEnvLabel,
   type SessionEnv,
 } from "@/app/lib/format";
@@ -112,7 +113,7 @@ export function hasActiveFilters(): boolean {
 function withinRange(value: string, range: RangeId, now: number): boolean {
   const span = RANGE_MS[range];
   if (!span) return true;
-  const ts = Date.parse(value);
+  const ts = parseStoreTime(value);
   if (!Number.isFinite(ts)) return true;
   return now - ts <= span;
 }
@@ -139,12 +140,12 @@ const comparators = {
   [SORT_DEFAULT]: (a, b) => {
     const order =
       (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
-      Date.parse(b.created_at) - Date.parse(a.created_at);
+      parseStoreTime(b.created_at) - parseStoreTime(a.created_at);
     return order;
   },
-  created_desc: (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
-  created_asc: (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
-  updated_desc: (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at),
+  created_desc: (a, b) => parseStoreTime(b.created_at) - parseStoreTime(a.created_at),
+  created_asc: (a, b) => parseStoreTime(a.created_at) - parseStoreTime(b.created_at),
+  updated_desc: (a, b) => parseStoreTime(b.updated_at) - parseStoreTime(a.updated_at),
   title_asc: (a, b) =>
     displaySessionTitle(a).localeCompare(displaySessionTitle(b), undefined, {
       sensitivity: "base",
@@ -248,7 +249,7 @@ export function useVisibleProjectItems(items: ProjectListItem[]): ProjectListIte
       const key = filters.sort === "updated_desc" ? "updatedAt" : "createdAt";
       const ascending = filters.sort === "created_asc";
       visible.sort((a, b) => {
-        const delta = Date.parse(itemTimes(b)[key]) - Date.parse(itemTimes(a)[key]);
+        const delta = parseStoreTime(itemTimes(b)[key]) - parseStoreTime(itemTimes(a)[key]);
         return ascending ? -delta : delta;
       });
     }

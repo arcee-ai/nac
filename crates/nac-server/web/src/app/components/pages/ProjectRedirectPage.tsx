@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
 import { Loader, LoaderSize } from "@/app/atoms";
+import { parseStoreTime } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useProjects, useSessions } from "@/app/services/queries";
@@ -27,7 +28,9 @@ export default function ProjectRedirectPage() {
     const owned = (sessionsQuery.data ?? []).filter(
       (entry) => entry.summary.project_id === projectId,
     );
-    owned.sort((a, b) => Date.parse(b.summary.updated_at) - Date.parse(a.summary.updated_at));
+    owned.sort(
+      (a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at),
+    );
     return owned[0] ?? null;
   }, [sessionsQuery.data, projectId]);
 

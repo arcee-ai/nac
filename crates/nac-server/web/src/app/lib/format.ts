@@ -159,12 +159,22 @@ export function formatClock(ms: number | null | undefined): string {
 }
 
 /**
- * A store timestamp as a short local date and time. The store writes UTC as
- * "YYYY-MM-DD HH:MM:SS" with no zone marker, which JavaScript would otherwise
- * read as local time and shift by the offset.
+ * A store timestamp as epoch milliseconds, or NaN if it cannot be read.
+ *
+ * The store writes UTC as "YYYY-MM-DD HH:MM:SS" with no zone marker, which
+ * `Date.parse` reads as local time. Left alone that shifts every timestamp by
+ * the viewer's offset, which is enough to file a project made a minute ago
+ * under yesterday. Anything that does name its zone is taken at its word.
  */
+export function parseStoreTime(value: string | null | undefined): number {
+  if (!value) return Number.NaN;
+  const isoish = value.replace(" ", "T");
+  return Date.parse(/(?:Z|[+-]\d\d:?\d\d)$/.test(isoish) ? isoish : `${isoish}Z`);
+}
+
+/** A store timestamp as a short local date and time. */
 export function formatStoreTime(value: string): string {
-  const parsed = new Date(`${value.replace(" ", "T")}Z`);
+  const parsed = new Date(parseStoreTime(value));
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString([], {
     month: "short",
