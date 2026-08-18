@@ -548,7 +548,7 @@ impl EffectiveSandboxOptions {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::large_enum_variant)]
 pub(crate) enum OrchestratorSession {
     Active {
         session_id: String,
@@ -611,6 +611,7 @@ pub struct ResumePickerRunConfig {
     pub worker_executable: Option<PathBuf>,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum RunState {
     Orchestrator { run_config: OrchestratorRunConfig },
     ResumePicker(ResumePickerRunConfig),
@@ -1357,6 +1358,7 @@ pub async fn build_resume_config_for_session_with_lease(
     Ok(run_config)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn build_resume_config_from_snapshot(
     snapshot: SessionSnapshot,
     store_path: PathBuf,

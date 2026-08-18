@@ -32,10 +32,7 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
-import {
-  displayPromptFromMessageText,
-  formatStoreTime,
-} from "@/app/lib/format";
+import { displayPromptFromMessageText, formatStoreTime } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import type { SessionPanel } from "@/app/lib/routes";
@@ -92,11 +89,7 @@ interface TranscriptProps {
   errorNotice?: ErrorNotice | null;
 }
 
-export function TranscriptRecoveryNotice({
-  warning,
-}: {
-  warning?: string | null;
-}) {
+export function TranscriptRecoveryNotice({ warning }: { warning?: string | null }) {
   if (!warning) return null;
   return (
     <MessageBox
@@ -166,16 +159,15 @@ export function Transcript({
   const olderMessages = useLoadOlderMessages(sessionId);
   const { data: revisions } = useWorkspaceRevisions(sessionId);
   const latestRevisionId = revisions?.at(-1)?.id ?? 0;
-  const { scrollRef, contentRef, showJumpButton, jumpToLatest } =
-    useStickToBottom({
-      resetKey: sessionId,
-      pinKey: [
-        running ? "running" : "idle",
-        snapshot?.active_run ? "active" : "settled",
-        snapshot?.messages.length ?? 0,
-        latestRevisionId,
-      ].join(":"),
-    });
+  const { scrollRef, contentRef, showJumpButton, jumpToLatest } = useStickToBottom({
+    resetKey: sessionId,
+    pinKey: [
+      running ? "running" : "idle",
+      snapshot?.active_run ? "active" : "settled",
+      snapshot?.messages.length ?? 0,
+      latestRevisionId,
+    ].join(":"),
+  });
   const prependAnchor = useRef<{ height: number; top: number } | null>(null);
   const messageWindowStart = snapshot?.message_page?.start ?? 0;
 
@@ -211,15 +203,12 @@ export function Transcript({
   // untouched between refetches, and the stream half hands its earlier turns
   // straight back, which is what keeps the memoized rows from re-rendering.
   const snapshotTurns = useMemo(
-    () =>
-      perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads)),
+    () => perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads)),
     [snapshot, liveThreads],
   );
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
   // Send so the bubble is already above the model pill before the round-trip.
-  const submitted = running
-    ? snapshot?.active_run?.submitted_user_message
-    : undefined;
+  const submitted = running ? snapshot?.active_run?.submitted_user_message : undefined;
   const pendingText = submitted
     ? displayPromptFromMessageText(submitted.content)
     : (optimisticPrompt ?? "");
@@ -227,9 +216,7 @@ export function Transcript({
   // kind: everything the run produces lands after the prompt it answers, so
   // once that prompt is in the snapshot the copy is a duplicate no matter how
   // many model turns have piled up on top of it.
-  const showPending = Boolean(
-    pendingText && lastUserText(snapshotTurns) !== pendingText,
-  );
+  const showPending = Boolean(pendingText && lastUserText(snapshotTurns) !== pendingText);
   const turns = useMemo(
     () =>
       withStreamedOutput(
@@ -242,8 +229,7 @@ export function Transcript({
   // A stream that had to open a turn of its own is answering a prompt the
   // snapshot has not caught up with, so the optimistic bubble moves into the
   // list with it instead of being rendered under the whole thing.
-  const streamingTurn =
-    showPending && turns[turns.length - 1]?.key === STREAMING_TURN_KEY;
+  const streamingTurn = showPending && turns[turns.length - 1]?.key === STREAMING_TURN_KEY;
   perfMark("transcript:turns", {
     fields: { turns: turns.length, streamChars: streamText.length },
     throttleMs: 1000,
@@ -275,10 +261,7 @@ export function Transcript({
             id: sessionId,
             messageIdx,
           });
-          pushLocalEvent(
-            "run",
-            `▶ resent: ${response.display_prompt.slice(0, 80)}`,
-          );
+          pushLocalEvent("run", `▶ resent: ${response.display_prompt.slice(0, 80)}`);
         } catch (err) {
           pushLocalEvent("error", `resend failed: ${errorMessage(toRunError(err))}`, true);
           toast.error(`Failed to resend: ${humanErrorText(toRunError(err), backend)}`);
@@ -297,10 +280,7 @@ export function Transcript({
   const model = snapshot?.metadata.model ?? "";
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
-  const turnRevisions = useMemo(
-    () => revisionsByTurn(turns, revisions),
-    [turns, revisions],
-  );
+  const turnRevisions = useMemo(() => revisionsByTurn(turns, revisions), [turns, revisions]);
 
   useEffect(() => {
     if (!showPending && optimisticPrompt) {
@@ -359,14 +339,7 @@ export function Transcript({
       onOpenFile: focusRevisionFile,
       onOpenPanel: focusRevision,
     }),
-    [
-      sessionId,
-      panel,
-      selectedFile,
-      selectedRevision,
-      focusRevisionFile,
-      focusRevision,
-    ],
+    [sessionId, panel, selectedFile, selectedRevision, focusRevisionFile, focusRevision],
   );
 
   // A session nobody has written to yet offers starter prompts in place of the
@@ -374,23 +347,16 @@ export function Transcript({
   // Emptiness is measured in turns rather than in the message page: every
   // session opens with a system prompt, which the page counts and the
   // transcript does not show.
-  const showInitialPrompts = Boolean(
-    snapshot && turns.length === 0 && !running && !showPending,
-  );
+  const showInitialPrompts = Boolean(snapshot && turns.length === 0 && !running && !showPending);
 
   const runError = error && !running ? error : null;
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
-  const notice =
-    errorNotice ??
-    (runError && !authErrorSuppressed ? toNotice(runError) : null);
+  const notice = errorNotice ?? (runError && !authErrorSuppressed ? toNotice(runError) : null);
 
   // Nothing is worth revealing before the snapshot lands, unless the reason it
   // never will is the notice standing in its place.
-  const revealed = useTranscriptReveal(
-    sessionId,
-    Boolean(snapshot) || errorNotice !== null,
-  );
+  const revealed = useTranscriptReveal(sessionId, Boolean(snapshot) || errorNotice !== null);
   // A load ends in a fade; a reveal that only turns the loader off would flash
   // the gap between the two. Sliding the whole tree in and out of view on the
   // same duration crossfades them instead.
@@ -409,9 +375,7 @@ export function Transcript({
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
           "pointer-events-none absolute inset-x-0 top-[96px] px-4 md:top-[72px] md:px-0",
-          revealed
-            ? "opacity-0 transition-opacity duration-150 ease-in-out"
-            : "opacity-100",
+          revealed ? "opacity-0 transition-opacity duration-150 ease-in-out" : "opacity-100",
         )}
       >
         <div className="mx-auto w-full max-w-[840px]">
@@ -434,10 +398,7 @@ export function Transcript({
           </div>
         </div>
       ) : null}
-      <div
-        ref={scrollRef}
-        className={cn("h-full overflow-auto", fade, !revealed && "invisible")}
-      >
+      <div ref={scrollRef} className={cn("h-full overflow-auto", fade, !revealed && "invisible")}>
         {/* The top bar is fixed over this scroll region, so the first message
             needs to clear it. */}
         <div
@@ -461,10 +422,7 @@ export function Transcript({
                 {olderMessages.isPending ? "Loading…" : "Load older"}
               </Button>
               {olderMessages.isError ? (
-                <div
-                  role="alert"
-                  className="flex items-center gap-2 text-basic-muted label-small"
-                >
+                <div role="alert" className="flex items-center gap-2 text-basic-muted label-small">
                   <span>Couldn’t load older messages.</span>
                   <Button
                     variant={ButtonVariant.Ghost}
@@ -479,9 +437,7 @@ export function Transcript({
             </div>
           ) : null}
 
-          <TranscriptRecoveryNotice
-            warning={snapshot?.transcript_recovery_warning}
-          />
+          <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />
 
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
@@ -490,9 +446,7 @@ export function Transcript({
                   <UserMessage
                     key={turn.key}
                     text={turn.text}
-                    timestamp={
-                      turn.createdAt ? formatStoreTime(turn.createdAt) : null
-                    }
+                    timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
                     messageIndex={turn.messageIndex}
                     actionsDisabled={actionsBusy}
                     onRefresh={refreshIndex === index ? resend : null}
@@ -504,10 +458,7 @@ export function Transcript({
               // Resend / revert on a model turn address the user prompt it
               // answered — same messageIdx as the bubble above.
               let precedingUserIndex: number | null = null;
-              let precedingUser: Extract<
-                TranscriptTurn,
-                { kind: "user" }
-              > | null = null;
+              let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
               for (let prior = index - 1; prior >= 0; prior -= 1) {
                 const candidate = turns[prior];
                 if (candidate?.kind === "user") {
@@ -524,23 +475,16 @@ export function Transcript({
                   model={model}
                   active={running && index === turns.length - 1}
                   isLast={index === turns.length - 1}
-                  activity={
-                    running && index === turns.length - 1 ? activity : undefined
-                  }
-                  selectedThreadEpisode={
-                    panel === "threads" ? selectedThreadEpisode : null
-                  }
-                  selectedWorkset={
-                    panel === "worksets" ? selectedWorkset : null
-                  }
+                  activity={running && index === turns.length - 1 ? activity : undefined}
+                  selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
+                  selectedWorkset={panel === "worksets" ? selectedWorkset : null}
                   onSelectThread={focusThread}
                   onSelectWorkset={focusWorkset}
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
                   onRefresh={
-                    precedingUserIndex != null &&
-                    refreshIndex === precedingUserIndex
+                    precedingUserIndex != null && refreshIndex === precedingUserIndex
                       ? resend
                       : null
                   }
@@ -568,9 +512,7 @@ export function Transcript({
             })}
           </PerfProfiler>
 
-          {showPending && !streamingTurn ? (
-            <UserMessage text={pendingText} pending />
-          ) : null}
+          {showPending && !streamingTurn ? <UserMessage text={pendingText} pending /> : null}
 
           {/* Before the first assistant message or stream delta lands, keep the
               same chrome as a live ModelMessage — pill + model name — rather
@@ -587,9 +529,7 @@ export function Transcript({
               model={model}
               active
               isLast
-              selectedThreadEpisode={
-                panel === "threads" ? selectedThreadEpisode : null
-              }
+              selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
               onSelectThread={focusThread}
               onSelectWorkset={focusWorkset}

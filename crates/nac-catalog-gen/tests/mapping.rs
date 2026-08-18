@@ -262,7 +262,10 @@ fn unknown_cost_tier_type_fails_loudly() {
         EMPTY_OVERRIDES,
     );
     let error = format!("{:#}", result.unwrap_err());
-    assert!(error.contains("unknown cost tier type 'time_of_day'"), "{error}");
+    assert!(
+        error.contains("unknown cost tier type 'time_of_day'"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -441,6 +441,7 @@ impl SessionClientHandle {
         self.service.frontend_snapshot().await
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prepared_prompt(
         &self,
         prompt: PreparedPrompt,
@@ -448,6 +449,7 @@ impl SessionClientHandle {
         self.try_submit_prompt(prompt.agent_prompt)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prepared_prompt_with_lease(
         &self,
         prompt: PreparedPrompt,
@@ -460,6 +462,7 @@ impl SessionClientHandle {
         )
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -966,6 +969,7 @@ impl SessionService {
         commands::prepare_user_input(input)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prepared_prompt(
         &self,
         prompt: PreparedPrompt,
@@ -1777,16 +1781,15 @@ impl SessionService {
             cache.scanned_len = merged_len;
             return Ok(());
         }
-        let mut position = scanned_len;
-        for message in blob_delta
-            .iter()
-            .chain(rows.iter().map(|(_, message)| message))
-        {
+        for (position, message) in (scanned_len..).zip(
+            blob_delta
+                .iter()
+                .chain(rows.iter().map(|(_, message)| message)),
+        ) {
             if position >= cache.scanned_len {
                 cache.scan_message(position, message);
                 cache.scanned_len = position + 1;
             }
-            position += 1;
         }
         Ok(())
     }
@@ -2073,6 +2076,7 @@ impl SessionService {
         Ok(operation_lease)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -2080,6 +2084,7 @@ impl SessionService {
         self.try_submit_prompt_inner(None, expanded_prompt, None)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt_for_client(
         &self,
         client_id: SessionClientId,
@@ -2088,6 +2093,7 @@ impl SessionService {
         self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt_for_client_with_lease(
         &self,
         client_id: SessionClientId,
@@ -2206,6 +2212,7 @@ impl SessionService {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn try_submit_prompt_inner(
         &self,
         client_id: Option<SessionClientId>,
@@ -2293,6 +2300,7 @@ impl SessionService {
         Ok(active)
     }
 
+    #[allow(clippy::result_large_err)]
     fn try_begin_run_with_lease(
         &self,
         client_id: Option<SessionClientId>,
@@ -2302,6 +2310,7 @@ impl SessionService {
         self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true)
     }
 
+    #[allow(clippy::result_large_err)]
     fn try_begin_run_inner(
         &self,
         client_id: Option<SessionClientId>,

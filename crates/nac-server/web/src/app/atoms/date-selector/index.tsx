@@ -34,8 +34,7 @@ const display = (value?: DateString | null): string => {
   return date ? date.toLocaleDateString("en-US") : "";
 };
 
-interface CommonProps
-  extends Omit<InputWrapperProps, "children" | "validationText"> {
+interface CommonProps extends Omit<InputWrapperProps, "children" | "validationText"> {
   size?: ButtonSize;
   disabled?: boolean;
   validationText?: string;
@@ -88,7 +87,7 @@ const DateSelector: React.FC<DateSelectorProps> = ({
     ? range?.from || range?.to
       ? `${display(range?.from) || "Start"} – ${display(range?.to) || "End"}`
       : (placeholder ?? "Select range")
-    : (display(value) || placeholder) ?? "Select date";
+    : ((display(value) || placeholder) ?? "Select date");
 
   const pickDate = (date: Date) => {
     onChange?.(toDateString(date));
@@ -143,18 +142,13 @@ const DateSelector: React.FC<DateSelectorProps> = ({
         content={calendar}
       >
         <Button
-          variant={
-            open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
-          }
+          variant={open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary}
           size={size}
           content={ButtonContent.IconLeft}
           disabled={disabled}
           aria-haspopup="dialog"
           aria-expanded={open}
-          className={cn(
-            "w-full justify-between",
-            validation && "input-validation",
-          )}
+          className={cn("w-full justify-between", validation && "input-validation")}
           onClick={() => setOpen((current) => !current)}
         >
           <Icon iconName={IconName.Calendar} />

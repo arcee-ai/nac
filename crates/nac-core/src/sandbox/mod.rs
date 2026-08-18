@@ -130,14 +130,10 @@ pub(crate) fn clear_activity(key: &str) {
 /// natural home for additional backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum SandboxBackendType {
+    #[default]
     Podman,
-}
-
-impl Default for SandboxBackendType {
-    fn default() -> Self {
-        SandboxBackendType::Podman
-    }
 }
 
 impl SandboxBackendType {
@@ -567,6 +563,7 @@ fn host_workspace_mounts_from_spec(spec: &SandboxSpec) -> Option<Vec<HostWorkspa
     Some(mounts)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_sandbox_spec(
     backend: SandboxBackendType,
     image: String,

@@ -31,9 +31,7 @@ export function smoothScrollTo(
   const to = Math.min(Math.max(0, targetTop), maxTop);
   const distance = to - from;
 
-  const reducedMotion = window.matchMedia(
-    "(prefers-reduced-motion: reduce)",
-  ).matches;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (!distance || durationMs <= 0 || reducedMotion) {
     element.scrollTop = to;
     return Promise.resolve(true);

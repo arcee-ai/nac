@@ -63,10 +63,7 @@ export function ModelPicker({
     metadata?.base_url || null,
     open && usesKey,
   );
-  const loginQuery = useManagedProviderModels(
-    backend,
-    open && !usesKey && signedIn,
-  );
+  const loginQuery = useManagedProviderModels(backend, open && !usesKey && signedIn);
   const query = usesKey ? keyQuery : loginQuery;
 
   const current = metadata?.model ?? label;
@@ -85,20 +82,14 @@ export function ModelPicker({
       await updateConfig.mutateAsync({ id: sessionId, patch: { model } });
       toast.success(`Model switched to ${model}`);
     } catch (error) {
-      toast.error(
-        `The model was not switched: ${humanErrorText(toRunError(error), backend)}`,
-      );
+      toast.error(`The model was not switched: ${humanErrorText(toRunError(error), backend)}`);
     }
   };
 
   const rows = query.isFetching ? (
     // Rows the size of the ones the provider is about to name, so the panel
     // does not resize under the pointer once the list lands.
-    <div
-      role="status"
-      aria-label="Reading the model list"
-      className="px-1 py-1"
-    >
+    <div role="status" aria-label="Reading the model list" className="px-1 py-1">
       <ShimmerLoader rows={3} rowClassName="h-6" />
     </div>
   ) : query.isError ? (
@@ -139,9 +130,7 @@ export function ModelPicker({
           <div className="px-1 py-2 code code-micro text-basic-tertiary truncate shrink-0">
             {providerLabel(backend) || "Model"}
           </div>
-          <div className="flex flex-col overflow-y-auto flex-grow gap-1">
-            {rows}
-          </div>
+          <div className="flex flex-col overflow-y-auto flex-grow gap-1">{rows}</div>
         </div>
       }
     >

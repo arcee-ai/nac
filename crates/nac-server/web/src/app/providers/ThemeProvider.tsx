@@ -1,10 +1,4 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 export type Theme = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
@@ -25,8 +19,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const prefersDark = () =>
-  window.matchMedia("(prefers-color-scheme: dark)").matches;
+const prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
 function resolve(_theme: Theme): ResolvedTheme {
   return FORCED_THEME;
@@ -48,9 +41,7 @@ function initialTheme(): Theme {
   return prefersDark() ? "dark" : "light";
 }
 
-export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({
-  children,
-}) => {
+export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   const setTheme = useCallback((next: Theme) => {
@@ -62,8 +53,7 @@ export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({
 
   const toggleTheme = useCallback(() => {
     setThemeState((prev) => {
-      const next: Theme =
-        prev === "light" ? "dark" : prev === "dark" ? "system" : "light";
+      const next: Theme = prev === "light" ? "dark" : prev === "dark" ? "system" : "light";
       localStorage.setItem(STORAGE_KEY, next);
       applyToDOM();
       return next;
@@ -75,9 +65,7 @@ export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({
   }, []);
 
   return (
-    <ThemeContext.Provider
-      value={{ theme, resolved: resolve(theme), setTheme, toggleTheme }}
-    >
+    <ThemeContext.Provider value={{ theme, resolved: resolve(theme), setTheme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

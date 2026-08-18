@@ -64,9 +64,7 @@ const Label: React.FC<LabelProps> & { Size: typeof LabelSize } = ({
       className,
     )}
   >
-    {icon ? (
-      <Icon iconName={icon} size={iconSizeFor[size]} className="shrink-0" />
-    ) : null}
+    {icon ? <Icon iconName={icon} size={iconSizeFor[size]} className="shrink-0" /> : null}
     <span className="truncate">{children}</span>
     {hoverHint ? (
       <HoverHint

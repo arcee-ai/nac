@@ -15,13 +15,7 @@ const onRender: ProfilerOnRenderCallback = (id, phase, actualDuration) => {
  * Wrap a subtree so React reports what each of its commits actually cost.
  * Transparent unless `__perf.on()` has been called, so it can stay in the tree.
  */
-export function PerfProfiler({
-  id,
-  children,
-}: {
-  id: string;
-  children: ReactNode;
-}) {
+export function PerfProfiler({ id, children }: { id: string; children: ReactNode }) {
   if (!perfEnabled()) return <>{children}</>;
   return (
     <Profiler id={id} onRender={onRender}>

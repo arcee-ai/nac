@@ -97,8 +97,7 @@ export function ThreadLogTail({
                 has room for still reads as the command it ran. */}
             {line.isError && line.mark ? (
               <>
-                <span className="text-error-primary">{line.mark}</span>{" "}
-                {line.body}
+                <span className="text-error-primary">{line.mark}</span> {line.body}
               </>
             ) : (
               line.bare

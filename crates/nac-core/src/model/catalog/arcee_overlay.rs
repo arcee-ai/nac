@@ -19,7 +19,9 @@
 //! `ArceeAuth` and `ArceeApi` backends.
 
 use super::data::{GeneratedModel, GeneratedProvider};
-use super::overlay::{atomic_replace, overlay_dir, unix_now, REFRESH_CADENCE_SECS, REFRESH_TIMEOUT};
+use super::overlay::{
+    atomic_replace, overlay_dir, unix_now, REFRESH_CADENCE_SECS, REFRESH_TIMEOUT,
+};
 use super::{CatalogWarning, ModelCatalog, ModelSource};
 use crate::model::{BackendKind, ReasoningEffort, ARCEE_AUTH_CANONICAL_BASE_URL};
 use serde::{Deserialize, Serialize};
@@ -167,10 +169,14 @@ pub(crate) async fn refresh_arcee_once() -> ArceeRefreshOutcome {
     }
     write_sidecar(
         &sidecar_path,
-        &ArceeOverlaySidecar { fetched_at_unix: now },
+        &ArceeOverlaySidecar {
+            fetched_at_unix: now,
+        },
     );
     super::reload();
-    ArceeRefreshOutcome::Updated { models: model_count }
+    ArceeRefreshOutcome::Updated {
+        models: model_count,
+    }
 }
 
 /// Fetch the arcee model list, trying arcee-api first then arcee-auth.
@@ -179,17 +185,13 @@ async fn fetch_arcee_models(client: &reqwest::Client) -> Result<Option<String>, 
     // arcee-api: the env var is cheaper — no file I/O, no token refresh.
     if let Ok(api_key) = std::env::var("ARCEE_API_KEY") {
         if !api_key.trim().is_empty() {
-            return Ok(Some(
-                fetch_arcee_models_api_key(client, &api_key).await?,
-            ));
+            return Ok(Some(fetch_arcee_models_api_key(client, &api_key).await?));
         }
     }
 
     // arcee-auth: stored login (device-flow credential file).
     if crate::model::arcee::stored_credential_present() {
-        return Ok(Some(
-            fetch_arcee_models_managed(client).await?,
-        ));
+        return Ok(Some(fetch_arcee_models_managed(client).await?));
     }
 
     // No credentials configured yet — the user may log in after the server
@@ -299,9 +301,7 @@ pub(super) fn map_arcee_api_response(body: &str) -> Result<Vec<ArceeOverlayEntry
         match serde_json::from_value::<ArceeApiModel>(item.clone()) {
             Ok(model) => entries.push(map_arcee_model(&model)),
             Err(error) => {
-                eprintln!(
-                    "nac: model catalog: skipping arcee model entry: {error}"
-                );
+                eprintln!("nac: model catalog: skipping arcee model entry: {error}");
             }
         }
     }
@@ -506,9 +506,7 @@ pub fn spawn_arcee_model_refresh() {
     handle.spawn(async move {
         match refresh_arcee_once().await {
             ArceeRefreshOutcome::Updated { models } => {
-                eprintln!(
-                    "nac: arcee model catalog updated from arcee API ({models} models)"
-                );
+                eprintln!("nac: arcee model catalog updated from arcee API ({models} models)");
             }
             ArceeRefreshOutcome::Failed { error } => {
                 eprintln!("nac: arcee model catalog refresh failed: {error}");

@@ -15,8 +15,7 @@ import type {
   SessionEventBoundary,
 } from "@/app/types/api";
 
-export type StreamStatus =
-  "idle" | "connecting" | "live" | "reconnecting" | "error";
+export type StreamStatus = "idle" | "connecting" | "live" | "reconnecting" | "error";
 
 export interface SessionStreamHandlers {
   onEnvelope: (envelope: SessionEventEnvelope) => void;

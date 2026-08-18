@@ -7,11 +7,7 @@ import {
   threadLogLine,
   toolCallFailed,
 } from "@/app/lib/threadLog";
-import type {
-  AgentEvent,
-  ThreadEventPage,
-  ThreadEventRecord,
-} from "@/app/types/api";
+import type { AgentEvent, ThreadEventPage, ThreadEventRecord } from "@/app/types/api";
 
 function logEvent(line: string): AgentEvent {
   // SAFETY: test fixture — the merge logic under test only reads `type` and
@@ -86,14 +82,14 @@ describe("tool-call status", () => {
 
 describe("thread history paging", () => {
   it("normalizes newest and overlapping older pages chronologically", () => {
-    const merged = mergeThreadEventPages([
-      page([104, 105], true),
-      page([102, 103, 104], false),
-    ]);
+    const merged = mergeThreadEventPages([page([104, 105], true), page([102, 103, 104], false)]);
 
-    expect(
-      merged.map((event) => (event.type === "thread_log" ? event.line : null)),
-    ).toEqual(["event-102", "event-103", "event-104", "event-105"]);
+    expect(merged.map((event) => (event.type === "thread_log" ? event.line : null))).toEqual([
+      "event-102",
+      "event-103",
+      "event-104",
+      "event-105",
+    ]);
   });
 
   it("collapses a live tool event once the persisted copy arrives", () => {

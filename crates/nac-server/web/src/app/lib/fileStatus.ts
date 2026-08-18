@@ -24,5 +24,4 @@ export const statusColor = (status: string | null) =>
 
 /** A deleted file is gone from the checkout, so its name is struck through. */
 export const statusLabelClass = (status: string | null) =>
-  cn(statusColor(status), status?.trim()[0] === "D" && "line-through") ||
-  undefined;
+  cn(statusColor(status), status?.trim()[0] === "D" && "line-through") || undefined;

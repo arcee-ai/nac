@@ -34,11 +34,7 @@ import {
 import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
-import {
-  STICK_TOLERANCE_PX,
-  distanceFromBottom,
-  scrollToBottomInstantly,
-} from "@/app/lib/scroll";
+import { STICK_TOLERANCE_PX, distanceFromBottom, scrollToBottomInstantly } from "@/app/lib/scroll";
 import {
   groupThreadLog,
   mergeThreadLog,
@@ -50,11 +46,7 @@ import {
   type ThreadLogLine,
   type ToolCallEntry,
 } from "@/app/lib/threadLog";
-import {
-  dispatchActions,
-  dispatchThreadName,
-  partitionThreadCalls,
-} from "@/app/lib/transcript";
+import { dispatchActions, dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
 import { useLiveThreads } from "@/app/store/runtimeStore";
 import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
@@ -151,11 +143,7 @@ const ToolCallView = memo(function ToolCallView({
         // rather than as urgent — a "File not found" is a plain fact about the
         // path in it.
         <p className="pl-4 pt-0.5 code code-small whitespace-pre-wrap break-words text-basic-tertiary">
-          <span
-            className={
-              entry.isError ? "text-error-primary" : "text-success-primary"
-            }
-          >
+          <span className={entry.isError ? "text-error-primary" : "text-success-primary"}>
             {`${entry.isError ? "✕" : "✓"} `}
           </span>
           {entry.resultPreview}
@@ -168,25 +156,15 @@ const ToolCallView = memo(function ToolCallView({
 /**
  * A line the worker printed that is not a tool call — its plain log output.
  */
-const StandaloneView = memo(function StandaloneView({
-  entry,
-}: {
-  entry: StandaloneLine;
-}) {
+const StandaloneView = memo(function StandaloneView({ entry }: { entry: StandaloneLine }) {
   return (
     <p className="pt-1 code code-small whitespace-pre-wrap break-words text-basic-tertiary">
       {entry.mark ? (
-        <span
-          className={
-            entry.isError ? "text-error-primary" : "text-success-primary"
-          }
-        >
+        <span className={entry.isError ? "text-error-primary" : "text-success-primary"}>
           {`${entry.mark} `}
         </span>
       ) : null}
-      {entry.name ? (
-        <span className="text-basic-primary">{`${entry.name}: `}</span>
-      ) : null}
+      {entry.name ? <span className="text-basic-primary">{`${entry.name}: `}</span> : null}
       {entry.body}
     </p>
   );
@@ -203,8 +181,7 @@ const LogEntryView = memo(function LogEntryView({
   entry: LogEntry;
   running: boolean;
 }) {
-  if (entry.kind === "tool_call")
-    return <ToolCallView entry={entry} running={running} />;
+  if (entry.kind === "tool_call") return <ToolCallView entry={entry} running={running} />;
   return <StandaloneView entry={entry} />;
 });
 
@@ -225,13 +202,7 @@ const FAILED_EPISODE_BADGE: FailedEpisodeBadgeMap = {
  * the prompt is already one click away under the panel's own Task control.
  * Each tab owns its open state so several can be read at once.
  */
-function EpisodeTab({
-  episode,
-  index,
-}: {
-  episode: EpisodeSnapshot;
-  index: number;
-}) {
+function EpisodeTab({ episode, index }: { episode: EpisodeSnapshot; index: number }) {
   const [expanded, setExpanded] = useState(false);
   const isMobile = useIsMobile();
   const failure = FAILED_EPISODE_BADGE[episode.status];
@@ -252,20 +223,12 @@ function EpisodeTab({
         <span className={`shrink-0 ${labelClass} text-basic-primary`}>
           {`Episode ${index + 1}`}
         </span>
-        {failure ? (
-          <Badge
-            text={failure.label}
-            color={failure.color}
-            className="shrink-0"
-          />
-        ) : null}
+        {failure ? <Badge text={failure.label} color={failure.color} className="shrink-0" /> : null}
       </button>
       <DropdownContent isOpen={expanded} className="w-full">
         <div className="flex flex-col pl-1 pr-1 md:pl-3 md:pr-2 pt-2 pb-6">
           {episode.content.trim() ? (
-            <Markdown className="text-basic-primary">
-              {episode.content}
-            </Markdown>
+            <Markdown className="text-basic-primary">{episode.content}</Markdown>
           ) : (
             <p className="label-small text-basic-muted">
               {failure
@@ -329,9 +292,7 @@ function LogScroller({
       <div className="pb-[128px] md:pb-4">
         {entries.map((entry) => (
           <LogEntryView
-            key={
-              entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key
-            }
+            key={entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key}
             entry={entry}
             running={running}
           />
@@ -343,9 +304,7 @@ function LogScroller({
           </p>
         ) : null}
         {!entries.length && !running && !loading ? (
-          <p className="pt-4 code code-small text-basic-muted">
-            No commands recorded.
-          </p>
+          <p className="pt-4 code code-small text-basic-muted">No commands recorded.</p>
         ) : null}
       </div>
     </div>
@@ -382,14 +341,9 @@ function LogPane({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stuckRef = useRef(true);
   const entries = useMemo(() => groupThreadLog(lines), [lines]);
-  const thinking = useMemo(
-    () => threadIsThinking(running, lines),
-    [running, lines],
-  );
+  const thinking = useMemo(() => threadIsThinking(running, lines), [running, lines]);
   const firstEntryKey =
-    entries[0]?.kind === "tool_call"
-      ? `call-${entries[0].callId}`
-      : (entries[0]?.key ?? null);
+    entries[0]?.kind === "tool_call" ? `call-${entries[0].callId}` : (entries[0]?.key ?? null);
 
   useLayoutEffect(() => {
     const anchor = prependAnchor.current;
@@ -451,9 +405,7 @@ function LogPane({
             ) : null}
             {historyError ? (
               <>
-                <span className="text-micro text-error-primary">
-                  {historyError}
-                </span>
+                <span className="text-micro text-error-primary">{historyError}</span>
                 <Button
                   size={ButtonSize.Small}
                   variant={ButtonVariant.Ghost}
@@ -495,12 +447,7 @@ function Episodes({
     );
   }
   return (
-    <div
-      className={cn(
-        "flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
-        className,
-      )}
-    >
+    <div className={cn("flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0", className)}>
       <div className="pb-[128px] md:pb-4 flex flex-col">
         {episodes.map((episode, index) => (
           <div key={episode.id} className="flex flex-col">
@@ -550,9 +497,7 @@ function ViewPills({
           <Button
             className="w-full"
             size={ButtonSize.Medium}
-            variant={
-              view === name ? ButtonVariant.Primary : ButtonVariant.Secondary
-            }
+            variant={view === name ? ButtonVariant.Primary : ButtonVariant.Secondary}
             aria-pressed={view === name}
             onClick={() => onChange(name)}
           >
@@ -587,9 +532,7 @@ function ViewSwitcher({
         <Button
           key={name}
           size={ButtonSize.Small}
-          variant={
-            view === name ? ButtonVariant.Primary : ButtonVariant.Secondary
-          }
+          variant={view === name ? ButtonVariant.Primary : ButtonVariant.Secondary}
           className="!rounded-full"
           aria-pressed={view === name}
           onClick={() => onChange(name)}
@@ -663,10 +606,7 @@ function Detail({
 }) {
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
-  const log = useMemo(
-    () => mergeThreadLog(persistedThreadLog(events), liveLog),
-    [events, liveLog],
-  );
+  const log = useMemo(() => mergeThreadLog(persistedThreadLog(events), liveLog), [events, liveLog]);
 
   // The floating phone pills sit over the top of this column, so the body has
   // to clear them.
@@ -693,9 +633,7 @@ function Detail({
     return (
       <div className="relative flex flex-col flex-1 min-h-0 min-w-0">
         {body}
-        {isMobile ? (
-          <ViewPills view={view} action={action} onChange={onViewChange} />
-        ) : null}
+        {isMobile ? <ViewPills view={view} action={action} onChange={onViewChange} /> : null}
       </div>
     );
   }
@@ -715,14 +653,10 @@ function Detail({
             </span>
             {action ? <TaskButton action={action} /> : null}
           </div>
-          <span className="code code-micro text-basic-muted truncate">
-            {thread.updated_at}
-          </span>
+          <span className="code code-micro text-basic-muted truncate">{thread.updated_at}</span>
         </div>
         <ViewSwitcher view={view} onChange={onViewChange} />
-        <span className="shrink-0 text-micro text-basic-muted">
-          {episodes.length} ep
-        </span>
+        <span className="shrink-0 text-micro text-basic-muted">{episodes.length} ep</span>
       </div>
       {body}
     </div>
@@ -749,14 +683,8 @@ export function ThreadsView({
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
   const sessionId = snapshot?.metadata.session_id ?? "";
-  const waveRank = useMemo(
-    () => waveRankByName(snapshot?.messages),
-    [snapshot?.messages],
-  );
-  const actions = useMemo(
-    () => dispatchActions(snapshot?.messages ?? []),
-    [snapshot?.messages],
-  );
+  const waveRank = useMemo(() => waveRankByName(snapshot?.messages), [snapshot?.messages]);
+  const actions = useMemo(() => dispatchActions(snapshot?.messages ?? []), [snapshot?.messages]);
 
   // Backend pre-marks every name in a DAG batch as active. Only
   // `thread_started` means the worker is actually running; the rest are
@@ -800,10 +728,7 @@ export function ThreadsView({
         extras.add(name);
       }
     }
-    const rows = [
-      ...threads,
-      ...[...extras].map((name) => pendingThread(name, sessionId)),
-    ];
+    const rows = [...threads, ...[...extras].map((name) => pendingThread(name, sessionId))];
     const kindOf = (name: string): ListKind => {
       if (pendingNames.has(name)) return "pending";
       if (runningNames.has(name)) return "running";
@@ -811,11 +736,9 @@ export function ThreadsView({
     };
     // Stable sort: later DAG waves (and pending) float up; done sinks.
     return rows.sort((a, b) => {
-      const kindDiff =
-        LIST_KIND_ORDER[kindOf(a.name)] - LIST_KIND_ORDER[kindOf(b.name)];
+      const kindDiff = LIST_KIND_ORDER[kindOf(a.name)] - LIST_KIND_ORDER[kindOf(b.name)];
       if (kindDiff !== 0) return kindDiff;
-      const rankDiff =
-        (waveRank.get(b.name) ?? -1) - (waveRank.get(a.name) ?? -1);
+      const rankDiff = (waveRank.get(b.name) ?? -1) - (waveRank.get(a.name) ?? -1);
       if (rankDiff !== 0) return rankDiff;
       return 0;
     });
@@ -825,28 +748,17 @@ export function ThreadsView({
     () => ordered.filter((thread) => !pendingNames.has(thread.name)),
     [ordered, pendingNames],
   );
-  const current =
-    selectable.find((thread) => thread.name === selected) ??
-    selectable[0] ??
-    null;
+  const current = selectable.find((thread) => thread.name === selected) ?? selectable[0] ?? null;
   const live = current ? liveThreads[current.name] : undefined;
-  const currentAction = current
-    ? actions[current.name] || current.latest_action || ""
-    : "";
+  const currentAction = current ? actions[current.name] || current.latest_action || "" : "";
 
   // Keep the layout store on the thread the detail pane is showing, so the
   // phone dialog header names that thread instead of the panel label.
   const currentName = current?.name ?? null;
   const currentRunning = Boolean(currentName && runningNames.has(currentName));
-  const eventPages = useThreadEventPages(
-    snapshot ? sessionId : null,
-    currentName,
-  );
+  const eventPages = useThreadEventPages(snapshot ? sessionId : null, currentName);
   const pagedEvents = useMemo(
-    () =>
-      eventPages.data
-        ? mergeThreadEventPages(eventPages.data.pages)
-        : undefined,
+    () => (eventPages.data ? mergeThreadEventPages(eventPages.data.pages) : undefined),
     [eventPages.data],
   );
   useEffect(() => {
@@ -867,16 +779,12 @@ export function ThreadsView({
       listTitle="Threads"
       title={current?.name}
       titleAction={currentAction ? <TaskButton action={currentAction} /> : null}
-      actions={
-        current ? <ThreadViewSelect view={view} onChange={setView} /> : null
-      }
+      actions={current ? <ThreadViewSelect view={view} onChange={setView} /> : null}
       list={
         ordered.length === 0 ? (
           <div className="flex flex-col px-2 pb-4 pt-2 text-micro">
             <p className="text-basic-tertiary">No threads yet.</p>
-            <p className="text-basic-muted">
-              Start a conversation to create one.
-            </p>
+            <p className="text-basic-muted">Start a conversation to create one.</p>
           </div>
         ) : (
           ordered.map((thread) => {
@@ -892,9 +800,7 @@ export function ThreadsView({
                 label={thread.name}
                 active={thread.name === current?.name}
                 disabled={pending}
-                title={
-                  pending ? "Waiting on source threads" : task || undefined
-                }
+                title={pending ? "Waiting on source threads" : task || undefined}
                 icon={
                   pending ? (
                     <Icon
@@ -903,27 +809,18 @@ export function ThreadsView({
                       className="shrink-0 [&>path]:!fill-basic-muted"
                     />
                   ) : running ? (
-                    <Loader
-                      size={LoaderSize.Micro}
-                      variant={LoaderVariant.Neutral}
-                    />
+                    <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
                   ) : (
                     <Icon
-                      iconName={
-                        errored ? IconName.Danger : IconName.CheckCircle
-                      }
+                      iconName={errored ? IconName.Danger : IconName.CheckCircle}
                       size={16}
-                      className={cn(
-                        "shrink-0",
-                        errored && "text-error-primary",
-                      )}
+                      className={cn("shrink-0", errored && "text-error-primary")}
                     />
                   )
                 }
                 trailing={
                   <span className="code code-micro text-basic-muted shrink-0">
-                    {snapshot.thread_episodes?.[thread.name]?.length ??
-                      thread.episode_count}
+                    {snapshot.thread_episodes?.[thread.name]?.length ?? thread.episode_count}
                   </span>
                 }
                 onClick={() => onSelect(thread.name)}
@@ -945,9 +842,7 @@ export function ThreadsView({
           hasOlder={Boolean(eventPages.hasNextPage)}
           loadingOlder={eventPages.isFetchingNextPage}
           loadingInitial={eventPages.isPending}
-          historyError={
-            eventPages.error instanceof Error ? eventPages.error.message : null
-          }
+          historyError={eventPages.error instanceof Error ? eventPages.error.message : null}
           onLoadOlder={async () => {
             await eventPages.fetchNextPage();
           }}
@@ -960,8 +855,8 @@ export function ThreadsView({
         />
       ) : (
         <PanelEmpty title="No thread selected">
-          Threads contain conversations, command output, and file changes for
-          each task. Select a thread to view its details.
+          Threads contain conversations, command output, and file changes for each task. Select a
+          thread to view its details.
         </PanelEmpty>
       )}
     </PanelSplit>

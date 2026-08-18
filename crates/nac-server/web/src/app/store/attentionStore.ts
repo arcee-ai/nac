@@ -25,10 +25,7 @@ let previouslyActive: ActiveById = {};
  * Flag every session that stopped running since the last call, except the one
  * currently open. Call this whenever a fresh session list arrives.
  */
-export function trackAttention(
-  sessions: ManagedSessionSummary[],
-  selectedId: string | null,
-): void {
+export function trackAttention(sessions: ManagedSessionSummary[], selectedId: string | null): void {
   const nextActive: Record<string, boolean> = {};
   const flagged = { ...getState().flagged };
   let changed = false;

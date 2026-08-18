@@ -1,9 +1,5 @@
 import { cn } from "@/app/lib/cn";
-import {
-  FALLBACK_ICON,
-  ICON_BY_EXTENSION,
-  ICON_BY_FILE_NAME,
-} from "./manifest.generated";
+import { FALLBACK_ICON, ICON_BY_EXTENSION, ICON_BY_FILE_NAME } from "./manifest.generated";
 
 // Vendored by `npm run sync-file-icons`; the glob is eager so the icons are
 // plain strings in the bundle rather than a hundred separate requests.
@@ -17,10 +13,7 @@ const sources = import.meta.glob("./icons/*.svg", {
 
 const PREFIX = "./icons/";
 const svgByIcon = new Map(
-  Object.entries(sources).map(([file, svg]) => [
-    file.slice(PREFIX.length, -".svg".length),
-    svg,
-  ]),
+  Object.entries(sources).map(([file, svg]) => [file.slice(PREFIX.length, -".svg".length), svg]),
 );
 
 /**

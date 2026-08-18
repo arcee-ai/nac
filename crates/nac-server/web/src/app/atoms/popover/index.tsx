@@ -72,9 +72,7 @@ const Popover: React.FC<PopoverProps> & {
   const asSheet = useIsMobile() && sheetOnMobile;
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(
-    null,
-  );
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
 
   useEffect(() => {
     if (!open || !closeOnOutsideClick || asSheet) return undefined;
@@ -147,9 +145,7 @@ const Popover: React.FC<PopoverProps> & {
           : cn("absolute z-30", anchorClasses[placement]),
         panelClassName,
       )}
-      style={
-        sticky ? { left: coords?.left ?? 0, top: coords?.top ?? 0 } : undefined
-      }
+      style={sticky ? { left: coords?.left ?? 0, top: coords?.top ?? 0 } : undefined}
     >
       {content}
     </div>

@@ -1,11 +1,4 @@
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Modal,
-  ModalSize,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useRevertSession } from "@/app/services/queries";
 import { toRunError } from "@/app/lib/providerError";
@@ -25,13 +18,7 @@ interface RevertModalProps {
  * after this prompt and the file changes they made are both discarded, and
  * neither comes back.
  */
-export function RevertModal({
-  open,
-  onClose,
-  sessionId,
-  messageIdx,
-  prompt,
-}: RevertModalProps) {
+export function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: RevertModalProps) {
   const toast = useToast();
   const revert = useRevertSession();
 
@@ -80,10 +67,9 @@ export function RevertModal({
       }
     >
       <p>
-        This removes{" "}
-        <span className="text-basic-primary">&quot;{prompt}&quot;</span> and
-        everything after it from the conversation, and restores the files to how
-        they were when it was sent. This action cannot be undone.
+        This removes <span className="text-basic-primary">&quot;{prompt}&quot;</span> and everything
+        after it from the conversation, and restores the files to how they were when it was sent.
+        This action cannot be undone.
       </p>
     </Modal>
   );

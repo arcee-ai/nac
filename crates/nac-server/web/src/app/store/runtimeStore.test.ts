@@ -3,16 +3,8 @@ import { describe, expect, it } from "vitest";
 // The real perfDebug module is inert unless explicitly enabled, so the store
 // under test runs against the real thing.
 import { mergeWorkspaceStats } from "@/app/services/queries";
-import {
-  applyEnvelope,
-  getRuntimeState,
-  resetRuntime,
-} from "@/app/store/runtimeStore";
-import type {
-  ManagedSessionSummary,
-  SessionEvent,
-  SessionEventEnvelope,
-} from "@/app/types/api";
+import { applyEnvelope, getRuntimeState, resetRuntime } from "@/app/store/runtimeStore";
+import type { ManagedSessionSummary, SessionEvent, SessionEventEnvelope } from "@/app/types/api";
 
 function envelope(event: SessionEvent): SessionEventEnvelope {
   // SAFETY: test fixture — the store under test reads only the event payload
@@ -20,11 +12,7 @@ function envelope(event: SessionEvent): SessionEventEnvelope {
   return { sequence_id: 1, event } as SessionEventEnvelope;
 }
 
-function summary(
-  id: string,
-  title: string,
-  changed?: number,
-): ManagedSessionSummary {
+function summary(id: string, title: string, changed?: number): ManagedSessionSummary {
   // SAFETY: test fixture — the merge reads only summary.session_id/title and
   // moves workspace_diff opaquely; the remaining summary fields are omitted.
   const fixture = {
@@ -44,11 +32,9 @@ function summary(
 describe("canonical refresh classification", () => {
   it("routes transcript commits to messages without a redundant assistant snapshot", () => {
     resetRuntime("session-a");
-    expect(
-      applyEnvelope(
-        envelope({ type: "transcript_appended", transcript_len: 42 }),
-      ),
-    ).toBe("messages");
+    expect(applyEnvelope(envelope({ type: "transcript_appended", transcript_len: 42 }))).toBe(
+      "messages",
+    );
     expect(
       applyEnvelope(
         envelope({
@@ -78,12 +64,10 @@ describe("canonical refresh classification", () => {
 
   it("distinguishes normal lifecycle snapshots from destructive fences", () => {
     resetRuntime("session-a");
-    expect(
-      applyEnvelope(envelope({ type: "run_completed", response: "ok" })),
-    ).toBe("snapshot");
-    expect(
-      applyEnvelope(envelope({ type: "transcript_reverted", transcript_len: 2 })),
-    ).toBe("replace-snapshot");
+    expect(applyEnvelope(envelope({ type: "run_completed", response: "ok" }))).toBe("snapshot");
+    expect(applyEnvelope(envelope({ type: "transcript_reverted", transcript_len: 2 }))).toBe(
+      "replace-snapshot",
+    );
     expect(
       applyEnvelope(
         envelope({
@@ -203,16 +187,10 @@ describe("run cancellation", () => {
 describe("workspace statistics merge", () => {
   it("copies only workspace stats into current base ids", () => {
     const base = [summary("a", "new title"), summary("b", "second")];
-    const stats = [
-      summary("a", "stale title", 7),
-      summary("deleted", "must not return", 9),
-    ];
+    const stats = [summary("a", "stale title", 7), summary("deleted", "must not return", 9)];
 
     const merged = mergeWorkspaceStats(base, stats);
-    expect(merged.map((entry) => entry.summary.title)).toEqual([
-      "new title",
-      "second",
-    ]);
+    expect(merged.map((entry) => entry.summary.title)).toEqual(["new title", "second"]);
     expect(merged.map((entry) => entry.workspace_diff)).toEqual([
       { total_additions: 7, total_deletions: 0, error: null },
       undefined,

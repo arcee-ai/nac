@@ -21,11 +21,10 @@ const KNOB_TRAVEL = {
   [SwitchSize.Large]: "translate-x-5",
 };
 
-interface SwitchProps
-  extends Omit<
-    React.ButtonHTMLAttributes<HTMLButtonElement>,
-    "onChange" | "size"
-  > {
+interface SwitchProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "onChange" | "size"
+> {
   checked?: boolean;
   onChange?: (checked: boolean) => void;
   /** A phone wants the larger track, which is easier to hit with a thumb. */
@@ -63,11 +62,7 @@ const Switch: React.FC<SwitchProps> = ({
       className={cn(
         "absolute top-0.5 left-0.5 rounded-full transition-transform duration-150",
         KNOB[size],
-        disabled
-          ? "bg-input-knob-disabled"
-          : checked
-            ? "bg-input-knob"
-            : "bg-input-knob",
+        disabled ? "bg-input-knob-disabled" : checked ? "bg-input-knob" : "bg-input-knob",
         checked ? KNOB_TRAVEL[size] : "translate-x-0",
       )}
     />

@@ -14,8 +14,7 @@ interface RangeInputProps {
   className?: string;
 }
 
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max);
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 /**
  * Slider on the input-progress tokens. Dragging goes through pointer events, so

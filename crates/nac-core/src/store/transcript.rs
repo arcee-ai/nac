@@ -124,10 +124,10 @@ pub const TRANSCRIPT_PAYLOAD_KEY: &str = "nac_transcript_message";
 pub fn is_transcript_log_payload(event_json: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(event_json)
         .ok()
-        .map_or(false, |value| {
+        .is_some_and(|value| {
             value
                 .get(TRANSCRIPT_PAYLOAD_KEY)
-                .map_or(false, |entry| entry.is_object())
+                .is_some_and(|entry| entry.is_object())
         })
 }
 
@@ -533,14 +533,12 @@ impl TranscriptLogWriter {
             entries.push((entry.idx, message));
         }
         entries.reverse();
-        let mut expected_idx = blob_len + tail_start;
-        for (idx, _) in &entries {
+        for (expected_idx, (idx, _)) in (blob_len + tail_start..).zip(entries.iter()) {
             if *idx != expected_idx {
                 return Err(anyhow!(
                     "transcript log tail window is not contiguous: expected idx {expected_idx}, found {idx}"
                 ));
             }
-            expected_idx += 1;
         }
         Ok((tail_len, entries))
     }
@@ -651,6 +649,7 @@ impl TranscriptLogWriter {
     /// index mismatch, that physical row and every later reserved row are
     /// deleted in the same IMMEDIATE transaction that refreshes the session
     /// summary. Malformed or foreign reserved rows fail before any mutation.
+    #[allow(clippy::type_complexity)]
     pub fn read_tail_repairing_gap(
         &self,
         session_id: &str,

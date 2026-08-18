@@ -99,9 +99,7 @@ export function SourceMenu({
                   onClick={() => pick({ kind: "saved", configId: entry.id })}
                 >
                   <Icon iconName={IconName.Gear} />
-                  <span className="text-left flex-grow truncate">
-                    {entry.name}
-                  </span>
+                  <span className="text-left flex-grow truncate">{entry.name}</span>
                 </TabButton>
                 <Button
                   variant={ButtonVariant.TertiaryDestructive}
@@ -140,9 +138,7 @@ export function SourceMenu({
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
       >
-        <span className="text-left flex-grow truncate max-w-[96px] md:max-w-[220px]">
-          {label}
-        </span>
+        <span className="text-left flex-grow truncate max-w-[96px] md:max-w-[220px]">{label}</span>
         <Icon
           iconName={IconName.Down}
           className={cn(

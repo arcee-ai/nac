@@ -4,11 +4,7 @@
 
 import type { JsonObject } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
-import type {
-  BackendKind,
-  LightModelSettings,
-  UpdateConfigRequest,
-} from "@/app/types/api";
+import type { BackendKind, LightModelSettings, UpdateConfigRequest } from "@/app/types/api";
 
 export function inheritPrimaryCredential(
   light: LightModelSettings,
@@ -97,10 +93,7 @@ export function csv(value: string | null | undefined): string[] {
 }
 
 /** `undefined` inherits the configured value, `null` clears it. */
-function selectedApiKeyEnv(
-  mode: CredentialMode,
-  value: string,
-): string | null | undefined {
+function selectedApiKeyEnv(mode: CredentialMode, value: string): string | null | undefined {
   if (mode === "inherit") return undefined;
   if (mode === "none") return null;
   if (mode !== "variable") throw new Error("Choose how credentials are selected");
@@ -117,15 +110,11 @@ function selectedApiKeyEnv(
   return value;
 }
 
-function validateCredentialMode(
-  backend: string | undefined,
-  mode: CredentialMode,
-): void {
+function validateCredentialMode(backend: string | undefined, mode: CredentialMode): void {
   if (!backend) return;
   const stored = backendUsesStoredCredentials(backend);
   if (stored && mode !== "none") {
-    const source =
-      backend === "arcee-auth" ? "stored Arcee login" : "stored Codex OAuth";
+    const source = backend === "arcee-auth" ? "stored Arcee login" : "stored Codex OAuth";
     throw new Error(
       `${backend} uses ${source} and does not accept an API key environment variable`,
     );
@@ -137,10 +126,7 @@ function validateCredentialMode(
   }
 }
 
-export function serializeExtraHeaders<T>(
-  value: string,
-  blankValue: T,
-): Record<string, string> | T {
+export function serializeExtraHeaders<T>(value: string, blankValue: T): Record<string, string> | T {
   const raw = value.trim();
   if (!raw) return blankValue;
 
@@ -151,9 +137,7 @@ export function serializeExtraHeaders<T>(
     throw new Error("Extra Headers must be valid JSON");
   }
   if (parsed === null || Array.isArray(parsed) || Object(parsed) !== parsed) {
-    throw new Error(
-      "Extra Headers must be a JSON object with string keys and string values",
-    );
+    throw new Error("Extra Headers must be a JSON object with string keys and string values");
   }
   // SAFETY: the identity check above admits only non-null JSON objects, and
   // the loop below verifies every value is a string before the cast.
@@ -173,10 +157,7 @@ function requiredSettingsString(value: string, label: string): string {
   return trimmed;
 }
 
-function sameHeaderObject(
-  left: Record<string, string>,
-  right: Record<string, string>,
-): boolean {
+function sameHeaderObject(left: Record<string, string>, right: Record<string, string>): boolean {
   const l = Object.keys(left).sort();
   const r = Object.keys(right).sort();
   return l.length === r.length && l.every((key, i) => key === r[i] && left[key] === right[key]);
@@ -208,9 +189,7 @@ export function launchLocationFromValues(values: {
     cwd: sshHost ? (nullable(values.cwd) ?? "~") : nullable(values.cwd),
     ssh_host: sshHost,
     ssh_port: port === null ? null : Number(port),
-    ssh_identity_file: sshHost
-      ? nullable(values.ssh_identity_file ?? "")
-      : null,
+    ssh_identity_file: sshHost ? nullable(values.ssh_identity_file ?? "") : null,
   };
 }
 
@@ -268,22 +247,23 @@ export function buildSettingsPatch(
     base_url: baseUrl,
     backend,
     reasoning_effort:
-      values.reasoning_effort === CLEAR_EFFORT
-        ? null
-        : values.reasoning_effort || null,
+      values.reasoning_effort === CLEAR_EFFORT ? null : values.reasoning_effort || null,
     api_key_env: apiKeyEnv,
   };
 
   const patch: UpdateConfigRequest = {};
-  for (const field of ["model", "base_url", "backend", "reasoning_effort", "api_key_env"] as const) {
+  for (const field of [
+    "model",
+    "base_url",
+    "backend",
+    "reasoning_effort",
+    "api_key_env",
+  ] as const) {
     if (current[field] !== initial[field]) patch[field] = current[field];
   }
 
   const headers = serializeExtraHeaders(values.extra_headers, {});
-  if (
-    initial.extra_headers_invalid ||
-    !sameHeaderObject(headers, initial.extra_headers)
-  ) {
+  if (initial.extra_headers_invalid || !sameHeaderObject(headers, initial.extra_headers)) {
     patch.extra_headers = headers;
   }
 

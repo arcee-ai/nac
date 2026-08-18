@@ -29,9 +29,7 @@ interface ToastRecord extends Required<ToastOptions> {
 }
 
 interface ToastApi {
-  addToast: (
-    params: { content: React.ReactNode; variant?: ToastVariant } & ToastOptions,
-  ) => string;
+  addToast: (params: { content: React.ReactNode; variant?: ToastVariant } & ToastOptions) => string;
   removeToast: (id: string) => void;
   clearToasts: () => void;
   info: (content: React.ReactNode, options?: ToastOptions) => string;
@@ -125,10 +123,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => {
       const target = prev.find((t) => t.id === id);
       if (!target || target.dismissing) return prev;
-      setTimeout(
-        () => setToasts((cur) => cur.filter((t) => t.id !== id)),
-        ANIMATION_MS,
-      );
+      setTimeout(() => setToasts((cur) => cur.filter((t) => t.id !== id)), ANIMATION_MS);
       return prev.map((t) => (t.id === id ? { ...t, dismissing: true } : t));
     });
   }, []);
@@ -136,10 +131,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const clearToasts = useCallback(() => {
     setToasts((prev) => {
       if (prev.length === 0) return prev;
-      setTimeout(
-        () => setToasts((cur) => cur.filter((t) => !t.dismissing)),
-        ANIMATION_MS,
-      );
+      setTimeout(() => setToasts((cur) => cur.filter((t) => !t.dismissing)), ANIMATION_MS);
       return prev.map((t) => ({ ...t, dismissing: true }));
     });
   }, []);
@@ -149,14 +141,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       addToast,
       removeToast,
       clearToasts,
-      info: (content, options) =>
-        addToast({ content, variant: ToastVariant.Info, ...options }),
+      info: (content, options) => addToast({ content, variant: ToastVariant.Info, ...options }),
       success: (content, options) =>
         addToast({ content, variant: ToastVariant.Success, ...options }),
-      error: (content, options) =>
-        addToast({ content, variant: ToastVariant.Error, ...options }),
-      danger: (content, options) =>
-        addToast({ content, variant: ToastVariant.Danger, ...options }),
+      error: (content, options) => addToast({ content, variant: ToastVariant.Error, ...options }),
+      danger: (content, options) => addToast({ content, variant: ToastVariant.Danger, ...options }),
     }),
     [addToast, removeToast, clearToasts],
   );

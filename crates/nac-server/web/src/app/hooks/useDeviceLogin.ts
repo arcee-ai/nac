@@ -81,11 +81,7 @@ export function useDeviceLogin(onSuccess?: () => void) {
 
     const poll = async () => {
       try {
-        const outcome = await api.pollManagedLogin(
-          provider,
-          loginId,
-          controller.signal,
-        );
+        const outcome = await api.pollManagedLogin(provider, loginId, controller.signal);
         if (stopped) return;
         if (outcome.state === "complete") {
           active.current = null;

@@ -19,6 +19,7 @@ pub(super) const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// (`clear_thinking_20251015` with `keep: "all"`). The edit requires
 /// `thinking` to be enabled or adaptive in the same request, so it is
 /// omitted when the effort is `None`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn anthropic_messages_request(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
@@ -335,10 +336,8 @@ pub(super) fn parse_anthropic_messages_response(
                     },
                 });
             }
-            Some("thinking") | Some("redacted_thinking") => {
-                if is_anthropic_reasoning_block(block) {
-                    reasoning_blocks.push(block.clone());
-                }
+            Some("thinking") | Some("redacted_thinking") if is_anthropic_reasoning_block(block) => {
+                reasoning_blocks.push(block.clone());
             }
             _ => {}
         }

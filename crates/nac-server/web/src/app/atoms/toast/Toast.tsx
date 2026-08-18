@@ -71,10 +71,7 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
             onClick={onClose}
           >
             {/* Beat `.btn-ghost .icon path { fill: … }` from atoms.css. */}
-            <Icon
-              iconName={IconName.Close}
-              className="[&>path]:!fill-notification"
-            />
+            <Icon iconName={IconName.Close} className="[&>path]:!fill-notification" />
           </Button>
         </div>
       </div>

@@ -14,8 +14,7 @@ export function useManagedSignIn(backend: BackendKind) {
   const provider = managedAuthProvider(backend);
   const { data } = useManagedAuth(Boolean(provider));
   const signedIn = Boolean(
-    provider &&
-      data?.providers.find((entry) => entry.provider === provider)?.signed_in,
+    provider && data?.providers.find((entry) => entry.provider === provider)?.signed_in,
   );
   return { provider, signedIn };
 }

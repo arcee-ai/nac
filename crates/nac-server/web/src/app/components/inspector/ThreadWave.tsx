@@ -23,13 +23,7 @@ function StateIcon({ state }: { state: ThreadState }) {
     return <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />;
   }
   if (state === "pending") {
-    return (
-      <Icon
-        iconName={IconName.Timelaps}
-        size={20}
-        className="[&>path]:!fill-basic-muted"
-      />
-    );
+    return <Icon iconName={IconName.Timelaps} size={20} className="[&>path]:!fill-basic-muted" />;
   }
   if (state === "error") {
     return (
@@ -42,27 +36,16 @@ function StateIcon({ state }: { state: ThreadState }) {
     );
   }
   if (state === "cancelled") {
-    return (
-      <Icon
-        iconName={IconName.Close}
-        size={20}
-        className="[&>path]:!fill-basic-muted"
-      />
-    );
+    return <Icon iconName={IconName.Close} size={20} className="[&>path]:!fill-basic-muted" />;
   }
   return (
-    <Icon
-      iconName={IconName.CheckCircle}
-      size={20}
-      className="[&>path]:!fill-basic-primary"
-    />
+    <Icon iconName={IconName.CheckCircle} size={20} className="[&>path]:!fill-basic-primary" />
   );
 }
 
 function worstState(threads: TranscriptThread[]): ThreadState {
   return threads.reduce<ThreadState>(
-    (worst, thread) =>
-      STATE_ORDER[thread.state] < STATE_ORDER[worst] ? thread.state : worst,
+    (worst, thread) => (STATE_ORDER[thread.state] < STATE_ORDER[worst] ? thread.state : worst),
     "done",
   );
 }
@@ -131,10 +114,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           )}
         </div>
         {running || cancelled ? (
-          <ThreadLogTail
-            lines={tail}
-            className="flex-1 min-h-0 w-full px-2 pb-2"
-          />
+          <ThreadLogTail lines={tail} className="flex-1 min-h-0 w-full px-2 pb-2" />
         ) : (
           // Chrome blockifies `-webkit-box` flex items, so the clamped text
           // needs a plain wrapper to stay clamped.

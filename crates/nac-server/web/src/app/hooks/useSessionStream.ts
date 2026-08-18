@@ -1,10 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import {
-  SNAPSHOT_MESSAGE_LIMIT,
-  mergeMessageTail,
-} from "@/app/lib/messageWindow";
+import { SNAPSHOT_MESSAGE_LIMIT, mergeMessageTail } from "@/app/lib/messageWindow";
 import { perfMark } from "@/app/lib/perfDebug";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
@@ -24,10 +21,7 @@ import {
   setStreamStatus,
   syncRunFromSnapshot,
 } from "@/app/store/runtimeStore";
-import type {
-  ActiveRunSnapshot,
-  SessionSnapshotResponse,
-} from "@/app/types/api";
+import type { ActiveRunSnapshot, SessionSnapshotResponse } from "@/app/types/api";
 
 // Events arrive far faster than a snapshot can be fetched, so reloads are
 // coalesced into one request per window.
@@ -101,12 +95,7 @@ export function useSessionStream(sessionId: string | null): void {
       let followUpsRemaining = 1;
       tailRunning = true;
       try {
-        while (
-          !disposed &&
-          tailDirty &&
-          !snapshotRunning &&
-          snapshotTimer === null
-        ) {
+        while (!disposed && tailDirty && !snapshotRunning && snapshotTimer === null) {
           tailDirty = false;
           const token = beginTailFetch(id);
           try {
@@ -115,10 +104,7 @@ export function useSessionStream(sessionId: string | null): void {
               includeSystem: true,
               signal: token.controller.signal,
             });
-            if (
-              disposed ||
-              !isCurrentSessionGeneration(id, token.generation)
-            ) {
+            if (disposed || !isCurrentSessionGeneration(id, token.generation)) {
               continue;
             }
 
@@ -167,10 +153,7 @@ export function useSessionStream(sessionId: string | null): void {
     }
 
     const scheduleTail = (transcriptLength: number) => {
-      highestTranscriptLength = Math.max(
-        highestTranscriptLength,
-        transcriptLength,
-      );
+      highestTranscriptLength = Math.max(highestTranscriptLength, transcriptLength);
       tailDirty = true;
       if (snapshotTimer !== null || snapshotRunning || tailRunning) return;
       clearTimeout(tailTimer ?? undefined);
@@ -182,28 +165,20 @@ export function useSessionStream(sessionId: string | null): void {
 
     const dispose = subscribeToSessionEvents(id, {
       onEnvelope: (envelope) => {
-        if (
-          envelope.event.type === "agent" &&
-          envelope.event.event.type === "thread_finished"
-        ) {
+        if (envelope.event.type === "agent" && envelope.event.event.type === "thread_finished") {
           // The paged command log is intentionally cached forever while live
           // SSE events extend it. Once the worker exits, refetch its newest
           // page so a final tool result cannot remain live-only (or missing
           // after runtime state is cleared during snapshot replacement).
           void client.invalidateQueries({
-            queryKey: queryKeys.threadEvents(
-              id,
-              envelope.event.event.name,
-            ),
+            queryKey: queryKeys.threadEvents(id, envelope.event.event.name),
             exact: true,
           });
         }
         const refresh = applyEnvelope(envelope);
         if (refresh === "messages") {
           scheduleTail(
-            envelope.event.type === "transcript_appended"
-              ? envelope.event.transcript_len
-              : 0,
+            envelope.event.type === "transcript_appended" ? envelope.event.transcript_len : 0,
           );
         } else if (refresh === "snapshot") {
           scheduleSnapshot(false);
@@ -245,9 +220,7 @@ export function useSessionStream(sessionId: string | null): void {
  * Reconcile the live running flag with the snapshot, so a reload during a run
  * does not show the session as idle until the next event arrives.
  */
-export function useRunStateSync(
-  activeRun: ActiveRunSnapshot | null | undefined,
-): void {
+export function useRunStateSync(activeRun: ActiveRunSnapshot | null | undefined): void {
   useEffect(() => {
     syncRunFromSnapshot(activeRun);
   }, [activeRun]);

@@ -21,10 +21,7 @@ import { perfRender } from "@/app/lib/perfDebug";
 import { isNumber, isString } from "@/app/lib/primitive";
 import type { RunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
-import {
-  classifyMarkdownHref,
-  markdownUrlTransform,
-} from "@/app/lib/workspaceLink";
+import { classifyMarkdownHref, markdownUrlTransform } from "@/app/lib/workspaceLink";
 import { useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
@@ -168,11 +165,7 @@ interface MarkdownRendererProps {
  * relative href would otherwise resolve against the document origin, leave the
  * hash route, and land on the homescreen.
  */
-function MarkdownLink({
-  href,
-  children,
-  ...props
-}: ComponentPropsWithoutRef<"a">) {
+function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
@@ -180,9 +173,7 @@ function MarkdownLink({
   const client = useQueryClient();
   const sessionId = sessionIdFromPath(location.pathname);
   const snapshot = sessionId
-    ? client.getQueryData<SessionSnapshotResponse>(
-        queryKeys.sessionSnapshot(sessionId),
-      )
+    ? client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId))
     : undefined;
   const kind = classifyMarkdownHref(href, [
     snapshot?.workspace?.host_root,
@@ -206,20 +197,15 @@ function MarkdownLink({
         href={href}
         onClick={(event) => {
           event.preventDefault();
-          void api
-            .openWorkspacePath(sessionId, kind.path)
-            .catch((error: RunError) => {
-              // Remote / sandbox sessions cannot open a host path; the Files
-              // panel is the next-best place to land.
-              const message =
-                error instanceof Error ? error.message : String(error);
-              if (!/only available for local sessions|lives only inside the sandbox/i.test(
-                message,
-              )) {
-                toast.error(`Could not open file: ${message}`);
-              }
-              openInFilesPanel(kind.path);
-            });
+          void api.openWorkspacePath(sessionId, kind.path).catch((error: RunError) => {
+            // Remote / sandbox sessions cannot open a host path; the Files
+            // panel is the next-best place to land.
+            const message = error instanceof Error ? error.message : String(error);
+            if (!/only available for local sessions|lives only inside the sandbox/i.test(message)) {
+              toast.error(`Could not open file: ${message}`);
+            }
+            openInFilesPanel(kind.path);
+          });
         }}
       >
         {children}
@@ -231,23 +217,14 @@ function MarkdownLink({
     // No session to open into (or an absolute path we cannot map): keep the
     // label, but do not let the browser leave the hash route.
     return (
-      <a
-        {...props}
-        href={href}
-        onClick={(event) => event.preventDefault()}
-      >
+      <a {...props} href={href} onClick={(event) => event.preventDefault()}>
         {children}
       </a>
     );
   }
 
   return (
-    <a
-      {...props}
-      href={kind.href}
-      target="_blank"
-      rel="noopener noreferrer nofollow"
-    >
+    <a {...props} href={kind.href} target="_blank" rel="noopener noreferrer nofollow">
       {children}
     </a>
   );
@@ -258,9 +235,7 @@ function MarkdownLink({
 function buildComponents(streaming: boolean) {
   return {
     a: MarkdownLink,
-    pre: ({ children }: { children?: ReactNode }) => (
-      <CodeFence>{children}</CodeFence>
-    ),
+    pre: ({ children }: { children?: ReactNode }) => <CodeFence>{children}</CodeFence>,
     table: ({ ...props }: ComponentPropsWithoutRef<"table">) => (
       <div className="overflow-x-auto">
         <table {...props} />
@@ -313,13 +288,7 @@ function buildComponents(streaming: boolean) {
 const streamingComponents = buildComponents(true);
 const staticComponents = buildComponents(false);
 
-function Parsed({
-  source,
-  streaming,
-}: {
-  source: string;
-  streaming: boolean;
-}) {
+function Parsed({ source, streaming }: { source: string; streaming: boolean }) {
   // The delimiters a model writes are not the ones remark-math reads, and the
   // dollars it means as money have to be neutered before the parser pairs them
   // up — both only work on the source, so they happen here.
@@ -374,11 +343,7 @@ function ParsedWithMath({
  * appends: once a later block exists this text is settled, and re-parsing it is
  * pure waste that grows with every delta.
  */
-const StreamedBlock = memo(function StreamedBlock({
-  source,
-}: {
-  source: string;
-}) {
+const StreamedBlock = memo(function StreamedBlock({ source }: { source: string }) {
   return <Parsed source={source} streaming />;
 });
 

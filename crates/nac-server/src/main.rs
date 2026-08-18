@@ -52,6 +52,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum RootCommand {
     /// Manage ChatGPT credentials used by Codex models
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]

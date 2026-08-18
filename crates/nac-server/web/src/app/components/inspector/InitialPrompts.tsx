@@ -12,8 +12,7 @@ const PROMPTS: Prompt[] = [
   {
     icon: IconName.FolderOpen,
     title: "Explore this repository",
-    prompt:
-      "Understand the project structure, key components, and how they work together.",
+    prompt: "Understand the project structure, key components, and how they work together.",
   },
   {
     icon: IconName.Eye,

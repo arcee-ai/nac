@@ -88,6 +88,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -103,11 +105,12 @@ jobs:
         working-directory: crates/nac-server/web
         run: npm ci
 
-      - name: Lint and typecheck the web app
+      - name: Lint and check formatting
+        run: make lint format-check
+
+      - name: Typecheck the web app
         working-directory: crates/nac-server/web
-        run: |
-          npm run lint
-          npm run typecheck
+        run: npm run typecheck
 
       # The build output is committed so that building nac-web never needs Node.
       # Rebuilding it here catches a commit that changed `web/` without shipping

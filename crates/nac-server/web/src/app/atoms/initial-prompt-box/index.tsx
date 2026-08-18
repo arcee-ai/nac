@@ -39,19 +39,11 @@ const InitialPromptBox: React.FC<InitialPromptBoxProps> = ({
       className="absolute inset-0 bg-btn-ghost transition-colors duration-200 ease-out group-hover:bg-btn-ghost-hovered group-active:bg-btn-ghost-pressed"
     />
     <span className="relative flex w-full items-center gap-[10px] px-4 pb-2 pt-4">
-      <Icon
-        iconName={icon}
-        size={20}
-        className="shrink-0 [&>path]:fill-basic-tertiary"
-      />
-      <span className="flex-1 min-w-0 truncate label-small text-basic-primary">
-        {title}
-      </span>
+      <Icon iconName={icon} size={20} className="shrink-0 [&>path]:fill-basic-tertiary" />
+      <span className="flex-1 min-w-0 truncate label-small text-basic-primary">{title}</span>
     </span>
     <span className="relative flex w-full flex-col justify-end px-4 pb-4 pt-2">
-      <span className="text-micro text-basic-muted line-clamp-2">
-        {description}
-      </span>
+      <span className="text-micro text-basic-muted line-clamp-2">{description}</span>
     </span>
   </button>
 );

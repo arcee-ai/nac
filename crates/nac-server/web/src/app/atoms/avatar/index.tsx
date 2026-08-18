@@ -47,11 +47,7 @@ const Avatar: React.FC<AvatarProps> & { Size: typeof AvatarSize } = ({
       style={{ background: imageUrl ? undefined : color }}
     >
       {imageUrl ? (
-        <img
-          src={imageUrl}
-          alt={trimmed}
-          className="w-full h-full object-cover"
-        />
+        <img src={imageUrl} alt={trimmed} className="w-full h-full object-cover" />
       ) : (
         initial
       )}

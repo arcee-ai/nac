@@ -238,6 +238,7 @@ impl TerminalManager {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn exec_one_shot(
         &self,
         cmd: &str,
@@ -654,8 +655,7 @@ mod tests {
     use super::*;
     use crate::paths::PathContext;
     use crate::sandbox::{
-        select_execution_backend, SandboxSession, SandboxSpec, SshConnection,
-        DEFAULT_SANDBOX_IMAGE,
+        select_execution_backend, SandboxSession, SandboxSpec, SshConnection, DEFAULT_SANDBOX_IMAGE,
     };
 
     fn backend() -> Arc<ExecutionBackend> {

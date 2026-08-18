@@ -45,8 +45,7 @@ export function HeaderMenu({
     setOpen(false);
     action();
   };
-  const openExternally = (url: string) =>
-    act(() => window.open(url, "_blank", "noopener"));
+  const openExternally = (url: string) => act(() => window.open(url, "_blank", "noopener"));
 
   return (
     <Popover

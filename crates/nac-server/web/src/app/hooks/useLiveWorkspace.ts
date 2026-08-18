@@ -22,10 +22,7 @@ const REREAD_INTERVAL_MS = 3000;
  *
  * A revision is a frozen commit and never needs any of this.
  */
-export function useLiveWorkspace(
-  sessionId: string,
-  revision: number | null,
-): void {
+export function useLiveWorkspace(sessionId: string, revision: number | null): void {
   const client = useQueryClient();
   const epoch = useWorkspaceEpoch();
   const timer = useRef<number | null>(null);

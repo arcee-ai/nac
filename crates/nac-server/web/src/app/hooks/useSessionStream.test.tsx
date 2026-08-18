@@ -67,16 +67,13 @@ const stream = {
   getPage: vi.fn(),
 };
 
-vi.spyOn(api, "getMessages").mockImplementation((...args) =>
-  stream.getPage(...args),
-);
+vi.spyOn(api, "getMessages").mockImplementation((...args) => stream.getPage(...args));
 
 const SESSION_ID = "stream-test";
 
 function deferred<T>() {
   return Promise.withResolvers<T>();
 }
-
 
 async function flushAsyncWork() {
   for (let flush = 0; flush < 10; flush += 1) {
@@ -167,10 +164,7 @@ describe("session stream request coordination", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    client.setQueryData(
-      queryKeys.sessionSnapshot(SESSION_ID),
-      snapshot([user("old")]),
-    );
+    client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), snapshot([user("old")]));
     const first = deferred<MessagesPageResponse>();
     const firstReturned = deferred<void>();
     const second = deferred<MessagesPageResponse>();

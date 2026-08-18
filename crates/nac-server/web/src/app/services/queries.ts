@@ -84,7 +84,6 @@ import type {
 export const SESSIONS_POLL_MS = 5000;
 export const WORKSPACE_STATS_POLL_MS = 30_000;
 
-
 export const queryKeys = {
   storeInfo: ["store"] as const,
   sandboxAvailability: ["sandbox-availability"] as const,
@@ -112,13 +111,11 @@ export const queryKeys = {
     ["provider-models", { backend, apiKey, baseUrl }] as const,
   storedKeyProviderModels: (backend: string, apiKeyEnv: string, baseUrl: string) =>
     ["stored-key-provider-models", { backend, apiKeyEnv, baseUrl }] as const,
-  managedProviderModels: (backend: string) =>
-    ["managed-provider-models", backend] as const,
+  managedProviderModels: (backend: string) => ["managed-provider-models", backend] as const,
   managedProviderModelsAll: ["managed-provider-models"] as const,
   modelCatalog: ["model-catalog"] as const,
   slashCommands: ["slash-commands"] as const,
-  resolvedModelConfig: (configId: string) =>
-    ["model-config-resolved", configId] as const,
+  resolvedModelConfig: (configId: string) => ["model-config-resolved", configId] as const,
   resolvedModelConfigsAll: ["model-config-resolved"] as const,
   resolvedConfigFile: (path: string) => ["config-file-resolved", path] as const,
   resolvedConfigFilesAll: ["config-file-resolved"] as const,
@@ -126,8 +123,7 @@ export const queryKeys = {
   sessionRoot: (id: string) => ["session", id] as const,
   sessionSnapshot: (id: string) => ["session", id, "snapshot"] as const,
   sessionsAll: ["sessions"] as const,
-  threadEventsRoot: (id: string) =>
-    ["session", id, "thread-events"] as const,
+  threadEventsRoot: (id: string) => ["session", id, "thread-events"] as const,
   threadEvents: (id: string, threadName: string) =>
     ["session", id, "thread-events", threadName] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
@@ -137,14 +133,12 @@ export const queryKeys = {
     stage: WorkspaceDiffStage | "all",
     context: number,
     revision: number | null,
-  ) =>
-    ["session", id, "workspace-diff", { path, stage, context, revision }] as const,
+  ) => ["session", id, "workspace-diff", { path, stage, context, revision }] as const,
   workspaceDiffRoot: (id: string) => ["session", id, "workspace-diff"] as const,
   branches: (id: string) => ["session", id, "branches"] as const,
   workspaceFiles: (id: string, revision: number | null) =>
     ["session", id, "workspace-files", { revision }] as const,
-  workspaceFilesRoot: (id: string) =>
-    ["session", id, "workspace-files"] as const,
+  workspaceFilesRoot: (id: string) => ["session", id, "workspace-files"] as const,
   workspaceFile: (id: string, path: string, revision: number | null) =>
     ["session", id, "workspace-file", { path, revision }] as const,
   workspaceFileRoot: (id: string) => ["session", id, "workspace-file"] as const,
@@ -213,8 +207,7 @@ export function useStoreCredential() {
   return useMutation({
     mutationFn: ({ name, value }: { name: string; value: string }) =>
       api.storeCredential(name, value),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: queryKeys.credentials }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
   });
 }
 
@@ -226,8 +219,7 @@ export function useStoreGeneratedCredential() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (value: string) => api.storeGeneratedCredential(value),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: queryKeys.credentials }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
   });
 }
 
@@ -235,8 +227,7 @@ export function useDeleteCredential() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => api.deleteCredential(name),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: queryKeys.credentials }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
   });
 }
 
@@ -347,8 +338,7 @@ export function useSshConfigs() {
 export function useCreateSshConfig() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (payload: CreateSshConfigurationRequest) =>
-      api.createSshConfig(payload),
+    mutationFn: (payload: CreateSshConfigurationRequest) => api.createSshConfig(payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.sshConfigs });
     },
@@ -408,8 +398,7 @@ export function useMcpServers() {
 export function useCreateMcpServer() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (payload: CreateMcpServerRequest) =>
-      api.createMcpServer(payload),
+    mutationFn: (payload: CreateMcpServerRequest) => api.createMcpServer(payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
     },
@@ -472,8 +461,7 @@ export function useProviderModels(
 ) {
   return useQuery<ProviderModelList>({
     queryKey: queryKeys.providerModels(backend, apiKey, baseUrl ?? ""),
-    queryFn: () =>
-      api.listProviderModels({ backend, api_key: apiKey, base_url: baseUrl }),
+    queryFn: () => api.listProviderModels({ backend, api_key: apiKey, base_url: baseUrl }),
     enabled: enabled && apiKey.length > 0,
     retry: false,
     staleTime: 5 * 60_000,
@@ -514,10 +502,7 @@ export function useStoredKeyProviderModels(
  * Invalidated when a login completes, which is what turns the model picker from
  * empty into populated without a reload.
  */
-export function useManagedProviderModels(
-  backend: BackendKind | null,
-  enabled: boolean,
-) {
+export function useManagedProviderModels(backend: BackendKind | null, enabled: boolean) {
   return useQuery<ProviderModelList>({
     queryKey: queryKeys.managedProviderModels(backend ?? ""),
     queryFn: () => api.listProviderModels({ backend: backend! }),
@@ -533,14 +518,11 @@ export function useManagedProviderModels(
  * overlay these on the local catalog so Arcee/Codex show what the account can
  * actually reach. Failures leave that provider on its catalog entries.
  */
-export function useReadyManagedProviderModels(
-  catalog: ModelCatalog | undefined,
-) {
+export function useReadyManagedProviderModels(catalog: ModelCatalog | undefined) {
   const ready = useMemo(
     () =>
       (catalog?.providers ?? []).filter(
-        (provider) =>
-          provider.auth_status === "ready" && provider.auth !== "api_key_env",
+        (provider) => provider.auth_status === "ready" && provider.auth !== "api_key_env",
       ),
     [catalog],
   );
@@ -595,8 +577,7 @@ export function useResolvedModelConfig(configId: string | null, filePath: string
     queryKey: configId
       ? queryKeys.resolvedModelConfig(configId)
       : queryKeys.resolvedConfigFile(path),
-    queryFn: () =>
-      configId ? api.resolveModelConfig(configId) : api.resolveConfigFile(path),
+    queryFn: () => (configId ? api.resolveModelConfig(configId) : api.resolveConfigFile(path)),
     enabled: Boolean(configId ?? path),
     retry: false,
     staleTime: 60_000,
@@ -606,8 +587,7 @@ export function useResolvedModelConfig(configId: string | null, filePath: string
 export function useCreateModelConfig() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (payload: CreateModelConfigurationRequest) =>
-      api.createModelConfig(payload),
+    mutationFn: (payload: CreateModelConfigurationRequest) => api.createModelConfig(payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
       // The server files the key under a generated credential name.
@@ -665,9 +645,7 @@ export function mergeWorkspaceStats(
   );
   return base.map((entry) => {
     const workspaceDiff = workspaceById.get(entry.summary.session_id);
-    return workspaceDiff === undefined
-      ? entry
-      : { ...entry, workspace_diff: workspaceDiff };
+    return workspaceDiff === undefined ? entry : { ...entry, workspace_diff: workspaceDiff };
   });
 }
 
@@ -688,10 +666,7 @@ export function useSessionsWithWorkspaceStats(
     staleTime: cadence.statsMs,
   });
   const data = useMemo(
-    () =>
-      base.data
-        ? mergeWorkspaceStats(base.data, stats.data ?? [])
-        : base.data,
+    () => (base.data ? mergeWorkspaceStats(base.data, stats.data ?? []) : base.data),
     [base.data, stats.data],
   );
   return { ...base, data };
@@ -710,11 +685,7 @@ export function useSessionSummary(id: string | null) {
       sessions.find((item) => item.summary.session_id === id) ?? null,
     [id],
   );
-  return useQuery<
-    ManagedSessionSummary[],
-    Error,
-    ManagedSessionSummary | null
-  >({
+  return useQuery<ManagedSessionSummary[], Error, ManagedSessionSummary | null>({
     queryKey: queryKeys.sessions(false),
     queryFn: ({ signal }) => api.listSessions(false, signal),
     refetchInterval: SESSIONS_POLL_MS,
@@ -742,10 +713,7 @@ export function useSessionSnapshot(
       if (!validSnapshotWindow(incoming)) {
         throw new Error("The server returned an invalid snapshot message page.");
       }
-      if (
-        signal.aborted ||
-        !isCurrentSessionGeneration(id!, token.generation)
-      ) {
+      if (signal.aborted || !isCurrentSessionGeneration(id!, token.generation)) {
         throw new DOMException("Snapshot superseded", "AbortError");
       }
       finishSnapshotFetch(id!, token);
@@ -765,9 +733,7 @@ export function useLoadOlderMessages(id: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (): Promise<boolean> => {
-      const current = client.getQueryData<SessionSnapshotResponse>(
-        queryKeys.sessionSnapshot(id),
-      );
+      const current = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
       const start = current?.message_page?.start;
       if (start === undefined || start <= 0) {
         throw new Error("No older messages are available.");
@@ -784,24 +750,18 @@ export function useLoadOlderMessages(id: string) {
       if (!isCurrentSessionGeneration(id, generation)) return false;
 
       let accepted = false;
-      client.setQueryData<SessionSnapshotResponse>(
-        queryKeys.sessionSnapshot(id),
-        (latest) => {
-          if (!latest) return latest;
-          const merged = prependMessagePage(latest, page, start);
-          if (!merged) return latest;
-          accepted = true;
-          return merged;
-        },
-      );
+      client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id), (latest) => {
+        if (!latest) return latest;
+        const merged = prependMessagePage(latest, page, start);
+        if (!merged) return latest;
+        accepted = true;
+        return merged;
+      });
       return accepted;
     },
   });
 }
-export function useThreadEventPages(
-  id: string | null,
-  threadName: string | null,
-) {
+export function useThreadEventPages(id: string | null, threadName: string | null) {
   return useInfiniteQuery<
     ThreadEventPage,
     Error,
@@ -817,14 +777,11 @@ export function useThreadEventPages(
         signal,
       }),
     initialPageParam: null,
-    getNextPageParam: (lastPage) =>
-      lastPage.has_older ? lastPage.next_before_id : undefined,
+    getNextPageParam: (lastPage) => (lastPage.has_older ? lastPage.next_before_id : undefined),
     enabled: Boolean(id && threadName),
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
-
-
 
 export function useSessionConfig(id: string | null) {
   return useQuery<RawSessionConfig>({
@@ -842,15 +799,8 @@ export function useWorkspaceDiff(
   revision: number | null = null,
 ) {
   return useQuery<WorkspaceFileDiff>({
-    queryKey: queryKeys.workspaceDiff(
-      id ?? "",
-      path ?? "",
-      stage,
-      context,
-      revision,
-    ),
-    queryFn: ({ signal }) =>
-      api.getWorkspaceDiff(id!, path!, { stage, context, revision, signal }),
+    queryKey: queryKeys.workspaceDiff(id ?? "", path ?? "", stage, context, revision),
+    queryFn: ({ signal }) => api.getWorkspaceDiff(id!, path!, { stage, context, revision, signal }),
     enabled: Boolean(id && path),
   });
 }
@@ -860,10 +810,7 @@ export function useWorkspaceDiff(
  * revision it is the project as it stood at the end of that run instead, which
  * is frozen and therefore never goes stale.
  */
-export function useWorkspaceFiles(
-  id: string | null,
-  revision: number | null = null,
-) {
+export function useWorkspaceFiles(id: string | null, revision: number | null = null) {
   return useQuery<WorkspaceFileList>({
     queryKey: queryKeys.workspaceFiles(id ?? "", revision),
     queryFn: ({ signal }) => api.getWorkspaceFiles(id!, revision, signal),
@@ -898,14 +845,10 @@ export function useWorkspaceRevisions(id: string | null) {
 }
 
 /** What the run behind a revision changed. Frozen, so it is cached for good. */
-export function useWorkspaceRevisionChanges(
-  id: string | null,
-  revision: number | null,
-) {
+export function useWorkspaceRevisionChanges(id: string | null, revision: number | null) {
   return useQuery<WorkspaceRevisionChanges>({
     queryKey: queryKeys.workspaceRevisionChanges(id ?? "", revision ?? 0),
-    queryFn: ({ signal }) =>
-      api.getWorkspaceRevisionChanges(id!, revision!, signal),
+    queryFn: ({ signal }) => api.getWorkspaceRevisionChanges(id!, revision!, signal),
     enabled: Boolean(id && revision != null),
     staleTime: Infinity,
   });
@@ -942,8 +885,7 @@ export function useSwitchBranch(id: string) {
 export function useCommitWorkspace(id: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (payload: CommitWorkspaceRequest) =>
-      api.commitWorkspace(id, payload),
+    mutationFn: (payload: CommitWorkspaceRequest) => api.commitWorkspace(id, payload),
     onSuccess: () => {
       // HEAD moved and the tree is clean again, so the changed-file list, every
       // cached diff and the branch's dirty flag are all stale. They hang off
@@ -958,15 +900,13 @@ export function useCommitWorkspace(id: string) {
 function useInvalidators() {
   const client = useQueryClient();
   return {
-    sessions: () =>
-      client.invalidateQueries({ queryKey: queryKeys.sessionsAll }),
+    sessions: () => client.invalidateQueries({ queryKey: queryKeys.sessionsAll }),
     session: (id: string) =>
       client.invalidateQueries({
         queryKey: queryKeys.sessionSnapshot(id),
         exact: true,
       }),
-    sessionRoot: (id: string) =>
-      client.invalidateQueries({ queryKey: queryKeys.sessionRoot(id) }),
+    sessionRoot: (id: string) => client.invalidateQueries({ queryKey: queryKeys.sessionRoot(id) }),
   };
 }
 
@@ -1087,8 +1027,7 @@ export function useUpdateConfig() {
 export function useSubmitRun() {
   const invalidate = useInvalidators();
   return useMutation({
-    mutationFn: ({ id, prompt }: { id: string; prompt: string }) =>
-      api.submitRun(id, prompt),
+    mutationFn: ({ id, prompt }: { id: string; prompt: string }) => api.submitRun(id, prompt),
     onMutate: ({ prompt }) => {
       setOptimisticUserPrompt(prompt);
     },

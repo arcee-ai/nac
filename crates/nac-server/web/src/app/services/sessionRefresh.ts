@@ -29,10 +29,7 @@ function stateFor(sessionId: string): SessionRefreshState {
 }
 
 /** Fence every page read before a canonical snapshot is requested. */
-export function fenceSessionSnapshot(
-  sessionId: string,
-  replace = false,
-): number {
+export function fenceSessionSnapshot(sessionId: string, replace = false): number {
   const state = stateFor(sessionId);
   state.generation += 1;
   state.replaceNextSnapshot ||= replace;
@@ -49,10 +46,7 @@ export function beginSnapshotFetch(sessionId: string): SnapshotFetchToken {
 }
 
 /** Consume replacement state only after the matching snapshot was accepted. */
-export function finishSnapshotFetch(
-  sessionId: string,
-  token: SnapshotFetchToken,
-): void {
+export function finishSnapshotFetch(sessionId: string, token: SnapshotFetchToken): void {
   const state = states.get(sessionId);
   if (state?.generation === token.generation && token.replace) {
     state.replaceNextSnapshot = false;
@@ -67,18 +61,12 @@ export function beginTailFetch(sessionId: string): TailFetchToken {
   return { generation: state.generation, controller };
 }
 
-export function finishTailFetch(
-  sessionId: string,
-  token: TailFetchToken,
-): void {
+export function finishTailFetch(sessionId: string, token: TailFetchToken): void {
   const state = states.get(sessionId);
   if (state?.tailController === token.controller) state.tailController = null;
 }
 
-export function isCurrentSessionGeneration(
-  sessionId: string,
-  generation: number,
-): boolean {
+export function isCurrentSessionGeneration(sessionId: string, generation: number): boolean {
   return states.get(sessionId)?.generation === generation;
 }
 

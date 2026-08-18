@@ -19,11 +19,7 @@ const TagsSelector: React.FC<TagsSelectorProps> = ({
   className = "",
 }) => {
   const toggle = (tag: string) => {
-    onChange(
-      selected.includes(tag)
-        ? selected.filter((item) => item !== tag)
-        : [...selected, tag],
-    );
+    onChange(selected.includes(tag) ? selected.filter((item) => item !== tag) : [...selected, tag]);
   };
 
   return (
@@ -34,9 +30,7 @@ const TagsSelector: React.FC<TagsSelectorProps> = ({
           <Button
             key={tag}
             size={ButtonSize.Small}
-            variant={
-              active ? ButtonVariant.SecondaryAccent : ButtonVariant.Secondary
-            }
+            variant={active ? ButtonVariant.SecondaryAccent : ButtonVariant.Secondary}
             disabled={disabled}
             aria-pressed={active}
             onClick={() => toggle(tag)}

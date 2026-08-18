@@ -31,14 +31,10 @@ function validRange(
 export function validMessagesPage(page: MessagesPageResponse): boolean {
   return validRange(page.page, page.messages.length, page.created_at.length);
 }
-export function validSnapshotWindow(
-  snapshot: SessionSnapshotResponse,
-): boolean {
+export function validSnapshotWindow(snapshot: SessionSnapshotResponse): boolean {
   const page = snapshot.message_page;
   const createdAt = snapshot.message_created_at ?? [];
-  return Boolean(
-    page && validRange(page, snapshot.messages.length, createdAt.length),
-  );
+  return Boolean(page && validRange(page, snapshot.messages.length, createdAt.length));
 }
 
 function snapshotRange(snapshot: SessionSnapshotResponse): MessagePageMetadata {
@@ -58,7 +54,6 @@ function snapshotTimes(snapshot: SessionSnapshotResponse): (string | null)[] {
     ? times
     : Array.from({ length: snapshot.messages.length }, () => null);
 }
-
 
 /**
  * Reconcile a newest-tail page into the focused snapshot cache.
@@ -105,14 +100,8 @@ export function mergeMessageTail(
     kind: "accepted",
     snapshot: {
       ...current,
-      messages: [
-        ...current.messages.slice(0, prefixLength),
-        ...incoming.messages,
-      ],
-      message_created_at: [
-        ...currentCreatedAt.slice(0, prefixLength),
-        ...incoming.created_at,
-      ],
+      messages: [...current.messages.slice(0, prefixLength), ...incoming.messages],
+      message_created_at: [...currentCreatedAt.slice(0, prefixLength), ...incoming.created_at],
       message_page: {
         ...incoming.page,
         start: currentPage.start,

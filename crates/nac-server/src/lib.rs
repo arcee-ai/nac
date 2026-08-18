@@ -301,17 +301,12 @@ pub struct ListSessionsQuery {
     pub workspace_stats: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum RequestField<T> {
+    #[default]
     Omitted,
     Null,
     Value(T),
-}
-
-impl<T> Default for RequestField<T> {
-    fn default() -> Self {
-        Self::Omitted
-    }
 }
 
 impl<'de, T> Deserialize<'de> for RequestField<T>

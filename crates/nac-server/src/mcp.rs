@@ -493,7 +493,7 @@ impl NacMcpService {
                 let grouped =
                     nac_core::store::load_all_retained_episodes(&store_path, &session_id)?;
                 let mut all: Vec<_> = Vec::new();
-                for (_thread, episodes) in &grouped {
+                for episodes in grouped.values() {
                     for e in episodes {
                         all.push(json!({
                             "id": e.id,

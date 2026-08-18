@@ -497,6 +497,7 @@ struct ModelsDevTierSelector {
 /// missing or explicitly incompatible IDs remain absent so a successful
 /// provider snapshot can retire them. Total payload parse failure is the only
 /// hard error (nothing is written then).
+#[allow(clippy::type_complexity)]
 pub(super) fn map_models_dev(
     api_json: &str,
     baseline: &ModelCatalog,

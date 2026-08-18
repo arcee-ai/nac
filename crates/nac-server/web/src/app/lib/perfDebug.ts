@@ -144,16 +144,12 @@ function report(): void {
       count: entry.count,
       "per s": elapsed ? Number((entry.count / elapsed).toFixed(2)) : 0,
       "total ms": Number(entry.totalMs.toFixed(1)),
-      "avg ms": entry.count
-        ? Number((entry.totalMs / entry.count).toFixed(2))
-        : 0,
+      "avg ms": entry.count ? Number((entry.totalMs / entry.count).toFixed(2)) : 0,
       "max ms": Number(entry.maxMs.toFixed(1)),
       ...entry.sums,
     };
   }
-  console.log(
-    `[perf] report over ${elapsed.toFixed(1)}s, ${epoch} stream deltas`,
-  );
+  console.log(`[perf] report over ${elapsed.toFixed(1)}s, ${epoch} stream deltas`);
   console.table(rows);
 }
 

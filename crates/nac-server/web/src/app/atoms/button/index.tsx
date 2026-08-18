@@ -81,34 +81,29 @@ const Button: React.FC<ButtonProps> & {
   type = "button",
   ...props
 }) => {
-    const classes = [
-      "btn",
-      size,
-      variant,
-      content,
-      disabled || loading ? "btn-disabled" : "",
-      loading ? "relative" : "",
-      className,
-    ]
-      .filter(Boolean)
-      .join(" ");
+  const classes = [
+    "btn",
+    size,
+    variant,
+    content,
+    disabled || loading ? "btn-disabled" : "",
+    loading ? "relative" : "",
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-    return (
-      <button
-        type={type}
-        className={classes}
-        disabled={disabled || loading}
-        {...props}
-      >
-        {children}
-        {loading ? (
-          <div className="absolute fade top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2">
-            <Loader size={loaderSize[size]} variant={loaderVariant[variant]} />
-          </div>
-        ) : null}
-      </button>
-    );
-  };
+  return (
+    <button type={type} className={classes} disabled={disabled || loading} {...props}>
+      {children}
+      {loading ? (
+        <div className="absolute fade top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2">
+          <Loader size={loaderSize[size]} variant={loaderVariant[variant]} />
+        </div>
+      ) : null}
+    </button>
+  );
+};
 
 // Attach enums to the Button object
 Button.Size = ButtonSize;

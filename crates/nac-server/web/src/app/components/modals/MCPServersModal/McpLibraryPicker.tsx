@@ -63,8 +63,7 @@ export function LibraryPicker({
       if (server.library_id) ids.add(server.library_id);
       names.add(server.name);
     }
-    return (entry: McpLibraryEntry) =>
-      ids.has(entry.id) || names.has(entry.name);
+    return (entry: McpLibraryEntry) => ids.has(entry.id) || names.has(entry.name);
   }, [serverData]);
   // Grouped by category before a search; a flat filtered list while typing.
   // A query searches names and descriptions, falling back to tags when
@@ -83,17 +82,12 @@ export function LibraryPicker({
       const matches =
         direct.length > 0
           ? direct
-          : all.filter((entry) =>
-              entry.tags.some((tag) => tag.toLowerCase().includes(needle)),
-            );
+          : all.filter((entry) => entry.tags.some((tag) => tag.toLowerCase().includes(needle)));
       return matches.length > 0 ? [{ category: null, entries: matches }] : [];
     }
-    const grouped: { category: string | null; entries: McpLibraryEntry[] }[] =
-      [];
+    const grouped: { category: string | null; entries: McpLibraryEntry[] }[] = [];
     for (const entry of all) {
-      const section = grouped.find(
-        (candidate) => candidate.category === entry.category,
-      );
+      const section = grouped.find((candidate) => candidate.category === entry.category);
       if (section) {
         section.entries.push(entry);
       } else {
@@ -106,11 +100,7 @@ export function LibraryPicker({
   useLayoutEffect(() => {
     if (!onClose || !setFooter) return undefined;
     setFooter(
-      <FooterButton
-        isMobile={isMobile}
-        variant={ButtonVariant.Secondary}
-        onClick={onClose}
-      >
+      <FooterButton isMobile={isMobile} variant={ButtonVariant.Secondary} onClick={onClose}>
         Close
       </FooterButton>,
     );
@@ -153,11 +143,7 @@ export function LibraryPicker({
                 <Button
                   key={item ?? "all"}
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    category === item
-                      ? ButtonVariant.Primary
-                      : ButtonVariant.Secondary
-                  }
+                  variant={category === item ? ButtonVariant.Primary : ButtonVariant.Secondary}
                   content={ButtonContent.Text}
                   aria-pressed={category === item}
                   onClick={() => setCategory(item)}
@@ -178,14 +164,9 @@ export function LibraryPicker({
         )}
       >
         {sections.map((section) => (
-          <div
-            key={section.category ?? "search"}
-            className="flex flex-col gap-2 [&>*]:shrink-0"
-          >
+          <div key={section.category ?? "search"} className="flex flex-col gap-2 [&>*]:shrink-0">
             {section.category !== null ? (
-              <span className="tag-label text-basic-muted pt-6 px-1">
-                {section.category}
-              </span>
+              <span className="tag-label text-basic-muted pt-6 px-1">{section.category}</span>
             ) : null}
             {section.entries.map((entry) => {
               const added = installed(entry);
@@ -200,9 +181,7 @@ export function LibraryPicker({
                   <EntryThumbnail entry={entry} />
                   <div className="flex flex-col items-start text-left min-w-0 flex-grow py-1">
                     <div className="flex items-center gap-2">
-                      <span className="label-small text-basic-primary">
-                        {entry.name}
-                      </span>
+                      <span className="label-small text-basic-primary">{entry.name}</span>
                       {added ? (
                         <Badge text="Added" color={BadgeColor.Green} />
                       ) : entry.auth === "required_header" ? (
@@ -213,9 +192,7 @@ export function LibraryPicker({
                       {entry.description}
                     </span>
                   </div>
-                  {added ? null : (
-                    <Icon iconName={IconName.Right} className="shrink-0" />
-                  )}
+                  {added ? null : <Icon iconName={IconName.Right} className="shrink-0" />}
                 </TabButton>
               );
             })}

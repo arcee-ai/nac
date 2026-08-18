@@ -20,9 +20,7 @@ export function sendPrompt(pending: string): void {
  * Hands each requested prompt to `send` exactly once. Returns the unsubscribe,
  * so an effect can `return consumePromptRequests(...)` directly.
  */
-export function consumePromptRequests(
-  send: (prompt: string) => void,
-): () => void {
+export function consumePromptRequests(send: (prompt: string) => void): () => void {
   return composerStore.subscribe(() => {
     const { pending } = composerStore.getState();
     if (pending === null) return;

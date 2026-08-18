@@ -1,14 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { cn } from "../../lib/cn";
 import Button, { ButtonSize, ButtonVariant } from "../button";
-import {
-  type CalendarDay,
-  dayKey,
-  isOutOfBounds,
-  isSameDay,
-  isToday,
-  isWithin,
-} from "./utils";
+import { type CalendarDay, dayKey, isOutOfBounds, isSameDay, isToday, isWithin } from "./utils";
 
 export interface DateRange {
   from?: Date;
@@ -62,9 +55,7 @@ const DayGrid: React.FC<DayGridProps> = ({
     const grid = gridRef.current;
     if (!focused || !grid) return undefined;
     const frame = requestAnimationFrame(() => {
-      const target = grid.querySelector<HTMLButtonElement>(
-        `button[data-day="${dayKey(focused)}"]`,
-      );
+      const target = grid.querySelector<HTMLButtonElement>(`button[data-day="${dayKey(focused)}"]`);
       if (target && !target.disabled) target.focus();
     });
     return () => cancelAnimationFrame(frame);
@@ -88,10 +79,8 @@ const DayGrid: React.FC<DayGridProps> = ({
         const isSelected = selected ? isSameDay(date, selected) : false;
         const isStart = range?.from ? isSameDay(date, range.from) : false;
         const isEnd = range?.to ? isSameDay(date, range.to) : false;
-        const inRange =
-          range?.from && range?.to ? isWithin(date, range.from, range.to) : false;
-        const isDisabled =
-          disabled || !inMonth || isOutOfBounds(date, min, max);
+        const inRange = range?.from && range?.to ? isWithin(date, range.from, range.to) : false;
+        const isDisabled = disabled || !inMonth || isOutOfBounds(date, min, max);
         // Square off the inner edges so a selected span reads as one bar.
         const seam =
           isStart && isEnd

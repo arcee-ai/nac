@@ -28,16 +28,8 @@ interface LoaderProps extends React.HTMLAttributes<HTMLDivElement> {
 const Loader: React.FC<LoaderProps> & {
   Size: typeof LoaderSize;
   Variant: typeof LoaderVariant;
-} = ({
-  size = LoaderSize.XLarge,
-  variant = LoaderVariant.Brand,
-  className = "",
-  ...props
-}) => (
-  <div
-    className={cn("flex w-fit h-fit animate-spin loader", className)}
-    {...props}
-  >
+} = ({ size = LoaderSize.XLarge, variant = LoaderVariant.Brand, className = "", ...props }) => (
+  <div className={cn("flex w-fit h-fit animate-spin loader", className)} {...props}>
     <Icon iconName={IconName.Loader} size={size} color={variant} />
   </div>
 );

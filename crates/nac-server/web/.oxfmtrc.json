@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "src/app/atoms/file-icon/manifest.generated.ts",
+    "src/app/atoms/file-icon/icons/**"
+  ]
+}
