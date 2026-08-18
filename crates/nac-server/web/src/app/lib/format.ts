@@ -14,22 +14,100 @@ export function shortId(id: string | null | undefined): string {
   return id.length > 13 ? `${id.slice(0, 8)}:${id.slice(-4)}` : id;
 }
 
-const INVOKED_SKILLS_CLOSE = "</invoked_skills>";
-const INVOKED_SKILLS_SEPARATOR = "\n\n<invoked_skills>\n";
+// The `$skillname` expansion wire format, pinned byte-for-byte with nac-core
+// `commands.rs` by fixtures/invoked-skills-format.json at the repo root.
+export const INVOKED_SKILLS_OPEN = "<invoked_skills>";
+export const INVOKED_SKILLS_CLOSE = "</invoked_skills>";
+export const INVOKED_SKILLS_SEPARATOR = "\n\n<invoked_skills>\n";
+const SKILL_CONTENT_OPEN = "<skill_content name=\"";
+const SKILL_CONTENT_CLOSE = "</skill_content>";
+
+/** A stored user message recognized as a `$skillname`-expanded prompt. */
+interface InvokedSkillsExpansion {
+  /** The prompt as the user typed it: everything before the last separator. */
+  head: string;
+  /** The expanded skills' names, in block order. */
+  names: string[];
+}
 
 /**
- * Collapse a `$skillname`-expanded prompt back to what the user typed.
- * Mirrors `invoked_skills_display_prompt` in nac-core `commands.rs`
- * byte-for-byte: the appended block is recognized by the closing tag at the
- * very end of the message plus the last separator before it, so user text
- * that merely mentions the sentinel — or even ends with the closing tag
- * without an appended block — is left alone.
+ * Parse one well-formed `<skill_content name="...">...</skill_content>` block
+ * at the start of `text`. Mirrors `parse_skill_content_block` in nac-core
+ * `commands.rs` byte-for-byte: the name runs to the next `"` and must be
+ * non-empty with no `<` or `>` (a rendered name can never contain those —
+ * `escape_xml` replaces them), and the block ends at the first
+ * `</skill_content>` (rendered bodies have the tag neutralized, so the first
+ * one closes the block).
  */
-function invokedSkillsDisplayPrompt(text: string): string | null {
+function parseSkillContentBlock(
+  text: string,
+): { name: string; rest: string } | null {
+  if (!text.startsWith(SKILL_CONTENT_OPEN)) return null;
+  const afterOpen = text.slice(SKILL_CONTENT_OPEN.length);
+  const quote = afterOpen.indexOf('"');
+  if (quote === -1) return null;
+  const name = afterOpen.slice(0, quote);
+  if (name === "" || name.includes("<") || name.includes(">")) return null;
+  const afterQuote = afterOpen.slice(quote + 1);
+  if (!afterQuote.startsWith(">")) return null;
+  const body = afterQuote.slice(1);
+  const close = body.indexOf(SKILL_CONTENT_CLOSE);
+  if (close === -1) return null;
+  return { name, rest: body.slice(close + SKILL_CONTENT_CLOSE.length) };
+}
+
+/**
+ * Recognize a `$skillname`-expanded prompt structurally. Mirrors
+ * `invoked_skills_display_prompt` in nac-core `commands.rs` byte-for-byte:
+ * the message must end with `\n` + the closing tag, and the region between
+ * the LAST separator and that final newline must be one or more well-formed
+ * `<skill_content>` blocks joined by single `\n`s — exactly what the
+ * expansion appends. Anything else (prose that happens to end with the
+ * closing tag, a malformed tail) is user text and returns null.
+ */
+function parseInvokedSkillsExpansion(
+  text: string,
+): InvokedSkillsExpansion | null {
   if (!text.endsWith(INVOKED_SKILLS_CLOSE)) return null;
-  const index = text.lastIndexOf(INVOKED_SKILLS_SEPARATOR);
+  const withoutClose = text.slice(0, text.length - INVOKED_SKILLS_CLOSE.length);
+  if (!withoutClose.endsWith("\n")) return null;
+  const tail = withoutClose.slice(0, -1);
+  const index = tail.lastIndexOf(INVOKED_SKILLS_SEPARATOR);
   if (index === -1) return null;
-  return text.slice(0, index);
+  const head = tail.slice(0, index);
+  let rest = tail.slice(index + INVOKED_SKILLS_SEPARATOR.length);
+  const names: string[] = [];
+  for (;;) {
+    const block = parseSkillContentBlock(rest);
+    if (block == null) return null;
+    names.push(block.name);
+    rest = block.rest;
+    if (rest === "") return { head, names };
+    if (!rest.startsWith("\n")) return null;
+    rest = rest.slice(1);
+    // A join newline with no block after it is not an expansion: real
+    // expansions end the region with the last block, not a separator.
+    if (rest === "") return null;
+  }
+}
+
+function invokedSkillsDisplayPrompt(text: string): string | null {
+  const expansion = parseInvokedSkillsExpansion(text);
+  return expansion ? expansion.head : null;
+}
+
+/**
+ * Names of the skills expanded into a stored user message, in block order —
+ * null when the message is not a well-formed `$skillname` expansion. Parsed
+ * from the same structural region the collapse recognizes, so the bubble's
+ * indicator and its collapsed text always agree.
+ */
+export function invokedSkillNames(
+  content: string | null | undefined,
+): string[] | null {
+  if (content == null) return null;
+  const expansion = parseInvokedSkillsExpansion(String(content));
+  return expansion ? expansion.names : null;
 }
 
 /**
