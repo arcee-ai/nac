@@ -125,7 +125,7 @@ impl SkillRegistry {
 
         content.push_str(&format!(
             "Skill directory: {}\n",
-            skill.skill_root_visible.display()
+            neutralize_prompt_markup(&skill.skill_root_visible.display().to_string())
         ));
         content.push_str("Relative paths in this skill are relative to the skill directory.\n");
         if !skill.resources.is_empty() {
@@ -141,17 +141,19 @@ impl SkillRegistry {
     }
 }
 
-/// Skill-controlled text (body, compatibility) is inserted into prompts
-/// raw, so it must not be able to forge the markup the prompt pipeline
-/// treats structurally. A literal `<invoked_skills>` sentinel in a skill
-/// body would corrupt the expand/collapse round trip: collapse truncates
-/// at the last separator, so a forged one makes display/resend show text
-/// the user never typed and makes re-expansion nest wrappers. Forged
-/// `<skill_content>` tags would fake block boundaries. Neutralize exactly
-/// those sequences by escaping their angle brackets — the same convention
-/// `escape_xml` uses for names and resource paths — and leave every other
-/// byte untouched. This rendering also backs `activate`, so tool
-/// activation and prompt expansion stay byte-identical.
+/// Skill-controlled text (body, compatibility, and the on-disk skill
+/// directory path — a directory name may legally contain newlines and
+/// markup) is inserted into prompts raw, so it must not be able to forge
+/// the markup the prompt pipeline treats structurally. A literal
+/// `<invoked_skills>` sentinel in a skill body would corrupt the
+/// expand/collapse round trip: collapse truncates at the last separator,
+/// so a forged one makes display/resend show text the user never typed
+/// and makes re-expansion nest wrappers. Forged `<skill_content>` tags
+/// would fake block boundaries. Neutralize exactly those sequences by
+/// escaping their angle brackets — the same convention `escape_xml` uses
+/// for names and resource paths — and leave every other byte untouched.
+/// This rendering also backs `activate`, so tool activation and prompt
+/// expansion stay byte-identical.
 fn neutralize_prompt_markup(value: &str) -> String {
     value
         .replace("<invoked_skills>", "&lt;invoked_skills&gt;")
