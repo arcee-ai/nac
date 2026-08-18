@@ -47,12 +47,30 @@ case "$PROFILE" in
     ;;
 esac
 
-if [[ ! -d "$WEB_DIR/node_modules" ]]; then
+DEPENDENCY_STAMP_DIR="$WEB_DIR/node_modules/.nac-dependencies"
+DEPENDENCIES_CURRENT=true
+for file in package.json package-lock.json; do
+  if [[ -f "$WEB_DIR/$file" ]]; then
+    cmp -s "$WEB_DIR/$file" "$DEPENDENCY_STAMP_DIR/$file" || DEPENDENCIES_CURRENT=false
+  elif [[ -f "$DEPENDENCY_STAMP_DIR/$file" ]]; then
+    DEPENDENCIES_CURRENT=false
+  fi
+done
+
+if [[ "$DEPENDENCIES_CURRENT" != true ]]; then
   echo "==> installing frontend dependencies"
   if [[ -f "$WEB_DIR/package-lock.json" ]]; then
     npm --prefix "$WEB_DIR" ci
   else
     npm --prefix "$WEB_DIR" install
+  fi
+
+  mkdir -p "$DEPENDENCY_STAMP_DIR"
+  cp "$WEB_DIR/package.json" "$DEPENDENCY_STAMP_DIR/package.json"
+  if [[ -f "$WEB_DIR/package-lock.json" ]]; then
+    cp "$WEB_DIR/package-lock.json" "$DEPENDENCY_STAMP_DIR/package-lock.json"
+  else
+    rm -f "$DEPENDENCY_STAMP_DIR/package-lock.json"
   fi
 fi
 
