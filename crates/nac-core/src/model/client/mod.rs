@@ -140,6 +140,13 @@ pub fn validate_model_configuration(
                 .map_err(classify_model_configuration_error)?;
             chatgpt_codex::preflight_stored_auth().map_err(classify_stored_codex_auth_error)?;
         }
+        BackendKind::OpencodeGo => {
+            if let Some(base_url) = base_url {
+                opencode_go::validate_base_url(base_url)
+                    .map_err(classify_model_configuration_error)?;
+            }
+            api_key_for_backend(backend, api_key_env)?;
+        }
         BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
@@ -249,6 +256,14 @@ impl ModelClient {
                     .map_err(classify_model_configuration_error)?;
                 chatgpt_codex::preflight_stored_auth().map_err(classify_stored_codex_auth_error)?;
                 (String::new(), None)
+            }
+            BackendKind::OpencodeGo => {
+                opencode_go::validate_base_url(&settings.base_url)
+                    .map_err(classify_model_configuration_error)?;
+                (
+                    api_key_for_backend(backend, settings.api_key_env.as_deref())?,
+                    None,
+                )
             }
             _ => (
                 api_key_for_backend(backend, settings.api_key_env.as_deref())?,
@@ -604,7 +619,11 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
         on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
-        let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let url = if self.backend == BackendKind::OpencodeGo {
+            opencode_go::messages_url(&self.base_url)
+        } else {
+            format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
+        };
         let mut request = anthropic_messages_request(
             &self.model,
             self.reasoning_effort,

@@ -38,6 +38,7 @@ pub fn provider_default_base_url(backend: BackendKind) -> Option<&'static str> {
         BackendKind::TogetherChat => Some("https://api.together.xyz/v1"),
         BackendKind::ArceeApi | BackendKind::ArceeAuth => Some(ARCEE_AUTH_CANONICAL_BASE_URL),
         BackendKind::ChatGptCodexResponses => Some(CHATGPT_CODEX_CANONICAL_BASE_URL),
+        BackendKind::OpencodeGo => Some(OPENCODE_GO_CANONICAL_BASE_URL),
     }
 }
 
@@ -73,7 +74,8 @@ fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
         | BackendKind::ArceeApi
-        | BackendKind::ArceeAuth => Some(format!("{trimmed}/models")),
+        | BackendKind::ArceeAuth
+        | BackendKind::OpencodeGo => Some(format!("{trimmed}/models")),
     }
 }
 
@@ -256,7 +258,7 @@ mod tests {
 
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    const ALL_BACKENDS: [BackendKind; 8] = [
+    const ALL_BACKENDS: [BackendKind; 9] = [
         BackendKind::OpenAiResponses,
         BackendKind::ChatGptCodexResponses,
         BackendKind::AnthropicMessages,
@@ -265,6 +267,7 @@ mod tests {
         BackendKind::TogetherChat,
         BackendKind::ArceeAuth,
         BackendKind::ArceeApi,
+        BackendKind::OpencodeGo,
     ];
 
     /// Restates the classification the launch UI depends on. A new backend has
@@ -276,7 +279,8 @@ mod tests {
             | BackendKind::DeepSeekChat
             | BackendKind::FireworksChat
             | BackendKind::TogetherChat
-            | BackendKind::ArceeApi => true,
+            | BackendKind::ArceeApi
+            | BackendKind::OpencodeGo => true,
             BackendKind::ChatGptCodexResponses | BackendKind::ArceeAuth => false,
         }
     }
@@ -325,6 +329,10 @@ mod tests {
         assert_eq!(
             models_url(BackendKind::TogetherChat, "https://api.together.xyz/v1/"),
             Some("https://api.together.xyz/v1/models".to_string())
+        );
+        assert_eq!(
+            models_url(BackendKind::OpencodeGo, "https://opencode.ai/zen/go/v1/"),
+            Some("https://opencode.ai/zen/go/v1/models".to_string())
         );
         // Codex keeps its index off the OpenAI-shaped path, and hides every
         // model unless the request says which client version is asking.

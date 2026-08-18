@@ -13,6 +13,7 @@ const PROVIDER_LABELS = {
   "together-chat": "Together Chat",
   "arcee-auth": "Arcee API (Sign in)",
   "arcee-api": "Arcee API (Key)",
+  "opencode-go": "OpenCode Go",
 } satisfies Record<BackendKind, string>;
 
 /** Display order shared by every provider list in the UI. */
@@ -25,6 +26,7 @@ export const PROVIDER_KINDS: BackendKind[] = [
   "deepseek-chat",
   "fireworks-chat",
   "together-chat",
+  "opencode-go",
 ];
 
 /** Stable rank for sorting provider lists; unknown backends sink to the end. */
@@ -48,6 +50,7 @@ const API_KEY_PROVIDERS: ReadonlySet<BackendKind> = new Set<BackendKind>([
   "fireworks-chat",
   "together-chat",
   "arcee-api",
+  "opencode-go",
 ]);
 
 export function providerUsesApiKey(backend: BackendKind): boolean {

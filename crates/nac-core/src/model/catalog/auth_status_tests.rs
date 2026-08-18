@@ -14,22 +14,24 @@ use std::path::Path;
 /// tests: the five models.dev conventional names and arcee-api's
 /// hand-seeded name. Saved + cleared by the guard so every test starts
 /// from a credential-free environment.
-const CREDENTIAL_VARS: [&str; 6] = [
+const CREDENTIAL_VARS: [&str; 7] = [
     "DEEPSEEK_API_KEY",
     "FIREWORKS_API_KEY",
     "TOGETHER_API_KEY",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "ARCEE_API_KEY",
+    "OPENCODE_API_KEY",
 ];
 
-const API_KEY_PROVIDERS: [(BackendKind, &str); 6] = [
+const API_KEY_PROVIDERS: [(BackendKind, &str); 7] = [
     (BackendKind::DeepSeekChat, "DEEPSEEK_API_KEY"),
     (BackendKind::FireworksChat, "FIREWORKS_API_KEY"),
     (BackendKind::TogetherChat, "TOGETHER_API_KEY"),
     (BackendKind::OpenAiResponses, "OPENAI_API_KEY"),
     (BackendKind::AnthropicMessages, "ANTHROPIC_API_KEY"),
     (BackendKind::ArceeApi, "ARCEE_API_KEY"),
+    (BackendKind::OpencodeGo, "OPENCODE_API_KEY"),
 ];
 
 fn credential_free_guard(label: &str) -> EnvGuard {
