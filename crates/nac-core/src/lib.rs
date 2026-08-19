@@ -20,6 +20,14 @@ pub mod model_configurations {
     };
 }
 
+/// Store-scoped project metadata, creation defaults, and session association.
+pub mod projects {
+    pub use crate::store::{
+        insert_project, list_projects, load_project_launch_context, update_project, NewProject,
+        ProjectLaunchContext, ProjectPatch, ProjectRecord, ProjectStoreError,
+    };
+}
+
 /// Named, reusable SSH connections the launch UI offers instead of asking for a
 /// host, port and identity file every time.
 pub mod ssh_configurations {

@@ -22,6 +22,32 @@ with at most four targeting the same canonical store. Capacity waits are
 bounded. These limits are internal and intentionally not configurable, leaving
 descriptor headroom under the common 256-descriptor process limit.
 
+## Projects
+
+Projects are explicit, store-scoped records exposed by `GET /projects`,
+`POST /projects`, and `PATCH /projects/{project_id}`. A project owns one
+canonical local directory or one canonical directory on an SSH connection,
+plus a name, optional description, and optional saved model configuration.
+Creation canonicalizes local paths and verifies remote paths with the same SSH
+directory browse used by session launch. Canonical location duplicates return
+409. Remote errors retain their existing classes: invalid or non-directory
+paths return 400, unreadable paths 403, missing paths 404, and transport or
+remote-command failures 502.
+
+`POST /sessions` accepts an optional `project_id`; `GET /sessions` accepts the
+same field as a filter. Selection is explicit—NAC never infers a project from
+`cwd`. A project-selected create must not also send a nonblank `cwd` or SSH
+location field, and an SSH project cannot use sandbox options. Each session
+belongs to at most one project. Project location and session membership are
+immutable; there is no delete, move, reassignment, or historical-backfill API.
+Existing sessions remain unassigned.
+
+The selected project ID appears in session summary and detail metadata.
+Project model defaults are copied into a new session, not read live. Later
+project edits affect only later sessions, and resume uses the session snapshot.
+Deleting a saved model configuration still referenced by a project returns
+409 and retains both the configuration and its credentials.
+
 ## Remote access
 
 Remote access delegates the authority of the local user to every client that
