@@ -35,8 +35,8 @@ export function DeleteProjectModal({
       if (location.pathname.startsWith(`/project/${encodeURIComponent(project.project_id)}`)) {
         navigate(routes.list(), { replace: true });
       }
-      const kept = result.released_session_ids.length;
-      const deleted = result.deleted_session_ids.length;
+      const kept = result?.released_session_ids?.length ?? 0;
+      const deleted = result?.deleted_session_ids?.length ?? 0;
       toast.success(
         deleted > 0
           ? `Project and ${deleted} ${plural(deleted)} deleted`

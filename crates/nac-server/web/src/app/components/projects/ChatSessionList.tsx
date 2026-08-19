@@ -26,6 +26,9 @@ interface ChatSessionListProps {
   onOpen: (summary: ManagedSessionSummary) => void;
   onRename?: (summary: ManagedSessionSummary) => void;
   onDelete?: (summary: ManagedSessionSummary) => void;
+  onPin?: (summary: ManagedSessionSummary) => void;
+  /** Taller rows and always-visible actions, matching the mobile modal. */
+  isMobile?: boolean;
   emptyLabel?: string;
 }
 
@@ -39,6 +42,8 @@ export function ChatSessionList({
   onOpen,
   onRename,
   onDelete,
+  onPin,
+  isMobile = false,
   emptyLabel = "No chats",
 }: ChatSessionListProps) {
   const now = useNow(RECENCY_TICK_MS);
@@ -74,10 +79,25 @@ export function ChatSessionList({
                   title={title}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
+                  isMobile={isMobile}
                   onClick={() => onOpen(entry)}
                   actions={
-                    onRename || onDelete ? (
+                    onPin || onRename || onDelete ? (
                       <>
+                        {onPin ? (
+                          <Button
+                            variant={ButtonVariant.Ghost}
+                            size={ButtonSize.Small}
+                            content={ButtonContent.Icon}
+                            title={entry.summary.pinned ? "Unpin chat" : "Pin chat"}
+                            aria-label={`${entry.summary.pinned ? "Unpin" : "Pin"} ${title}`}
+                            onClick={() => onPin(entry)}
+                          >
+                            <Icon
+                              iconName={entry.summary.pinned ? IconName.Unpin : IconName.Pin}
+                            />
+                          </Button>
+                        ) : null}
                         {onRename ? (
                           <Button
                             variant={ButtonVariant.Ghost}

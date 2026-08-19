@@ -139,8 +139,11 @@ function Provenance({ facts }: { facts: CardFacts }) {
   );
 }
 
+export type ProjectListKind = "project" | "orphan";
+
 export interface ProjectReorderStart {
   itemId: string;
+  kind: ProjectListKind;
   pinned: boolean;
   clientX: number;
   clientY: number;
@@ -180,6 +183,7 @@ function DragHandle({
         e.currentTarget.setPointerCapture(e.pointerId);
         onReorderStart({
           itemId: card.dataset.itemId ?? "",
+          kind: card.dataset.itemKind === "orphan" ? "orphan" : "project",
           pinned: card.dataset.itemPinned === "true",
           clientX: e.clientX,
           clientY: e.clientY,
@@ -215,7 +219,8 @@ interface ProjectCardProps {
   onRename?: () => void;
   /** Orphan rows only: file the chat under a project. */
   onAssign?: () => void;
-  /** When set (Default sort), shows desktop handle / mobile arrows. */
+  /** When set (Default sort), shows desktop handle / mobile arrows. Projects
+   *  and orphans reorder within their own group, never across it. */
   reorder?: ProjectCardReorder;
   /** Card is the active drag ghost (follows the pointer). */
   dragging?: boolean;
@@ -223,8 +228,8 @@ interface ProjectCardProps {
 
 /**
  * One row of the project list: either a project with the chats inside it rolled
- * up, or a chat that belongs to none. Both open with a click, but they carry
- * different controls — see ProjectCardActions.
+ * up, or a chat that belongs to none. Both open with a click and can be
+ * reordered within their own group — see ProjectCardActions.
  */
 export function ProjectCard({
   item,
@@ -272,6 +277,7 @@ export function ProjectCard({
     <div
       ref={cardRef}
       data-item-id={facts.id}
+      data-item-kind={facts.orphan ? "orphan" : "project"}
       data-item-pinned={facts.pinned ? "true" : "false"}
       className={cn(
         "group fade relative flex flex-col rounded-[8px] overflow-hidden cursor-default",

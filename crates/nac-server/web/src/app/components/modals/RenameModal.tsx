@@ -35,6 +35,7 @@ function RenameForm({
   const update = useUpdatePresentation();
   const [title, setTitle] = useState(summary.title ?? "");
   const [pinned, setPinned] = useState(Boolean(summary.pinned));
+  const canPin = Boolean(summary.project_id);
 
   const submit = async () => {
     if (update.isPending) return;
@@ -42,7 +43,7 @@ function RenameForm({
       await update.mutateAsync({
         id: summary.session_id,
         title: title.trim(),
-        pinned,
+        pinned: canPin ? pinned : false,
         expectedVersion: summary.presentation_version ?? 0,
       });
       toast.success("Session presentation saved");
@@ -95,15 +96,17 @@ function RenameForm({
             if (e.key === "Enter") void submit();
           }}
         />
-        <label className="flex items-center gap-2 label-small text-basic-secondary select-none">
-          <input
-            type="checkbox"
-            checked={pinned}
-            onChange={(e) => setPinned(e.target.checked)}
-            className="accent-[var(--color-fill-accent-primary)]"
-          />
-          Pin to top of the list
-        </label>
+        {canPin ? (
+          <label className="flex items-center gap-2 label-small text-basic-secondary select-none">
+            <input
+              type="checkbox"
+              checked={pinned}
+              onChange={(e) => setPinned(e.target.checked)}
+              className="accent-[var(--color-fill-accent-primary)]"
+            />
+            Pin to top of the list
+          </label>
+        ) : null}
       </div>
     </Modal>
   );

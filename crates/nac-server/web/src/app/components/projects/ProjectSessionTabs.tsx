@@ -23,6 +23,7 @@ import type { DropEdge } from "@/app/lib/sessionOrder";
 import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionOrder";
 import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
+import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
   dismissChatTab,
   restoreChatTab,
@@ -69,6 +70,7 @@ export function ProjectSessionTabs({
 }) {
   const navigate = useNavigate();
   const projectActions = useProjectActions();
+  const sessionActions = useSessionActions();
   const sessionTitle = useSessionTitle();
   const dismissed = useDismissedChatTabs();
   const tabOrder = useChatTabOrder(projectId);
@@ -93,6 +95,19 @@ export function ProjectSessionTabs({
             Adding new sessions is unavailable
           </span>
         </div>
+        <Tooltip title="Delete chat" position={Tooltip.Position.BottomLeft}>
+          <Button
+            variant={ButtonVariant.GhostDestructive}
+            size={ButtonSize.Medium}
+            content={ButtonContent.Icon}
+            className="shrink-0"
+            aria-label="Delete chat"
+            disabled={!summary}
+            onClick={() => summary && sessionActions.remove(summary)}
+          >
+            <Icon iconName={IconName.Trash} />
+          </Button>
+        </Tooltip>
         <Button
           variant={ButtonVariant.Primary}
           size={ButtonSize.Medium}

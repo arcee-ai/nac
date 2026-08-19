@@ -107,7 +107,7 @@ export function ProjectPopover({
         />
         <Separator />
       </div>
-      <div className="flex-1 min-h-0 overflow-auto [&>*]:shrink-0 pt-1">
+      <div className="flex-1 min-h-0 overflow-auto [&>*]:shrink-0">
         <ProjectsList
           items={visible}
           activeId={activeId}

@@ -17,21 +17,31 @@ import {
   Tooltip,
 } from "@/app/atoms";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
-import { ProjectCard, type ProjectReorderStart } from "@/app/components/projects/ProjectCard";
+import {
+  ProjectCard,
+  type ProjectListKind,
+  type ProjectReorderStart,
+} from "@/app/components/projects/ProjectCard";
 import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { toRunError } from "@/app/lib/providerError";
-import { projectListItemId, projectListItems, type ProjectListItem } from "@/app/lib/projects";
+import {
+  orphanSessions,
+  projectListItemId,
+  projectListItems,
+  type ProjectListItem,
+} from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
-import { type DropEdge } from "@/app/lib/sessionOrder";
+import { pinGroup, targetIndexInGroup, type DropEdge } from "@/app/lib/sessionOrder";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useMoveProjectOrder,
+  useMoveSessionOrder,
   useProjects,
   useSessionsWithWorkspaceStats,
 } from "@/app/services/queries";
@@ -96,7 +106,8 @@ interface DropTarget {
 }
 
 interface DragState {
-  projectId: string;
+  itemId: string;
+  kind: ProjectListKind;
   offsetX: number;
   offsetY: number;
   width: number;
@@ -158,6 +169,7 @@ function GridCard({
   return (
     <ProjectCard
       {...common}
+      onRename={() => sessionActions.rename(summary)}
       onDelete={() => sessionActions.remove(summary)}
       onAssign={() => projectActions.assign(summary)}
     />
@@ -168,17 +180,23 @@ function hitTestDropTarget(
   clientX: number,
   clientY: number,
   draggingId: string,
+  draggingKind: ProjectListKind,
 ): DropTarget | "pin-zone" | null {
   const stack = document.elementsFromPoint(clientX, clientY);
   for (const node of stack) {
     if (!(node instanceof HTMLElement)) continue;
-    if (node.dataset.pinDropZone === "true") return "pin-zone";
+    // Pinning is a project-only drop; an orphan over this zone is ignored.
+    if (node.dataset.pinDropZone === "true") {
+      if (draggingKind !== "project") continue;
+      return "pin-zone";
+    }
     const card = node.closest<HTMLElement>("[data-item-id]");
     if (!card) continue;
     const itemId = card.dataset.itemId;
     if (!itemId || itemId === draggingId) continue;
-    // Only a project has a place in the order; a loose chat is just passed over.
-    if (card.dataset.itemKind !== "project") continue;
+    // Projects and unassigned chats keep separate orders; a drop across
+    // groups would put a card where it cannot live.
+    if (card.dataset.itemKind !== draggingKind) continue;
     // Skip the floating ghost (fixed + data-dragging).
     if (card.dataset.dragging === "true") continue;
     const rect = card.getBoundingClientRect();
@@ -203,6 +221,7 @@ export default function ProjectsListPage() {
   const query = useFilterQuery();
   const isDefaultSort = useIsDefaultSort();
   const moveOrder = useMoveProjectOrder();
+  const moveSessionOrder = useMoveSessionOrder();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -236,6 +255,8 @@ export default function ProjectsListPage() {
 
   const fullPinned = useMemo(() => pinnedGroup(projects, true), [projects]);
   const fullUnpinned = useMemo(() => pinnedGroup(projects, false), [projects]);
+  const fullOrphans = useMemo(() => orphanSessions(allSessions), [allSessions]);
+  const fullUnpinnedSessions = useMemo(() => pinGroup(allSessions, false), [allSessions]);
 
   const clearDrag = useCallback(() => {
     dragRef.current = null;
@@ -271,6 +292,24 @@ export default function ProjectsListPage() {
     [projects, clearDrag, moveOrder, toast],
   );
 
+  const moveOrphanTo = useCallback(
+    async (sessionId: string, targetIndex: number) => {
+      try {
+        await moveSessionOrder.mutateAsync({
+          sessions: allSessions,
+          sessionId,
+          targetPinned: false,
+          targetIndex,
+        });
+      } catch (err) {
+        toast.error(`Failed to reorder chats: ${errorMessage(toRunError(err))}`);
+      } finally {
+        clearDrag();
+      }
+    },
+    [allSessions, clearDrag, moveSessionOrder, toast],
+  );
+
   const moveByArrow = useCallback(
     (project: ProjectRecord, delta: -1 | 1) => {
       const group = project.pinned ? fullPinned : fullUnpinned;
@@ -283,8 +322,38 @@ export default function ProjectsListPage() {
     [fullPinned, fullUnpinned, moveTo],
   );
 
+  const moveOrphanByArrow = useCallback(
+    (sessionId: string, delta: -1 | 1) => {
+      const index = fullOrphans.findIndex((entry) => entry.summary.session_id === sessionId);
+      const neighbor = index < 0 ? undefined : fullOrphans[index + delta];
+      if (!neighbor) return;
+      const targetIndex = targetIndexInGroup(
+        fullUnpinnedSessions,
+        neighbor.summary.session_id,
+        delta === -1 ? "before" : "after",
+        sessionId,
+      );
+      void moveOrphanTo(sessionId, targetIndex);
+    },
+    [fullOrphans, fullUnpinnedSessions, moveOrphanTo],
+  );
+
   const applyDropTarget = useCallback(
-    (dragId: string, target: DropTarget) => {
+    (dragId: string, kind: ProjectListKind, target: DropTarget) => {
+      if (kind === "orphan") {
+        if (target.itemId === dragId) {
+          clearDrag();
+          return;
+        }
+        const targetIndex = targetIndexInGroup(
+          fullUnpinnedSessions,
+          target.itemId,
+          target.edge,
+          dragId,
+        );
+        void moveOrphanTo(dragId, targetIndex);
+        return;
+      }
       const targetProject = projects.find((project) => project.project_id === target.itemId);
       if (!targetProject || target.itemId === dragId) {
         clearDrag();
@@ -299,13 +368,14 @@ export default function ProjectsListPage() {
       }
       void moveTo(dragId, targetProject.pinned, target.edge === "before" ? at : at + 1);
     },
-    [clearDrag, projects, moveTo],
+    [clearDrag, fullUnpinnedSessions, moveOrphanTo, moveTo, projects],
   );
 
   const beginDrag = useCallback((start: ProjectReorderStart) => {
     if (!start.itemId) return;
     const next: DragState = {
-      projectId: start.itemId,
+      itemId: start.itemId,
+      kind: start.kind,
       offsetX: start.offsetX,
       offsetY: start.offsetY,
       width: start.width,
@@ -332,7 +402,7 @@ export default function ProjectsListPage() {
       dragRef.current = next;
       setDrag(next);
 
-      const hit = hitTestDropTarget(e.clientX, e.clientY, current.projectId);
+      const hit = hitTestDropTarget(e.clientX, e.clientY, current.itemId, current.kind);
       if (hit === "pin-zone") {
         pinZoneRef.current = true;
         dropTargetRef.current = null;
@@ -353,13 +423,13 @@ export default function ProjectsListPage() {
         clearDrag();
         return;
       }
-      if (pinZoneRef.current) {
-        void moveTo(current.projectId, true, 0);
+      if (pinZoneRef.current && current.kind === "project") {
+        void moveTo(current.itemId, true, 0);
         return;
       }
       const target = dropTargetRef.current;
       if (target) {
-        applyDropTarget(current.projectId, target);
+        applyDropTarget(current.itemId, current.kind, target);
         return;
       }
       clearDrag();
@@ -378,9 +448,17 @@ export default function ProjectsListPage() {
   const renderCard = (item: ProjectListItem) => {
     const id = projectListItemId(item);
     const project = item.kind === "project" ? item.entry.project : null;
-    const group = project ? (project.pinned ? fullPinned : fullUnpinned) : [];
-    const index = project ? group.findIndex((p) => p.project_id === project.project_id) : -1;
-    const isDragging = drag?.projectId === id;
+    const projectGroup = project ? (project.pinned ? fullPinned : fullUnpinned) : [];
+    const projectIndex = project
+      ? projectGroup.findIndex((p) => p.project_id === project.project_id)
+      : -1;
+    const orphanIndex =
+      item.kind === "orphan"
+        ? fullOrphans.findIndex((entry) => entry.summary.session_id === id)
+        : -1;
+    const index = project ? projectIndex : orphanIndex;
+    const groupLength = project ? projectGroup.length : fullOrphans.length;
+    const isDragging = drag?.itemId === id;
     const dropEdge = !isDragging && dropTarget?.itemId === id ? dropTarget.edge : null;
 
     return (
@@ -408,13 +486,18 @@ export default function ProjectsListPage() {
           <GridCard
             item={item}
             onOpen={open}
-            // A loose chat has no place in the project order to move within.
-            reorderable={isDefaultSort && project != null}
+            reorderable={isDefaultSort}
             dragging={isDragging}
             canMoveUp={index > 0}
-            canMoveDown={index >= 0 && index < group.length - 1}
-            onMoveUp={() => project && moveByArrow(project, -1)}
-            onMoveDown={() => project && moveByArrow(project, 1)}
+            canMoveDown={index >= 0 && index < groupLength - 1}
+            onMoveUp={() => {
+              if (project) moveByArrow(project, -1);
+              else if (item.kind === "orphan") moveOrphanByArrow(id, -1);
+            }}
+            onMoveDown={() => {
+              if (project) moveByArrow(project, 1);
+              else if (item.kind === "orphan") moveOrphanByArrow(id, 1);
+            }}
             onReorderStart={beginDrag}
           />
         </div>
@@ -501,8 +584,9 @@ export default function ProjectsListPage() {
   const showPinDropZone =
     isDefaultSort &&
     drag != null &&
+    drag.kind === "project" &&
     pinned.length === 0 &&
-    !projects.find((project) => project.project_id === drag.projectId)?.pinned;
+    !projects.find((project) => project.project_id === drag.itemId)?.pinned;
 
   return (
     <div className="flex h-full min-h-0">

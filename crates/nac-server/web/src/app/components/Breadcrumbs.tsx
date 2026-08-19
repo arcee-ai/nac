@@ -55,16 +55,22 @@ export function Breadcrumbs() {
   const projectSessions = projectId
     ? sessions
         .filter((entry) => entry.summary.project_id === projectId)
-        .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
+        .sort(
+          (a, b) =>
+            parseStoreTime(b.summary.updated_at) -
+            parseStoreTime(a.summary.updated_at),
+        )
     : [];
 
   const inTrail = Boolean(projectId || sessionId);
   // An orphan has a chat but no project, so the trail falls back to its title
   // and the neutral chat tile.
-  const label = project?.name ?? sessionTitle(currentEntry?.summary) ?? sessionId ?? "";
+  const label =
+    project?.name ?? sessionTitle(currentEntry?.summary) ?? sessionId ?? "";
   // A phone names the chat and puts its project underneath, because the tab
   // strip that says which chat is open on a wider screen is not there to say
-  // it. An orphan has only the one line, which is all it has to give.
+  // it. An unassigned chat keeps the second line, in the danger color, so the
+  // missing project is still visible.
   const chatTitle = currentEntry ? sessionTitle(currentEntry.summary) : null;
   const avatarId = project?.project_id ?? sessionId ?? "";
   // The project chip pulses only for the chat actually running under it.
@@ -76,7 +82,10 @@ export function Breadcrumbs() {
 
   return (
     <nav
-      className={cn("flex items-center min-w-0 gap-1", isMobile && inTrail && "flex-1")}
+      className={cn(
+        "flex items-center min-w-0 gap-1",
+        isMobile && inTrail && "flex-1",
+      )}
       aria-label="Breadcrumb"
     >
       {showRoot ? (
@@ -107,7 +116,10 @@ export function Breadcrumbs() {
       {inTrail ? (
         <>
           {showRoot ? (
-            <Icon iconName={IconName.Right} className="text-basic-muted shrink-0" />
+            <Icon
+              iconName={IconName.Right}
+              className="text-basic-muted shrink-0"
+            />
           ) : null}
           {isMobile ? (
             <>
@@ -122,14 +134,30 @@ export function Breadcrumbs() {
                 aria-label="Switch chat or project"
               >
                 <span className="flex flex-col flex-1 min-w-0 text-left">
-                  <span className={cn("label-medium truncate", running && "text-shimmer-basic")}>
+                  <span
+                    className={cn(
+                      "label-medium truncate !leading-[20px]",
+                      running ? "text-shimmer-basic" : "text-basic-primary",
+                    )}
+                  >
                     {chatTitle ?? label}
                   </span>
-                  {chatTitle && project ? (
-                    <span className="text-micro truncate opacity-50">{project.name}</span>
+                  {chatTitle ? (
+                    <span
+                      className={cn(
+                        "text-micro truncate",
+                        project ? "text-basic-muted" : "text-danger-primary",
+                      )}
+                    >
+                      {project?.name ?? "Not assigned"}
+                    </span>
                   ) : null}
                 </span>
-                <Icon iconName={IconName.Right} size={24} className="shrink-0" />
+                <Icon
+                  iconName={IconName.Right}
+                  size={24}
+                  className="shrink-0"
+                />
               </button>
               <MobileProjectSessionModal
                 open={open}
@@ -148,7 +176,10 @@ export function Breadcrumbs() {
               size={PopoverSize.Medium}
               className="min-w-0"
               content={
-                <ProjectPopover activeId={projectId ?? sessionId} onClose={() => setOpen(false)} />
+                <ProjectPopover
+                  activeId={projectId ?? sessionId}
+                  onClose={() => setOpen(false)}
+                />
               }
             >
               <Button
@@ -172,12 +203,20 @@ export function Breadcrumbs() {
                 ) : (
                   <ChatSessionOrphanAvatar size={24} isRunning={running} />
                 )}
-                <span className={cn("truncate max-w-[120px]", running && "text-shimmer-basic")}>
+                <span
+                  className={cn(
+                    "truncate max-w-[120px]",
+                    running && "text-shimmer-basic",
+                  )}
+                >
                   {label}
                 </span>
                 <Icon
                   iconName={IconName.Down}
-                  className={cn("transition-transform", open ? "rotate-180" : undefined)}
+                  className={cn(
+                    "transition-transform",
+                    open ? "rotate-180" : undefined,
+                  )}
                 />
               </Button>
             </Popover>

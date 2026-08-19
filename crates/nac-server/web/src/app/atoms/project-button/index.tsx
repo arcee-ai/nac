@@ -50,7 +50,7 @@ const ProjectButton: React.FC<ProjectButtonProps> & {
   <div
     className={cn(
       "group flex items-center min-w-0 rounded-[4px] hover:bg-btn-ghost-hovered",
-      isMobile ? "h-12 gap-3 px-3" : "h-9 gap-2 px-2",
+      isMobile ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1",
       active && "bg-btn-ghost-highlighted",
       className,
     )}
@@ -90,8 +90,8 @@ const ProjectButton: React.FC<ProjectButtonProps> & {
     {actions ? (
       <div
         className={cn(
-          "items-center gap-1 shrink-0",
-          isMobile ? "flex" : "hidden group-hover:flex group-has-[:focus-visible]:flex",
+          "items-center shrink-0",
+          isMobile ? "flex gap-3" : "hidden gap-1.5 group-hover:flex group-has-[:focus-visible]:flex",
         )}
       >
         {actions}

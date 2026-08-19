@@ -50,12 +50,12 @@ interface ProjectCardActionsProps {
   orphan: boolean;
   pinned: boolean;
   onDelete: () => void;
-  /** Projects only — a loose chat has neither a pin nor a name of its own. */
+  /** Projects only — an unassigned chat cannot be pinned. */
   onTogglePin?: () => void;
   onRename?: () => void;
   /** Files an unassigned chat; only meaningful on an orphan card. */
   onAssign?: () => void;
-  /** Tablet/mobile reorder controls (Default sort), projects only. */
+  /** Tablet/mobile reorder controls (Default sort). */
   reorder?: {
     canMoveUp: boolean;
     canMoveDown: boolean;
@@ -65,9 +65,9 @@ interface ProjectCardActionsProps {
 }
 
 /**
- * Row of per-card actions. The two kinds of card carry different verbs: a
- * project is pinned, renamed and deleted, while the one thing worth offering on
- * an unassigned chat is filing it, so that gets a labelled primary button.
+ * Row of per-card actions. Both kinds of card can be renamed, deleted and
+ * reordered; a project can also be pinned, while an unassigned chat can be
+ * filed under a project instead.
  */
 export function ProjectCardActions({
   orphan,
@@ -78,32 +78,6 @@ export function ProjectCardActions({
   onAssign,
   reorder,
 }: ProjectCardActionsProps) {
-  if (orphan) {
-    return (
-      <div className="flex items-center gap-2 shrink-0">
-        <IconAction
-          title="Delete chat"
-          icon={IconName.Trash}
-          variant={ButtonVariant.GhostDestructive}
-          onClick={onDelete}
-        />
-        {onAssign ? (
-          <Button
-            variant={ButtonVariant.Secondary}
-            size={ButtonSize.Small}
-            content={ButtonContent.IconLeft}
-            onClick={(e) => {
-              e.stopPropagation();
-              onAssign();
-            }}
-          >
-            <Icon iconName={IconName.FolderOpen} /> Assign to project
-          </Button>
-        ) : null}
-      </div>
-    );
-  }
-
   return (
     <div
       className={
@@ -128,22 +102,39 @@ export function ProjectCardActions({
           />
         </>
       ) : null}
-      {onTogglePin ? (
-        <IconAction
-          title={pinned ? "Unpin project" : "Pin project"}
-          icon={pinned ? IconName.Unpin : IconName.Pin}
-          onClick={onTogglePin}
-        />
-      ) : null}
-      {onRename ? (
-        <IconAction title="Rename project" icon={IconName.Edit} onClick={onRename} />
-      ) : null}
-      <IconAction
-        title="Delete project"
-        icon={IconName.Trash}
-        variant={ButtonVariant.GhostDestructive}
-        onClick={onDelete}
-      />
+      {orphan ? (
+        <>
+          {onRename ? <IconAction title="Edit" icon={IconName.Edit} onClick={onRename} /> : null}
+          {onAssign ? (
+            <IconAction title="Assign to project" icon={IconName.FolderOpen} onClick={onAssign} />
+          ) : null}
+          <IconAction
+            title="Delete chat"
+            icon={IconName.Trash}
+            variant={ButtonVariant.GhostDestructive}
+            onClick={onDelete}
+          />
+        </>
+      ) : (
+        <>
+          {onTogglePin ? (
+            <IconAction
+              title={pinned ? "Unpin project" : "Pin project"}
+              icon={pinned ? IconName.Unpin : IconName.Pin}
+              onClick={onTogglePin}
+            />
+          ) : null}
+          {onRename ? (
+            <IconAction title="Rename project" icon={IconName.Edit} onClick={onRename} />
+          ) : null}
+          <IconAction
+            title="Delete project"
+            icon={IconName.Trash}
+            variant={ButtonVariant.GhostDestructive}
+            onClick={onDelete}
+          />
+        </>
+      )}
     </div>
   );
 }

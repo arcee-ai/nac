@@ -11,6 +11,8 @@ interface ChatSessionButtonProps extends Omit<
   active?: boolean;
   /** Swaps the label for a shimmering one and shows a spinner. */
   running?: boolean;
+  /** Taller touch target and always-visible actions for the mobile modal. */
+  isMobile?: boolean;
   /** Rename and delete controls, revealed on hover and on keyboard focus. */
   actions?: React.ReactNode;
 }
@@ -29,6 +31,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   title,
   active = false,
   running = false,
+  isMobile = false,
   actions,
   className = "",
   type = "button",
@@ -36,7 +39,8 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
 }) => (
   <div
     className={cn(
-      "group flex items-center gap-1.5 h-9 px-2 py-1 min-w-0 rounded-[4px]",
+      "group flex items-center min-w-0 rounded-[4px]",
+      isMobile ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1",
       active
         ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered"
         : "hover:bg-btn-ghost-hovered",
@@ -47,7 +51,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
       type={type}
       title={title}
       aria-current={active ? "page" : undefined}
-      className="flex flex-1 items-center gap-1.5 min-w-0 text-left"
+      className={cn("flex flex-1 items-center min-w-0 text-left", isMobile ? "gap-3" : "gap-1.5")}
       {...props}
     >
       {running ? (
@@ -55,7 +59,8 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
       ) : null}
       <span
         className={cn(
-          "label-small truncate",
+          "truncate",
+          isMobile ? "text-medium" : "label-small",
           running
             ? "text-shimmer-basic"
             : active
@@ -67,7 +72,14 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
       </span>
     </button>
     {actions ? (
-      <div className="flex items-center gap-1 shrink-0 invisible opacity-0 transition-opacity duration-150 ease-out group-hover:visible group-hover:opacity-100 group-has-[:focus-visible]:visible group-has-[:focus-visible]:opacity-100">
+      <div
+        className={cn(
+          "flex items-center gap-1 shrink-0",
+          isMobile
+            ? null
+            : "invisible opacity-0 transition-opacity duration-150 ease-out group-hover:visible group-hover:opacity-100 group-has-[:focus-visible]:visible group-has-[:focus-visible]:opacity-100",
+        )}
+      >
         {actions}
       </div>
     ) : null}

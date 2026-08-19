@@ -55,41 +55,41 @@ export function ProjectsList({
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-8">
       {groups.map((group) => (
-        <div key={group.label} className="flex flex-col gap-1">
-          {groups.length > 1 ? (
-            <GroupLabel className="px-2 pt-3 pb-1 first:pt-1">{group.label}</GroupLabel>
-          ) : null}
-          {group.items.map((item) => {
-            const id = projectListItemId(item);
-            const actions = renderActions?.(item);
-            return item.kind === "project" ? (
-              <ProjectButton
-                key={id}
-                entityId={id}
-                name={item.entry.project.name}
-                active={id === activeId}
-                running={item.entry.running > 0}
-                trailing={String(item.entry.sessions.length)}
-                isMobile={isMobile}
-                actions={actions}
-                onClick={() => onOpenProject(id)}
-              />
-            ) : (
-              <ProjectButton
-                key={id}
-                entityId={id}
-                name={sessionTitle(item.session.summary)}
-                variant={ProjectButtonVariant.Orphan}
-                active={id === activeId}
-                running={isActiveRun(item.session.active_run)}
-                isMobile={isMobile}
-                actions={actions}
-                onClick={() => onOpenSession(id)}
-              />
-            );
-          })}
+        <div key={group.label} className="flex flex-col gap-2">
+          <GroupLabel className={isMobile ? "px-3" : "px-2"}>{group.label}</GroupLabel>
+          <div className="flex flex-col gap-1">
+            {group.items.map((item) => {
+              const id = projectListItemId(item);
+              const actions = renderActions?.(item);
+              return item.kind === "project" ? (
+                <ProjectButton
+                  key={id}
+                  entityId={id}
+                  name={item.entry.project.name}
+                  active={id === activeId}
+                  running={item.entry.running > 0}
+                  trailing={String(item.entry.sessions.length)}
+                  isMobile={isMobile}
+                  actions={actions}
+                  onClick={() => onOpenProject(id)}
+                />
+              ) : (
+                <ProjectButton
+                  key={id}
+                  entityId={id}
+                  name={sessionTitle(item.session.summary)}
+                  variant={ProjectButtonVariant.Orphan}
+                  active={id === activeId}
+                  running={isActiveRun(item.session.active_run)}
+                  isMobile={isMobile}
+                  actions={actions}
+                  onClick={() => onOpenSession(id)}
+                />
+              );
+            })}
+          </div>
         </div>
       ))}
     </div>
