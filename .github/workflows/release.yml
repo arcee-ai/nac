@@ -74,12 +74,10 @@ jobs:
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
 
-  test-server:
+  lint:
     if: ${{ needs.prepare.outputs.run == 'true' }}
     needs: prepare
     runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
 
     steps:
       - uses: actions/checkout@v4
@@ -105,8 +103,40 @@ jobs:
         working-directory: crates/nac-server/web
         run: npm ci
 
-      - name: Lint and check formatting
-        run: make lint format-check
+      - name: Lint frontend and backend
+        run: make lint
+
+      - name: Check frontend and backend formatting
+        run: make format-check
+
+  test-server:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: [prepare, lint]
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/nac-server/web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: crates/nac-server/web
+        run: npm ci
 
       - name: Typecheck the web app
         working-directory: crates/nac-server/web
@@ -138,7 +168,7 @@ jobs:
 
   test-core:
     if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
+    needs: [prepare, lint]
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
