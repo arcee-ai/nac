@@ -3495,9 +3495,10 @@ async fn assign_session_handler(
     payload: std::result::Result<Json<AssignSessionRequest>, JsonRejection>,
 ) -> std::result::Result<Json<ProjectRecord>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    Ok(Json(
-        manager.assign_session_to_project(&project_id, &request.session_id)?,
-    ))
+    Ok(Json(manager.assign_session_to_project(
+        &project_id,
+        &request.session_id,
+    )?))
 }
 
 /// Rewrite the order of one pin group.
@@ -3514,8 +3515,11 @@ async fn reorder_projects_handler(
     payload: std::result::Result<Json<ReorderProjectsRequest>, JsonRejection>,
 ) -> std::result::Result<Json<ReorderProjectsResponse>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    let projects =
-        manager.reorder_projects(request.pinned, &request.project_ids, &request.expected_versions)?;
+    let projects = manager.reorder_projects(
+        request.pinned,
+        &request.project_ids,
+        &request.expected_versions,
+    )?;
     Ok(Json(ReorderProjectsResponse {
         pinned: request.pinned,
         projects,

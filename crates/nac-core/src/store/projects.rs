@@ -292,8 +292,9 @@ fn load_project_with_connection(
 
 pub fn list_projects(path: &Path) -> ProjectResult<Vec<ProjectRecord>> {
     let conn = open_runtime_connection(path)?;
-    let mut statement =
-        conn.prepare(&format!("SELECT {PROJECT_COLUMNS} FROM projects {PROJECT_ORDER}"))?;
+    let mut statement = conn.prepare(&format!(
+        "SELECT {PROJECT_COLUMNS} FROM projects {PROJECT_ORDER}"
+    ))?;
     let projects = statement
         .query_map([], row_to_project)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -382,9 +383,12 @@ pub fn update_project(
         Some(pinned) if pinned != existing.pinned => (
             pinned,
             next_sort_order(&tx, pinned, Some(project_id))?,
-            existing.presentation_version.checked_add(1).ok_or_else(|| {
-                ProjectStoreError::Store(anyhow!("project presentation version overflow"))
-            })?,
+            existing
+                .presentation_version
+                .checked_add(1)
+                .ok_or_else(|| {
+                    ProjectStoreError::Store(anyhow!("project presentation version overflow"))
+                })?,
         ),
         _ => (
             existing.pinned,
@@ -434,9 +438,10 @@ pub fn delete_project(path: &Path, project_id: &str) -> ProjectResult<Vec<String
         "DELETE FROM session_projects WHERE project_id = ?1",
         params![project_id],
     )?;
-    tx.execute("DELETE FROM projects WHERE project_id = ?1", params![
-        project_id
-    ])?;
+    tx.execute(
+        "DELETE FROM projects WHERE project_id = ?1",
+        params![project_id],
+    )?;
     tx.commit()?;
     Ok(released)
 }
@@ -494,7 +499,7 @@ pub fn assign_session_to_project(
             "session '{session_id}' already belongs to project '{assigned}'"
         )));
     }
-    if PathBuf::from(&cwd) != project.cwd
+    if project.cwd != Path::new(&cwd)
         || ssh_host != project.ssh_host
         || ssh_port != project.ssh_port
         || ssh_identity_file != project.ssh_identity_file
@@ -560,7 +565,9 @@ pub fn reorder_projects(
         group
     };
     if group.len() != project_ids.len()
-        || group.iter().any(|project_id| !submitted.contains(project_id.as_str()))
+        || group
+            .iter()
+            .any(|project_id| !submitted.contains(project_id.as_str()))
     {
         return Err(ProjectStoreError::Conflict(
             "project_ids must list every project in the requested pin group exactly once"
