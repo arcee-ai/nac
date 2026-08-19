@@ -36,20 +36,14 @@ export function TopBar() {
   const isTablet = useIsTablet();
   const { pathname } = useLocation();
   const actions = useProjectActions();
-  const inTrail =
-    sessionIdFromPath(pathname) !== null ||
-    projectIdFromPath(pathname) !== null;
+  const inTrail = sessionIdFromPath(pathname) !== null || projectIdFromPath(pathname) !== null;
 
   return (
     <>
       <header
         className={cn(
           "fixed inset-x-0 top-0 z-10 flex items-center justify-between py-2 shrink-0",
-          isMobile
-            ? "h-16 px-3 gap-4"
-            : isTablet
-              ? "h-[52px] px-3"
-              : "h-[52px] px-4",
+          isMobile ? "h-16 px-3 gap-4" : isTablet ? "h-[52px] px-3" : "h-[52px] px-4",
         )}
       >
         <div
@@ -64,18 +58,10 @@ export function TopBar() {
         <div
           className={cn(
             "relative flex items-center",
-            isMobile
-              ? "flex-1 min-w-0 gap-4"
-              : isTablet
-                ? "shrink-0 gap-4"
-                : "shrink-0 gap-8",
+            isMobile ? "flex-1 min-w-0 gap-4" : isTablet ? "shrink-0 gap-4" : "shrink-0 gap-8",
           )}
         >
-          <Link
-            to={routes.list()}
-            className="shrink-0"
-            aria-label="All projects"
-          >
+          <Link to={routes.list()} className="shrink-0" aria-label="All projects">
             <Logo
               height={isMobile ? 36 : isTablet ? 36 : 36}
               markOnly={isMobile || isTablet}
@@ -107,10 +93,7 @@ export function TopBar() {
           />
         </div>
       </header>
-      <ConfigurationsModal
-        open={configuring}
-        onClose={() => setConfiguring(false)}
-      />
+      <ConfigurationsModal open={configuring} onClose={() => setConfiguring(false)} />
       <SshConfigsModal open={sshConfigs} onClose={() => setSshConfigs(false)} />
       <McpServersModal open={mcpServers} onClose={() => setMcpServers(false)} />
     </>

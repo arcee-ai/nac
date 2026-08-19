@@ -209,9 +209,7 @@ export function MobileProjectSessionModal({
             activeSessionId={activeSessionId}
             isMobile
             emptyLabel={query.trim() ? "No matching chats" : "No chats yet"}
-            onOpen={(entry) =>
-              closeAnd(() => navigate(routes.session(entry.summary.session_id)))
-            }
+            onOpen={(entry) => closeAnd(() => navigate(routes.session(entry.summary.session_id)))}
             onPin={(entry) => void sessionActions.togglePin(entry.summary)}
             onRename={(entry) => closeAnd(() => sessionActions.rename(entry.summary))}
             onDelete={(entry) => closeAnd(() => sessionActions.remove(entry.summary))}
@@ -319,7 +317,12 @@ function ModalTab({
       onClick={onClick}
     >
       <Icon iconName={icon} size={28} />
-      <span className={cn("label-micro font-bold truncate max-w-full", active ? null : "text-basic-primary")}>
+      <span
+        className={cn(
+          "label-micro font-bold truncate max-w-full",
+          active ? null : "text-basic-primary",
+        )}
+      >
         {label}
       </span>
     </button>

@@ -93,9 +93,7 @@ export function ChatSessionList({
                             aria-label={`${entry.summary.pinned ? "Unpin" : "Pin"} ${title}`}
                             onClick={() => onPin(entry)}
                           >
-                            <Icon
-                              iconName={entry.summary.pinned ? IconName.Unpin : IconName.Pin}
-                            />
+                            <Icon iconName={entry.summary.pinned ? IconName.Unpin : IconName.Pin} />
                           </Button>
                         ) : null}
                         {onRename ? (

@@ -771,10 +771,7 @@ export function ThreadsView({
   // when the list is not empty — otherwise a reconnect flash shows the empty
   // copy next to a list that already has threads.
   const current =
-    ordered.find((thread) => thread.name === selected) ??
-    selectable[0] ??
-    ordered[0] ??
-    null;
+    ordered.find((thread) => thread.name === selected) ?? selectable[0] ?? ordered[0] ?? null;
   // A session that fanned out into hundreds of workstreams would otherwise lay
   // every row out at once, on a panel where only the first screen is ever read.
   // The thread opened from a message keeps its row whatever the reader has

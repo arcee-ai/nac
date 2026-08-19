@@ -91,7 +91,9 @@ const ProjectButton: React.FC<ProjectButtonProps> & {
       <div
         className={cn(
           "items-center shrink-0",
-          isMobile ? "flex gap-3" : "hidden gap-1.5 group-hover:flex group-has-[:focus-visible]:flex",
+          isMobile
+            ? "flex gap-3"
+            : "hidden gap-1.5 group-hover:flex group-has-[:focus-visible]:flex",
         )}
       >
         {actions}
