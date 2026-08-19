@@ -1,6 +1,6 @@
 # Skills
 
-Skills are directories that contain a `SKILL.md` file. nac discovers them from project and user skill trees, shows the orchestrator a compact catalog, and preloads selected skills into worker threads. Workers cannot activate skills themselves: there is no `activate_skill` tool, and workers do not receive an available-skills listing.
+Skills are directories that contain a `SKILL.md` file. nac discovers them from project and user skill trees, shows the orchestrator a compact catalog, preloads selected skills into worker threads, and expands `$skillname` references in top-level prompts. Workers cannot activate skills themselves: there is no `activate_skill` tool, and workers do not receive an available-skills listing.
 
 ## Discovery
 
@@ -46,3 +46,17 @@ The orchestrator never calls `activate_skill`. When a registry is present, the `
 Unknown names fail the dispatch. Duplicates are ignored. Selected skills are preloaded as worker system messages (`The orchestrator preloaded this skill for this worker dispatch.`) that include the skill body, optional compatibility, the skill directory, and any resource file list.
 
 On a local unsandboxed session the skill directory is the real host path. Under sandbox or SSH it is the placeholder `[filepath-not-visible]`, because the model cannot use host paths on those backends. Relative paths in the skill are relative to that directory.
+
+## Referencing skills in a prompt
+
+In a top-level orchestrator prompt you can reference a skill as `$skillname`. Recognized names are resolved from the session's skill registry, and the skill's instructions are appended to the prompt before the first model call — no tool call and no extra round trip.
+
+The literal `$skillname` stays in your sentence; the skill content is appended after it, wrapped in an `<invoked_skills>` element. You can reference several skills in one prompt: each is included once, in first-reference order.
+
+A `$` token that is not a registered skill is left untouched, so shell variables (`$HOME`, `${VAR}`, `$(cmd)`), money (`$5`), and a trailing `$` all pass through unchanged. Recognition is by name only, so the flip side applies too: if a skill is named `HOME` or `5`, then `$HOME` and `$5` *will* expand — avoid skill names that look like shell variables or numbers. Likewise only the first `$` of a doubled `$` is literal: `$$demo` expands when `demo` is registered, because the second `$` starts the reference.
+
+The chat UI and history show the prompt as you typed it; the expanded form is what the model sees. Resend and retry re-expand from the original text, exactly once — the appended block is never nested.
+
+Every non-empty registered name is `$`-referenceable, including names containing punctuation, leading underscores, or Unicode. At each `$`, registry names are compared literally and the longest boundary-delimited match wins: with both `code` and `code-review` registered, `$code-review` resolves to `code-review`; with only `code`, `$code-review` remains untouched rather than invoking the shorter prefix.
+
+This complements worker preloading rather than replacing it: `thread(..., skills: [...])` remains the way to give workers skills, while `$skillname` hands the skill's instructions to the orchestrator for the current prompt.

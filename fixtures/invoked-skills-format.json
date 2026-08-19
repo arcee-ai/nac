@@ -1,0 +1,63 @@
+{
+  "description": "Wire format for $skillname prompt expansion, shared by nac-core (crates/nac-core/src/commands.rs) and the web frontend (crates/nac-server/web/src/app/lib/format.ts). An expanded prompt is {raw}{separator}{blocks}\\n{close} where each block is one <skill_content name=\"...\">...</skill_content> rendering and blocks are joined by a single \\n. Collapse truncates at the last separator, but only when the message ends with \\n{close} AND the region between the last separator and that final newline is one or more well-formed blocks joined by single \\n's. A well-formed block starts with the literal '<skill_content name=\"', has a non-empty name free of quotes and angle brackets up to the next '\"', then '>', and ends at the first '</skill_content>'. Consumers: Rust test invoked_skills_wire_format_matches_the_shared_fixture in commands.rs (via env!(\"CARGO_MANIFEST_DIR\") + ../../fixtures), vitest suite in format.test.ts (JSON import six ../ up from crates/nac-server/web/src/app/lib). Every collapse vector must stay true under this strictened collapse: expansion vectors use well-formed blocks, and no-collapse vectors must keep not collapsing.",
+  "separator": "\n\n<invoked_skills>\n",
+  "open": "<invoked_skills>",
+  "close": "</invoked_skills>",
+  "collapse_vectors": [
+    {
+      "name": "single_skill_expansion",
+      "message": "Use $demo to review this change.\n\n<invoked_skills>\n<skill_content name=\"demo\">\nDEMO BODY\n\nSkill directory: /skills/demo\nRelative paths in this skill are relative to the skill directory.\n</skill_content>\n</invoked_skills>",
+      "display": "Use $demo to review this change."
+    },
+    {
+      "name": "multi_skill_expansion",
+      "message": "first $beta, then $alpha\n\n<invoked_skills>\n<skill_content name=\"beta\">\nBETA BODY\n\nSkill directory: /skills/beta\nRelative paths in this skill are relative to the skill directory.\n</skill_content>\n<skill_content name=\"alpha\">\nALPHA BODY\n\nSkill directory: /skills/alpha\nRelative paths in this skill are relative to the skill directory.\n</skill_content>\n</invoked_skills>",
+      "display": "first $beta, then $alpha"
+    },
+    {
+      "name": "raw_prompt_containing_the_separator_collapses_at_the_last_one",
+      "message": "the separator\n\n<invoked_skills>\nmentioned in prose\n\n<invoked_skills>\n<skill_content name=\"demo\">\nDEMO BODY\n</skill_content>\n</invoked_skills>",
+      "display": "the separator\n\n<invoked_skills>\nmentioned in prose"
+    },
+    {
+      "name": "prose_mentioning_sentinel_without_trailing_close",
+      "message": "the <invoked_skills> element wraps appended skills",
+      "display": "the <invoked_skills> element wraps appended skills"
+    },
+    {
+      "name": "separator_in_prose_without_trailing_close",
+      "message": "the separator\n\n<invoked_skills>\nmentioned in prose stays",
+      "display": "the separator\n\n<invoked_skills>\nmentioned in prose stays"
+    },
+    {
+      "name": "trailing_close_without_separator",
+      "message": "user text that ends with </invoked_skills>",
+      "display": "user text that ends with </invoked_skills>"
+    },
+    {
+      "name": "prose_with_sentinel_and_trailing_close",
+      "message": "notes on the format\n\n<invoked_skills>\nmore of my notes\n</invoked_skills>",
+      "display": "notes on the format\n\n<invoked_skills>\nmore of my notes\n</invoked_skills>"
+    },
+    {
+      "name": "malformed_tail_extra_text_after_block",
+      "message": "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content>\nextra text\n</invoked_skills>",
+      "display": "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content>\nextra text\n</invoked_skills>"
+    },
+    {
+      "name": "malformed_tail_junk_between_blocks",
+      "message": "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content>\nJUNK\n<skill_content name=\"b\">\nY\n</skill_content>\n</invoked_skills>",
+      "display": "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</skill_content>\nJUNK\n<skill_content name=\"b\">\nY\n</skill_content>\n</invoked_skills>"
+    },
+    {
+      "name": "malformed_tail_missing_block_close",
+      "message": "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</invoked_skills>",
+      "display": "raw\n\n<invoked_skills>\n<skill_content name=\"a\">\nX\n</invoked_skills>"
+    },
+    {
+      "name": "empty_wrapper_is_not_an_expansion",
+      "message": "raw\n\n<invoked_skills>\n\n</invoked_skills>",
+      "display": "raw\n\n<invoked_skills>\n\n</invoked_skills>"
+    }
+  ]
+}

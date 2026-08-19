@@ -32,7 +32,7 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
-import { displayPromptFromMessageText, formatStoreTime } from "@/app/lib/format";
+import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import type { SessionPanel } from "@/app/lib/routes";
@@ -212,6 +212,9 @@ export function Transcript({
   const pendingText = submitted
     ? displayPromptFromMessageText(submitted.content)
     : (optimisticPrompt ?? "");
+  // The optimistic copy is raw typed text; only the stored message can carry
+  // an expansion.
+  const pendingSkills = submitted ? invokedSkillNames(submitted.content) : null;
   // Compared against the last *user* turn rather than the last turn of any
   // kind: everything the run produces lands after the prompt it answers, so
   // once that prompt is in the snapshot the copy is a duplicate no matter how
@@ -446,6 +449,7 @@ export function Transcript({
                   <UserMessage
                     key={turn.key}
                     text={turn.text}
+                    invokedSkills={turn.invokedSkills}
                     timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
                     messageIndex={turn.messageIndex}
                     actionsDisabled={actionsBusy}
@@ -503,7 +507,7 @@ export function Transcript({
               // above the answer to it rather than after it.
               return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
                 <Fragment key={turn.key}>
-                  <UserMessage text={pendingText} pending />
+                  <UserMessage text={pendingText} invokedSkills={pendingSkills} pending />
                   {row}
                 </Fragment>
               ) : (
@@ -512,7 +516,9 @@ export function Transcript({
             })}
           </PerfProfiler>
 
-          {showPending && !streamingTurn ? <UserMessage text={pendingText} pending /> : null}
+          {showPending && !streamingTurn ? (
+            <UserMessage text={pendingText} invokedSkills={pendingSkills} pending />
+          ) : null}
 
           {/* Before the first assistant message or stream delta lands, keep the
               same chrome as a live ModelMessage — pill + model name — rather

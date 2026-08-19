@@ -51,6 +51,12 @@ impl SkillRegistry {
                     shadowed.insert(parsed.name);
                     continue;
                 }
+                if is_env_var_style_name(&parsed.name) {
+                    eprintln!(
+                        "Skill '{}' has an env-var-style name; writing '${}' in a prompt will expand this skill",
+                        parsed.name, parsed.name
+                    );
+                }
                 skills.insert(parsed.name.clone(), record);
             }
         }
@@ -89,19 +95,54 @@ impl SkillRegistry {
         self.skills.contains_key(name)
     }
 
+    /// Returns the longest registered skill name that begins `input` and ends
+    /// at a reference boundary. Registry names are matched literally instead
+    /// of being constrained by a second, prompt-specific name grammar.
+    pub(crate) fn match_prompt_reference<'a>(&'a self, input: &str) -> Option<&'a str> {
+        self.skills
+            .keys()
+            .filter_map(|name| {
+                let remainder = input.strip_prefix(name)?;
+                let is_boundary = match remainder.chars().next() {
+                    Some(character) => {
+                        !character.is_alphanumeric() && character != '_' && character != '-'
+                    }
+                    None => true,
+                };
+                is_boundary.then_some(name.as_str())
+            })
+            .max_by_key(|name| name.len())
+    }
+
     pub fn activate(&self, name: &str) -> ToolResult {
-        let Some(skill) = self.skills.get(name) else {
+        let Some(content) = self.render_for_prompt(name) else {
             return ToolResult {
                 content: (format!("Error: unknown skill '{}'", name)).into(),
                 is_error: true,
             };
         };
 
+        ToolResult {
+            content: content.into(),
+            is_error: false,
+        }
+    }
+
+    /// Renders the skill in the `<skill_content>` format for injection into
+    /// a user prompt, or `None` when the name is not registered. This is the
+    /// exact rendering `activate` returns, so a `$skill` prompt expansion
+    /// reads identically to a tool activation.
+    pub(crate) fn render_for_prompt(&self, name: &str) -> Option<String> {
+        let skill = self.skills.get(name)?;
+
         let mut content = format!("<skill_content name=\"{}\">\n", escape_xml(&skill.name));
         if let Some(compatibility) = &skill.compatibility {
-            content.push_str(&format!("Compatibility: {}\n\n", compatibility));
+            content.push_str(&format!(
+                "Compatibility: {}\n\n",
+                neutralize_prompt_markup(compatibility)
+            ));
         }
-        content.push_str(&skill.body);
+        content.push_str(&neutralize_prompt_markup(&skill.body));
         if !skill.body.ends_with('\n') {
             content.push('\n');
         }
@@ -109,7 +150,7 @@ impl SkillRegistry {
 
         content.push_str(&format!(
             "Skill directory: {}\n",
-            skill.skill_root_visible.display()
+            neutralize_prompt_markup(&skill.skill_root_visible.display().to_string())
         ));
         content.push_str("Relative paths in this skill are relative to the skill directory.\n");
         if !skill.resources.is_empty() {
@@ -121,11 +162,42 @@ impl SkillRegistry {
         }
         content.push_str("</skill_content>");
 
-        ToolResult {
-            content: content.into(),
-            is_error: false,
-        }
+        Some(content)
     }
+}
+
+/// Env-var-style names — all uppercase letters, digits, and underscores
+/// (`HOME`, `PATH`, `VIRTUAL_ENV`), including all-digit names (`5`) —
+/// collide with shell syntax: `$HOME` in a prompt is indistinguishable
+/// from a skill reference, and the registered skill wins. Loading still
+/// succeeds; the registry warns at load time so the collision is visible
+/// to whoever installed the skill.
+pub(super) fn is_env_var_style_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Skill-controlled text (body, compatibility, and the on-disk skill
+/// directory path — a directory name may legally contain newlines and
+/// markup) is inserted into prompts raw, so it must not be able to forge
+/// the markup the prompt pipeline treats structurally. A literal
+/// `<invoked_skills>` sentinel in a skill body would corrupt the
+/// expand/collapse round trip: collapse truncates at the last separator,
+/// so a forged one makes display/resend show text the user never typed
+/// and makes re-expansion nest wrappers. Forged `<skill_content>` tags
+/// would fake block boundaries. Neutralize exactly those sequences by
+/// escaping their angle brackets — the same convention `escape_xml` uses
+/// for names and resource paths — and leave every other byte untouched.
+/// This rendering also backs `activate`, so tool activation and prompt
+/// expansion stay byte-identical.
+fn neutralize_prompt_markup(value: &str) -> String {
+    value
+        .replace("<invoked_skills>", "&lt;invoked_skills&gt;")
+        .replace("</invoked_skills>", "&lt;/invoked_skills&gt;")
+        .replace("</skill_content>", "&lt;/skill_content&gt;")
+        .replace("<skill_content", "&lt;skill_content")
 }
 
 #[cfg(test)]

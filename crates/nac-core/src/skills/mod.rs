@@ -318,4 +318,28 @@ mod tests {
             Some("Use when handling foo:bar tasks")
         );
     }
+
+    #[test]
+    fn env_var_style_names_are_detected() {
+        for name in ["HOME", "PATH", "VIRTUAL_ENV", "H2O", "5", "123", "_"] {
+            assert!(
+                registry::is_env_var_style_name(name),
+                "{name:?} should warn"
+            );
+        }
+        for name in ["demo", "code-review", "home", "my_skill2", "", "A-b"] {
+            assert!(
+                !registry::is_env_var_style_name(name),
+                "{name:?} should not warn"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_xml_escapes_quotes_for_attribute_contexts() {
+        assert_eq!(
+            escape_xml("a <b> & \"c\""),
+            "a &lt;b&gt; &amp; &quot;c&quot;"
+        );
+    }
 }
