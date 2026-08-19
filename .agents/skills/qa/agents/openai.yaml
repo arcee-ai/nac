@@ -1,0 +1,4 @@
+interface:
+  display_name: "NAC Quality Assurance"
+  short_description: "Run scalable isolated live QA for NAC"
+  default_prompt: "Use $qa with n=4 to run an isolated live QA pass for this NAC development branch."

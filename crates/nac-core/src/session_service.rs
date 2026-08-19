@@ -23,6 +23,7 @@ pub use crate::events::{
 };
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
+use crate::skills::SkillRegistry;
 use crate::types::Message;
 use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
@@ -525,6 +526,10 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    /// The session's skill registry, captured from the agent at construction
+    /// so `prepare_user_input` can expand top-level `$skillname` references
+    /// without taking the agent lock.
+    skills: Option<Arc<SkillRegistry>>,
     /// True when this session executes inside a sandbox container. Dropping
     /// the last service reference drops the `SandboxSession`, and an owned
     /// container's `Drop` runs `podman rm -f`; the next resume builds a fresh
@@ -719,6 +724,7 @@ impl SessionService {
         let active_threads = run_config.agent.active_threads_handle();
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
+        let skills = run_config.agent.skills();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
         // pass; later scans read only the newly appended tail rows.
@@ -740,6 +746,7 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            skills,
             has_sandbox,
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
@@ -966,7 +973,7 @@ impl SessionService {
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
-        commands::prepare_user_input(input)
+        commands::prepare_user_input(input, self.skills.as_deref())
     }
 
     #[allow(clippy::result_large_err)]
@@ -2413,7 +2420,14 @@ impl SessionService {
         let active_run = ActiveRunSnapshot {
             run_id,
             client_id,
-            prompt_preview: prompt_preview(expanded_prompt, 160),
+            // Preview what the user typed, not the expanded prompt: this
+            // text feeds the events feed, history subtitles, and revision
+            // labels, where `<invoked_skills>`/skill-body fragments would
+            // leak.
+            prompt_preview: prompt_preview(
+                &commands::display_prompt_from_message(expanded_prompt),
+                160,
+            ),
             submitted_user_message: Some(submitted_user_message),
             started_at_epoch_ms: submitted_at_epoch_ms,
         };
@@ -3386,7 +3400,7 @@ pub(super) mod tests {
         store_path: PathBuf,
         session_id: Option<String>,
     ) -> Agent {
-        test_agent_with_compaction_threshold(client, store_path, session_id, None)
+        build_test_agent(client, store_path, session_id, None, None)
     }
 
     pub(super) fn test_agent_with_compaction_threshold(
@@ -3394,6 +3408,31 @@ pub(super) mod tests {
         store_path: PathBuf,
         session_id: Option<String>,
         orchestrator_compaction_threshold: Option<u64>,
+    ) -> Agent {
+        build_test_agent(
+            client,
+            store_path,
+            session_id,
+            orchestrator_compaction_threshold,
+            None,
+        )
+    }
+
+    pub(super) fn test_agent_with_skills(
+        client: ModelClient,
+        store_path: PathBuf,
+        session_id: Option<String>,
+        skills: Option<Arc<SkillRegistry>>,
+    ) -> Agent {
+        build_test_agent(client, store_path, session_id, None, skills)
+    }
+
+    fn build_test_agent(
+        client: ModelClient,
+        store_path: PathBuf,
+        session_id: Option<String>,
+        orchestrator_compaction_threshold: Option<u64>,
+        skills: Option<Arc<SkillRegistry>>,
     ) -> Agent {
         Agent::with_config(
             client,
@@ -3414,7 +3453,7 @@ pub(super) mod tests {
                 sandbox: None,
                 ssh: None,
                 mcp: None,
-                skills: None,
+                skills,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
@@ -3444,12 +3483,23 @@ pub(super) mod tests {
         label: &str,
         session_id: &str,
     ) -> (SessionServiceParts, PathBuf) {
+        test_active_service_with_skills(label, session_id, ModelClient::new_for_test(), None)
+    }
+
+    /// Active-session service whose agent carries a skill registry. The
+    /// client is a parameter so the test can point it at a scripted server.
+    pub(super) fn test_active_service_with_skills(
+        label: &str,
+        session_id: &str,
+        client: ModelClient,
+        skills: Option<Arc<SkillRegistry>>,
+    ) -> (SessionServiceParts, PathBuf) {
         let store_path = test_store_path(label);
-        let client = ModelClient::new_for_test();
-        let agent = test_agent(
+        let agent = test_agent_with_skills(
             client.clone(),
             store_path.clone(),
             Some(session_id.to_string()),
+            skills,
         );
         let snapshot = sessions::new_snapshot(
             session_id.to_string(),
@@ -4274,6 +4324,109 @@ pub(super) mod tests {
         }
         assert_eq!(appended_lens, vec![2, 3, 4, 5]);
         drop(handle);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn skill_references_expand_into_the_agent_prompt_only() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            serde_json::json!({
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "done"}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+            .to_string(),
+        )]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let registry = Arc::new(SkillRegistry::load_for_test(vec![
+            crate::skills::SkillRecord {
+                name: "demo".to_string(),
+                description: "demo skill".to_string(),
+                compatibility: None,
+                skill_root_visible: PathBuf::from("/skills/demo"),
+                body: "DEMO SKILL BODY".to_string(),
+                resources: Vec::new(),
+            },
+        ]));
+        let (parts, store_path) = test_active_service_with_skills(
+            "skill_prompt_expansion",
+            "skill-expansion-session",
+            client,
+            Some(registry),
+        );
+
+        // Preparation keeps the raw/display prompt exactly as typed and
+        // appends the rendered skill to the agent-facing prompt only.
+        let raw = "Use $demo to say hi";
+        let PreparedUserInput::SubmitPrompt(prompt) = parts.service.prepare_user_input(raw) else {
+            panic!("expected a submittable prompt");
+        };
+        assert_eq!(prompt.raw_prompt, raw);
+        assert_eq!(prompt.display_prompt, raw);
+        assert!(prompt.agent_prompt.starts_with(raw));
+        // The sentinel strings in this test are intentionally hardcoded
+        // byte literals, not the commands::INVOKED_SKILLS_* consts (which
+        // are private to commands.rs): they pin the wire format the
+        // frontend mirrors byte-for-byte, so drifting the Rust consts
+        // fails this test.
+        assert!(prompt.agent_prompt.contains("\n\n<invoked_skills>\n"));
+        assert!(prompt
+            .agent_prompt
+            .contains("<skill_content name=\"demo\">"));
+        assert!(prompt.agent_prompt.contains("DEMO SKILL BODY"));
+        assert!(prompt.agent_prompt.ends_with("</invoked_skills>"));
+        let expanded = prompt.agent_prompt.clone();
+
+        let handle = parts.service.try_submit_prepared_prompt(prompt).unwrap();
+        // The run preview shows what the user typed, not the expanded
+        // prompt, even though the run carries the expanded form.
+        assert_eq!(parts.service.active_run().unwrap().prompt_preview, raw);
+        for _ in 0..100 {
+            if parts.service.active_run().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(parts.service.active_run().is_none());
+        drop(handle);
+
+        // The provider request carried the expanded prompt.
+        let requests = server.finish();
+        assert_eq!(requests.len(), 1);
+        let body = String::from_utf8(requests[0].body.clone()).unwrap();
+        assert!(body.contains("Use $demo to say hi"));
+        assert!(body.contains("DEMO SKILL BODY"));
+        assert!(body.contains("<invoked_skills>"));
+
+        // The stored transcript holds the expanded form...
+        let transcript = parts.service.store_backed_transcript().await.unwrap();
+        let message_idx = transcript
+            .iter()
+            .position(|message| matches!(message, Message::User { .. }))
+            .expect("the run committed a user message");
+        assert!(
+            matches!(&transcript[message_idx], Message::User { content } if content == &expanded)
+        );
+
+        // ...while the resend read path collapses it back to the raw input,
+        // and re-preparing that collapses-then-expands exactly once (no
+        // nested wrappers).
+        let collapsed = parts.service.user_input_at(message_idx).await.unwrap();
+        assert_eq!(collapsed, raw);
+        let PreparedUserInput::SubmitPrompt(reprepared) =
+            parts.service.prepare_user_input(&collapsed)
+        else {
+            panic!("expected a submittable prompt");
+        };
+        assert_eq!(reprepared.agent_prompt, expanded);
+        assert_eq!(
+            reprepared.agent_prompt.matches("<invoked_skills>").count(),
+            1
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

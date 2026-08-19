@@ -54,4 +54,7 @@ pub(super) fn escape_xml(value: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        // Quotes are harmless in element content but would break the
+        // `name="..."` attribute convention, so escape them too.
+        .replace('"', "&quot;")
 }

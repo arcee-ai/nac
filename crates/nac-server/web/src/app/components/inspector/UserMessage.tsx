@@ -18,6 +18,12 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 interface UserMessageProps {
   text: string;
   pending?: boolean;
+  /**
+   * Skills the stored message had expanded into the agent-facing prompt,
+   * parsed from its invoked_skills wrapper. Shown as a small line under the
+   * bubble so the injection is visible; null for an ordinary prompt.
+   */
+  invokedSkills?: string[] | null;
   /** Shown on hover when the message has a known time. */
   timestamp?: string | null;
   /**
@@ -46,6 +52,7 @@ interface UserMessageProps {
 export const UserMessage = memo(function UserMessage({
   text,
   pending = false,
+  invokedSkills = null,
   timestamp = null,
   messageIndex,
   onRefresh = null,
@@ -67,6 +74,19 @@ export const UserMessage = memo(function UserMessage({
       >
         {text}
       </div>
+
+      {invokedSkills && invokedSkills.length > 0 ? (
+        <div
+          className="flex items-center gap-1 pt-1.5 pr-1 label-micro text-basic-tertiary"
+          title="Skill content was expanded into the prompt sent to the agent"
+        >
+          <Icon iconName={IconName.Bolt} size={12} color="var(--color-fill-basic-tertiary)" />
+          <span>
+            {invokedSkills.length === 1 ? "Skill" : "Skills"} expanded:{" "}
+            {invokedSkills.map((name) => `$${name}`).join(", ")}
+          </span>
+        </div>
+      ) : null}
 
       {!pending ? (
         <div
