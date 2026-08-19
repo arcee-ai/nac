@@ -54,7 +54,7 @@ export function DeleteProjectModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Delete project"
+      title="Delete Entire Project?"
       size={ModalSize.Medium}
       footer={
         <>
@@ -74,7 +74,7 @@ export function DeleteProjectModal({
             onClick={() => void submit("keep")}
             disabled={remove.isPending}
           >
-            Delete and keep sessions
+            Keep Sessions
           </Button>
           <Button
             variant={ButtonVariant.SecondaryDestructive}
@@ -87,11 +87,17 @@ export function DeleteProjectModal({
         </>
       }
     >
-      <p>
-        Delete the project <span className="text-basic-primary">&quot;{project?.name}&quot;</span>?
-        Its chats can stay behind as unassigned, so nothing said in them is lost, or go down with it
-        — which cannot be undone.
-      </p>
+      <div className="flex flex-col gap-4">
+        <p>
+          Are you sure you want to delete{" "}
+          <span className="text-basic-primary">&quot;{project?.name}&quot;</span>? This can&apos;t
+          be undone.
+        </p>
+        <p>
+          Select Keep Sessions if you want to delete the project and keep the sessions within it.
+          Those sessions will be unassigned.
+        </p>
+      </div>
     </Modal>
   );
 }
