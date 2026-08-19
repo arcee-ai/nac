@@ -95,6 +95,25 @@ impl SkillRegistry {
         self.skills.contains_key(name)
     }
 
+    /// Returns the longest registered skill name that begins `input` and ends
+    /// at a reference boundary. Registry names are matched literally instead
+    /// of being constrained by a second, prompt-specific name grammar.
+    pub(crate) fn match_prompt_reference<'a>(&'a self, input: &str) -> Option<&'a str> {
+        self.skills
+            .keys()
+            .filter_map(|name| {
+                let remainder = input.strip_prefix(name)?;
+                let is_boundary = match remainder.chars().next() {
+                    Some(character) => {
+                        !character.is_alphanumeric() && character != '_' && character != '-'
+                    }
+                    None => true,
+                };
+                is_boundary.then_some(name.as_str())
+            })
+            .max_by_key(|name| name.len())
+    }
+
     pub fn activate(&self, name: &str) -> ToolResult {
         let Some(content) = self.render_for_prompt(name) else {
             return ToolResult {

@@ -120,15 +120,11 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
 
 /// Expands top-level `$skillname` references into an appended skill block.
 ///
-/// A reference is a `$` immediately followed by a name token matching
-/// `[A-Za-z0-9][A-Za-z0-9_-]*`; the whole greedy run is the candidate name,
-/// so with both `code` and `code-review` registered, `$code-review` resolves
-/// to `code-review`. `$` before anything else (`{`, `(`, whitespace, end of
-/// input, another `$`, ...) is never a reference, and a candidate that is
-/// not a registered skill stays ordinary text — `$HOME`, `${VAR}`,
-/// `$(cmd)`, `$5`, and `$$` all pass through byte-identical. Recognized
-/// skills are deduplicated and appended in first-reference order; the
-/// literal `$skillname` stays in the original sentence.
+/// At each `$`, registered skill names are matched literally and the longest
+/// boundary-delimited match wins. The registry therefore defines which names
+/// are referenceable; unregistered dollar syntax stays ordinary text.
+/// Recognized skills are deduplicated and appended in first-reference order,
+/// while the literal `$skillname` stays in the original sentence.
 pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -> String {
     let Some(skills) = skills else {
         return prompt.to_string();
@@ -138,31 +134,17 @@ pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -
     // recognized skill is looked up and rendered exactly once, blocks are
     // deduplicated, and first-reference order is preserved.
     let mut invoked: Vec<(&str, String)> = Vec::new();
-    let bytes = prompt.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] != b'$' {
-            index += 1;
+    for (marker, _) in prompt.match_indices('$') {
+        let reference_start = marker + 1;
+        let Some(name) = skills.match_prompt_reference(&prompt[reference_start..]) else {
             continue;
-        }
-        let name_start = index + 1;
-        // All name characters are ASCII, so byte slicing stays on char
-        // boundaries; a `$` not followed by a name start is literal text.
-        if name_start >= bytes.len() || !bytes[name_start].is_ascii_alphanumeric() {
-            index += 1;
-            continue;
-        }
-        let mut name_end = name_start + 1;
-        while name_end < bytes.len() && is_skill_name_char(bytes[name_end]) {
-            name_end += 1;
-        }
-        let name = &prompt[name_start..name_end];
+        };
         if !invoked.iter().any(|(seen, _)| *seen == name) {
-            if let Some(block) = skills.render_for_prompt(name) {
-                invoked.push((name, block));
-            }
+            let block = skills
+                .render_for_prompt(name)
+                .expect("matched prompt reference must remain registered");
+            invoked.push((name, block));
         }
-        index = name_end;
     }
 
     if invoked.is_empty() {
@@ -193,10 +175,6 @@ pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -
     expanded.push('\n');
     expanded.push_str(INVOKED_SKILLS_CLOSE);
     expanded
-}
-
-fn is_skill_name_char(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
 }
 
 pub fn display_prompt_from_message(content: &str) -> String {
@@ -416,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_skill_names_resolve_to_the_greedy_longest_run() {
+    fn overlapping_skill_names_resolve_to_the_longest_registered_match() {
         let registry = test_registry(&[("code", "CODE BODY"), ("code-review", "REVIEW BODY")]);
 
         let expanded = expand("run $code-review please", Some(&registry));
@@ -427,10 +405,42 @@ mod tests {
         assert!(expanded.contains("<skill_content name=\"code\">"));
         assert!(!expanded.contains("REVIEW BODY"));
 
-        // A run that matches no registered skill is ordinary text, even
-        // when a registered name is a prefix of it.
+        // A registered prefix is not a complete reference without a boundary.
         let expanded = expand("run $codebase please", Some(&registry));
         assert_eq!(expanded, "run $codebase please");
+    }
+
+    #[test]
+    fn every_registered_name_is_referenceable() {
+        let registry = test_registry(&[
+            ("_review", "UNDERSCORE BODY"),
+            ("code.review", "PUNCTUATION BODY"),
+            ("技能", "UNICODE BODY"),
+            ("{VAR}", "BRACED BODY"),
+        ]);
+
+        let expanded = expand(
+            "run $_review, $code.review, $技能, and ${VAR}",
+            Some(&registry),
+        );
+
+        for name in ["_review", "code.review", "技能", "{VAR}"] {
+            assert!(
+                expanded.contains(&format!("<skill_content name=\"{name}\">")),
+                "missing registered name {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dollar_inside_a_registered_name_starts_an_independent_reference() {
+        let registry = test_registry(&[("foo$bar", "OUTER BODY"), ("bar", "INNER BODY")]);
+
+        let expanded = expand("$foo$bar", Some(&registry));
+        let outer = expanded.find("OUTER BODY").unwrap();
+        let inner = expanded.find("INNER BODY").unwrap();
+
+        assert!(outer < inner, "references follow dollar-sign order");
     }
 
     #[test]

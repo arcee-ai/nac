@@ -57,6 +57,6 @@ A `$` token that is not a registered skill is left untouched, so shell variables
 
 The chat UI and history show the prompt as you typed it; the expanded form is what the model sees. Resend and retry re-expand from the original text, exactly once — the appended block is never nested.
 
-Only names matching `[A-Za-z0-9][A-Za-z0-9_-]*` are `$`-referenceable, even though skill frontmatter allows any non-empty `name`. Overlapping names resolve greedily to the longest match: with both `code` and `code-review` registered, `$code-review` resolves to `code-review`.
+Every non-empty registered name is `$`-referenceable, including names containing punctuation, leading underscores, or Unicode. At each `$`, registry names are compared literally and the longest boundary-delimited match wins: with both `code` and `code-review` registered, `$code-review` resolves to `code-review`; with only `code`, `$code-review` remains untouched rather than invoking the shorter prefix.
 
 This complements worker preloading rather than replacing it: `thread(..., skills: [...])` remains the way to give workers skills, while `$skillname` hands the skill's instructions to the orchestrator for the current prompt.
