@@ -20,7 +20,7 @@ The top-level controller is not a QA test worker. In nac it sees this catalog de
 
 1. Dispatch `qa/setup` with `skills: ["qa"]` and `mode=setup`, `n`, and the caller's complete scope/focus context.
 2. Read the retained setup episode. It must contain the absolute pass root, source SHA, binary, and `n` distinct assignment contracts.
-3. Dispatch exactly those `n` test workers together in one parallel wave. Copy every setup contract verbatim—especially `slot`, `scope`, `report`, and `evidence`—then add `skills: ["qa"]`, `qa/setup` as a source thread, the setup-proven `podman_mode`, and ephemeral connection fields only when that mode is remote. Never rename, repartition, or “improve” assignments after `RUN.json` exists.
+3. Dispatch exactly those `n` test workers together in one parallel wave. Copy every setup contract verbatim—especially `slot`, `scope`, `report`, and `evidence`—then add `skills: ["qa"]`, `qa/setup` as a source thread, the setup-proven `podman_mode`, `XDG_RUNTIME_DIR` only for local mode, and ephemeral connection fields only for remote mode. Never rename, repartition, or “improve” assignments after `RUN.json` exists.
 4. After all `n` finish, dispatch `qa/aggregate` with `skills: ["qa"]`, `mode=aggregate`, the exact setup-defined slots, `qa/setup`, every test worker that produced a retained episode, and explicit dispatch outcomes for workers without episodes. A failed or timed-out worker cannot be named as a source thread.
 5. Return the aggregate conclusion. Never substitute one all-purpose QA worker for this topology.
 
@@ -54,7 +54,7 @@ From the repository root:
 2. Record the root, current ref, and full `HEAD` SHA. Require that the caller owns or has reviewed and explicitly authorized this revision for host execution. Stop on an unreviewed third-party or otherwise untrusted commit.
 3. Require no staged or unstaged tracked changes and no untracked source inputs. Ignored build output and prior `.nac/qa/` passes do not make the source dirty. Do not stash, commit, reset, clean, or delete user work. If the source is dirty, stop: nac sandbox worktrees fork from `HEAD` and cannot validate uncommitted files.
 4. Require `podman --version` and `podman info --format '{{.Host.Security.Rootless}}'` to succeed and report `true`. The client user's UID does not prove a remote engine is rootless.
-5. Classify the selected engine as local or remote/VM-backed and prove it remains rootless after replacing `HOME`. Local engines use no connection override. For a remote engine, read `podman system connection list --format json`, select its default connection, and map only its URI and identity path to ephemeral `CONTAINER_HOST` and `CONTAINER_SSHKEY`. Test those fields with an isolated home. Return the mode and any connection fields in the setup episode, outside `RUN.json`; never copy the containers configuration tree.
+5. Classify the selected engine as local or remote/VM-backed and prove it remains rootless after replacing `HOME`. For a local engine, capture `XDG_RUNTIME_DIR` ephemerally, require it to be an absolute existing directory owned by the current user, and prove rootless `podman info` with isolated HOME/XDG config plus that runtime directory. For a remote engine, read `podman system connection list --format json`, select its default connection, and map only its URI and identity path to ephemeral `CONTAINER_HOST` and `CONTAINER_SSHKEY`; prove rootless `podman info` with an isolated home. Return the mode and its ephemeral runtime fields in the setup episode, outside `RUN.json`; never copy the containers configuration tree.
 
 ### 2. Create the pass
 
@@ -108,7 +108,7 @@ caller_context=<relevant focus or time guidance>
 podman_mode=<local|remote>
 ```
 
-Return the pass root, captured SHA, pass-owned binary path/version/SHA-256, requested `n`, Podman mode, any ephemeral remote connection fields, and all `n` complete worker contracts in the retained setup episode. Do not dispatch them yourself.
+Return the pass root, captured SHA, pass-owned binary path/version/SHA-256, requested `n`, Podman mode, the selected mode's ephemeral runtime fields (`XDG_RUNTIME_DIR` for local or connection URI/key path for remote), and all `n` complete worker contracts in the retained setup episode. Do not dispatch them yourself.
 
 ## Aggregate workflow
 
@@ -119,10 +119,10 @@ Run only with `mode=aggregate`, the absolute pass root, captured source SHA, req
 3. Confirm reports are regular files under the pass root, have unique paths, name the captured SHA, and link only to evidence under the same pass root.
 4. Confirm `HEAD` still equals the captured SHA and the pass-owned binary SHA-256 still matches `RUN.json`. Revision or binary drift invalidates the pass as infrastructure evidence.
 5. Read every report. Deduplicate findings only in `SUMMARY.md`; never rewrite worker reports.
-6. Account for exactly `n` slots by status. Separate product findings from skips and infrastructure failures. Preserve contradictory results and repeated symptoms with source links.
+6. Account for exactly `n` slots by primary status and separately count `clean`, `degraded`, and `failed` infrastructure outcomes. Preserve product findings even when their slot also has infrastructure failure; never count one slot under two primary statuses. Preserve contradictory results and repeated symptoms with source links.
 7. Record cleanup results and any exact resource IDs that remain. Do not remove pre-existing resources or earlier pass directories.
 
-`SUMMARY.md` must include revision and environment identity, assignments, coverage gaps, status counts, deduplicated findings ordered by severity/confidence, exact report links, fuzz seeds/replay commands, cleanup conclusion, and a statement that findings were not fixed during QA.
+`SUMMARY.md` must include revision and environment identity, assignments, primary status counts, separate infrastructure-outcome counts, coverage gaps, deduplicated findings ordered by severity/confidence, exact report links, fuzz seeds/replay commands, cleanup conclusion, and a statement that findings were not fixed during QA.
 
 ## Worker workflow
 
@@ -148,11 +148,11 @@ server.stderr.log
 resources.jsonl
 ```
 
-Construct the server environment from a minimal named allowlist. Set the isolated `HOME`, `XDG_CONFIG_HOME`, and `NAC_HOME`; retain only required `PATH`, locale, temporary-directory, logging, and the setup-proven optional remote Podman fields. Remove ambient provider/base-URL, proxy, SSH-agent, cloud, CI, token, password, and secret variables. Before the first nac-web launch, set `MODELS_DEV_URL` to a run-owned loopback metadata double; a deliberately closed loopback endpoint is acceptable only for an explicit offline case. Add only run-specific dummy credentials consumed by local service doubles.
+Construct the server environment from a minimal named allowlist. Set the isolated `HOME`, `XDG_CONFIG_HOME`, and `NAC_HOME`; retain only required `PATH`, locale, temporary-directory, logging, the setup-proven local `XDG_RUNTIME_DIR`, or the setup-proven remote Podman fields. Remove ambient provider/base-URL, proxy, SSH-agent, cloud, CI, token, password, and secret variables. Before the first nac-web launch, set `MODELS_DEV_URL` to a run-owned loopback metadata double; a deliberately closed loopback endpoint is acceptable only for an explicit offline case. Add only run-specific dummy credentials consumed by local service doubles.
 
 Record allowed variable names, never values. Before server launch, verify the isolated homes contain no copied `config.toml`, auth files, credential files, model overrides, or user skills. Use secret canaries in local doubles and later confirm they do not appear in logs/reports.
 
-Use the setup-proven Podman mode from the dispatch. For a local engine, require rootless `podman info` under the isolated home with no connection overrides. For a remote/VM engine, use the ephemeral setup-proven `CONTAINER_HOST` and `CONTAINER_SSHKEY` and require the same rootless check. Do not rediscover another connection, fall back to ambient `HOME`, persist connection fields in `RUN.json`, or copy the user's containers configuration tree.
+Use the setup-proven Podman mode from the dispatch. For a local engine, pass the ephemeral setup-proven `XDG_RUNTIME_DIR` and require rootless `podman info` under the isolated home; do not omit the runtime directory that owns the rootless user socket. For a remote/VM engine, use the ephemeral setup-proven `CONTAINER_HOST` and `CONTAINER_SSHKEY` and require the same rootless check. Do not rediscover another connection, fall back to ambient `HOME`, persist runtime/connection fields in `RUN.json`, or copy the user's containers configuration tree.
 
 ### 3. Start the worker SUT
 
@@ -223,6 +223,7 @@ Use this structure:
 # QA slot <slot>
 
 Status: pass | finding | skip | infra
+Infrastructure: clean | degraded | failed
 Source: <full SHA>
 Scope: <assignment>
 
@@ -240,6 +241,7 @@ Scope: <assignment>
 ## Cleanup
 ## Redaction
 ```
+`Status` is one primary slot outcome. Use `finding` whenever the report contains at least one independently reproducible product finding, regardless of infrastructure outcome. Otherwise use `infra` when failed infrastructure invalidates a pass or skip; `skip` for explicitly unexecuted coverage or degraded non-invalidating infrastructure; and `pass` only when assigned coverage completed without a finding and `Infrastructure: clean`. Record infrastructure separately: `clean` means no harness/resource/cleanup limitation, `degraded` means a non-invalidating limitation and cannot accompany `pass`, and `failed` means invalidating unless `finding` remains primary.
 
 Every finding needs observable impact, expected versus actual behavior, minimal exact reproduction, evidence path, severity, and confidence. Use `critical`, `high`, `medium`, or `low` for severity; do not inflate severity from noisy load alone.
 
@@ -259,7 +261,7 @@ Cleanup runs cooperatively on success and failure. The aggregate workflow is the
 
 Never run `podman system prune`, an unfiltered bulk remove, `git clean`, or a name-prefix cleanup. Never touch resources absent from a validated current-worker write-ahead ledger.
 
-If cooperative cleanup is incomplete, report `infra` alongside any independently reproducible product finding and list exact leftovers for aggregate recovery.
+If cooperative cleanup is incomplete, set `Infrastructure: failed` and list exact leftovers for aggregate recovery. Keep `Status: finding` when an independently reproducible product finding exists; otherwise set `Status: infra`.
 
 ## Stop conditions
 
