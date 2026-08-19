@@ -156,11 +156,11 @@ export function MobileProjectSessionModal({
           <StickyInput
             className="flex-1 min-w-0"
             variant={StickyInputVariant.Search}
-            placeholder={tab === "chats" ? "Search chat sessions..." : "Search projects..."}
+            placeholder={tab === "chats" ? "Search Sessions..." : "Search projects..."}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onClear={() => setQuery("")}
-            aria-label={tab === "chats" ? "Search chat sessions" : "Search projects"}
+            aria-label={tab === "chats" ? "Search Sessions" : "Search projects"}
           />
           {tab === "chats" && projectId ? (
             <StickyButton
@@ -279,7 +279,7 @@ export function MobileProjectSessionModal({
           <ModalTab
             active={tab === "chats"}
             icon={IconName.Chat}
-            label="Chat sessions"
+            label="Sessions"
             onClick={() => switchTab("chats")}
           />
           <ModalTab
@@ -402,7 +402,7 @@ function AssignPanel({
   return (
     <div className="flex flex-col gap-6">
       <p className="text-medium text-basic-secondary">
-        This chat session will be assigned to the project (according to its working directory):
+        This Session will be assigned to the project (according to its working directory):
       </p>
       {existing ? (
         <div className="flex items-center gap-4 min-w-0">

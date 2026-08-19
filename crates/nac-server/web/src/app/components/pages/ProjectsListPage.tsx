@@ -654,7 +654,7 @@ export default function ProjectsListPage() {
               what the page is, and pinning is already legible from the cards. */}
           {orphans.length > 0 ? (
             <>
-              <GroupLabel>Unassigned chat sessions</GroupLabel>
+              <GroupLabel>Unassigned Sessions</GroupLabel>
               <CardGrid single={isMobile}>{orphans.map(renderCard)}</CardGrid>
             </>
           ) : null}
