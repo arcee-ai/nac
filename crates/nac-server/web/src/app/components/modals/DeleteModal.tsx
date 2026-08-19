@@ -1,7 +1,8 @@
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
-import { displaySessionTitle, shortId } from "@/app/lib/format";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { shortId } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useDeleteSession } from "@/app/services/queries";
@@ -16,6 +17,7 @@ interface DeleteModalProps {
 
 export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
   const toast = useToast();
+  const sessionTitle = useSessionTitle();
   const navigate = useNavigate();
   const location = useLocation();
   const remove = useDeleteSession();
@@ -65,7 +67,7 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
     >
       <p>
         Are you sure you want to delete the session{" "}
-        <span className="text-basic-primary">&quot;{displaySessionTitle(summary)}&quot;</span>{" "}
+        <span className="text-basic-primary">&quot;{sessionTitle(summary)}&quot;</span>{" "}
         <span className="font-mono text-basic-muted">({shortId(summary?.session_id)})</span>? This
         action cannot be undone.
       </p>

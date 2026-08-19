@@ -164,6 +164,18 @@ export function displaySessionTitle(summary: SessionSummarySnapshot | null | und
 }
 
 /**
+ * The label every list, search box and action should use: numbered untitled
+ * chats when a map is supplied, otherwise the unnumbered display title.
+ */
+export function sessionTitle(
+  summary: SessionSummarySnapshot | null | undefined,
+  numbered: ReadonlyMap<string, string>,
+): string {
+  if (!summary) return "";
+  return numbered.get(summary.session_id) ?? displaySessionTitle(summary);
+}
+
+/**
  * Tells the untitled chats apart, since they would otherwise all answer to the
  * same name: the oldest keeps the plain "New Chat" and each later one takes the
  * next number.

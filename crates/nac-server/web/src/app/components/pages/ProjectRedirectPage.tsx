@@ -8,6 +8,12 @@ import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useProjects, useSessions } from "@/app/services/queries";
 
 /**
+ * One in-flight create per project, so React StrictMode replaying the mount
+ * effect cannot POST two chats before the session list refreshes.
+ */
+const firstChatByProject = new Map<string, Promise<void>>();
+
+/**
  * `/project/:id` is an address for a project, but every screen that shows one is
  * really a chat inside it, so this lands on the project's newest chat.
  *
@@ -39,7 +45,14 @@ export default function ProjectRedirectPage() {
 
   const startChat = actions.newChat;
   useEffect(() => {
-    if (needsFirstChat) void startChat(projectId);
+    if (!needsFirstChat) return;
+    let pending = firstChatByProject.get(projectId);
+    if (!pending) {
+      pending = startChat(projectId).finally(() => {
+        firstChatByProject.delete(projectId);
+      });
+      firstChatByProject.set(projectId, pending);
+    }
   }, [needsFirstChat, startChat, projectId]);
 
   // Deleted, or a stale link — the listing is the only honest place to land.

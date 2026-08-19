@@ -106,21 +106,48 @@ export function findProject(
   return projects.find((project) => project.project_id === projectId) ?? null;
 }
 
+/** The four fields the backend treats as one SSH/workspace location. */
+export type SessionLocation = {
+  cwd: string;
+  ssh_host?: string | null;
+  ssh_port?: number | null;
+  ssh_identity_file?: string | null;
+};
+
+export function sameSessionLocation(left: SessionLocation, right: SessionLocation): boolean {
+  return (
+    left.cwd === right.cwd &&
+    (left.ssh_host ?? null) === (right.ssh_host ?? null) &&
+    (left.ssh_port ?? null) === (right.ssh_port ?? null) &&
+    (left.ssh_identity_file ?? null) === (right.ssh_identity_file ?? null)
+  );
+}
+
+/** Location fields a create-project request must copy from a session. */
+export function projectLocationPayload(summary: SessionLocation): {
+  cwd: string;
+  ssh_host: string | null;
+  ssh_port: number | null;
+  ssh_identity_file: string | null;
+} {
+  return {
+    cwd: summary.cwd,
+    ssh_host: summary.ssh_host ?? null,
+    ssh_port: summary.ssh_port ?? null,
+    ssh_identity_file: summary.ssh_identity_file ?? null,
+  };
+}
+
 /**
  * A project can only adopt a session that already runs in its exact location,
  * because the session keeps its own `cwd` and the backend refuses a mismatch.
  */
 export function projectForSessionLocation(
   projects: ProjectRecord[],
-  summary: { cwd: string; ssh_host?: string | null } | null | undefined,
+  summary: SessionLocation | null | undefined,
 ): ProjectRecord | null {
   if (!summary) return null;
-  return (
-    projects.find(
-      (project) =>
-        project.cwd === summary.cwd && (project.ssh_host ?? null) === (summary.ssh_host ?? null),
-    ) ?? null
-  );
+  return projects.find((project) => sameSessionLocation(project, summary)) ?? null;
 }
 
 export type RecencyBucket = "Pinned" | "Today" | "Yesterday" | "This week" | "This month" | "Older";
@@ -139,22 +166,26 @@ export interface RecencyGroup<T> {
   items: T[];
 }
 
-function startOfDay(at: number): number {
+function startOfLocalDay(at: number): Date {
   const date = new Date(at);
   date.setHours(0, 0, 0, 0);
-  return date.getTime();
+  return date;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+function daysAgo(today: Date, days: number): number {
+  const date = new Date(today);
+  date.setDate(date.getDate() - days);
+  return date.getTime();
+}
 
 function bucketFor(updatedAt: string, now: number): RecencyBucket {
   const timestamp = parseStoreTime(updatedAt);
   if (!Number.isFinite(timestamp)) return "Older";
-  const today = startOfDay(now);
-  if (timestamp >= today) return "Today";
-  if (timestamp >= today - DAY_MS) return "Yesterday";
-  if (timestamp >= today - 7 * DAY_MS) return "This week";
-  if (timestamp >= today - 30 * DAY_MS) return "This month";
+  const today = startOfLocalDay(now);
+  if (timestamp >= today.getTime()) return "Today";
+  if (timestamp >= daysAgo(today, 1)) return "Yesterday";
+  if (timestamp >= daysAgo(today, 7)) return "This week";
+  if (timestamp >= daysAgo(today, 30)) return "This month";
   return "Older";
 }
 

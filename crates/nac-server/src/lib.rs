@@ -656,12 +656,15 @@ fn newest_project_session(
     store_path: &Path,
     project_id: &str,
 ) -> Option<sessions::SessionSnapshot> {
-    sessions::list_sessions(store_path)
+    let mut candidates: Vec<_> = sessions::list_sessions(store_path)
         .ok()?
         .into_iter()
         .filter(|summary| summary.project_id.as_deref() == Some(project_id))
-        .max_by(|left, right| left.created_at.cmp(&right.created_at))
-        .and_then(|summary| sessions::load_session(store_path, &summary.session_id).ok())
+        .collect();
+    candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    candidates
+        .into_iter()
+        .find_map(|summary| sessions::load_session(store_path, &summary.session_id).ok())
 }
 
 /// Same inheritance as `apply_project_model_defaults`, sourced from a sibling

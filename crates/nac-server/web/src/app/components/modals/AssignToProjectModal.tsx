@@ -11,8 +11,8 @@ import {
   SessionAvatar,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { displaySessionTitle } from "@/app/lib/format";
-import { projectForSessionLocation } from "@/app/lib/projects";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { projectForSessionLocation, projectLocationPayload } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useAssignSessionToProject, useCreateProject, useProjects } from "@/app/services/queries";
@@ -36,6 +36,7 @@ export function AssignToProjectModal({
 }) {
   const toast = useToast();
   const isMobile = useIsMobile();
+  const sessionTitle = useSessionTitle();
   const { data: projectList } = useProjects();
   const assign = useAssignSessionToProject();
   const createProject = useCreateProject();
@@ -57,8 +58,7 @@ export function AssignToProjectModal({
         existing ??
         (await createProject.mutateAsync({
           name: name.trim() || null,
-          cwd: summary.cwd,
-          ssh_host: summary.ssh_host ?? null,
+          ...projectLocationPayload(summary),
         }));
       await assign.mutateAsync({
         projectId: project.project_id,
@@ -100,8 +100,8 @@ export function AssignToProjectModal({
     >
       <div className="flex flex-col gap-4">
         <p className="text-small">
-          <span className="text-basic-primary font-bold">{displaySessionTitle(summary)}</span>{" "}
-          belongs to no project yet.
+          <span className="text-basic-primary font-bold">{sessionTitle(summary)}</span> belongs to
+          no project yet.
         </p>
 
         {existing ? (

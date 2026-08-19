@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
 import { toRunError } from "@/app/lib/providerError";
-import { routes } from "@/app/lib/routes";
+import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useDeleteProject } from "@/app/services/queries";
 import type { DeleteProjectSessions, ProjectRecord } from "@/app/types/api";
@@ -31,12 +31,19 @@ export function DeleteProjectModal({
         projectId: project.project_id,
         sessions,
       });
-      // Any screen scoped to this project has nothing left to show.
-      if (location.pathname.startsWith(`/project/${encodeURIComponent(project.project_id)}`)) {
+      const deletedIds = result?.deleted_session_ids ?? [];
+      const currentSessionId = sessionIdFromPath(location.pathname);
+      const onProjectRoute = location.pathname.startsWith(
+        `/project/${encodeURIComponent(project.project_id)}`,
+      );
+      // `/project/:id` is rare — opening a project lands on `/session/:id`.
+      // Delete All has to leave that route too, or the browser stays on a
+      // session that no longer exists.
+      if (onProjectRoute || (currentSessionId && deletedIds.includes(currentSessionId))) {
         navigate(routes.list(), { replace: true });
       }
       const kept = result?.released_session_ids?.length ?? 0;
-      const deleted = result?.deleted_session_ids?.length ?? 0;
+      const deleted = deletedIds.length;
       toast.success(
         deleted > 0
           ? `Project and ${deleted} ${plural(deleted)} deleted`

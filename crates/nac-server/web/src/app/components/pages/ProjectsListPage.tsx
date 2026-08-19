@@ -29,6 +29,7 @@ import { cn } from "@/app/lib/cn";
 import { toRunError } from "@/app/lib/providerError";
 import {
   orphanSessions,
+  projectForSessionLocation,
   projectListItemId,
   projectListItems,
   type ProjectListItem,
@@ -194,13 +195,18 @@ function hitTestDropTarget(
     if (!card) continue;
     const itemId = card.dataset.itemId;
     if (!itemId || itemId === draggingId) continue;
-    // Projects and unassigned chats keep separate orders; a drop across
-    // groups would put a card where it cannot live.
-    if (card.dataset.itemKind !== draggingKind) continue;
     // Skip the floating ghost (fixed + data-dragging).
     if (card.dataset.dragging === "true") continue;
     const rect = card.getBoundingClientRect();
     const edge: DropEdge = clientX < rect.left + rect.width / 2 ? "before" : "after";
+    // An unassigned chat can land on a project to be assigned, rather than
+    // only being reordered among other orphans.
+    if (draggingKind === "orphan" && card.dataset.itemKind === "project") {
+      return { itemId, edge };
+    }
+    // Projects and unassigned chats keep separate orders; a drop across
+    // groups would put a card where it cannot live.
+    if (card.dataset.itemKind !== draggingKind) continue;
     return { itemId, edge };
   }
   return null;
@@ -310,6 +316,29 @@ export default function ProjectsListPage() {
     [allSessions, clearDrag, moveSessionOrder, toast],
   );
 
+  const assignOrphanToProject = useCallback(
+    async (sessionId: string, projectId: string) => {
+      const entry = allSessions.find((session) => session.summary.session_id === sessionId);
+      const project = projects.find((item) => item.project_id === projectId);
+      if (!entry || !project) {
+        clearDrag();
+        return;
+      }
+      const covering = projectForSessionLocation(projects, entry.summary);
+      if (covering?.project_id !== project.project_id) {
+        toast.error("That chat does not run in this project's location");
+        clearDrag();
+        return;
+      }
+      try {
+        projectActions.assign(entry.summary);
+      } finally {
+        clearDrag();
+      }
+    },
+    [allSessions, clearDrag, projectActions, projects, toast],
+  );
+
   const moveByArrow = useCallback(
     (project: ProjectRecord, delta: -1 | 1) => {
       const group = project.pinned ? fullPinned : fullUnpinned;
@@ -341,6 +370,11 @@ export default function ProjectsListPage() {
   const applyDropTarget = useCallback(
     (dragId: string, kind: ProjectListKind, target: DropTarget) => {
       if (kind === "orphan") {
+        const targetProject = projects.find((project) => project.project_id === target.itemId);
+        if (targetProject) {
+          void assignOrphanToProject(dragId, targetProject.project_id);
+          return;
+        }
         if (target.itemId === dragId) {
           clearDrag();
           return;
@@ -368,7 +402,7 @@ export default function ProjectsListPage() {
       }
       void moveTo(dragId, targetProject.pinned, target.edge === "before" ? at : at + 1);
     },
-    [clearDrag, fullUnpinnedSessions, moveOrphanTo, moveTo, projects],
+    [assignOrphanToProject, clearDrag, fullUnpinnedSessions, moveOrphanTo, moveTo, projects],
   );
 
   const beginDrag = useCallback((start: ProjectReorderStart) => {

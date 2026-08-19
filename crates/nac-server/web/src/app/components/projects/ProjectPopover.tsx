@@ -15,13 +15,14 @@ import {
 } from "@/app/atoms";
 import { ProjectsList } from "@/app/components/projects/ProjectsList";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
-import { displaySessionTitle } from "@/app/lib/format";
 import { projectListItems, type ProjectListItem } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useProjects, useSessions } from "@/app/services/queries";
+import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /** One control of a row, at the size the popover's rows are built to. */
 function RowAction({
@@ -52,11 +53,15 @@ function RowAction({
   );
 }
 
-function matches(item: ProjectListItem, needle: string): boolean {
+function matches(
+  item: ProjectListItem,
+  needle: string,
+  titleOf: (summary: SessionSummarySnapshot) => string,
+): boolean {
   const haystack =
     item.kind === "project"
       ? `${item.entry.project.name} ${item.entry.project.cwd}`
-      : `${displaySessionTitle(item.session.summary)} ${item.session.summary.cwd}`;
+      : `${titleOf(item.session.summary)} ${item.session.summary.cwd}`;
   return haystack.toLowerCase().includes(needle);
 }
 
@@ -78,6 +83,7 @@ export function ProjectPopover({
   const navigate = useNavigate();
   const actions = useProjectActions();
   const sessionActions = useSessionActions();
+  const sessionTitle = useSessionTitle();
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const { data: projectList } = useProjects();
@@ -90,8 +96,8 @@ export function ProjectPopover({
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return items;
-    return items.filter((item) => matches(item, needle));
-  }, [items, query]);
+    return items.filter((item) => matches(item, needle, sessionTitle));
+  }, [items, query, sessionTitle]);
 
   return (
     <div className={cn("flex flex-col", isMobile ? "h-[calc(70dvh)]" : "max-h-[520px]")}>
@@ -156,7 +162,7 @@ export function ProjectPopover({
             }
 
             const { summary } = item.session;
-            const title = displaySessionTitle(summary);
+            const title = sessionTitle(summary);
             return (
               <>
                 <RowAction

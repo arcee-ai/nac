@@ -7,9 +7,10 @@ import { createStore } from "@/app/lib/store";
 import { useNow } from "@/app/hooks/useNow";
 import {
   SESSION_ENVS,
-  displaySessionTitle,
+  numberUntitledSessions,
   parseStoreTime,
   sessionEnvLabel,
+  sessionTitle,
   type SessionEnv,
 } from "@/app/lib/format";
 import { providersFromBackends } from "@/app/lib/providers";
@@ -118,10 +119,14 @@ function withinRange(value: string, range: RangeId, now: number): boolean {
   return now - ts <= span;
 }
 
-function matchesQuery(summary: SessionSummarySnapshot, needle: string): boolean {
+function matchesQuery(
+  summary: SessionSummarySnapshot,
+  needle: string,
+  numbered: ReadonlyMap<string, string>,
+): boolean {
   if (!needle) return true;
   const haystack = [
-    displaySessionTitle(summary),
+    sessionTitle(summary, numbered),
     summary.cwd,
     summary.model,
     summary.backend,
@@ -146,10 +151,6 @@ const comparators = {
   created_desc: (a, b) => parseStoreTime(b.created_at) - parseStoreTime(a.created_at),
   created_asc: (a, b) => parseStoreTime(a.created_at) - parseStoreTime(b.created_at),
   updated_desc: (a, b) => parseStoreTime(b.updated_at) - parseStoreTime(a.updated_at),
-  title_asc: (a, b) =>
-    displaySessionTitle(a).localeCompare(displaySessionTitle(b), undefined, {
-      sensitivity: "base",
-    }),
 } satisfies Partial<Record<SortId, Comparator>>;
 
 /**
@@ -161,9 +162,10 @@ export function useVisibleSessions(sessions: ManagedSessionSummary[]): ManagedSe
   // Relative ranges span hours, so re-evaluating them once a minute is plenty.
   const now = useNow(RANGE_TICK_MS);
   return useMemo(() => {
+    const numbered = numberUntitledSessions(sessions);
     const needle = filters.query.trim().toLowerCase();
     const visible = sessions.filter(({ summary }) => {
-      if (!matchesQuery(summary, needle)) return false;
+      if (!matchesQuery(summary, needle, numbered)) return false;
       if (!withinRange(summary.created_at, filters.createdRange, now)) return false;
       if (!withinRange(summary.updated_at, filters.modifiedRange, now)) return false;
       if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
@@ -175,8 +177,20 @@ export function useVisibleSessions(sessions: ManagedSessionSummary[]): ManagedSe
       return true;
     });
 
-    const compare = comparators[filters.sort];
-    if (compare) visible.sort((a, b) => compare(a.summary, b.summary));
+    if (filters.sort === "title_asc") {
+      visible.sort((a, b) =>
+        sessionTitle(a.summary, numbered).localeCompare(
+          sessionTitle(b.summary, numbered),
+          undefined,
+          {
+            sensitivity: "base",
+          },
+        ),
+      );
+    } else {
+      const compare = comparators[filters.sort];
+      if (compare) visible.sort((a, b) => compare(a.summary, b.summary));
+    }
     return visible;
   }, [sessions, filters, now]);
 }
@@ -187,10 +201,14 @@ function projectMatchesQuery(project: ProjectRecord, needle: string): boolean {
   return haystack.some((v) => v && String(v).toLowerCase().includes(needle));
 }
 
-function itemTitle(item: ProjectListItem): string {
+function sessionsFromItems(items: ProjectListItem[]): ManagedSessionSummary[] {
+  return items.flatMap((item) => (item.kind === "project" ? item.entry.sessions : [item.session]));
+}
+
+function itemTitle(item: ProjectListItem, numbered: ReadonlyMap<string, string>): string {
   return item.kind === "project"
     ? item.entry.project.name
-    : displaySessionTitle(item.session.summary);
+    : sessionTitle(item.session.summary, numbered);
 }
 
 function itemTimes(item: ProjectListItem): { createdAt: string; updatedAt: string } {
@@ -214,6 +232,7 @@ export function useVisibleProjectItems(items: ProjectListItem[]): ProjectListIte
   const filters = useStore();
   const now = useNow(RANGE_TICK_MS);
   return useMemo(() => {
+    const numbered = numberUntitledSessions(sessionsFromItems(items));
     const needle = filters.query.trim().toLowerCase();
     const facetPasses = (summary: SessionSummarySnapshot) => {
       if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
@@ -230,20 +249,22 @@ export function useVisibleProjectItems(items: ProjectListItem[]): ProjectListIte
 
       if (item.kind === "orphan") {
         const { summary } = item.session;
-        return facetPasses(summary) && matchesQuery(summary, needle);
+        return facetPasses(summary) && matchesQuery(summary, needle, numbered);
       }
 
       const { project, sessions } = item.entry;
       if (facetsActive && !sessions.some((entry) => facetPasses(entry.summary))) return false;
       return (
         projectMatchesQuery(project, needle) ||
-        sessions.some((entry) => matchesQuery(entry.summary, needle))
+        sessions.some((entry) => matchesQuery(entry.summary, needle, numbered))
       );
     });
 
     if (filters.sort === "title_asc") {
       visible.sort((a, b) =>
-        itemTitle(a).localeCompare(itemTitle(b), undefined, { sensitivity: "base" }),
+        itemTitle(a, numbered).localeCompare(itemTitle(b, numbered), undefined, {
+          sensitivity: "base",
+        }),
       );
     } else if (filters.sort !== SORT_DEFAULT) {
       const key = filters.sort === "updated_desc" ? "updatedAt" : "createdAt";

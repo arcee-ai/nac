@@ -25,6 +25,7 @@ import {
   orphanSessions,
   projectForSessionLocation,
   projectListItems,
+  projectLocationPayload,
   type ProjectListItem,
 } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
@@ -385,8 +386,7 @@ function AssignPanel({
         existing ??
         (await createProject.mutateAsync({
           name: name.trim() || null,
-          cwd: summary.cwd,
-          ssh_host: summary.ssh_host ?? null,
+          ...projectLocationPayload(summary),
         }));
       await assign.mutateAsync({
         projectId: project.project_id,

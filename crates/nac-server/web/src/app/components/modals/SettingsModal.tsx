@@ -46,7 +46,7 @@ import {
   sameLightModel,
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
-import { displaySessionTitle } from "@/app/lib/format";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { managedAuthLabel } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -238,6 +238,7 @@ function SettingsForm({
 }) {
   const isMobile = useIsMobile();
   const toast = useToast();
+  const sessionTitle = useSessionTitle();
   const updateConfig = useUpdateConfig();
   const createModelConfig = useCreateModelConfig();
   const [openingSummary] = useState(summary);
@@ -530,7 +531,7 @@ function SettingsForm({
         <Input
           label="Session title"
           inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-          placeholder={displaySessionTitle(openingSummary) || "Session name"}
+          placeholder={sessionTitle(openingSummary) || "Session name"}
           hintText="Leave empty to restore the automatic title (the last prompt)."
           value={title}
           onChange={(event) => setTitle(event.target.value)}

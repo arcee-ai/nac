@@ -1,4 +1,4 @@
-import { displaySessionTitle, numberUntitledSessions } from "@/app/lib/format";
+import { numberUntitledSessions, sessionTitle } from "@/app/lib/format";
 import { useSessions } from "@/app/services/queries";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
@@ -14,6 +14,5 @@ import type { SessionSummarySnapshot } from "@/app/types/api";
 export function useSessionTitle(): (summary: SessionSummarySnapshot | null | undefined) => string {
   const { data: sessions = [] } = useSessions();
   const numbered = numberUntitledSessions(sessions);
-  return (summary) =>
-    summary ? (numbered.get(summary.session_id) ?? displaySessionTitle(summary)) : "";
+  return (summary) => sessionTitle(summary, numbered);
 }

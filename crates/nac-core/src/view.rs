@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::workspace::GitTarget;
 use crate::{sessions, store};
@@ -731,29 +732,42 @@ pub fn local_repo_label(cwd: &Path) -> Option<String> {
 }
 
 pub fn parse_remote_label(remote: &str) -> Option<String> {
-    let trimmed = remote.trim().trim_end_matches(".git");
+    let trimmed = remote.trim();
     if trimmed.is_empty() {
         return None;
     }
+    if let Ok(url) = Url::parse(trimmed) {
+        return owner_repo_from_path(url.path());
+    }
+    owner_repo_from_scp(trimmed)
+}
 
-    let normalized = trimmed.replace(':', "/");
-    let without_scheme = normalized
-        .split_once("://")
-        .map(|(_, rest)| rest.to_string())
-        .unwrap_or(normalized);
-    let parts: Vec<&str> = without_scheme
-        .split('/')
-        .filter(|part| !part.is_empty())
-        .collect();
+/// `user@host:path` / `host:path` without a URL scheme.
+fn owner_repo_from_scp(remote: &str) -> Option<String> {
+    if remote.contains("://") {
+        return None;
+    }
+    let path = remote.split_once(':')?.1;
+    owner_repo_from_path(path)
+}
+
+fn owner_repo_from_path(path: &str) -> Option<String> {
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    if path.is_empty() || path.contains('@') {
+        return None;
+    }
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
     if parts.len() < 2 {
         return None;
     }
-
-    Some(format!(
-        "{}/{}",
-        parts[parts.len() - 2],
-        parts[parts.len() - 1]
-    ))
+    let owner = parts[parts.len() - 2];
+    let repo = parts[parts.len() - 1];
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some(format!("{owner}/{repo}"))
 }
 
 /// Path a change ends up at. git spells a rename two ways — `old -> new` in
@@ -914,6 +928,22 @@ mod tests {
             parse_remote_label("git@github.com:arcee-ai/nac.git").as_deref(),
             Some("arcee-ai/nac")
         );
+        assert_eq!(
+            parse_remote_label("https://github.com/arcee-ai/nac.git").as_deref(),
+            Some("arcee-ai/nac")
+        );
+        assert_eq!(
+            parse_remote_label("ssh://git@github.com/arcee-ai/nac.git").as_deref(),
+            Some("arcee-ai/nac")
+        );
+        assert_eq!(
+            parse_remote_label(
+                "https://user:token@github.com/arcee-ai/nac.git?access_token=SECRET#frag"
+            )
+            .as_deref(),
+            Some("arcee-ai/nac")
+        );
+        assert_eq!(parse_remote_label("not-a-remote"), None);
     }
 
     #[test]
