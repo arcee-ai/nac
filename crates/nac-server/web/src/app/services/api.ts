@@ -45,6 +45,7 @@ import type {
   SessionSnapshotResponse,
   SessionEventBoundary,
   SessionSummarySnapshot,
+  SkillCatalogEntry,
   SlashCommandDefinition,
   SshBrowseRequest,
   SshConfigurationList,
@@ -274,6 +275,11 @@ export const api = {
 
   listCommands: (signal?: AbortSignal) =>
     request<SlashCommandDefinition[]>("GET", "/commands", { signal }),
+
+  listSessionSkills: (sessionId: string, signal?: AbortSignal) =>
+    request<SkillCatalogEntry[]>("GET", `/sessions/${encodeURIComponent(sessionId)}/skills`, {
+      signal,
+    }),
 
   listModelConfigs: (signal?: AbortSignal) =>
     request<ModelConfigurationList>("GET", "/model-configs", { signal }),

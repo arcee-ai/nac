@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -34,12 +34,18 @@ import { useNow } from "@/app/hooks/useNow";
 import { usePromptHistoryPreview } from "@/app/hooks/usePromptHistoryPreview";
 import { perfRender } from "@/app/lib/perfDebug";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import {
+  skillReferenceQuery,
+  skillReferenceSegments,
+  type SkillReferenceSegment,
+} from "@/app/lib/skillReferences";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
   useCompactSession,
   useModelCatalog,
   useSshConnect,
+  useSessionSkills,
   useSubmitRun,
   useSlashCommands,
 } from "@/app/services/queries";
@@ -52,6 +58,7 @@ import {
   useSshConnectionStatus,
 } from "@/app/store/sshConnectionStore";
 import type {
+  SkillCatalogEntry,
   SlashCommandDefinition,
   ManagedSessionSummary,
   SessionSnapshotResponse,
@@ -95,6 +102,56 @@ function submittedSlashCommand(
     definitions.find(
       (definition) => definition.name === name && (definition.accepts_arguments || !argumentsText),
     ) ?? null
+  );
+}
+
+interface TextSelection {
+  start: number;
+  end: number;
+}
+
+type SuggestionOption =
+  | {
+      kind: "slash";
+      key: string;
+      name: string;
+      description: string;
+      definition: SlashCommandDefinition;
+    }
+  | {
+      kind: "skill";
+      key: string;
+      name: string;
+      description: string;
+      definition: SkillCatalogEntry;
+    };
+
+function suggestionIdentity(
+  kind: SuggestionOption["kind"],
+  value: string,
+  start: number,
+  end: number,
+): string {
+  return `${kind}:${start}:${end}:${value}`;
+}
+
+const SKILL_EMPHASIS_STYLE = {
+  WebkitTextStroke: "0.25px currentColor",
+};
+
+function highlightedSkillText(segments: SkillReferenceSegment[]) {
+  return segments.map((segment, index) =>
+    segment.skillName ? (
+      <strong
+        key={`${segment.skillName}-${index}`}
+        className="[font-weight:inherit] text-info-primary"
+        style={SKILL_EMPHASIS_STYLE}
+      >
+        {segment.text}
+      </strong>
+    ) : (
+      <span key={index}>{segment.text}</span>
+    ),
   );
 }
 
@@ -186,7 +243,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // A phone keeps the message on one truncated line until the field is focused,
   // then grows the pill over the transcript.
   const [focused, setFocused] = useState(false);
-  const [dismissedSuggestionValue, setDismissedSuggestionValue] = useState<string | null>(null);
+  const [selection, setSelection] = useState<TextSelection>({ start: 0, end: 0 });
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   // The pointer's row is held apart from the keyboard's so that leaving the list
   // takes the highlight with it instead of stranding it on the last row crossed.
@@ -204,7 +262,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     isError: commandsFailed,
     refetch: refetchCommands,
   } = useSlashCommands();
+  const { data: skillDefinitions, isError: skillsFailed } = useSessionSkills(sessionId);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  const completionCaretRef = useRef<number | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const submitInFlight = useRef(false);
   const listboxId = useId();
@@ -236,6 +297,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     el.style.height = `${rowPx}px`;
     el.style.height = `${Math.min(el.scrollHeight, maxHeightPx)}px`;
   }, [rowPx, maxHeightPx]);
+
+  useLayoutEffect(() => {
+    const caret = completionCaretRef.current;
+    const textarea = ref.current;
+    if (caret === null || !textarea) return;
+    completionCaretRef.current = null;
+    resize();
+    textarea.focus();
+    textarea.setSelectionRange(caret, caret);
+  }, [resize, value]);
 
   // Prompts already sent, newest first, in the short form the bubbles show —
   // a `/plan` or `/run` message goes back to the instruction it was written as
@@ -273,19 +344,71 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       definition.name.toLocaleLowerCase().startsWith(prefix),
     );
   }, [commandDefinitions, commandQuery]);
-  const suggestionsOpen = focused && commandQuery !== null && dismissedSuggestionValue !== value;
+  const skillQuery = useMemo(
+    () => skillReferenceQuery(value, selection.start, selection.end, skillDefinitions ?? []),
+    [selection, skillDefinitions, value],
+  );
+  const pendingSkillQuery = useMemo(() => {
+    if (
+      commandQuery !== null ||
+      skillDefinitions !== undefined ||
+      selection.start === 0 ||
+      selection.start !== selection.end
+    ) {
+      return null;
+    }
+    const marker = value.lastIndexOf("$", selection.start - 1);
+    if (marker === -1) return null;
+    return {
+      start: marker,
+      end: selection.end,
+    };
+  }, [commandQuery, selection, skillDefinitions, value]);
+  const suggestionKind = commandQuery ? "slash" : skillQuery || pendingSkillQuery ? "skill" : null;
+  const options = useMemo<SuggestionOption[]>(() => {
+    if (suggestionKind === "slash") {
+      return filteredCommands.map((definition) => ({
+        kind: "slash",
+        key: definition.command,
+        name: `/${definition.name}`,
+        description: definition.description,
+        definition,
+      }));
+    }
+    if (suggestionKind === "skill" && skillQuery) {
+      return skillQuery.entries.map((definition) => ({
+        kind: "skill",
+        key: definition.name,
+        name: `$${definition.name}`,
+        description: definition.description,
+        definition,
+      }));
+    }
+    return [];
+  }, [filteredCommands, skillQuery, suggestionKind]);
+  const currentSuggestionIdentity =
+    suggestionKind === "slash"
+      ? suggestionIdentity("slash", value, 0, value.length)
+      : suggestionKind === "skill"
+        ? suggestionIdentity(
+            "skill",
+            value,
+            skillQuery?.start ?? pendingSkillQuery?.start ?? selection.start,
+            skillQuery?.end ?? pendingSkillQuery?.end ?? selection.end,
+          )
+        : null;
+  const suggestionsOpen =
+    focused && suggestionKind !== null && currentSuggestionIdentity !== dismissedSuggestion;
   // A narrower query can leave the keyboard's highlight past the last row.
-  const keyboardSuggestion = Math.min(activeSuggestion, Math.max(filteredCommands.length - 1, 0));
+  const keyboardSuggestion = Math.min(activeSuggestion, Math.max(options.length - 1, 0));
   // What Tab and Enter would take, which is whatever is lit: the pointer
   // outranks the keyboard while it is in the list.
   const suggestionIndex =
-    hoveredSuggestion !== null && hoveredSuggestion < filteredCommands.length
+    hoveredSuggestion !== null && hoveredSuggestion < options.length
       ? hoveredSuggestion
       : keyboardSuggestion;
-  const activeOptionId =
-    suggestionsOpen && filteredCommands[suggestionIndex]
-      ? `${listboxId}-option-${suggestionIndex}`
-      : undefined;
+  const selectedSuggestion = suggestionsOpen ? options[suggestionIndex] : undefined;
+  const activeOptionId = selectedSuggestion ? `${listboxId}-option-${suggestionIndex}` : undefined;
 
   // Only the keyboard's row: scrolling a row the pointer is already on would
   // move the list out from under it.
@@ -294,34 +417,64 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     optionRefs.current[keyboardSuggestion]?.scrollIntoView({
       block: "nearest",
     });
-  }, [keyboardSuggestion, suggestionsOpen, filteredCommands]);
+  }, [keyboardSuggestion, suggestionsOpen, options]);
 
   // A list that closes under a resting pointer sends no leave event, and a
   // stale row would light on the way back in.
   const dismissSuggestions = useCallback(() => {
-    setDismissedSuggestionValue(value);
+    setDismissedSuggestion(currentSuggestionIdentity);
     setHoveredSuggestion(null);
-  }, [value]);
+  }, [currentSuggestionIdentity]);
 
-  const completeCommand = useCallback(
-    (definition: SlashCommandDefinition) => {
-      if (!commandQuery) return;
-      const completed = `${commandQuery.leadingWhitespace}/${definition.name}${
-        definition.accepts_arguments ? " " : ""
-      }`;
-      setValue(completed);
-      setDismissedSuggestionValue(completed);
-      setHoveredSuggestion(null);
-      requestAnimationFrame(() => {
-        const textarea = ref.current;
-        if (!textarea) return;
+  const completeSuggestion = useCallback(
+    (option: SuggestionOption) => {
+      let completed: string;
+      let caret: number;
+      let dismissed: string;
+      if (option.kind === "slash") {
+        if (!commandQuery) return;
+        completed = `${commandQuery.leadingWhitespace}/${option.definition.name}${
+          option.definition.accepts_arguments ? " " : ""
+        }`;
+        caret = completed.length;
+        dismissed = suggestionIdentity("slash", completed, 0, completed.length);
+      } else {
+        if (!skillQuery) return;
+        const reference = `$${option.definition.name}`;
+        completed = `${value.slice(0, skillQuery.start)}${reference}${value.slice(skillQuery.end)}`;
+        caret = skillQuery.start + reference.length;
+        dismissed = suggestionIdentity("skill", completed, skillQuery.start, caret);
+      }
+      if (completed === value) {
+        completionCaretRef.current = null;
         resize();
-        textarea.focus();
-        textarea.setSelectionRange(completed.length, completed.length);
-      });
+        ref.current?.focus();
+        ref.current?.setSelectionRange(caret, caret);
+      } else {
+        completionCaretRef.current = caret;
+        setValue(completed);
+      }
+      setSelection({ start: caret, end: caret });
+      setDismissedSuggestion(dismissed);
+      setHoveredSuggestion(null);
     },
-    [commandQuery, resize],
+    [commandQuery, resize, skillQuery, value],
   );
+
+  const skillSegments = useMemo(
+    () => skillReferenceSegments(value, skillDefinitions ?? []),
+    [skillDefinitions, value],
+  );
+  const mirrorActive =
+    !history.active && skillSegments.some((segment) => segment.skillName !== null);
+
+  useLayoutEffect(() => {
+    const textarea = ref.current;
+    const mirror = mirrorRef.current;
+    if (!mirrorActive || !textarea || !mirror) return;
+    mirror.scrollTop = textarea.scrollTop;
+    mirror.scrollLeft = textarea.scrollLeft;
+  }, [collapsed, mirrorActive, value]);
 
   // A collapsed field is one line whatever it holds, which is a height it
   // cannot work out for itself; leaving the collapse restores the content's.
@@ -349,6 +502,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       const end = ref.current.value.length;
       ref.current.selectionStart = end;
       ref.current.selectionEnd = end;
+      setSelection({ start: end, end });
       ref.current.scrollTop = ref.current.scrollHeight;
     });
   }, []);
@@ -377,6 +531,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       const clearField = () => {
         if (!fromField) return;
         setValue("");
+        setSelection({ start: 0, end: 0 });
         resetHistory();
         if (ref.current) ref.current.style.height = `${rowPx}px`;
       };
@@ -495,6 +650,22 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     </Button>
   );
 
+  const suggestionStatus = suggestionsOpen
+    ? suggestionKind === "slash"
+      ? commandDefinitions === undefined
+        ? commandsFailed
+          ? "Slash commands unavailable"
+          : "Loading slash commands"
+        : options.length
+          ? `${options.length} slash ${options.length === 1 ? "command" : "commands"} available`
+          : "No matching commands"
+      : skillDefinitions === undefined
+        ? skillsFailed
+          ? "Skills unavailable"
+          : "Loading skills"
+        : `${options.length} ${options.length === 1 ? "skill" : "skills"} available`
+    : "";
+
   const field = (
     <div
       className={cn(
@@ -511,22 +682,25 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     >
       <div className="relative flex-1 min-w-0">
         <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-          {suggestionsOpen
-            ? commandDefinitions === undefined
-              ? commandsFailed
-                ? "Slash commands unavailable"
-                : "Loading slash commands"
-              : filteredCommands.length
-                ? `${filteredCommands.length} slash ${
-                    filteredCommands.length === 1 ? "command" : "commands"
-                  } available`
-                : "No matching commands"
-            : ""}
+          {suggestionStatus}
         </span>
+        {mirrorActive && !collapsed ? (
+          <div
+            ref={mirrorRef}
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-medium text-input [scrollbar-gutter:stable]",
+              isMobile ? "px-4 py-2" : "p-3",
+            )}
+          >
+            {highlightedSkillText(skillSegments)}
+            {value.endsWith("\n") ? " " : null}
+          </div>
+        ) : null}
         <textarea
           ref={ref}
           className={cn(
-            "block w-full bg-transparent resize-none border-none outline-none text-medium  text-input placeholder:text-input-placeholder",
+            "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder [scrollbar-gutter:stable]",
             isMobile ? "px-4 py-2" : "p-3",
             // The line below stands in for it while it is a single row, because
             // a textarea cannot ellipsize its own overflow.
@@ -553,63 +727,92 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }
           spellCheck={false}
           value={value}
-          style={{ minHeight: `${rowPx}px`, maxHeight: `${maxHeightPx}px` }}
-          onChange={(e) => {
-            if (e.target.value !== value) setDismissedSuggestionValue(null);
+          style={{
+            minHeight: `${rowPx}px`,
+            maxHeight: `${maxHeightPx}px`,
+            color: mirrorActive ? "transparent" : undefined,
+            caretColor: mirrorActive ? "var(--color-text-input)" : undefined,
+          }}
+          onChange={(event) => {
+            if (event.target.value !== value) setDismissedSuggestion(null);
             setActiveSuggestion(0);
             // A pointer resting over the list sends nothing while the rows
             // change underneath it, so its position no longer means the row it
             // meant.
             setHoveredSuggestion(null);
-            history.onValueChange(e.target.value);
-            setValue(e.target.value);
+            history.onValueChange(event.target.value);
+            setValue(event.target.value);
+            setSelection({
+              start: event.target.selectionStart,
+              end: event.target.selectionEnd,
+            });
             resize();
           }}
-          onFocus={() => setFocused(true)}
+          onSelect={(event) => {
+            const next = {
+              start: event.currentTarget.selectionStart,
+              end: event.currentTarget.selectionEnd,
+            };
+            if (next.start !== selection.start || next.end !== selection.end) {
+              setActiveSuggestion(0);
+              setHoveredSuggestion(null);
+              setSelection(next);
+            }
+          }}
+          onScroll={(event) => {
+            if (!mirrorRef.current) return;
+            mirrorRef.current.scrollTop = event.currentTarget.scrollTop;
+            mirrorRef.current.scrollLeft = event.currentTarget.scrollLeft;
+          }}
+          onFocus={(event) => {
+            setFocused(true);
+            setSelection({
+              start: event.currentTarget.selectionStart,
+              end: event.currentTarget.selectionEnd,
+            });
+          }}
           onBlur={() => {
             setFocused(false);
             setHoveredSuggestion(null);
             resetHistory();
           }}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return;
-            if (suggestionsOpen && !e.shiftKey) {
-              if (e.key === "Escape") {
-                e.preventDefault();
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (suggestionsOpen && !event.shiftKey) {
+              if (event.key === "Escape") {
+                event.preventDefault();
                 dismissSuggestions();
                 return;
               }
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                if (!filteredCommands.length) return;
+              if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length) {
+                event.preventDefault();
                 // From the lit row, so the keyboard carries on from where the
                 // pointer left the highlight rather than jumping back to its
                 // own last position.
                 setActiveSuggestion(
-                  e.key === "ArrowDown"
-                    ? Math.min(suggestionIndex + 1, filteredCommands.length - 1)
+                  event.key === "ArrowDown"
+                    ? Math.min(suggestionIndex + 1, options.length - 1)
                     : Math.max(suggestionIndex - 1, 0),
                 );
                 setHoveredSuggestion(null);
                 return;
               }
-              if (e.key === "Tab" && filteredCommands[suggestionIndex]) {
-                e.preventDefault();
-                completeCommand(filteredCommands[suggestionIndex]);
+              if (event.key === "Tab" && selectedSuggestion) {
+                event.preventDefault();
+                completeSuggestion(selectedSuggestion);
                 return;
               }
-              if (e.key === "Enter") {
-                e.preventDefault();
-                const selected = filteredCommands[suggestionIndex];
-                if (selected) completeCommand(selected);
+              if (event.key === "Enter" && (selectedSuggestion || suggestionKind === "slash")) {
+                event.preventDefault();
+                if (selectedSuggestion) completeSuggestion(selectedSuggestion);
                 return;
               }
             }
-            if (history.onKeyDown(e)) return;
-            if (e.key !== "Enter") return;
+            if (history.onKeyDown(event)) return;
+            if (event.key !== "Enter") return;
             // Shift+Enter inserts a newline; a bare Enter (or Cmd/Ctrl+Enter) sends.
-            if (e.shiftKey) return;
-            e.preventDefault();
+            if (event.shiftKey) return;
+            event.preventDefault();
             void submit();
           }}
         />
@@ -637,7 +840,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 value ? "text-input" : "text-input-placeholder",
               )}
             >
-              {value || PLACEHOLDER}
+              {value ? highlightedSkillText(skillSegments) : PLACEHOLDER}
             </span>
           </div>
         ) : null}
@@ -653,15 +856,23 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   );
 
   const suggestions = (
-    <div id={listboxId} role="listbox" aria-label="Slash commands">
-      {commandDefinitions === undefined ? (
+    <div
+      id={listboxId}
+      role="listbox"
+      aria-label={suggestionKind === "skill" ? "Skills" : "Slash commands"}
+    >
+      {suggestionKind === "slash" && commandDefinitions === undefined ? (
         <div className="px-3 py-2 text-small text-basic-secondary">
           {commandsFailed ? "Slash commands unavailable" : "Loading commands…"}
         </div>
-      ) : filteredCommands.length ? (
-        filteredCommands.map((definition, index) => (
+      ) : suggestionKind === "skill" && skillDefinitions === undefined ? (
+        <div className="px-3 py-2 text-small text-basic-secondary">
+          {skillsFailed ? "Skills unavailable" : "Loading skills…"}
+        </div>
+      ) : options.length ? (
+        options.map((option, index) => (
           <button
-            key={definition.command}
+            key={`${option.kind}-${option.key}`}
             id={`${listboxId}-option-${index}`}
             ref={(element) => {
               optionRefs.current[index] = element;
@@ -681,11 +892,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             onPointerLeave={() =>
               setHoveredSuggestion((current) => (current === index ? null : current))
             }
-            onClick={() => completeCommand(definition)}
+            onClick={() => completeSuggestion(option)}
           >
-            <span className="code code-small shrink-0 text-basic-primary">/{definition.name}</span>
-            <span className="min-w-0 text-small text-basic-secondary">
-              {definition.description}
+            <span className="code code-small shrink-0 text-basic-primary">{option.name}</span>
+            <span
+              className={cn(
+                "min-w-0 flex-1 text-small text-basic-secondary",
+                option.kind === "skill" && "truncate",
+              )}
+            >
+              {option.description}
             </span>
           </button>
         ))
@@ -723,11 +939,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             : "gap-4 p-4 rounded-[8px] bg-elevation-level-1 shadow-2xl",
       )}
       style={isMobile ? GROUND_FADE_UP : undefined}
-      onSubmit={(e) => {
-        e.preventDefault();
-        const selected = suggestionsOpen ? filteredCommands[activeSuggestion] : undefined;
-        if (selected) {
-          completeCommand(selected);
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (selectedSuggestion) {
+          completeSuggestion(selectedSuggestion);
           return;
         }
         void submit();

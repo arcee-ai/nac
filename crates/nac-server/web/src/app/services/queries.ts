@@ -53,6 +53,7 @@ import type {
   ManagedAuthProvider,
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
+  SkillCatalogEntry,
   SlashCommandDefinition,
   SessionSummarySnapshot,
   ThreadEventPage,
@@ -122,6 +123,7 @@ export const queryKeys = {
   sessions: (workspaceStats: boolean) => ["sessions", { workspaceStats }] as const,
   sessionRoot: (id: string) => ["session", id] as const,
   sessionSnapshot: (id: string) => ["session", id, "snapshot"] as const,
+  sessionSkills: (id: string) => ["session", id, "skills"] as const,
   sessionsAll: ["sessions"] as const,
   threadEventsRoot: (id: string) => ["session", id, "thread-events"] as const,
   threadEvents: (id: string, threadName: string) =>
@@ -563,6 +565,16 @@ export function useSlashCommands() {
     queryKey: queryKeys.slashCommands,
     queryFn: ({ signal }) => api.listCommands(signal),
     staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** Skills discovered by the service currently attached to this session. */
+export function useSessionSkills(sessionId: string) {
+  return useQuery<SkillCatalogEntry[]>({
+    queryKey: queryKeys.sessionSkills(sessionId),
+    queryFn: ({ signal }) => api.listSessionSkills(sessionId, signal),
+    refetchOnMount: "always",
     retry: false,
   });
 }
