@@ -438,6 +438,8 @@ describe("skill suggestions", () => {
     expect(mirror?.className).toContain("pointer-events-none");
     expect(mirror?.textContent).toContain("$code-reviewer");
     expect(mirror?.querySelectorAll("strong")).toHaveLength(1);
+    expect(emphasized.className).toContain("text-danger-primary");
+    expect(emphasized.style.webkitTextStroke).toBe("0.45px currentColor");
     expect(textarea.style.color).toBe("transparent");
   });
 

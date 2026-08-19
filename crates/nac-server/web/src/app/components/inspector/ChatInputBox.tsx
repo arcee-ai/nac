@@ -136,7 +136,7 @@ function suggestionIdentity(
 }
 
 const SKILL_EMPHASIS_STYLE = {
-  WebkitTextStroke: "0.25px currentColor",
+  WebkitTextStroke: "0.45px currentColor",
 };
 
 function highlightedSkillText(segments: SkillReferenceSegment[]) {
@@ -144,7 +144,7 @@ function highlightedSkillText(segments: SkillReferenceSegment[]) {
     segment.skillName ? (
       <strong
         key={`${segment.skillName}-${index}`}
-        className="[font-weight:inherit] text-info-primary"
+        className="[font-weight:inherit] text-danger-primary"
         style={SKILL_EMPHASIS_STYLE}
       >
         {segment.text}
