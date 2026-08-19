@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   displayPromptFromMessageText,
   displaySessionTitle,
+  numberUntitledSessions,
+  NEW_CHAT_TITLE,
+  sessionTitle,
   INVOKED_SKILLS_CLOSE,
   INVOKED_SKILLS_OPEN,
   INVOKED_SKILLS_SEPARATOR,
   invokedSkillNames,
 } from "@/app/lib/format";
-import type { SessionSummarySnapshot } from "@/app/types/api";
+import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 // The shared wire-format pin both sides test against: nac-core
 // `commands.rs` reads the same file via env!("CARGO_MANIFEST_DIR").
@@ -31,6 +34,21 @@ function summaryWithPrompt(prompt: string | null): SessionSummarySnapshot {
     session_id: "session-abcdef1234567890",
     last_user_prompt: prompt,
   } as SessionSummarySnapshot;
+}
+
+function untitled(
+  sessionId: string,
+  projectId: string | undefined,
+  createdAt: string,
+): ManagedSessionSummary {
+  return {
+    summary: {
+      session_id: sessionId,
+      project_id: projectId,
+      last_user_prompt: null,
+      created_at: createdAt,
+    },
+  } as ManagedSessionSummary;
 }
 
 describe("displayPromptFromMessageText", () => {
@@ -181,7 +199,27 @@ describe("displaySessionTitle", () => {
     expect(displaySessionTitle(summary)).toBe("My title");
   });
 
-  it("falls back to the short session id without a title or prompt", () => {
-    expect(displaySessionTitle(summaryWithPrompt(null))).toBe("session-:7890");
+  it("falls back to New Chat without a title or prompt", () => {
+    expect(displaySessionTitle(summaryWithPrompt(null))).toBe(NEW_CHAT_TITLE);
+  });
+});
+
+describe("numberUntitledSessions", () => {
+  it("numbers untitled chats within one project and restarts in another", () => {
+    const sessions = [
+      untitled("a", "proj-1", "2026-01-01 00:00:00.000000000"),
+      untitled("b", "proj-1", "2026-01-01 00:00:01.000000000"),
+      untitled("c", "proj-1", "2026-01-01 00:00:02.000000000"),
+      untitled("d", "proj-2", "2026-01-01 00:00:03.000000000"),
+      untitled("e", undefined, "2026-01-01 00:00:04.000000000"),
+      untitled("f", undefined, "2026-01-01 00:00:05.000000000"),
+    ];
+    const numbered = numberUntitledSessions(sessions);
+    expect(sessionTitle(sessions[0].summary, numbered)).toBe(NEW_CHAT_TITLE);
+    expect(sessionTitle(sessions[1].summary, numbered)).toBe(`${NEW_CHAT_TITLE} 1`);
+    expect(sessionTitle(sessions[2].summary, numbered)).toBe(`${NEW_CHAT_TITLE} 2`);
+    expect(sessionTitle(sessions[3].summary, numbered)).toBe(NEW_CHAT_TITLE);
+    expect(sessionTitle(sessions[4].summary, numbered)).toBe(NEW_CHAT_TITLE);
+    expect(sessionTitle(sessions[5].summary, numbered)).toBe(`${NEW_CHAT_TITLE} 1`);
   });
 });

@@ -7,6 +7,7 @@ import {
   HorizontalTabsItemVariant,
   Icon,
   IconName,
+  ProgressLoader,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
@@ -17,6 +18,7 @@ import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import { useSessionFetching } from "@/app/hooks/useSessionFetching";
 import {
   DEFAULT_SESSION_PANEL,
   SESSION_PANEL_LABEL,
@@ -72,6 +74,22 @@ function FooterChip({
         {label}
       </span>
     </div>
+  );
+}
+
+/**
+ * The one place the panel admits to reloading. Everything below it keeps the
+ * data it already has while a fetch runs, so this hairline is what tells apart
+ * "nothing has changed" from "not asked yet".
+ *
+ * Its own component because it listens to every fetch in the session, and that
+ * is a busy signal during a run: re-rendering the panels off it would undo the
+ * quiet it is there to report.
+ */
+function SideBoxProgress({ sessionId }: { sessionId: string }) {
+  const fetching = useSessionFetching(sessionId);
+  return (
+    <ProgressLoader active={fetching} className="absolute bottom-[-1px] left-0 right-0 z-[1]" />
   );
 }
 
@@ -162,12 +180,13 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
     <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-md border border-muted">
       <div
         className={cn(
-          "flex items-center gap-4 pl-1 pt-1 shrink-0 border-b border-muted bg-elevation-level-1",
+          "flex items-center gap-4 pl-1 pt-1 shrink-0 border-b border-muted bg-elevation-level-1 relative",
           // Room for the Modal's Close when this box is the fullscreen body.
           expanded ? "pr-10" : "pr-2",
         )}
       >
-        <div className="flex flex-1 min-w-0 items-center gap-1" role="tablist">
+        <SideBoxProgress sessionId={sessionId} />
+        <div className="flex flex-1 min-w-0 items-center gap-1 " role="tablist">
           {WIDE_SESSION_PANELS.map((name) => (
             <HorizontalTabsItem
               key={name}

@@ -267,6 +267,9 @@ fn assert_current_schema(conn: &Connection) {
             "default_model_config_id",
             "created_at",
             "updated_at",
+            "pinned",
+            "sort_order",
+            "presentation_version",
         ]
     );
     assert_eq!(

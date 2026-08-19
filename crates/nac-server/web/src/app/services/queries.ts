@@ -14,7 +14,7 @@ import {
 
 import {
   pinGroup,
-  placeSessionId,
+  placeIdAt,
   reorderRequest,
   sameOrder,
   withUpdatedSummary,
@@ -42,10 +42,14 @@ import type {
   BrowseListing,
   CommitWorkspaceRequest,
   CreateModelConfigurationRequest,
+  CreateProjectRequest,
   CreateSessionRequest,
+  DeleteProjectSessions,
   ManagedSessionSummary,
   ModelCatalog,
   ModelConfigurationList,
+  ProjectList,
+  ProjectRecord,
   ProviderModel,
   ProviderModelList,
   RawSessionConfig,
@@ -72,6 +76,7 @@ import type {
   SwitchBranchRequest,
   UpdateConfigRequest,
   UpdateModelConfigurationRequest,
+  UpdateProjectRequest,
   WorkspaceDiffStage,
   WorkspaceFileContent,
   WorkspaceFileDiff,
@@ -119,6 +124,7 @@ export const queryKeys = {
   resolvedModelConfigsAll: ["model-config-resolved"] as const,
   resolvedConfigFile: (path: string) => ["config-file-resolved", path] as const,
   resolvedConfigFilesAll: ["config-file-resolved"] as const,
+  projects: ["projects"] as const,
   sessions: (workspaceStats: boolean) => ["sessions", { workspaceStats }] as const,
   sessionRoot: (id: string) => ["session", id] as const,
   sessionSnapshot: (id: string) => ["session", id, "snapshot"] as const,
@@ -628,7 +634,7 @@ export function useDeleteModelConfig() {
 export function useSessions(pollMs = SESSIONS_POLL_MS) {
   return useQuery<ManagedSessionSummary[]>({
     queryKey: queryKeys.sessions(false),
-    queryFn: ({ signal }) => api.listSessions(false, signal),
+    queryFn: ({ signal }) => api.listSessions({}, signal),
     refetchInterval: pollMs,
     staleTime: 0,
   });
@@ -661,7 +667,7 @@ export function useSessionsWithWorkspaceStats(
   const base = useSessions(cadence.baseMs);
   const stats = useQuery<ManagedSessionSummary[]>({
     queryKey: queryKeys.sessions(true),
-    queryFn: ({ signal }) => api.listSessions(true, signal),
+    queryFn: ({ signal }) => api.listSessions({ workspaceStats: true }, signal),
     refetchInterval: cadence.statsMs,
     staleTime: cadence.statsMs,
   });
@@ -687,7 +693,7 @@ export function useSessionSummary(id: string | null) {
   );
   return useQuery<ManagedSessionSummary[], Error, ManagedSessionSummary | null>({
     queryKey: queryKeys.sessions(false),
-    queryFn: ({ signal }) => api.listSessions(false, signal),
+    queryFn: ({ signal }) => api.listSessions({}, signal),
     refetchInterval: SESSIONS_POLL_MS,
     staleTime: 0,
     select,
@@ -791,6 +797,21 @@ export function useSessionConfig(id: string | null) {
   });
 }
 
+/**
+ * Keeps the answer already on screen while the next one is fetched, so asking
+ * the same panel a slightly different question — another revision, another
+ * file — reads as the panel changing rather than reloading.
+ *
+ * Only within one session: every session-scoped key starts `["session", id]`,
+ * and a different session's files under this one's heading would be a lie
+ * rather than a stale truth. The hairline bar on the panel says a fetch is
+ * still running.
+ */
+function previousDataFrom(sessionId: string) {
+  return <T>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) =>
+    previousQuery?.queryKey[1] === sessionId ? previous : undefined;
+}
+
 export function useWorkspaceDiff(
   id: string | null,
   path: string | null,
@@ -802,6 +823,7 @@ export function useWorkspaceDiff(
     queryKey: queryKeys.workspaceDiff(id ?? "", path ?? "", stage, context, revision),
     queryFn: ({ signal }) => api.getWorkspaceDiff(id!, path!, { stage, context, revision, signal }),
     enabled: Boolean(id && path),
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 
@@ -816,6 +838,7 @@ export function useWorkspaceFiles(id: string | null, revision: number | null = n
     queryFn: ({ signal }) => api.getWorkspaceFiles(id!, revision, signal),
     enabled: Boolean(id),
     staleTime: revision == null ? 10_000 : Infinity,
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 
@@ -830,6 +853,7 @@ export function useWorkspaceFile(
     queryFn: ({ signal }) => api.getWorkspaceFile(id!, path!, revision, signal),
     enabled: Boolean(id && path),
     staleTime: revision == null ? 10_000 : Infinity,
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 
@@ -851,6 +875,7 @@ export function useWorkspaceRevisionChanges(id: string | null, revision: number 
     queryFn: ({ signal }) => api.getWorkspaceRevisionChanges(id!, revision!, signal),
     enabled: Boolean(id && revision != null),
     staleTime: Infinity,
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 
@@ -901,6 +926,7 @@ function useInvalidators() {
   const client = useQueryClient();
   return {
     sessions: () => client.invalidateQueries({ queryKey: queryKeys.sessionsAll }),
+    projects: () => client.invalidateQueries({ queryKey: queryKeys.projects }),
     session: (id: string) =>
       client.invalidateQueries({
         queryKey: queryKeys.sessionSnapshot(id),
@@ -908,6 +934,136 @@ function useInvalidators() {
       }),
     sessionRoot: (id: string) => client.invalidateQueries({ queryKey: queryKeys.sessionRoot(id) }),
   };
+}
+
+/**
+ * Projects have no event stream, so this refetches on the same cadence as the
+ * session list rather than polling: every project mutation invalidates it.
+ */
+export function useProjects() {
+  return useQuery<ProjectList>({
+    queryKey: queryKeys.projects,
+    queryFn: ({ signal }) => api.listProjects(signal),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useCreateProject() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: (payload: CreateProjectRequest) => api.createProject(payload),
+    onSuccess: () => invalidate.projects(),
+  });
+}
+
+export interface UpdateProjectVariables {
+  projectId: string;
+  payload: UpdateProjectRequest;
+}
+
+export function useUpdateProject() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ projectId, payload }: UpdateProjectVariables) =>
+      api.updateProject(projectId, payload),
+    onSuccess: () => invalidate.projects(),
+  });
+}
+
+/** Pin toggle mirrors the session one: same shape, no title to preserve. */
+export function useToggleProjectPin() {
+  const update = useUpdateProject();
+  return {
+    ...update,
+    toggle: (project: ProjectRecord) =>
+      update.mutateAsync({
+        projectId: project.project_id,
+        payload: { pinned: !project.pinned },
+      }),
+  };
+}
+
+export interface DeleteProjectVariables {
+  projectId: string;
+  /** Whether the project's chats go with it. Defaults to keeping them. */
+  sessions?: DeleteProjectSessions;
+}
+
+/** Either way the project's sessions move, so the session list moves too. */
+export function useDeleteProject() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ projectId, sessions }: DeleteProjectVariables) =>
+      api.deleteProject(projectId, sessions),
+    onSuccess: () => Promise.all([invalidate.projects(), invalidate.sessions()]),
+  });
+}
+
+export interface AssignSessionVariables {
+  projectId: string;
+  sessionId: string;
+}
+
+export function useAssignSessionToProject() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ projectId, sessionId }: AssignSessionVariables) =>
+      api.assignSessionToProject(projectId, { session_id: sessionId }),
+    onSuccess: () => Promise.all([invalidate.projects(), invalidate.sessions()]),
+  });
+}
+
+export interface MoveProjectOrderVariables {
+  /** Full list — `/projects/order` requires entire pin-group membership. */
+  projects: ProjectRecord[];
+  projectId: string;
+  targetPinned: boolean;
+  /** Index within the destination pin group after the move. */
+  targetIndex: number;
+}
+
+/**
+ * Reorder within a pin group, pinning or unpinning first when the destination
+ * group differs. The pin toggle rewrites versions, so the group is re-read from
+ * its response before the order request is built.
+ */
+export function useMoveProjectOrder() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: async ({
+      projects,
+      projectId,
+      targetPinned,
+      targetIndex,
+    }: MoveProjectOrderVariables) => {
+      const moving = projects.find((project) => project.project_id === projectId);
+      if (!moving) return;
+
+      let current = projects;
+      if (moving.pinned !== targetPinned) {
+        await api.updateProject(projectId, { pinned: targetPinned });
+        current = (await api.listProjects()).projects;
+      }
+
+      const group = current
+        .filter((project) => project.pinned === targetPinned)
+        .sort((a, b) => a.sort_order - b.sort_order);
+      const ordered = placeIdAt(
+        group.map((project) => project.project_id),
+        projectId,
+        targetIndex,
+      );
+      await api.reorderProjects({
+        pinned: targetPinned,
+        project_ids: ordered,
+        expected_versions: Object.fromEntries(
+          group.map((project) => [project.project_id, project.presentation_version]),
+        ),
+      });
+    },
+    onSuccess: () => invalidate.projects(),
+  });
 }
 
 export function useCreateSession() {
@@ -1001,7 +1157,7 @@ export function useMoveSessionOrder() {
 
       const group = pinGroup(entries, targetPinned);
       const currentIds = group.map((e) => e.summary.session_id);
-      const nextIds = placeSessionId(currentIds, sessionId, targetIndex);
+      const nextIds = placeIdAt(currentIds, sessionId, targetIndex);
       if (sameOrder(currentIds, nextIds)) return null;
 
       return api.reorderSessions(reorderRequest(targetPinned, nextIds, group));

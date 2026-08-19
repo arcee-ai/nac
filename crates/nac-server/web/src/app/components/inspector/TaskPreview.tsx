@@ -73,7 +73,7 @@ function TaskPopover({
       placement={PopoverPlacement.BottomRight}
       sticky
       size="w-[430px] max-w-[calc(100vw-16px)]"
-      panelClassName="p-4 max-h-[260px] overflow-auto"
+      panelClassName="p-4 overflow-auto max-h-[70vh]"
       sheetClassName="max-h-[70vh] overflow-auto"
       className="shrink-0"
       content={<Markdown className="text-basic-primary px-4 md:px-0">{action}</Markdown>}

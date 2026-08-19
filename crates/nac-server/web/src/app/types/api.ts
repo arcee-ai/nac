@@ -1134,6 +1134,75 @@ export interface CreateSessionRequest {
   sandbox?: SandboxRequest;
 }
 
+/**
+ * A durable location plus the defaults and grouping applied to the sessions
+ * started inside it. Mirrors `ProjectRecord` in `crates/nac-core`.
+ */
+export interface ProjectRecord {
+  project_id: string;
+  name: string;
+  description: string | null;
+  cwd: string;
+  ssh_host: string | null;
+  ssh_port: number | null;
+  ssh_identity_file: string | null;
+  default_model_config_id: string | null;
+  created_at: string;
+  updated_at: string;
+  pinned: boolean;
+  sort_order: number;
+  presentation_version: number;
+}
+
+export interface ProjectList {
+  projects: ProjectRecord[];
+}
+
+export interface CreateProjectRequest {
+  /** Omit to derive one from the origin remote, then the directory name. */
+  name?: string | null;
+  description?: string | null;
+  cwd: string;
+  ssh_host?: string | null;
+  ssh_port?: number | null;
+  ssh_identity_file?: string | null;
+  default_model_config_id?: string | null;
+}
+
+export interface UpdateProjectRequest {
+  name?: RequestField<string>;
+  description?: RequestField<string>;
+  default_model_config_id?: RequestField<string>;
+  /** Toggling moves the project to the end of the target pin group. */
+  pinned?: RequestField<boolean>;
+}
+
+/** Membership is write-once, so this only ever links an unassigned session. */
+export interface AssignSessionRequest {
+  session_id: string;
+}
+
+/** What a project delete does with the chats inside it. */
+export type DeleteProjectSessions = "keep" | "delete";
+
+export interface DeleteProjectResponse {
+  /** Sessions that survived the delete and are now unassigned. */
+  released_session_ids: string[];
+  /** Sessions deleted along with the project. */
+  deleted_session_ids: string[];
+}
+
+export interface ReorderProjectsRequest {
+  pinned: boolean;
+  project_ids: string[];
+  expected_versions: Record<string, number>;
+}
+
+export interface ReorderProjectsResponse {
+  pinned: boolean;
+  projects: ProjectRecord[];
+}
+
 export interface UpdateConfigRequest {
   model?: RequestField<string>;
   base_url?: RequestField<string>;

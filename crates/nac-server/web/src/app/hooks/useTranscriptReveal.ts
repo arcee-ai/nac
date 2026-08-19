@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
 
 import { useMarkdownReady } from "@/app/hooks/useMarkdownReady";
@@ -24,6 +24,10 @@ const REVEAL_DEADLINE_MS = 1500;
  * One-way per session: a refetch later in the session is an update to a
  * transcript that is already on screen, and hiding it again for that would be a
  * flicker rather than a load.
+ *
+ * None of it applies to a conversation that is already in hand. Switching
+ * between chats a few times would otherwise mean waiting behind the same rows
+ * over and over for a transcript the cache could have drawn at once.
  */
 export function useTranscriptReveal(
   sessionId: string,
@@ -38,12 +42,31 @@ export function useTranscriptReveal(
   // Held as the session it belongs to, so switching sessions closes the gate in
   // the same render as the switch rather than a paint later.
   const [shown, setShown] = useState<string | null>(null);
+  const opened = useRef<string | null>(null);
+  const cached = useRef(false);
   const revealed = shown === sessionId;
 
   useEffect(() => {
-    if (revealed || !hasContent || !markdownReady || fetching > 0) {
-      return undefined;
+    // Whether the chat was already in hand the moment it was opened, which is
+    // what tells apart a load from a return to somewhere the user has been.
+    if (opened.current !== sessionId) {
+      opened.current = sessionId;
+      cached.current = hasContent;
     }
+    if (revealed || !hasContent || !markdownReady) return undefined;
+    // A cached chat waits for nothing — what is being refetched around it only
+    // updates a conversation that is already drawn — and least of all for a
+    // frame it would spend blank.
+    if (cached.current) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) setShown(sessionId);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (fetching > 0) return undefined;
     // Two frames: the first paints the prose and the rows whose reads have just
     // landed, the second hands over a transcript that is already complete.
     let second = 0;

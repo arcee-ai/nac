@@ -341,8 +341,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                   isFullScreen && !chromeless && "rounded-[8px]",
                 ),
             className,
-            // Callers size the desktop card through `className` (LaunchModal
-            // asks for `h-[680px]`). On a phone the panel *is* the screen, so
+            // Callers size the desktop card through `className`
+            // (CreateProjectModal asks for `h-[680px]`). On a phone the panel
+            // *is* the screen, so
             // its own sizing has to win: it comes after `className`, which is
             // where tailwind-merge resolves the conflict, and the min/max pair
             // clamps anything the caller adds on top.

@@ -23,7 +23,8 @@ pub mod model_configurations {
 /// Store-scoped project metadata, creation defaults, and session association.
 pub mod projects {
     pub use crate::store::{
-        insert_project, list_projects, load_project_launch_context, update_project, NewProject,
+        assign_session_to_project, delete_project, insert_project, list_projects,
+        load_project_launch_context, reorder_projects, update_project, NewProject,
         ProjectLaunchContext, ProjectPatch, ProjectRecord, ProjectStoreError,
     };
 }

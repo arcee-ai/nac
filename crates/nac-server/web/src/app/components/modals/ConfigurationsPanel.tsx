@@ -63,6 +63,12 @@ export type LaunchModelSelection =
        * (catalog and file launches), so the form keeps its own memory.
        */
       light_model: LightModelSettings | null | undefined;
+      /**
+       * The saved configuration this resolved from, when there is one. A
+       * catalog or file pick has nothing to point at, which is why a project
+       * created from one gets no default configuration.
+       */
+      config_id?: string | null;
     };
 
 export interface ConfigurationsPanelInitial {
@@ -408,6 +414,7 @@ export function ConfigurationsPanel({
       reasoning_effort: resolved.reasoning_effort,
       extra_headers: savedRecord?.extra_headers ?? null,
       light_model: savedRecord ? (savedRecord.light_model ?? null) : undefined,
+      config_id: savedRecord?.config_id ?? null,
     };
   }, [
     source.kind,

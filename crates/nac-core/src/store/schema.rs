@@ -3,14 +3,14 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 15 adds projects and their one-to-many session links. 14 added the bounded
-// interrupted-run recovery row. 13 added the light-model columns
-// (`light_model_json` on both `sessions` and `model_configurations`) —
-// `open_runtime_connection` returns early whenever the stored version already
-// equals this one. (12 carries the same schema as 11, which added
-// episodes.status; 10 added the ssh_configurations table; 9 the per-session ssh
-// port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 15;
+// 16 adds project presentation columns (pin, order, version). 15 added projects
+// and their one-to-many session links. 14 added the bounded interrupted-run
+// recovery row. 13 added the light-model columns (`light_model_json` on both
+// `sessions` and `model_configurations`) — `open_runtime_connection` returns
+// early whenever the stored version already equals this one. (12 carries the
+// same schema as 11, which added episodes.status; 10 added the
+// ssh_configurations table; 9 the per-session ssh port and key columns.)
+const STORE_SCHEMA_VERSION: i64 = 16;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -367,7 +367,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -906,6 +906,27 @@ fn create_projects_tables(conn: &Connection) -> Result<()> {
          );
          CREATE INDEX IF NOT EXISTS idx_session_projects_project
              ON session_projects(project_id, session_id);",
+    )?;
+    // Pin, order, and the optimistic-concurrency counter mirror
+    // `session_presentations`, but live on `projects` itself because a project
+    // row always exists before it can be ordered.
+    ensure_column(
+        conn,
+        "projects",
+        "pinned",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1))",
+    )?;
+    ensure_column(
+        conn,
+        "projects",
+        "sort_order",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0)",
+    )?;
+    ensure_column(
+        conn,
+        "projects",
+        "presentation_version",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (presentation_version >= 0)",
     )?;
     Ok(())
 }

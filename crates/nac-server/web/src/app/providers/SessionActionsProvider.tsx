@@ -1,19 +1,19 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 import { DeleteModal } from "@/app/components/modals/DeleteModal";
-import { LaunchModal } from "@/app/components/modals/LaunchModal";
 import { RenameModal } from "@/app/components/modals/RenameModal";
 import { SettingsModal } from "@/app/components/modals/SettingsModal";
-import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
-import { NEW_SESSION_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCancelRun, useTogglePin } from "@/app/services/queries";
 import { pushLocalEvent } from "@/app/store/runtimeStore";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
 
+/**
+ * Actions on a single chat. Creating one is a project-level action, because a
+ * chat is always started inside a project — see `ProjectActionsProvider`.
+ */
 interface SessionActions {
-  launch: () => void;
   rename: (summary: SessionSummarySnapshot) => void;
   remove: (summary: SessionSummarySnapshot) => void;
   settings: (sessionId: string) => void;
@@ -23,7 +23,7 @@ interface SessionActions {
 
 const SessionActionsContext = createContext<SessionActions | null>(null);
 
-type ModalKind = "rename" | "delete" | "settings" | "launch";
+type ModalKind = "rename" | "delete" | "settings";
 
 /**
  * Owns the actions a session card and the inspector header share, along with
@@ -48,7 +48,6 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
   const togglePin = pin.toggle;
   const value = useMemo<SessionActions>(
     () => ({
-      launch: () => setModal("launch"),
       rename: openModal("rename"),
       remove: openModal("delete"),
       settings: (sessionId) => {
@@ -75,18 +74,11 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
     [openModal, togglePin, cancelRun, toast],
   );
 
-  // Launching is the one action reachable from anywhere, so it is the one bound
-  // to a key; the rest all need a session picked out first.
-  useKeyboardShortcuts(
-    useMemo(() => [{ keys: NEW_SESSION_KEYS, onTrigger: () => setModal("launch") }], []),
-  );
-
   const close = () => setModal(null);
 
   return (
     <SessionActionsContext.Provider value={value}>
       {children}
-      <LaunchModal open={modal === "launch"} onClose={close} />
       <RenameModal open={modal === "rename"} onClose={close} summary={target} />
       <DeleteModal open={modal === "delete"} onClose={close} summary={target} />
       <SettingsModal open={modal === "settings"} id={settingsId} onClose={close} />

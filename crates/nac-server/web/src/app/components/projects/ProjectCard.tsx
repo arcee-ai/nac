@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 
 import {
+  ChatSessionOrphanAvatar,
   Icon,
   IconName,
   Loader,
@@ -9,72 +10,128 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { cn } from "@/app/lib/cn";
-import {
-  displaySessionTitle,
-  formatClock,
-  formatCostMicros,
-  isActiveRun,
-  sessionEnvLabel,
-} from "@/app/lib/format";
-import { providerLabel } from "@/app/lib/providers";
+import { ProjectCardActions } from "@/app/components/projects/ProjectCardActions";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
-import { useNow } from "@/app/hooks/useNow";
-import { SessionCardActions } from "@/app/components/sessions/SessionCardActions";
-import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { cn } from "@/app/lib/cn";
+import { formatCostMicros, isActiveRun, sessionEnvLabel } from "@/app/lib/format";
+import type { ProjectListItem } from "@/app/lib/projects";
+import { providerLabel } from "@/app/lib/providers";
+import type { SessionSummarySnapshot } from "@/app/types/api";
 
-// Figma ChatSessionCard has a full-bleed "Surface" layer below the content that
+// Figma ProjectCard has a full-bleed "Surface" layer below the content that
 // carries the interaction state. Tokens are applied as CSS variables because the
-// generated utilities have no group-hover/group-active variants.
+// generated utilities have no group-hover/group-active variants. The highlighted
+// row is the design's Status=Running, not its selection — selection is the ring.
 const SURFACE_TOKENS = {
   default: "--color-bg-btn-ghost",
   hovered: "--color-bg-btn-ghost-hovered",
   pressed: "--color-bg-btn-ghost-pressed",
-  selected: "--color-bg-btn-ghost-highlighted",
-  selectedHovered: "--color-bg-btn-ghost-highlighted-hovered",
-  selectedPressed: "--color-bg-btn-ghost-highlighted-pressed",
+  highlighted: "--color-bg-btn-ghost-highlighted",
+  highlightedHovered: "--color-bg-btn-ghost-highlighted-hovered",
+  highlightedPressed: "--color-bg-btn-ghost-highlighted-pressed",
 };
 
 function surfaceToken({
-  selected,
+  highlighted,
   hover,
   pressed,
 }: {
-  selected: boolean;
+  highlighted: boolean;
   hover: boolean;
   pressed: boolean;
 }) {
   if (pressed) {
-    return selected ? SURFACE_TOKENS.selectedPressed : SURFACE_TOKENS.pressed;
+    return highlighted ? SURFACE_TOKENS.highlightedPressed : SURFACE_TOKENS.pressed;
   }
   if (hover) {
-    return selected ? SURFACE_TOKENS.selectedHovered : SURFACE_TOKENS.hovered;
+    return highlighted ? SURFACE_TOKENS.highlightedHovered : SURFACE_TOKENS.hovered;
   }
-  return selected ? SURFACE_TOKENS.selected : SURFACE_TOKENS.default;
+  return highlighted ? SURFACE_TOKENS.highlighted : SURFACE_TOKENS.default;
 }
 
-function Metrics({ summary }: { summary: SessionSummarySnapshot }) {
-  const costLabel =
-    summary.total_cost_micros != null && summary.total_cost_micros > 0
-      ? formatCostMicros(summary.total_cost_micros)
-      : null;
+/**
+ * What a card shows, flattened from either kind of row so the body below reads
+ * the same for both. A project draws its provenance from its newest chat, which
+ * is the only place the environment is recorded.
+ */
+interface CardFacts {
+  id: string;
+  orphan: boolean;
+  title: string;
+  cwd: string;
+  pinned: boolean;
+  running: boolean;
+  costMicros: number;
+  /** "3 Sessions" for a project. A loose chat rolls nothing up, so it has none. */
+  countLabel: string | null;
+  /** Drives the run badge next to the title; a loose chat only ever runs once. */
+  runningCount: number;
+  /** The chat whose environment stands in for the row. */
+  representative: SessionSummarySnapshot | null;
+}
+
+function factsFor(
+  item: ProjectListItem,
+  /** Names an unassigned chat; a project already carries its own name. */
+  sessionTitle: (summary: SessionSummarySnapshot) => string,
+): CardFacts {
+  if (item.kind === "project") {
+    const { project, sessions, running, totalCostMicros } = item.entry;
+    const live = sessions.find((entry) => isActiveRun(entry.active_run));
+    return {
+      id: project.project_id,
+      orphan: false,
+      title: project.name,
+      cwd: project.cwd,
+      pinned: project.pinned,
+      running: running > 0,
+      costMicros: totalCostMicros,
+      countLabel: `${sessions.length} ${sessions.length === 1 ? "Session" : "Sessions"}`,
+      runningCount: running,
+      representative: live?.summary ?? sessions[0]?.summary ?? null,
+    };
+  }
+  const { summary, active_run } = item.session;
+  const running = isActiveRun(active_run);
+  return {
+    id: summary.session_id,
+    orphan: true,
+    title: sessionTitle(summary),
+    cwd: summary.cwd,
+    // Pinning is a project affordance; an unassigned chat is never pinned.
+    pinned: false,
+    running,
+    costMicros: summary.total_cost_micros ?? 0,
+    countLabel: null,
+    runningCount: running ? 1 : 0,
+    representative: summary,
+  };
+}
+
+function Metrics({ facts }: { facts: CardFacts }) {
+  const costLabel = facts.costMicros > 0 ? formatCostMicros(facts.costMicros) : null;
   return (
     <div className="flex items-center gap-2.5 shrink-0 min-w-0">
       {costLabel ? (
         <span className="text-micro text-basic-primary whitespace-nowrap">{costLabel}</span>
       ) : null}
-      <span className="text-micro text-info-primary whitespace-nowrap truncate">
-        {summary.run_count} {summary.run_count === 1 ? "Run" : "Runs"}
-      </span>
+      {facts.countLabel ? (
+        <span className="text-micro text-info-primary whitespace-nowrap truncate">
+          {facts.countLabel}
+        </span>
+      ) : null}
     </div>
   );
 }
 
-function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
-  const provider = providerLabel(summary.backend);
+function Provenance({ facts }: { facts: CardFacts }) {
+  const provider = providerLabel(facts.representative?.backend);
   return (
     <div className="flex flex-wrap items-center gap-2.5 min-w-0 whitespace-nowrap">
-      <span className="label-micro text-basic-tertiary">{sessionEnvLabel(summary)}</span>
+      <span className="label-micro text-basic-tertiary">
+        {sessionEnvLabel(facts.representative)}
+      </span>
       {provider ? (
         <span className="text-micro text-basic-muted truncate md:max-w-[128px]">{provider}</span>
       ) : null}
@@ -82,8 +139,11 @@ function Provenance({ summary }: { summary: SessionSummarySnapshot }) {
   );
 }
 
-export interface SessionReorderStart {
-  sessionId: string;
+export type ProjectListKind = "project" | "orphan";
+
+export interface ProjectReorderStart {
+  itemId: string;
+  kind: ProjectListKind;
   pinned: boolean;
   clientX: number;
   clientY: number;
@@ -99,7 +159,7 @@ function DragHandle({
   onReorderStart,
 }: {
   getCardElement: () => HTMLElement | null;
-  onReorderStart: (start: SessionReorderStart) => void;
+  onReorderStart: (start: ProjectReorderStart) => void;
 }) {
   return (
     <button
@@ -122,8 +182,9 @@ function DragHandle({
         // Capture on the handle so moves keep flowing after the card floats.
         e.currentTarget.setPointerCapture(e.pointerId);
         onReorderStart({
-          sessionId: card.dataset.sessionId ?? "",
-          pinned: card.dataset.sessionPinned === "true",
+          itemId: card.dataset.itemId ?? "",
+          kind: card.dataset.itemKind === "orphan" ? "orphan" : "project",
+          pinned: card.dataset.itemPinned === "true",
           clientX: e.clientX,
           clientY: e.clientY,
           offsetX: e.clientX - rect.left,
@@ -139,50 +200,52 @@ function DragHandle({
   );
 }
 
-export interface SessionCardReorder {
+export interface ProjectCardReorder {
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMoveUp: () => void;
   onMoveDown: () => void;
-  onReorderStart: (start: SessionReorderStart) => void;
+  onReorderStart: (start: ProjectReorderStart) => void;
 }
 
-interface SessionCardProps {
-  entry: ManagedSessionSummary;
+interface ProjectCardProps {
+  item: ProjectListItem;
   selected: boolean;
   attention: boolean;
-  onOpen: (id: string) => void;
-  onTogglePin: (entry: ManagedSessionSummary) => void;
-  onRename: (entry: ManagedSessionSummary) => void;
-  onDelete: (entry: ManagedSessionSummary) => void;
-  onStop: (entry: ManagedSessionSummary) => void;
-  /** When set (Default sort), shows desktop handle / mobile arrows. */
-  reorder?: SessionCardReorder;
+  onOpen: () => void;
+  onDelete: () => void;
+  /** Project rows only. */
+  onTogglePin?: () => void;
+  onRename?: () => void;
+  /** Orphan rows only: file the chat under a project. */
+  onAssign?: () => void;
+  /** When set (Default sort), shows desktop handle / mobile arrows. Projects
+   *  and orphans reorder within their own group, never across it. */
+  reorder?: ProjectCardReorder;
   /** Card is the active drag ghost (follows the pointer). */
   dragging?: boolean;
 }
 
-export function SessionCard({
-  entry,
+/**
+ * One row of the project list: either a project with the chats inside it rolled
+ * up, or a chat that belongs to none. Both open with a click and can be
+ * reordered within their own group — see ProjectCardActions.
+ */
+export function ProjectCard({
+  item,
   selected,
   attention,
   onOpen,
+  onDelete,
   onTogglePin,
   onRename,
-  onDelete,
-  onStop,
+  onAssign,
   reorder,
   dragging = false,
-}: SessionCardProps) {
-  const summary = entry.summary;
-  const id = summary.session_id;
-  const activeRun = entry.active_run;
-  const running = isActiveRun(activeRun);
-
-  const now = useNow(1000, running);
-  const clock = running
-    ? formatClock(activeRun?.started_at_epoch_ms ? now - activeRun.started_at_epoch_ms : 0)
-    : null;
+}: ProjectCardProps) {
+  const sessionTitle = useSessionTitle();
+  const facts = factsFor(item, sessionTitle);
+  const configError = facts.representative?.model_config_error;
 
   const isMobile = useIsMobile();
   const isDesktop = useIsDesktop();
@@ -207,19 +270,19 @@ export function SessionCard({
       suppressClick.current = false;
       return;
     }
-    onOpen(id);
+    onOpen();
   };
 
   return (
     <div
       ref={cardRef}
-      data-session-id={id}
-      data-session-pinned={summary.pinned ? "true" : "false"}
+      data-item-id={facts.id}
+      data-item-kind={facts.orphan ? "orphan" : "project"}
+      data-item-pinned={facts.pinned ? "true" : "false"}
       className={cn(
         "group fade relative flex flex-col rounded-[8px] overflow-hidden cursor-default",
         isMobile ? "gap-4 px-4 pt-4 pb-2" : "gap-4 px-6 pt-5 pb-3",
-        "shadow-convex",
-        running ? "bg-elevation-level-3" : "bg-elevation-level-1",
+        "shadow-convex bg-elevation-level-1",
         dragging && "shadow-lg",
       )}
       role="button"
@@ -259,7 +322,11 @@ export function SessionCard({
       <div
         className="absolute inset-0 rounded-[8px] pointer-events-none ease-out"
         style={{
-          backgroundColor: `var(${surfaceToken({ selected, hover: surfaceHover, pressed })})`,
+          backgroundColor: `var(${surfaceToken({
+            highlighted: facts.running,
+            hover: surfaceHover,
+            pressed,
+          })})`,
         }}
       />
       {selected || focused || dragging ? (
@@ -293,51 +360,59 @@ export function SessionCard({
       ) : null}
 
       <div className="relative flex items-center gap-4 w-full">
-        <SessionAvatar id={id} size={40} isRunning={running} />
+        {facts.orphan ? (
+          <ChatSessionOrphanAvatar isRunning={facts.running} />
+        ) : (
+          <SessionAvatar id={facts.id} size={40} isRunning={facts.running} />
+        )}
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
           <div className="flex items-center gap-1.5 w-full">
-            {summary.pinned ? (
+            {facts.pinned ? (
               <Icon iconName={IconName.Pin} className="text-basic-secondary shrink-0" />
             ) : null}
             <div
               className={cn(
                 "header-md flex-1 min-w-0 truncate",
-                running ? "text-shimmer-basic" : "text-basic-primary",
+                facts.running ? "text-shimmer-basic" : "text-basic-primary",
               )}
             >
-              {displaySessionTitle(summary)}
+              {facts.title}
             </div>
-            {summary.model_config_error ? (
-              <Tooltip
-                title={summary.model_config_error}
-                position={TooltipPosition.BottomRight}
-                sticky
-              >
+            {configError ? (
+              <Tooltip title={configError} position={TooltipPosition.BottomRight} sticky>
                 <Icon iconName={IconName.Repair} className="text-error-primary shrink-0" />
               </Tooltip>
             ) : null}
-            {running ? (
-              <div className="flex items-center gap-1 shrink-0">
-                <span className="text-basic-primary text-sm leading-5">{clock}</span>
-                <Loader size={LoaderSize.Small} />
-              </div>
+            {/* A project counts the chats currently running inside it; a loose
+                chat is its own run, so the spinner alone says it. */}
+            {facts.running ? (
+              facts.orphan ? (
+                <Loader size={LoaderSize.Micro} className="shrink-0" />
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Loader size={LoaderSize.XSmall} />
+                  <span className="text-micro text-basic-primary whitespace-nowrap">
+                    {facts.runningCount} Running
+                  </span>
+                </div>
+              )
             ) : null}
           </div>
-          <div className="code code-micro text-basic-tertiary truncate w-full">{summary.cwd}</div>
+          <div className="code code-micro text-basic-tertiary truncate w-full">{facts.cwd}</div>
         </div>
       </div>
-      {!isDesktop ? <Provenance summary={summary} /> : null}
+      {!isDesktop ? <Provenance facts={facts} /> : null}
 
       <div className="relative flex items-center justify-between w-full h-6 gap-2">
-        <Metrics summary={summary} />
+        <Metrics facts={facts} />
         {showActions ? (
-          <SessionCardActions
-            pinned={Boolean(summary.pinned)}
-            running={running}
-            onTogglePin={() => onTogglePin(entry)}
-            onRename={() => onRename(entry)}
-            onDelete={() => onDelete(entry)}
-            onStop={() => onStop(entry)}
+          <ProjectCardActions
+            orphan={facts.orphan}
+            pinned={facts.pinned}
+            onTogglePin={onTogglePin}
+            onRename={onRename}
+            onDelete={onDelete}
+            onAssign={onAssign}
             reorder={
               showMobileReorder && reorder
                 ? {
@@ -350,7 +425,7 @@ export function SessionCard({
             }
           />
         ) : (
-          <Provenance summary={summary} />
+          <Provenance facts={facts} />
         )}
       </div>
     </div>

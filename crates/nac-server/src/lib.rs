@@ -25,7 +25,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex as StdMutex, Weak},
     time::{Duration, Instant},
 };
@@ -506,6 +506,54 @@ pub struct UpdateProjectRequest {
     pub description: RequestField<String>,
     #[serde(default)]
     pub default_model_config_id: RequestField<String>,
+    /// Toggling this moves the project to the end of the target pin group and
+    /// bumps `presentation_version`.
+    #[serde(default)]
+    pub pinned: RequestField<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct AssignSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct ReorderProjectsRequest {
+    pub pinned: bool,
+    pub project_ids: Vec<String>,
+    pub expected_versions: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct ReorderProjectsResponse {
+    pub pinned: bool,
+    pub projects: Vec<ProjectRecord>,
+}
+
+/// What a project delete does with the chats inside it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteProjectSessions {
+    /// Hand them back as unassigned, so nothing said in them is lost.
+    #[default]
+    Keep,
+    /// Delete them along with the project.
+    Delete,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DeleteProjectQuery {
+    #[serde(default)]
+    pub sessions: DeleteProjectSessions,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct DeleteProjectResponse {
+    /// Sessions that stayed behind and are now unassigned.
+    pub released_session_ids: Vec<String>,
+    /// Sessions deleted along with the project.
+    pub deleted_session_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
@@ -587,6 +635,77 @@ fn apply_project_model_defaults(
     inherit_project_field(
         &mut request.light_model,
         defaults
+            .light_model
+            .map(RequestField::Value)
+            .unwrap_or(RequestField::Null),
+    );
+}
+
+/// The chat a project's model settings are read off when the project names no
+/// default configuration of its own.
+///
+/// A project set up from a one-off model pick has no saved configuration to
+/// point at, which used to leave its every later chat unlaunchable: nothing said
+/// what to run it on. Its existing chats do say, so the newest one stands in —
+/// and being the newest, it also tracks the project as its chats are retuned,
+/// rather than pinning it to whatever was chosen the day it was created.
+///
+/// A chat whose own stored configuration no longer parses has nothing to lend,
+/// and is passed over so one broken row cannot make the project unusable.
+fn newest_project_session(
+    store_path: &Path,
+    project_id: &str,
+) -> Option<sessions::SessionSnapshot> {
+    let mut candidates: Vec<_> = sessions::list_sessions(store_path)
+        .ok()?
+        .into_iter()
+        .filter(|summary| summary.project_id.as_deref() == Some(project_id))
+        .collect();
+    candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    candidates
+        .into_iter()
+        .find_map(|summary| sessions::load_session(store_path, &summary.session_id).ok())
+}
+
+/// Same inheritance as `apply_project_model_defaults`, sourced from a sibling
+/// chat instead of a saved configuration.
+fn apply_sibling_model_defaults(
+    request: &mut CreateSessionRequest,
+    sibling: sessions::SessionSnapshot,
+) {
+    inherit_project_field(&mut request.model, RequestField::Value(sibling.model));
+    inherit_project_field(&mut request.base_url, RequestField::Value(sibling.base_url));
+    inherit_project_field(
+        &mut request.backend,
+        RequestField::Value(sibling.backend.as_str().to_string()),
+    );
+    inherit_project_field(
+        &mut request.reasoning_effort,
+        sibling
+            .reasoning_effort
+            .map(|effort| RequestField::Value(effort.as_str().to_string()))
+            .unwrap_or(RequestField::Null),
+    );
+    inherit_project_field(
+        &mut request.api_key_env,
+        sibling
+            .api_key_env
+            .map(RequestField::Value)
+            .unwrap_or(RequestField::Null),
+    );
+    inherit_project_field(
+        &mut request.extra_headers,
+        RequestField::Value(HeadersRequest(sibling.extra_headers)),
+    );
+    if let Some(threshold) = sibling.orchestrator_compaction_threshold {
+        inherit_project_field(
+            &mut request.orchestrator_compaction_threshold,
+            RequestField::Value(threshold),
+        );
+    }
+    inherit_project_field(
+        &mut request.light_model,
+        sibling
             .light_model
             .map(RequestField::Value)
             .unwrap_or(RequestField::Null),
@@ -1136,11 +1255,20 @@ impl SessionManager {
             (PathBuf::from(listing.path), None, None, None)
         };
 
+        // A local checkout is named after its origin remote (`owner/repo`),
+        // which reads better than the bare folder the store would fall back to.
+        let name = request.name.or_else(|| {
+            ssh_host
+                .is_none()
+                .then(|| view::local_repo_label(&cwd))
+                .flatten()
+        });
+
         Ok(projects::insert_project(
             &self.inner.store_path,
             projects::NewProject {
                 project_id: uuid::Uuid::new_v4().to_string(),
-                name: request.name,
+                name,
                 description: request.description,
                 cwd,
                 ssh_host,
@@ -1165,6 +1293,15 @@ impl SessionManager {
             }
             RequestField::Value(name) => Some(name),
         };
+        let pinned = match request.pinned {
+            RequestField::Omitted => None,
+            RequestField::Null => {
+                return Err(ProjectStoreError::InvalidInput(
+                    "project pinned cannot be null".to_string(),
+                ))
+            }
+            RequestField::Value(pinned) => Some(pinned),
+        };
         projects::update_project(
             &self.inner.store_path,
             project_id,
@@ -1172,7 +1309,57 @@ impl SessionManager {
                 name,
                 description: request_field_patch(request.description),
                 default_model_config_id: request_field_patch(request.default_model_config_id),
+                pinned,
             },
+        )
+    }
+
+    /// Drops the project and hands its sessions back as unassigned.
+    pub fn delete_project(
+        &self,
+        project_id: &str,
+    ) -> std::result::Result<Vec<String>, ProjectStoreError> {
+        projects::delete_project(&self.inner.store_path, project_id)
+    }
+
+    /// Drops the project along with every chat in it.
+    ///
+    /// The chats go first: membership is recorded against the project row, so
+    /// once that is gone there is nothing left saying which sessions were its.
+    /// A chat that refuses to be deleted — one mid-run that will not cancel —
+    /// leaves the project standing rather than orphaning the rest.
+    pub async fn delete_project_with_sessions(&self, project_id: &str) -> Result<Vec<String>> {
+        let session_ids: Vec<String> = sessions::list_sessions(&self.inner.store_path)?
+            .into_iter()
+            .filter(|summary| summary.project_id.as_deref() == Some(project_id))
+            .map(|summary| summary.session_id)
+            .collect();
+        for session_id in &session_ids {
+            self.delete_session(session_id).await?;
+        }
+        self.delete_project(project_id)?;
+        Ok(session_ids)
+    }
+
+    pub fn assign_session_to_project(
+        &self,
+        project_id: &str,
+        session_id: &str,
+    ) -> std::result::Result<ProjectRecord, ProjectStoreError> {
+        projects::assign_session_to_project(&self.inner.store_path, project_id, session_id)
+    }
+
+    pub fn reorder_projects(
+        &self,
+        pinned: bool,
+        project_ids: &[String],
+        expected_versions: &BTreeMap<String, i64>,
+    ) -> std::result::Result<Vec<ProjectRecord>, ProjectStoreError> {
+        projects::reorder_projects(
+            &self.inner.store_path,
+            pinned,
+            project_ids,
+            expected_versions,
         )
     }
 
@@ -1569,6 +1756,10 @@ impl SessionManager {
             }
             if let Some(defaults) = context.default_model_config {
                 apply_project_model_defaults(&mut request, defaults);
+            } else if let Some(sibling) =
+                newest_project_session(&self.inner.store_path, &context.project.project_id)
+            {
+                apply_sibling_model_defaults(&mut request, sibling);
             }
             let project = context.project;
             let ssh = runtime::SshOptions {
@@ -2760,6 +2951,9 @@ async fn secure_docs(request: axum::extract::Request, next: Next) -> Response {
     ),
     components(schemas(
         filesystem::BrowseKind,
+        // Only ever referenced from a query parameter, which utoipa does not
+        // walk for schemas the way it walks bodies and responses.
+        DeleteProjectSessions,
         ReplayBoundaryEvent,
         ReplayGapEvent,
         SessionEventEnvelope,
@@ -2812,7 +3006,9 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
             create_model_config_handler
         ))
         .routes(routes!(list_projects_handler, create_project_handler))
-        .routes(routes!(update_project_handler))
+        .routes(routes!(reorder_projects_handler))
+        .routes(routes!(update_project_handler, delete_project_handler))
+        .routes(routes!(assign_session_handler))
         .routes(routes!(model_config_from_file_handler))
         .routes(routes!(
             update_model_config_handler,
@@ -3251,6 +3447,86 @@ async fn update_project_handler(
 ) -> std::result::Result<Json<ProjectRecord>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
     Ok(Json(manager.update_project(&project_id, request)?))
+}
+
+/// Remove a project, by default without touching the work done inside it.
+///
+/// Its sessions are released rather than deleted, so they reappear in the
+/// listing as unassigned and can be assigned somewhere else. Pass
+/// `?sessions=delete` to take them down with the project instead.
+#[utoipa::path(
+    delete,
+    path = "/projects/{project_id}",
+    operation_id = "delete_projects_project_id",
+    tag = "projects",
+    params(DeleteProjectQuery, ("project_id" = String, Path)),
+    responses((status = 200, description = "Success", body = DeleteProjectResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Project was not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn delete_project_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(project_id): AxumPath<String>,
+    Query(query): Query<DeleteProjectQuery>,
+) -> std::result::Result<Json<DeleteProjectResponse>, ApiError> {
+    Ok(Json(match query.sessions {
+        DeleteProjectSessions::Keep => DeleteProjectResponse {
+            released_session_ids: manager.delete_project(&project_id)?,
+            deleted_session_ids: Vec::new(),
+        },
+        DeleteProjectSessions::Delete => DeleteProjectResponse {
+            released_session_ids: Vec::new(),
+            deleted_session_ids: manager.delete_project_with_sessions(&project_id).await?,
+        },
+    }))
+}
+
+/// Attach an existing session to a project.
+///
+/// Membership is set once: an already-assigned session conflicts, and so does a
+/// session whose working directory is not the project's location.
+#[utoipa::path(
+    post,
+    path = "/projects/{project_id}/sessions",
+    operation_id = "post_projects_project_id_sessions",
+    tag = "projects",
+    params(("project_id" = String, Path)),
+    request_body(content = AssignSessionRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ProjectRecord, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Project or session was not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Session is already assigned or runs elsewhere", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn assign_session_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(project_id): AxumPath<String>,
+    payload: std::result::Result<Json<AssignSessionRequest>, JsonRejection>,
+) -> std::result::Result<Json<ProjectRecord>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(manager.assign_session_to_project(
+        &project_id,
+        &request.session_id,
+    )?))
+}
+
+/// Rewrite the order of one pin group.
+#[utoipa::path(
+    put,
+    path = "/projects/order",
+    operation_id = "put_projects_order",
+    tag = "projects",
+    request_body(content = ReorderProjectsRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ReorderProjectsResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn reorder_projects_handler(
+    State(manager): State<SessionManager>,
+    payload: std::result::Result<Json<ReorderProjectsRequest>, JsonRejection>,
+) -> std::result::Result<Json<ReorderProjectsResponse>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let projects = manager.reorder_projects(
+        request.pinned,
+        &request.project_ids,
+        &request.expected_versions,
+    )?;
+    Ok(Json(ReorderProjectsResponse {
+        pinned: request.pinned,
+        projects,
+    }))
 }
 
 #[utoipa::path(
@@ -5106,7 +5382,9 @@ impl From<ProjectStoreError> for ApiError {
     fn from(error: ProjectStoreError) -> Self {
         let status = match &error {
             ProjectStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-            ProjectStoreError::DuplicateLocation => StatusCode::CONFLICT,
+            ProjectStoreError::DuplicateLocation | ProjectStoreError::Conflict(_) => {
+                StatusCode::CONFLICT
+            }
             ProjectStoreError::NotFound(_) | ProjectStoreError::ModelConfigurationNotFound(_) => {
                 StatusCode::NOT_FOUND
             }
@@ -5266,6 +5544,7 @@ mod tests {
         ("DELETE", "/credentials/{name}"),
         ("DELETE", "/mcp_library/servers/{server_name}"),
         ("DELETE", "/model-configs/{config_id}"),
+        ("DELETE", "/projects/{project_id}"),
         ("DELETE", "/sessions/{session_id}"),
         ("DELETE", "/ssh-configs/{config_id}"),
         ("GET", "/auth"),
@@ -5312,6 +5591,7 @@ mod tests {
         ("POST", "/model-configs/from-file"),
         ("POST", "/model-configs/{config_id}/models"),
         ("POST", "/projects"),
+        ("POST", "/projects/{project_id}/sessions"),
         ("POST", "/providers/models"),
         ("POST", "/sessions"),
         ("POST", "/sessions/launch-defaults"),
@@ -5331,6 +5611,7 @@ mod tests {
         ("POST", "/ssh-configs"),
         ("POST", "/ssh/browse"),
         ("PUT", "/credentials/{name}"),
+        ("PUT", "/projects/order"),
         ("PUT", "/sessions/order"),
         ("PUT", "/sessions/{session_id}/presentation"),
     ];

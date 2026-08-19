@@ -27,8 +27,11 @@ import {
   Loader,
   LoaderSize,
   Logo,
+  ChatSessionButton,
   ChatSessionMessage,
   ChatSessionMessageVariant,
+  ChatSessionOrphanAvatar,
+  ChatSessionTab,
   MessageBox,
   MessageBoxVariant,
   Modal,
@@ -37,6 +40,8 @@ import {
   Popover,
   PopoverPlacement,
   ProgressLoader,
+  ProjectButton,
+  ProjectButtonVariant,
   Radio,
   RangeInput,
   Select,
@@ -301,6 +306,34 @@ export default function DesignPreviewPage() {
                 <span className="code code-small text-basic-muted">{id}</span>
               </div>
             ))}
+            <div className="flex items-center gap-2">
+              <ChatSessionOrphanAvatar />
+              <span className="code code-small text-basic-muted">unassigned</span>
+            </div>
+          </div>
+        </BoxSurface>
+
+        <BoxSurface title="Project navigation">
+          <div className="p-4 flex flex-col gap-6">
+            <div className="flex items-start gap-2">
+              <ChatSessionTab title="Fix the parser" active />
+              <ChatSessionTab title="Rewrite the store layer" />
+              <ChatSessionTab title="Investigating" running />
+            </div>
+            <div className="flex flex-col gap-1 max-w-[320px]">
+              <ChatSessionButton title="Fix the parser" active />
+              <ChatSessionButton title="Rewrite the store layer" />
+              <ChatSessionButton title="Investigating" running />
+            </div>
+            <div className="flex flex-col gap-1 max-w-[320px]">
+              <ProjectButton entityId={SAMPLE_IDS[3]} name="arcee-ai/nac" trailing="4" active />
+              <ProjectButton entityId={SAMPLE_IDS[4]} name="arcee-ai/telos" trailing="1" running />
+              <ProjectButton
+                entityId={SAMPLE_IDS[5]}
+                name="Unassigned session"
+                variant={ProjectButtonVariant.Orphan}
+              />
+            </div>
           </div>
         </BoxSurface>
 

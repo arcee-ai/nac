@@ -1,5 +1,7 @@
 use super::*;
 
+use std::collections::{BTreeMap, HashSet};
+
 use crate::store::model_configurations::{model_configuration_columns, row_to_record_at};
 
 const MAX_NAME_LEN: usize = 120;
@@ -19,6 +21,9 @@ pub struct ProjectRecord {
     pub default_model_config_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub pinned: bool,
+    pub sort_order: i64,
+    pub presentation_version: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +43,7 @@ pub struct ProjectPatch {
     pub name: Option<String>,
     pub description: Option<Option<String>>,
     pub default_model_config_id: Option<Option<String>>,
+    pub pinned: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +58,7 @@ pub enum ProjectStoreError {
     DuplicateLocation,
     NotFound(String),
     ModelConfigurationNotFound(String),
+    Conflict(String),
     Store(anyhow::Error),
 }
 
@@ -64,6 +71,7 @@ impl std::fmt::Display for ProjectStoreError {
             Self::ModelConfigurationNotFound(id) => {
                 write!(formatter, "model configuration '{id}' was not found")
             }
+            Self::Conflict(message) => formatter.write_str(message),
             Self::Store(error) => write!(formatter, "{error}"),
         }
     }
@@ -86,7 +94,12 @@ impl From<rusqlite::Error> for ProjectStoreError {
 type ProjectResult<T> = std::result::Result<T, ProjectStoreError>;
 
 const PROJECT_COLUMNS: &str = "project_id, name, description, cwd, ssh_host, ssh_port,
-     ssh_identity_file, default_model_config_id, created_at, updated_at";
+     ssh_identity_file, default_model_config_id, created_at, updated_at,
+     pinned, sort_order, presentation_version";
+
+/// Pinned projects lead the list; inside a pin group the explicit order wins and
+/// creation time only breaks ties for rows that have never been reordered.
+const PROJECT_ORDER: &str = "ORDER BY pinned DESC, sort_order, created_at, name, project_id";
 
 fn normalize_name(name: &str) -> ProjectResult<String> {
     let name = name.trim();
@@ -200,6 +213,9 @@ fn validated_project(project: NewProject) -> ProjectResult<ProjectRecord> {
         default_model_config_id,
         created_at: now.clone(),
         updated_at: now,
+        pinned: false,
+        sort_order: 0,
+        presentation_version: 0,
     })
 }
 
@@ -216,6 +232,9 @@ fn row_to_project_at(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result
         default_model_config_id: row.get(offset + 7)?,
         created_at: row.get(offset + 8)?,
         updated_at: row.get(offset + 9)?,
+        pinned: row.get::<_, i64>(offset + 10)? != 0,
+        sort_order: row.get(offset + 11)?,
+        presentation_version: row.get(offset + 12)?,
     })
 }
 
@@ -274,7 +293,7 @@ fn load_project_with_connection(
 pub fn list_projects(path: &Path) -> ProjectResult<Vec<ProjectRecord>> {
     let conn = open_runtime_connection(path)?;
     let mut statement = conn.prepare(&format!(
-        "SELECT {PROJECT_COLUMNS} FROM projects ORDER BY created_at, name, project_id"
+        "SELECT {PROJECT_COLUMNS} FROM projects {PROJECT_ORDER}"
     ))?;
     let projects = statement
         .query_map([], row_to_project)?
@@ -283,15 +302,17 @@ pub fn list_projects(path: &Path) -> ProjectResult<Vec<ProjectRecord>> {
 }
 
 pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<ProjectRecord> {
-    let record = validated_project(project)?;
+    let mut record = validated_project(project)?;
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     ensure_model_configuration(&tx, record.default_model_config_id.as_deref())?;
+    record.sort_order = next_sort_order(&tx, false, None)?;
     tx.execute(
         "INSERT INTO projects
          (project_id, name, description, cwd, ssh_host, ssh_port, ssh_identity_file,
-          default_model_config_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          default_model_config_id, created_at, updated_at, pinned, sort_order,
+          presentation_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, 0)",
         params![
             record.project_id,
             record.name,
@@ -303,11 +324,30 @@ pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<Project
             record.default_model_config_id,
             record.created_at,
             record.updated_at,
+            record.sort_order,
         ],
     )
     .map_err(map_insert_error)?;
     tx.commit()?;
     Ok(record)
+}
+
+/// Next free slot at the end of a pin group, optionally ignoring the project
+/// that is being moved into it.
+fn next_sort_order(
+    conn: &rusqlite::Connection,
+    pinned: bool,
+    exclude_project_id: Option<&str>,
+) -> ProjectResult<i64> {
+    let maximum: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM projects
+         WHERE pinned = ?1 AND project_id IS NOT ?2",
+        params![i64::from(pinned), exclude_project_id],
+        |row| row.get(0),
+    )?;
+    maximum
+        .checked_add(1)
+        .ok_or_else(|| ProjectStoreError::Store(anyhow!("project order overflow")))
 }
 
 pub fn update_project(
@@ -336,22 +376,238 @@ pub fn update_project(
         }
         None => existing.default_model_config_id,
     };
+    // Re-pinning moves the project to the end of the target group and bumps the
+    // presentation version so a concurrent reorder holding the old version is
+    // rejected instead of silently reinstating the previous placement.
+    let (pinned, sort_order, presentation_version) = match patch.pinned {
+        Some(pinned) if pinned != existing.pinned => (
+            pinned,
+            next_sort_order(&tx, pinned, Some(project_id))?,
+            existing
+                .presentation_version
+                .checked_add(1)
+                .ok_or_else(|| {
+                    ProjectStoreError::Store(anyhow!("project presentation version overflow"))
+                })?,
+        ),
+        _ => (
+            existing.pinned,
+            existing.sort_order,
+            existing.presentation_version,
+        ),
+    };
     let updated_at = now_utc();
     tx.execute(
         "UPDATE projects
-         SET name = ?2, description = ?3, default_model_config_id = ?4, updated_at = ?5
+         SET name = ?2, description = ?3, default_model_config_id = ?4, updated_at = ?5,
+             pinned = ?6, sort_order = ?7, presentation_version = ?8
          WHERE project_id = ?1",
         params![
             project_id,
             name,
             description,
             default_model_config_id,
-            updated_at
+            updated_at,
+            i64::from(pinned),
+            sort_order,
+            presentation_version,
         ],
     )?;
     let updated = load_project_with_connection(&tx, project_id)?;
     tx.commit()?;
     Ok(updated)
+}
+
+/// Removes the project and releases its sessions instead of deleting them.
+///
+/// `session_projects.project_id` is `ON DELETE RESTRICT`, so the links have to
+/// go first; the sessions themselves survive and reappear as unassigned.
+pub fn delete_project(path: &Path, project_id: &str) -> ProjectResult<Vec<String>> {
+    let mut conn = open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    load_project_with_connection(&tx, project_id)?;
+    let released = {
+        let mut statement =
+            tx.prepare("SELECT session_id FROM session_projects WHERE project_id = ?1")?;
+        let released = statement
+            .query_map(params![project_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        released
+    };
+    tx.execute(
+        "DELETE FROM session_projects WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM projects WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.commit()?;
+    Ok(released)
+}
+
+/// Links an existing session to a project.
+///
+/// Membership stays immutable once set, so an already-assigned session is a
+/// conflict rather than a move. The session keeps its own `cwd`, so the
+/// location tuple has to match or the project listing would show a session that
+/// works somewhere else entirely.
+pub fn assign_session_to_project(
+    path: &Path,
+    project_id: &str,
+    session_id: &str,
+) -> ProjectResult<ProjectRecord> {
+    if session_id.trim().is_empty() {
+        return Err(ProjectStoreError::InvalidInput(
+            "session id must not be blank".to_string(),
+        ));
+    }
+    let mut conn = open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let project = load_project_with_connection(&tx, project_id)?;
+    let location = tx
+        .query_row(
+            // A session records its host under `host_id`; the matching column on
+            // a project is `ssh_host`.
+            "SELECT cwd, host_id, ssh_port, ssh_identity_file FROM sessions
+             WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<u16>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((cwd, ssh_host, ssh_port, ssh_identity_file)) = location else {
+        return Err(ProjectStoreError::NotFound(format!(
+            "session '{session_id}' was not found"
+        )));
+    };
+    let assigned: Option<String> = tx
+        .query_row(
+            "SELECT project_id FROM session_projects WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(assigned) = assigned {
+        return Err(ProjectStoreError::Conflict(format!(
+            "session '{session_id}' already belongs to project '{assigned}'"
+        )));
+    }
+    if project.cwd != Path::new(&cwd)
+        || ssh_host != project.ssh_host
+        || ssh_port != project.ssh_port
+        || ssh_identity_file != project.ssh_identity_file
+    {
+        return Err(ProjectStoreError::Conflict(format!(
+            "session '{session_id}' does not run in the location of project '{project_id}'"
+        )));
+    }
+    tx.execute(
+        "INSERT INTO session_projects (session_id, project_id) VALUES (?1, ?2)",
+        params![session_id, project_id],
+    )?;
+    tx.commit()?;
+    Ok(project)
+}
+
+/// Rewrites the order of one pin group.
+///
+/// The submitted list must cover the whole group exactly once and carry each
+/// project's current `presentation_version`, so a reorder computed against a
+/// stale listing is rejected rather than applied to a different set of rows.
+pub fn reorder_projects(
+    path: &Path,
+    pinned: bool,
+    project_ids: &[String],
+    expected_versions: &BTreeMap<String, i64>,
+) -> ProjectResult<Vec<ProjectRecord>> {
+    let mut submitted = HashSet::with_capacity(project_ids.len());
+    for project_id in project_ids {
+        if project_id.trim().is_empty() {
+            return Err(ProjectStoreError::InvalidInput(
+                "project IDs must not be blank".to_string(),
+            ));
+        }
+        if !submitted.insert(project_id.as_str()) {
+            return Err(ProjectStoreError::InvalidInput(format!(
+                "duplicate project ID '{project_id}'"
+            )));
+        }
+    }
+    if expected_versions.values().any(|version| *version < 0) {
+        return Err(ProjectStoreError::InvalidInput(
+            "expected presentation versions must not be negative".to_string(),
+        ));
+    }
+    if expected_versions.len() != project_ids.len()
+        || project_ids
+            .iter()
+            .any(|project_id| !expected_versions.contains_key(project_id))
+    {
+        return Err(ProjectStoreError::InvalidInput(
+            "expected_versions keys must exactly match project_ids".to_string(),
+        ));
+    }
+
+    let mut conn = open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let group = {
+        let mut statement = tx.prepare("SELECT project_id FROM projects WHERE pinned = ?1")?;
+        let group = statement
+            .query_map(params![i64::from(pinned)], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        group
+    };
+    if group.len() != project_ids.len()
+        || group
+            .iter()
+            .any(|project_id| !submitted.contains(project_id.as_str()))
+    {
+        return Err(ProjectStoreError::Conflict(
+            "project_ids must list every project in the requested pin group exactly once"
+                .to_string(),
+        ));
+    }
+
+    for (position, project_id) in project_ids.iter().enumerate() {
+        let current: i64 = tx.query_row(
+            "SELECT presentation_version FROM projects WHERE project_id = ?1",
+            params![project_id],
+            |row| row.get(0),
+        )?;
+        let expected = expected_versions[project_id];
+        if current != expected {
+            return Err(ProjectStoreError::Conflict(format!(
+                "project '{project_id}' presentation version changed (expected {expected}, found {current})"
+            )));
+        }
+        let next = current.checked_add(1).ok_or_else(|| {
+            ProjectStoreError::Store(anyhow!("project presentation version overflow"))
+        })?;
+        tx.execute(
+            "UPDATE projects SET sort_order = ?2, presentation_version = ?3
+             WHERE project_id = ?1",
+            params![project_id, position as i64, next],
+        )?;
+    }
+
+    let reordered = {
+        let mut statement = tx.prepare(&format!(
+            "SELECT {PROJECT_COLUMNS} FROM projects WHERE pinned = ?1 {PROJECT_ORDER}"
+        ))?;
+        let reordered = statement
+            .query_map(params![i64::from(pinned)], row_to_project)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        reordered
+    };
+    tx.commit()?;
+    Ok(reordered)
 }
 
 pub fn load_project_launch_context(
@@ -364,6 +620,7 @@ pub fn load_project_launch_context(
         &format!(
             "SELECT p.project_id, p.name, p.description, p.cwd, p.ssh_host, p.ssh_port,
                     p.ssh_identity_file, p.default_model_config_id, p.created_at, p.updated_at,
+                    p.pinned, p.sort_order, p.presentation_version,
                     {model_columns}
              FROM projects p
              LEFT JOIN model_configurations mc
@@ -373,8 +630,8 @@ pub fn load_project_launch_context(
         params![project_id],
         |row| {
             let project = row_to_project_at(row, 0)?;
-            let default_model_config = if row.get::<_, Option<String>>(10)?.is_some() {
-                Some(row_to_record_at(row, 10)?)
+            let default_model_config = if row.get::<_, Option<String>>(13)?.is_some() {
+                Some(row_to_record_at(row, 13)?)
             } else {
                 None
             };
@@ -448,7 +705,7 @@ mod tests {
             ProjectPatch {
                 name: Some("Primary".to_string()),
                 description: Some(Some("First\nproject".to_string())),
-                default_model_config_id: None,
+                ..ProjectPatch::default()
             },
         )
         .unwrap();

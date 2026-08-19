@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
-import { displaySessionTitle } from "@/app/lib/format";
+import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useUpdatePresentation } from "@/app/services/queries";
 import { ApiError } from "@/app/services/api";
@@ -32,9 +32,11 @@ function RenameForm({
   onClose: () => void;
 }) {
   const toast = useToast();
+  const sessionTitle = useSessionTitle();
   const update = useUpdatePresentation();
   const [title, setTitle] = useState(summary.title ?? "");
   const [pinned, setPinned] = useState(Boolean(summary.pinned));
+  const canPin = Boolean(summary.project_id);
 
   const submit = async () => {
     if (update.isPending) return;
@@ -42,7 +44,7 @@ function RenameForm({
       await update.mutateAsync({
         id: summary.session_id,
         title: title.trim(),
-        pinned,
+        pinned: canPin ? pinned : false,
         expectedVersion: summary.presentation_version ?? 0,
       });
       toast.success("Session presentation saved");
@@ -87,7 +89,7 @@ function RenameForm({
       <div className="flex flex-col gap-4">
         <Input
           label="Title"
-          placeholder={displaySessionTitle(summary) || "Session name"}
+          placeholder={sessionTitle(summary) || "Session name"}
           hintText="Leave empty to restore the automatic title (last prompt)."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -95,15 +97,17 @@ function RenameForm({
             if (e.key === "Enter") void submit();
           }}
         />
-        <label className="flex items-center gap-2 label-small text-basic-secondary select-none">
-          <input
-            type="checkbox"
-            checked={pinned}
-            onChange={(e) => setPinned(e.target.checked)}
-            className="accent-[var(--color-fill-accent-primary)]"
-          />
-          Pin to top of the list
-        </label>
+        {canPin ? (
+          <label className="flex items-center gap-2 label-small text-basic-secondary select-none">
+            <input
+              type="checkbox"
+              checked={pinned}
+              onChange={(e) => setPinned(e.target.checked)}
+              className="accent-[var(--color-fill-accent-primary)]"
+            />
+            Pin to top of the list
+          </label>
+        ) : null}
       </div>
     </Modal>
   );
