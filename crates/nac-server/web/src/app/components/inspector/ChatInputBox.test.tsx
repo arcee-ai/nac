@@ -241,6 +241,7 @@ describe("slash-command suggestions", () => {
     type(textarea, "/co");
     const send = screen.getByRole("button", { name: "Send" });
 
+    expect(fireEvent.pointerDown(send)).toBe(false);
     fireEvent.click(send);
     expect(textarea.value).toBe("/compact");
     expect(fakes.compactSession).not.toHaveBeenCalled();
@@ -393,6 +394,19 @@ describe("skill suggestions", () => {
     expect(textarea.selectionStart).toBe(16);
     expect(document.activeElement).toBe(textarea);
     expect(screen.queryByRole("listbox", { name: "Skills" })).toBeNull();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+  });
+
+  it("keeps focus long enough for Send to complete a skill suggestion", () => {
+    const textarea = composer();
+    type(textarea, "$te");
+    const send = screen.getByRole("button", { name: "Send" });
+
+    expect(fireEvent.pointerDown(send)).toBe(false);
+    fireEvent.click(send);
+
+    expect(textarea.value).toBe("$test");
+    expect(document.activeElement).toBe(textarea);
     expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 

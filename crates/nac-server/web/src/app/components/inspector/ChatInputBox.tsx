@@ -409,6 +409,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       : keyboardSuggestion;
   const selectedSuggestion = suggestionsOpen ? options[suggestionIndex] : undefined;
   const activeOptionId = selectedSuggestion ? `${listboxId}-option-${suggestionIndex}` : undefined;
+  const preserveSuggestionFocus = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (selectedSuggestion) event.preventDefault();
+    },
+    [selectedSuggestion],
+  );
 
   // Only the keyboard's row: scrolling a row the pointer is already on would
   // move the list out from under it.
@@ -631,6 +637,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       type={sendType}
       disabled={sendDisabled}
       aria-label={sendLabel}
+      onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
     >
       {sendIcon}
@@ -644,6 +651,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       type={sendType}
       disabled={sendDisabled}
       aria-label={sendLabel}
+      onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
     >
       {sendIcon}
