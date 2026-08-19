@@ -16,15 +16,34 @@ import {
 } from "@/app/atoms";
 import { ChatSessionPopover } from "@/app/components/projects/ChatSessionPopover";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { cn } from "@/app/lib/cn";
 import { isActiveRun } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
+import type { DropEdge } from "@/app/lib/sessionOrder";
+import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionOrder";
 import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { dismissChatTab, restoreChatTab, useDismissedChatTabs } from "@/app/store/chatTabsStore";
+import {
+  dismissChatTab,
+  restoreChatTab,
+  setChatTabOrder,
+  useChatTabOrder,
+  useDismissedChatTabs,
+} from "@/app/store/chatTabsStore";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
+
+/** Which side of the tab under the pointer the dragged one would land on. */
+function edgeUnderPointer(element: HTMLElement, clientX: number): DropEdge {
+  const rect = element.getBoundingClientRect();
+  return clientX < rect.left + rect.width / 2 ? "before" : "after";
+}
 
 /**
  * The strip above a project's transcript, listing the project's chats.
+ *
+ * Tabs can be dragged into any order, which the project keeps for the rest of
+ * the visit. That order is the strip's alone: the chat lists elsewhere are read
+ * to find a chat, so they stay sorted by when each was last used.
  *
  * A session that belongs to no project gets the same slot, filled with the way
  * to file it somewhere — an orphan is not a project of one, so it has no tabs
@@ -52,7 +71,10 @@ export function ProjectSessionTabs({
   const projectActions = useProjectActions();
   const sessionTitle = useSessionTitle();
   const dismissed = useDismissedChatTabs();
+  const tabOrder = useChatTabOrder(projectId);
   const [open, setOpen] = useState(false);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ sessionId: string; edge: DropEdge } | null>(null);
 
   // Reaching a chat any other way — the popover, the trail, a bookmarked URL —
   // is as much "open it" as clicking its tab, so it earns its place back.
@@ -89,12 +111,38 @@ export function ProjectSessionTabs({
   // to get, and nothing to list or add alongside it.
   const empty = sessions.length === 0;
 
+  // Closed tabs keep their place in the arrangement, so reopening one puts it
+  // back where the user left it rather than at the front.
+  const ordered = applyTabOrder(sessions, tabOrder);
+
   // The chat on screen keeps its tab whatever the user did with it, because a
   // transcript with no tab above it reads as belonging to nothing.
-  const visible = sessions.filter(
+  const visible = ordered.filter(
     (entry) =>
       !dismissed.has(entry.summary.session_id) || entry.summary.session_id === activeSessionId,
   );
+
+  // A single tab has nothing to trade places with.
+  const reorderable = visible.length > 1;
+
+  const endDrag = () => {
+    setDragging(null);
+    setDropAt(null);
+  };
+
+  const dropOn = (targetSessionId: string, edge: DropEdge) => {
+    if (!dragging) return;
+    const index = targetIndexInGroup(ordered, targetSessionId, edge, dragging);
+    setChatTabOrder(
+      projectId,
+      placeIdAt(
+        ordered.map((entry) => entry.summary.session_id),
+        dragging,
+        index,
+      ),
+    );
+    endDrag();
+  };
 
   // Closing the chat being read has to leave another one to read.
   const closeTab = (sessionId: string) => {
@@ -119,17 +167,62 @@ export function ProjectSessionTabs({
             onClick={() => void projectActions.newChat(projectId)}
           />
         ) : (
-          visible.map((entry) => (
-            <ChatSessionTab
-              key={entry.summary.session_id}
-              title={sessionTitle(entry.summary)}
-              active={entry.summary.session_id === activeSessionId}
-              running={isActiveRun(entry.active_run)}
-              onClick={() => navigate(routes.session(entry.summary.session_id))}
-              // The last tab has nowhere to hand the screen over to.
-              onDismiss={visible.length > 1 ? () => closeTab(entry.summary.session_id) : undefined}
-            />
-          ))
+          visible.map((entry) => {
+            const sessionId = entry.summary.session_id;
+            return (
+              <div
+                key={sessionId}
+                className={cn("relative", dragging === sessionId && "opacity-40")}
+                draggable={reorderable}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  // Firefox starts no drag at all without a payload.
+                  event.dataTransfer.setData("text/plain", sessionId);
+                  setDragging(sessionId);
+                }}
+                onDragEnd={endDrag}
+                onDragOver={(event) => {
+                  // Anything else being dragged over the strip — a file, a
+                  // selection — is none of the strip's business.
+                  if (!dragging) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  const edge = edgeUnderPointer(event.currentTarget, event.clientX);
+                  setDropAt((current) =>
+                    current?.sessionId === sessionId && current.edge === edge
+                      ? current
+                      : { sessionId, edge },
+                  );
+                }}
+                onDrop={(event) => {
+                  if (!dragging) return;
+                  event.preventDefault();
+                  dropOn(sessionId, edgeUnderPointer(event.currentTarget, event.clientX));
+                }}
+              >
+                {dropAt?.sessionId === sessionId ? (
+                  // On the tab's own edge rather than out in the gap between
+                  // tabs: the strip scrolls, and anything outside a tab is
+                  // clipped away at either end of it.
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute inset-y-1 w-0.5 rounded-full bg-accent-inverse",
+                      dropAt.edge === "before" ? "left-0" : "right-0",
+                    )}
+                  />
+                ) : null}
+                <ChatSessionTab
+                  title={sessionTitle(entry.summary)}
+                  active={sessionId === activeSessionId}
+                  running={isActiveRun(entry.active_run)}
+                  onClick={() => navigate(routes.session(sessionId))}
+                  // The last tab has nowhere to hand the screen over to.
+                  onDismiss={visible.length > 1 ? () => closeTab(sessionId) : undefined}
+                />
+              </div>
+            );
+          })
         )}
       </div>
 

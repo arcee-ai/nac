@@ -1,6 +1,7 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
+import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 import Loader, { LoaderSize, LoaderVariant } from "../loader";
 
@@ -34,7 +35,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
 }) => (
   <div
     className={cn(
-      "chat-session-tab group flex h-10 w-32 shrink-0 items-center justify-center gap-1 px-2 py-1",
+      "chat-session-tab group flex shrink-0 items-center justify-start gap-1 relative",
       active
         ? "chat-session-tab-active bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered"
         : "hover:bg-btn-ghost-hovered",
@@ -45,7 +46,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       type={type}
       title={title}
       aria-current={active ? "page" : undefined}
-      className="flex flex-1 min-w-0 items-center justify-center gap-1"
+      className="flex flex-1 min-w-0 items-center justify-start gap-1 px-2 py-1 h-10 w-full max-w-32 min-w-10"
       {...props}
     >
       {running ? (
@@ -53,58 +54,39 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       ) : null}
       <span
         className={cn(
-          "label-small flex-1 min-w-0 truncate text-center",
+          "label-micro w-full min-w-0 truncate text-left",
           running
-            ? "text-shimmer-basic"
+            ? "text-shimmer-basic group-hover:w-[calc(100%-36px)] group-hover:max-w-[calc(100%-36px)]"
             : active
-              ? "text-btn-secondary-pressed"
-              : "text-btn-secondary",
+              ? "text-btn-secondary-pressed group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]"
+              : "text-btn-secondary group-hover:text-btn-secondary-hovered group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]",
         )}
       >
         {title}
       </span>
     </button>
     {onDismiss ? (
-      <TabAction
-        iconName={IconName.Close}
-        label={`Close ${title}`}
-        tooltip="Close tab"
+      <Button
+        variant={ButtonVariant.Tertiary}
+        size={ButtonSize.Small}
+        content={ButtonContent.Icon}
+        title="Close tab"
+        aria-label={`Close ${title}`}
         onClick={onDismiss}
-      />
+        // Hidden rather than transparent, so the title gets the room back
+        // whenever the pointer is elsewhere. Keyboard focus reveals it too, but
+        // only the visible kind: clicking a tab leaves its title button focused,
+        // and plain `:focus` would strand the button on screen long after the
+        // pointer moved away.
+        //
+        // `.btn`'s own `display` is unlayered CSS, so a plain `hidden` never
+        // reaches it.
+        className="shrink-0 !hidden group-hover:!inline-flex group-has-[:focus-visible]:!inline-flex absolute right-0 top-1/2 -translate-y-1/2"
+      >
+        <Icon iconName={IconName.Close} />
+      </Button>
     ) : null}
   </div>
 );
-
-/**
- * Hidden rather than transparent, so the title gets the room back whenever the
- * pointer is elsewhere.
- *
- * Keyboard focus reveals it too, but only the visible kind: clicking a tab
- * leaves its title button focused, and plain `:focus` would strand the controls
- * on screen long after the pointer moved away.
- */
-function TabAction({
-  iconName,
-  label,
-  tooltip,
-  onClick,
-}: {
-  iconName: IconName;
-  label: string;
-  tooltip: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={tooltip}
-      aria-label={label}
-      onClick={onClick}
-      className="hidden shrink-0 p-1 rounded-[4px] text-basic-muted hover:text-basic-primary hover:bg-btn-ghost-hovered group-hover:block group-has-[:focus-visible]:block"
-    >
-      <Icon iconName={iconName} size={16} />
-    </button>
-  );
-}
 
 export default ChatSessionTab;

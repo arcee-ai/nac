@@ -25,6 +25,7 @@ import {
   Separator,
 } from "@/app/atoms";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import { usePagedRows } from "@/app/hooks/usePagedRows";
 import {
   PanelEmpty,
   PanelLoading,
@@ -375,7 +376,11 @@ function LogPane({
     });
   };
 
-  useEffect(() => {
+  // Before paint, not after: a log is read from its foot, and a pane that put
+  // its head on screen first — which is where a fresh scroll container starts,
+  // and where opening another chat lands — would show the wrong end of the
+  // thread for a frame and then snap away from it.
+  useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element || !stuckRef.current) return;
     scrollToBottomInstantly(element);
@@ -749,6 +754,15 @@ export function ThreadsView({
     [ordered, pendingNames],
   );
   const current = selectable.find((thread) => thread.name === selected) ?? selectable[0] ?? null;
+  // A session that fanned out into hundreds of workstreams would otherwise lay
+  // every row out at once, on a panel where only the first screen is ever read.
+  // The thread opened from a message keeps its row whatever the reader has
+  // scrolled to, so the list still shows what the detail pane is about.
+  const currentRow = current ? ordered.findIndex((thread) => thread.name === current.name) : -1;
+  const { visible, hasMore, sentinelRef } = usePagedRows(ordered, {
+    key: sessionId,
+    atLeast: currentRow + 1,
+  });
   const live = current ? liveThreads[current.name] : undefined;
   const currentAction = current ? actions[current.name] || current.latest_action || "" : "";
 
@@ -787,46 +801,49 @@ export function ThreadsView({
             <p className="text-basic-muted">Start a conversation to create one.</p>
           </div>
         ) : (
-          ordered.map((thread) => {
-            const pending = pendingNames.has(thread.name);
-            const running = runningNames.has(thread.name);
-            const errored = liveThreads[thread.name]?.isError;
-            // The task is the only description a thread has, so the row hands
-            // it over on hover rather than making the name stand for it.
-            const task = actions[thread.name] || thread.latest_action || "";
-            return (
-              <PanelRow
-                key={thread.name}
-                label={thread.name}
-                active={thread.name === current?.name}
-                disabled={pending}
-                title={pending ? "Waiting on source threads" : task || undefined}
-                icon={
-                  pending ? (
-                    <Icon
-                      iconName={IconName.Timelaps}
-                      size={16}
-                      className="shrink-0 [&>path]:!fill-basic-muted"
-                    />
-                  ) : running ? (
-                    <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
-                  ) : (
-                    <Icon
-                      iconName={errored ? IconName.Danger : IconName.CheckCircle}
-                      size={16}
-                      className={cn("shrink-0", errored && "text-error-primary")}
-                    />
-                  )
-                }
-                trailing={
-                  <span className="code code-micro text-basic-muted shrink-0">
-                    {snapshot.thread_episodes?.[thread.name]?.length ?? thread.episode_count}
-                  </span>
-                }
-                onClick={() => onSelect(thread.name)}
-              />
-            );
-          })
+          <>
+            {visible.map((thread) => {
+              const pending = pendingNames.has(thread.name);
+              const running = runningNames.has(thread.name);
+              const errored = liveThreads[thread.name]?.isError;
+              // The task is the only description a thread has, so the row hands
+              // it over on hover rather than making the name stand for it.
+              const task = actions[thread.name] || thread.latest_action || "";
+              return (
+                <PanelRow
+                  key={thread.name}
+                  label={thread.name}
+                  active={thread.name === current?.name}
+                  disabled={pending}
+                  title={pending ? "Waiting on source threads" : task || undefined}
+                  icon={
+                    pending ? (
+                      <Icon
+                        iconName={IconName.Timelaps}
+                        size={16}
+                        className="shrink-0 [&>path]:!fill-basic-muted"
+                      />
+                    ) : running ? (
+                      <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
+                    ) : (
+                      <Icon
+                        iconName={errored ? IconName.Danger : IconName.CheckCircle}
+                        size={16}
+                        className={cn("shrink-0", errored && "text-error-primary")}
+                      />
+                    )
+                  }
+                  trailing={
+                    <span className="code code-micro text-basic-muted shrink-0">
+                      {snapshot.thread_episodes?.[thread.name]?.length ?? thread.episode_count}
+                    </span>
+                  }
+                  onClick={() => onSelect(thread.name)}
+                />
+              );
+            })}
+            {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
+          </>
         )
       }
     >

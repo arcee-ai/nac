@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { AssignToProjectModal } from "@/app/components/modals/AssignToProjectModal";
@@ -11,6 +11,7 @@ import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { pruneChatTabs } from "@/app/store/chatTabsStore";
 import {
   useAssignSessionToProject,
   useCreateSession,
@@ -47,7 +48,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const toast = useToast();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { data: sessions = [] } = useSessions();
+  const { data: sessions = [], isSuccess: sessionsLoaded } = useSessions();
   const { data: projectList } = useProjects();
   const pin = useToggleProjectPin();
   const createSession = useCreateSession();
@@ -124,6 +125,17 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     }),
     [togglePin, newChat, toast, adopt, projectList],
   );
+
+  // The tab strips remember how they were arranged across visits, and this is
+  // the one place holding both full lists, so it is where that memory is kept
+  // clear of chats and projects that have since been deleted.
+  useEffect(() => {
+    if (!sessionsLoaded || !projectList) return;
+    pruneChatTabs(
+      sessions.map((entry) => entry.summary.session_id),
+      projectList.projects.map((project) => project.project_id),
+    );
+  }, [sessionsLoaded, sessions, projectList]);
 
   // Which project the screen is about, whether it was reached by its own route
   // or through one of its chats.

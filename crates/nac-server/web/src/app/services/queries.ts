@@ -797,6 +797,21 @@ export function useSessionConfig(id: string | null) {
   });
 }
 
+/**
+ * Keeps the answer already on screen while the next one is fetched, so asking
+ * the same panel a slightly different question — another revision, another
+ * file — reads as the panel changing rather than reloading.
+ *
+ * Only within one session: every session-scoped key starts `["session", id]`,
+ * and a different session's files under this one's heading would be a lie
+ * rather than a stale truth. The hairline bar on the panel says a fetch is
+ * still running.
+ */
+function previousDataFrom(sessionId: string) {
+  return <T>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) =>
+    previousQuery?.queryKey[1] === sessionId ? previous : undefined;
+}
+
 export function useWorkspaceDiff(
   id: string | null,
   path: string | null,
@@ -808,6 +823,7 @@ export function useWorkspaceDiff(
     queryKey: queryKeys.workspaceDiff(id ?? "", path ?? "", stage, context, revision),
     queryFn: ({ signal }) => api.getWorkspaceDiff(id!, path!, { stage, context, revision, signal }),
     enabled: Boolean(id && path),
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 
@@ -822,6 +838,7 @@ export function useWorkspaceFiles(id: string | null, revision: number | null = n
     queryFn: ({ signal }) => api.getWorkspaceFiles(id!, revision, signal),
     enabled: Boolean(id),
     staleTime: revision == null ? 10_000 : Infinity,
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 
@@ -836,6 +853,7 @@ export function useWorkspaceFile(
     queryFn: ({ signal }) => api.getWorkspaceFile(id!, path!, revision, signal),
     enabled: Boolean(id && path),
     staleTime: revision == null ? 10_000 : Infinity,
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 
@@ -857,6 +875,7 @@ export function useWorkspaceRevisionChanges(id: string | null, revision: number 
     queryFn: ({ signal }) => api.getWorkspaceRevisionChanges(id!, revision!, signal),
     enabled: Boolean(id && revision != null),
     staleTime: Infinity,
+    placeholderData: previousDataFrom(id ?? ""),
   });
 }
 

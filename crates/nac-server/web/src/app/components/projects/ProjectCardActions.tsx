@@ -89,7 +89,7 @@ export function ProjectCardActions({
         />
         {onAssign ? (
           <Button
-            variant={ButtonVariant.Primary}
+            variant={ButtonVariant.Secondary}
             size={ButtonSize.Small}
             content={ButtonContent.IconLeft}
             onClick={(e) => {

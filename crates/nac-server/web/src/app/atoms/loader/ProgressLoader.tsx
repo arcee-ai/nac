@@ -18,7 +18,7 @@ const ProgressLoader: React.FC<ProgressLoaderProps> = ({ active = false, classNa
       className,
     )}
   >
-    <div className="h-full w-full rounded-full bg-accent-primary animate-progress" />
+    <div className="h-full w-full rounded-full bg-accent-inverse animate-progress" />
   </div>
 );
 

@@ -14,6 +14,29 @@ export function placeIdAt(ids: string[], id: string, index: number): string[] {
   return [...without.slice(0, clamped), id, ...without.slice(clamped)];
 }
 
+/**
+ * Lay `entries` out in the order the user dragged the tabs into.
+ *
+ * Chats started since that arrangement are not in it, and go to the front,
+ * where the untouched newest-first order would have put them anyway.
+ */
+export function applyTabOrder(
+  entries: ManagedSessionSummary[],
+  order: readonly string[],
+): ManagedSessionSummary[] {
+  if (order.length === 0) return entries;
+  const rank = new Map(order.map((id, index) => [id, index]));
+  const placed: ManagedSessionSummary[] = [];
+  const fresh: ManagedSessionSummary[] = [];
+  for (const entry of entries) {
+    (rank.has(entry.summary.session_id) ? placed : fresh).push(entry);
+  }
+  placed.sort(
+    (a, b) => (rank.get(a.summary.session_id) ?? 0) - (rank.get(b.summary.session_id) ?? 0),
+  );
+  return [...fresh, ...placed];
+}
+
 export function compareSortOrder(a: SessionSummarySnapshot, b: SessionSummarySnapshot): number {
   return (
     (a.sort_order ?? 0) - (b.sort_order ?? 0) ||

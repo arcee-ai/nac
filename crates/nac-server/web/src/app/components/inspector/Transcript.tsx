@@ -369,13 +369,16 @@ export function Transcript({
       {/* Rows the size of the messages they stand in for, over the space those
           messages will fill. Laid out on top rather than in the flow, so the
           transcript can already be mounted underneath — hidden, but measured,
-          which is what lets it open at its own bottom edge. */}
+          which is what lets it open at its own bottom edge.
+          Coming in is delayed and going out is not, so a conversation that is
+          served from the cache, or simply arrives quickly, is swapped in over a
+          blank moment instead of behind rows nobody had time to read. */}
       <div
         role="status"
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-[96px] px-4 md:top-[72px] md:px-0",
-          revealed ? "opacity-0 transition-opacity duration-150 ease-in-out" : "opacity-100",
+          "pointer-events-none absolute inset-x-0 top-[96px] px-4 transition-opacity duration-150 ease-in-out md:top-[72px] md:px-0",
+          revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
         <div className="mx-auto w-full max-w-[840px]">
