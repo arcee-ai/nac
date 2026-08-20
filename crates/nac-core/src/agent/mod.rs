@@ -71,6 +71,62 @@ fn render_orchestrator_system_prompt(working_directory: &str, thread_timeout_sec
 const EMPTY_TURN_NUDGE: &str = "Your last turn arrived empty: no answer and no tool call. \
 Reply with your answer as ordinary text, or issue the tool call you meant to make.";
 
+/// Flash-class models can ignore a correct tool error and retry the same call
+/// forever (`write` + `expected_revision: null` on an existing file). The
+/// error stays on the tool result; this only stops the worker after the
+/// identical failing round has repeated enough times to be a loop.
+const REPEATED_TOOL_FAILURE_LIMIT: usize = 3;
+
+fn tool_call_path(calls: &[ToolCall], call_id: &str) -> String {
+    calls
+        .iter()
+        .find(|call| call.id == call_id)
+        .and_then(|call| serde_json::from_str::<serde_json::Value>(&call.function.arguments).ok())
+        .and_then(|value| {
+            value
+                .get("path")
+                .and_then(|path| path.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default()
+}
+
+fn tool_result_error_code(result: &ToolResult) -> String {
+    result
+        .content
+        .as_text()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "error".to_string())
+}
+
+fn failed_tool_round_signature(
+    calls: &[ToolCall],
+    results: &[(String, String, ToolResult)],
+) -> Option<String> {
+    let mut parts: Vec<String> = results
+        .iter()
+        .filter(|(_, _, result)| result.is_error)
+        .map(|(id, name, result)| {
+            format!(
+                "{name}\t{}\t{}",
+                tool_call_path(calls, id),
+                tool_result_error_code(result)
+            )
+        })
+        .collect();
+    if parts.is_empty() {
+        return None;
+    }
+    parts.sort();
+    Some(parts.join("\n"))
+}
+
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -513,6 +569,8 @@ impl Agent {
 
         let mut iteration = 0usize;
         let mut empty_turn_nudged = false;
+        let mut last_failure_signature: Option<String> = None;
+        let mut repeated_failures = 0usize;
         let mut accumulated_usage = TokenUsage::default();
         loop {
             self.append_pending_steering_checked().await?;
@@ -722,13 +780,33 @@ impl Agent {
 
             let tool_calls = response.assistant.tool_calls.unwrap_or_default();
             let results = execute_tools_parallel(
-                tool_calls,
+                tool_calls.clone(),
                 self.tool_runtime.clone(),
                 self.client.clone(),
                 self.event_sink.clone(),
                 self.thread_name.clone(),
             )
             .await;
+            let repeated_identical_failure =
+                match failed_tool_round_signature(&tool_calls, &results) {
+                    Some(signature)
+                        if last_failure_signature.as_deref() == Some(signature.as_str()) =>
+                    {
+                        repeated_failures = repeated_failures.saturating_add(1);
+                        repeated_failures >= REPEATED_TOOL_FAILURE_LIMIT
+                    }
+                    Some(signature) => {
+                        last_failure_signature = Some(signature);
+                        repeated_failures = 1;
+                        false
+                    }
+                    None => {
+                        last_failure_signature = None;
+                        repeated_failures = 0;
+                        false
+                    }
+                };
+            let failure_signature = last_failure_signature.clone();
             let tool_messages =
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
@@ -759,6 +837,18 @@ impl Agent {
             // only after the complete batch is both durable and appended.
             if let Err(error) = self.push_batch_and_log(tool_messages).await {
                 self.last_usage = Some(accumulated_usage.clone());
+                self.emit(AgentEvent::Error {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
+                });
+                self.tool_runtime.terminal_manager.remove_all().await;
+                return Err(error);
+            }
+            if repeated_identical_failure {
+                let detail = failure_signature.unwrap_or_default().replace('\t', " ");
+                let error = anyhow!(
+                    "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {detail}"
+                );
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),

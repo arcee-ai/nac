@@ -177,6 +177,11 @@ pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
             return preview(&summary, 160);
         }
     }
+    if matches!(name, "read" | "write" | "edit") {
+        if let Some(summary) = preview_json_tool_result(trimmed) {
+            return preview(&summary, 160);
+        }
+    }
 
     let lines: Vec<&str> = rendered
         .lines()
@@ -193,6 +198,25 @@ pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
     }
 
     preview(&format!("{}{more}", lines[0]), 160)
+}
+
+fn preview_json_tool_result(content: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<serde_json::Value>(content).ok()?;
+    if let Some(error) = parsed.get("error").and_then(|value| value.as_str()) {
+        let message = parsed
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        return Some(if message.is_empty() {
+            error.to_string()
+        } else {
+            format!("{error}: {message}")
+        });
+    }
+    parsed
+        .get("path")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
 }
 
 /// Marks a preview that stands in for more than the one line it shows.
