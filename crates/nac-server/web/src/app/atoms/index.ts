@@ -17,6 +17,7 @@ export { default as DateSelector, type DateString, type DateStringRange } from "
 export { default as DropdownContent } from "./dropdown-content";
 export { default as EditableHeader, EditableHeaderSize } from "./editable-header";
 export { default as FileIcon, fileIconName } from "./file-icon";
+export { default as ForkSessionItem } from "./fork-session-item";
 export { default as Hint } from "./hint";
 export { default as HorizontalTabsItem, HorizontalTabsItemVariant } from "./horizontal-tabs-item";
 export { default as HoverHint, HoverHintSize } from "./hover-hint";

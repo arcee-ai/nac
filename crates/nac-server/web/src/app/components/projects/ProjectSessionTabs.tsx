@@ -231,6 +231,7 @@ export function ProjectSessionTabs({
                   title={sessionTitle(entry.summary)}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}
+                  forkedFromTitle={entry.summary.forked_from?.title}
                   onClick={() => navigate(routes.session(sessionId))}
                   // The last tab has nowhere to hand the screen over to.
                   onDismiss={visible.length > 1 ? () => closeTab(sessionId) : undefined}

@@ -50,6 +50,7 @@ import type {
   ReorderSessionsResponse,
   ResolvedModelConfiguration,
   RevertSessionResponse,
+  ForkSessionResponse,
   SessionSnapshotResponse,
   SessionEventBoundary,
   SessionSummarySnapshot,
@@ -552,6 +553,14 @@ export const api = {
     request<SubmitPromptResponse>("POST", `${sessionPath(id)}/regenerate`, {
       body: { message_idx: messageIdx },
     }),
+
+  forkSession: (id: string, messageIdx: number) =>
+    request<ForkSessionResponse>("POST", `${sessionPath(id)}/fork`, {
+      body: { message_idx: messageIdx },
+    }),
+
+  dismissSessionFork: (id: string, forkId: string) =>
+    request<void>("DELETE", `${sessionPath(id)}/forks/${encodeURIComponent(forkId)}`),
 
   steerOrchestrator: (id: string, instruction: string) =>
     request<OrchestratorSteeringResponse>("POST", `${sessionPath(id)}/steering`, {

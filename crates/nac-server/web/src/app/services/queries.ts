@@ -1076,9 +1076,15 @@ export function useCreateSession() {
 
 export function useDeleteSession() {
   const invalidate = useInvalidators();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteSession(id),
-    onSuccess: () => invalidate.sessions(),
+    onSuccess: () => {
+      void invalidate.sessions();
+      // Fork markers on other chats become the deleted state once the fork row
+      // is gone, so every open snapshot has to refetch.
+      void client.invalidateQueries({ queryKey: ["session"] });
+    },
   });
 }
 
@@ -1244,6 +1250,34 @@ export function useRegenerateRun() {
       fenceSessionSnapshot(id, true);
       void invalidate.sessionRoot(id);
       void invalidate.sessions();
+    },
+  });
+}
+
+/**
+ * Clone the transcript through a finished model turn into a new session, then
+ * open that chat. The source snapshot has to refetch so the fork marker lands
+ * under the turn that was copied.
+ */
+export function useForkSession() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
+      api.forkSession(id, messageIdx),
+    onSuccess: (_data, { id }) => {
+      void invalidate.sessionRoot(id);
+      void invalidate.sessions();
+    },
+  });
+}
+
+export function useDismissSessionFork() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ id, forkId }: { id: string; forkId: string }) =>
+      api.dismissSessionFork(id, forkId),
+    onSuccess: (_data, { id }) => {
+      void invalidate.sessionRoot(id);
     },
   });
 }

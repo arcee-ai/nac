@@ -5,7 +5,7 @@
 // it dispatched. Thread tool calls from one assistant message form one package;
 // in-batch `threads` deps split that package into stacked DAG rows.
 
-import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
+import { displayPromptFromMessageText, invokedSkillNames, parseStoreTime } from "@/app/lib/format";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
@@ -17,6 +17,7 @@ import type {
   Message,
   SessionSnapshotResponse,
   ToolCall,
+  WorksetSnapshot,
 } from "@/app/types/api";
 
 /** Exact assistant marker written after any partial response on cancellation. */
@@ -139,6 +140,37 @@ interface BuildContext {
   threadEpisodes: Record<string, AgentEvent[][]>;
   /** How often each name is dispatched across the whole transcript. */
   dispatchCounts: Record<string, number>;
+  /**
+   * Orchestrator tool-call ids whose `tool_call_finished` already arrived.
+   * DAG batches only commit tool *messages* once every thread in the round
+   * returns, so a workset can be saved long before `results` sees the call.
+   */
+  liveFinishedToolCalls: Record<string, true>;
+  worksets: WorksetSnapshot[];
+}
+
+/**
+ * `workset_define` is pending until its tool result is in the transcript, a
+ * live finish event lands, or the saved workset is at least as new as this
+ * assistant message. Existence of an older workset with the same id is not
+ * enough — the orchestrator often re-defines the plan in the same batch as
+ * the next wave of threads.
+ */
+function worksetDefinePending(
+  callId: string,
+  worksetId: string,
+  results: Map<string, string>,
+  messageCreatedAt: string | null,
+  ctx: BuildContext,
+): boolean {
+  if (results.has(callId) || ctx.liveFinishedToolCalls[callId]) return false;
+  if (!worksetId || !messageCreatedAt) return true;
+  const workset = ctx.worksets.find((item) => item.id === worksetId);
+  if (!workset) return true;
+  const saved = parseStoreTime(workset.updated_at);
+  const called = parseStoreTime(messageCreatedAt);
+  if (!Number.isFinite(saved) || !Number.isFinite(called)) return true;
+  return saved < called;
 }
 
 /**
@@ -486,6 +518,7 @@ export function withStreamedOutput(
 export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
   liveThreads: Record<string, RuntimeThread>,
+  liveFinishedToolCalls: Record<string, true> = {},
 ): TranscriptTurn[] {
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
@@ -507,6 +540,8 @@ export function buildTranscript(
   }
   const ctx: BuildContext = {
     liveThreads,
+    liveFinishedToolCalls,
+    worksets: snapshot?.worksets.items ?? [],
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts,
   };
@@ -586,11 +621,18 @@ export function buildTranscript(
       if (name === "thread") {
         threadCalls.push(call);
       } else if (name === "workset_define") {
+        const worksetId = text(parseArguments(call).id);
         blocks.push({
           kind: "workset",
           key,
-          worksetId: text(parseArguments(call).id),
-          pending: !results.has(call.id),
+          worksetId,
+          pending: worksetDefinePending(
+            call.id,
+            worksetId,
+            results,
+            createdAt[index] ?? null,
+            ctx,
+          ),
         });
       } else if (!SILENT_TOOLS.has(name)) {
         blocks.push({ kind: "tool", key, name, pending: !results.has(call.id) });
