@@ -201,9 +201,11 @@ impl TerminalSession {
     }
 
     pub async fn kill(&mut self) -> Result<()> {
-        if let Some((backend, pidfile)) = &self.backend_cleanup {
-            let _ = backend.terminal_pipe_kill(pidfile).await;
-        }
+        let backend_result = if let Some((backend, pidfile)) = &self.backend_cleanup {
+            backend.terminal_pipe_kill(pidfile).await
+        } else {
+            Ok(())
+        };
 
         self.refresh_status();
         #[cfg(unix)]
@@ -219,6 +221,7 @@ impl TerminalSession {
         self.alive.store(false, Ordering::SeqCst);
         #[cfg(unix)]
         descendant_result?;
+        backend_result?;
         Ok(())
     }
 

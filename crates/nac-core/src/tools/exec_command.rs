@@ -3,6 +3,7 @@
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::terminal::{
     CommandStatus, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
@@ -105,15 +106,15 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
 
     if !tty {
         let output = manager
-            .exec_one_shot(
-                &cmd,
+            .exec_one_shot_managed(
+                cmd,
                 cwd,
                 120,
                 40,
                 yield_ms,
                 max_output,
-                runtime.backend.as_ref(),
-                Some(&runtime.command_cancellation),
+                Arc::clone(&runtime.backend),
+                runtime.command_cancellation.clone(),
             )
             .await;
         let is_error = output.status == CommandStatus::SpawnError;
@@ -276,6 +277,7 @@ mod tests {
             mcp: None,
             skills: None,
             terminal_manager: crate::terminal::TerminalManager::new(),
+            active_tools: Arc::new(crate::tools::ActiveToolRegistry::default()),
             command_cancellation: crate::tools::ThreadCancellation::default(),
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),

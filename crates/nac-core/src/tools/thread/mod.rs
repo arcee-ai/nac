@@ -250,21 +250,51 @@ pub async fn execute_parsed_dispatch(
     // on top of the episode it just wrote.
     let handoff_watermark = read_handoff_watermark(runtime, &session_id, &thread_name).await;
 
-    let result = run_worker(
-        runtime,
-        client,
-        WorkerInvocation {
-            session_id: &session_id,
-            thread_name: &thread_name,
-            dispatch_id: &dispatch_id,
-            action: &action,
-            source_threads: &source_threads,
-            scheduled_skills: &scheduled_skills,
-            timeout_secs,
-        },
-        cancellation,
-    )
-    .await;
+    let worker_runtime = runtime.clone();
+    let worker_client = client.clone();
+    let worker_session_id = session_id.clone();
+    let worker_thread_name = thread_name.clone();
+    let worker_dispatch_id = dispatch_id.clone();
+    let worker_action = action.clone();
+    let worker_source_threads = source_threads.clone();
+    let worker_scheduled_skills = scheduled_skills.clone();
+    let worker = tokio::spawn(async move {
+        let result = run_worker(
+            &worker_runtime,
+            &worker_client,
+            WorkerInvocation {
+                session_id: &worker_session_id,
+                thread_name: &worker_thread_name,
+                dispatch_id: &worker_dispatch_id,
+                action: &worker_action,
+                source_threads: &worker_source_threads,
+                scheduled_skills: &worker_scheduled_skills,
+                timeout_secs,
+            },
+            cancellation,
+        )
+        .await;
+        if let Ok(run) = &result {
+            if let Some(error) = &run.cleanup_error {
+                worker_runtime
+                    .active_threads
+                    .record_cleanup_failure(error.clone());
+            }
+        }
+        close_thread_dispatch(
+            &worker_runtime,
+            &worker_session_id,
+            &worker_thread_name,
+            &worker_dispatch_id,
+        );
+        result
+    });
+    let result = match worker.await {
+        Ok(result) => result,
+        Err(error) => Err(std::io::Error::other(format!(
+            "worker task failed: {error}"
+        ))),
+    };
 
     let run = match result {
         Ok(run) => run,

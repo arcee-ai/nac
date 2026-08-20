@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 use tokio::time::sleep;
 
-use crate::process::{isolate_process_group, terminate_child_tree};
+use crate::process::ProcessTreeGuard;
 use crate::sandbox::ExecutionBackend;
 use crate::tools::ThreadCancellation;
 
@@ -34,6 +35,9 @@ const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    active_one_shots: Arc<AtomicUsize>,
+    active_one_shot_failures: Arc<StdMutex<Vec<String>>>,
+    active_one_shot_activity: Arc<Notify>,
     max_sessions: usize,
     isolate_process_groups: bool,
     output_registry: OutputRegistry,
@@ -60,6 +64,9 @@ impl TerminalManager {
     ) -> Result<Self> {
         Ok(Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            active_one_shots: Arc::new(AtomicUsize::new(0)),
+            active_one_shot_failures: Arc::new(StdMutex::new(Vec::new())),
+            active_one_shot_activity: Arc::new(Notify::new()),
             max_sessions: 16,
             isolate_process_groups,
             output_registry: OutputRegistry::new(limits)?,
@@ -239,6 +246,60 @@ impl TerminalManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub async fn exec_one_shot_managed(
+        &self,
+        cmd: String,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        yield_ms: u64,
+        max_output: usize,
+        backend: Arc<ExecutionBackend>,
+        cancellation: ThreadCancellation,
+    ) -> CommandOutput {
+        self.active_one_shots.fetch_add(1, Ordering::AcqRel);
+        let manager = self.clone();
+        let task = tokio::spawn(async move {
+            let _active = ActiveOneShotGuard {
+                manager: manager.clone(),
+            };
+            let output = manager
+                .exec_one_shot(
+                    &cmd,
+                    cwd,
+                    cols,
+                    rows,
+                    yield_ms,
+                    max_output,
+                    backend.as_ref(),
+                    Some(&cancellation),
+                )
+                .await;
+            if output.stderr_preview.contains("command cleanup incomplete") {
+                manager
+                    .lock_one_shot_failures()
+                    .push(output.stderr_preview.clone());
+            }
+            output
+        });
+        match task.await {
+            Ok(output) => output,
+            Err(error) => CommandOutput {
+                status: CommandStatus::SpawnError,
+                exit_code: None,
+                wall_time_ms: 0,
+                stdout_preview: String::new(),
+                stderr_preview: format!("command task failed: {error}"),
+                output_id: None,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                truncated: false,
+                overflowed: false,
+            },
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn exec_one_shot(
         &self,
         cmd: &str,
@@ -273,16 +334,22 @@ impl TerminalManager {
                 .map(|(key, value)| (key.to_string(), value.to_string())),
         );
         let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
-        if self.isolate_process_groups {
-            isolate_process_group(&mut command);
-        }
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
 
-        let mut child = match command.spawn() {
-            Ok(child) => child,
+        let spawned = if self.isolate_process_groups {
+            ProcessTreeGuard::spawn_supervised(&mut command)
+        } else {
+            command.spawn().map(|child| {
+                let process_tree = ProcessTreeGuard::for_child(&child);
+                (child, process_tree)
+            })
+        };
+        let (mut child, mut process_tree) = match spawned {
+            Ok(spawned) => spawned,
             Err(error) => {
                 return CommandOutput {
                     status: CommandStatus::SpawnError,
@@ -378,9 +445,15 @@ impl TerminalManager {
         let mut force_reader_shutdown = false;
         if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
-                let _ = backend.terminal_pipe_kill(pidfile).await;
+                if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
+                    let cleanup_error = format!("command cleanup incomplete: {error}");
+                    runtime_error = Some(match runtime_error.take() {
+                        Some(existing) => format!("{existing}\n{cleanup_error}"),
+                        None => cleanup_error,
+                    });
+                }
             }
-            match terminate_child_tree(&mut child).await {
+            match process_tree.terminate(&mut child).await {
                 Ok(()) => force_reader_shutdown = true,
                 Err(error) => {
                     reader_shutdown.cancel();
@@ -418,12 +491,41 @@ impl TerminalManager {
         tokio::pin!(reader_shutdown_timer);
         let mut reader_shutdown_pending = force_reader_shutdown;
         let mut append_failed = false;
+        let mut drain_cancelled = false;
         loop {
             tokio::select! {
                 biased;
                 _ = &mut reader_shutdown_timer, if reader_shutdown_pending => {
                     reader_shutdown.cancel();
                     reader_shutdown_pending = false;
+                }
+                _ = async {
+                    if let Some(cancellation) = cancellation {
+                        cancellation.cancelled().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                }, if !drain_cancelled => {
+                    drain_cancelled = true;
+                    status = CommandStatus::Cancelled;
+                    if let Some(pidfile) = pidfile.as_deref() {
+                        if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
+                            let cleanup_error = format!("command cleanup incomplete: {error}");
+                            runtime_error = Some(match runtime_error.take() {
+                                Some(existing) => format!("{existing}\n{cleanup_error}"),
+                                None => cleanup_error,
+                            });
+                        }
+                    }
+                    if let Err(error) = process_tree.terminate(&mut child).await {
+                        let cleanup_error = format!("command cleanup incomplete: {error}");
+                        runtime_error = Some(match runtime_error.take() {
+                            Some(existing) => format!("{existing}\n{cleanup_error}"),
+                            None => cleanup_error,
+                        });
+                    }
+                    exit_code = None;
+                    reader_shutdown.cancel();
                 }
                 chunk = receiver.recv() => {
                     let Some(chunk) = chunk else {
@@ -476,6 +578,8 @@ impl TerminalManager {
             stderr_preview.push_str(&error);
         }
 
+        process_tree.disarm();
+
         CommandOutput {
             status,
             exit_code: if status == CommandStatus::Completed {
@@ -504,7 +608,29 @@ impl TerminalManager {
         self.output_registry.page(output_id, stream, offset, limit)
     }
 
-    pub async fn remove_all(&self) {
+    pub fn begin_run(&self) {
+        if self.active_one_shots.load(Ordering::Acquire) == 0 {
+            self.lock_one_shot_failures().clear();
+        }
+    }
+
+    pub async fn wait_for_one_shot_shutdown(&self) -> Result<()> {
+        loop {
+            let notified = self.active_one_shot_activity.notified();
+            if self.active_one_shots.load(Ordering::Acquire) == 0 {
+                break;
+            }
+            notified.await;
+        }
+        let failures = self.lock_one_shot_failures().clone();
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(failures.join("\n")))
+        }
+    }
+
+    pub async fn terminate_sessions(&self) -> Result<()> {
         let sessions: Vec<TerminalSession> = self
             .sessions
             .lock()
@@ -512,15 +638,46 @@ impl TerminalManager {
             .drain()
             .map(|(_, session)| session)
             .collect();
+        let mut failures = Vec::new();
+        let mut failed_sessions = Vec::new();
         for mut session in sessions {
             if let Err(error) = session.kill().await {
-                eprintln!(
-                    "nac: terminal session '{}' cleanup incomplete during removal: {error:#}",
+                failures.push(format!(
+                    "terminal session '{}' cleanup incomplete: {error:#}",
                     session.name
-                );
+                ));
+                failed_sessions.push(session);
             }
         }
+        if !failed_sessions.is_empty() {
+            let mut sessions = self.sessions.lock().await;
+            for session in failed_sessions {
+                sessions.insert(session.name.clone(), session);
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(failures.join("\n")))
+        }
+    }
+
+    pub async fn remove_all(&self) {
+        if let Err(error) = self.terminate_sessions().await {
+            eprintln!("nac: terminal cleanup incomplete during removal: {error:#}");
+        }
         self.output_registry.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_cleanup_failure_for_test(&self, failure: &str) {
+        self.lock_one_shot_failures().push(failure.to_string());
+    }
+
+    fn lock_one_shot_failures(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
+        self.active_one_shot_failures
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub async fn get(&self, name: &str) -> Option<TerminalInfo> {
@@ -589,6 +746,17 @@ impl TerminalManager {
     }
 }
 
+struct ActiveOneShotGuard {
+    manager: TerminalManager,
+}
+
+impl Drop for ActiveOneShotGuard {
+    fn drop(&mut self) {
+        self.manager.active_one_shots.fetch_sub(1, Ordering::AcqRel);
+        self.manager.active_one_shot_activity.notify_waiters();
+    }
+}
+
 struct StreamChunk {
     stream: OutputStream,
     bytes: Vec<u8>,
@@ -651,6 +819,20 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(receiver.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn cleanup_failure_stays_sticky_until_a_new_run() {
+        let manager = TerminalManager::new();
+        manager
+            .lock_one_shot_failures()
+            .push("command cleanup incomplete: remote still alive".to_string());
+
+        assert!(manager.wait_for_one_shot_shutdown().await.is_err());
+        assert!(manager.wait_for_one_shot_shutdown().await.is_err());
+
+        manager.begin_run();
+        manager.wait_for_one_shot_shutdown().await.unwrap();
     }
     use super::*;
     use crate::paths::PathContext;
@@ -1009,6 +1191,65 @@ mod tests {
             !path.exists(),
             "cancelled command produced a late side effect"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn aborting_one_shot_future_terminates_process_tree() {
+        let manager = TerminalManager::new();
+        let root =
+            std::env::temp_dir().join(format!("nac-command-abort-tree-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let leader_pid_path = root.join("leader-pid");
+        let ready = root.join("ready");
+        let late = root.join("late");
+        let command = format!(
+            "printf $$ > '{}'; printf ready > '{}'; (sleep 1; printf late > '{}') &",
+            leader_pid_path.display(),
+            ready.display(),
+            late.display()
+        );
+        let task_manager = manager.clone();
+        let task_backend = backend();
+        let task = tokio::spawn(async move {
+            task_manager
+                .exec_one_shot(
+                    &command,
+                    None,
+                    120,
+                    40,
+                    5_000,
+                    8_000,
+                    task_backend.as_ref(),
+                    None,
+                )
+                .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !ready.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("command did not start");
+        let leader_pid = std::fs::read_to_string(&leader_pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while unsafe { libc::kill(leader_pid, 0) } == 0 {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("shell leader did not exit");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+
+        sleep(Duration::from_millis(1_100)).await;
+        assert!(!late.exists(), "aborted command left a descendant running");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

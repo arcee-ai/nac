@@ -452,6 +452,7 @@ impl Agent {
                 mcp: config.mcp,
                 skills: config.skills,
                 terminal_manager,
+                active_tools: Arc::new(crate::tools::ActiveToolRegistry::default()),
                 command_cancellation: crate::tools::ThreadCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
@@ -885,6 +886,31 @@ impl Agent {
 
     pub(crate) fn command_cancellation(&self) -> crate::tools::ThreadCancellation {
         self.tool_runtime.command_cancellation.clone()
+    }
+    pub(crate) fn reset_command_cancellation(&self) {
+        self.tool_runtime.command_cancellation.reset();
+        self.tool_runtime.terminal_manager.begin_run();
+    }
+
+    pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
+        self.tool_runtime.terminal_manager.clone()
+    }
+
+    pub(crate) fn active_tools_handle(&self) -> Arc<crate::tools::ActiveToolRegistry> {
+        Arc::clone(&self.tool_runtime.active_tools)
+    }
+
+    pub(crate) async fn confirm_command_shutdown(&self) -> Result<()> {
+        self.tool_runtime
+            .terminal_manager
+            .wait_for_one_shot_shutdown()
+            .await?;
+        self.tool_runtime
+            .terminal_manager
+            .terminate_sessions()
+            .await?;
+        self.tool_runtime.active_tools.wait_for_shutdown().await;
+        Ok(())
     }
 
     #[cfg(test)]
