@@ -234,10 +234,15 @@ describe("session stream request coordination", () => {
     client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), snapshot([user("old")]));
     const firstSnapshot = deferred<void>();
     const secondSnapshot = deferred<void>();
-    const invalidate = vi
-      .spyOn(client, "invalidateQueries")
-      .mockImplementationOnce(async () => firstSnapshot.promise)
-      .mockImplementationOnce(async () => secondSnapshot.promise);
+    let snapshotInvalidations = 0;
+    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation(async (filters) => {
+      if (filters?.queryKey?.toString() !== queryKeys.sessionSnapshot(SESSION_ID).toString()) {
+        return;
+      }
+      const pending = snapshotInvalidations === 0 ? firstSnapshot : secondSnapshot;
+      snapshotInvalidations += 1;
+      await pending.promise;
+    });
     stream.getPage.mockResolvedValue(page([user("old"), user("new")], 4));
     const renderer = await mount(client);
     const stream_source = source();
@@ -247,18 +252,22 @@ describe("session stream request coordination", () => {
       stream_source.emit("replay_boundary", { epoch_id: "two" });
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(snapshotInvalidations).toBe(1);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.sessionSkills(SESSION_ID),
+      exact: true,
+    });
 
     await act(async () => {
       stream_source.emit("replay_boundary", { epoch_id: "three" });
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(invalidate).toHaveBeenCalledTimes(2);
+    expect(snapshotInvalidations).toBe(2);
     await act(async () => {
       firstSnapshot.resolve();
       await firstSnapshot.promise;
     });
-    expect(invalidate).toHaveBeenCalledTimes(2);
+    expect(snapshotInvalidations).toBe(2);
 
     await act(async () => {
       stream_source.emit("session_event", transcriptEnvelope(3));

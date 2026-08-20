@@ -172,8 +172,19 @@ pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
         return "ok".to_string();
     }
 
+    if result.is_error {
+        if let Some(message) = json_string_field(trimmed, "message") {
+            return preview(&message, 160);
+        }
+    }
+
     if name == "exec_command" {
         if let Some(summary) = preview_exec_command_result(trimmed) {
+            return preview(&summary, 160);
+        }
+    }
+    if matches!(name, "read" | "write" | "edit") {
+        if let Some(summary) = preview_json_tool_result(trimmed) {
             return preview(&summary, 160);
         }
     }
@@ -193,6 +204,36 @@ pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
     }
 
     preview(&format!("{}{more}", lines[0]), 160)
+}
+
+fn json_string_field(content: &str, key: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()?
+        .get(key)?
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn preview_json_tool_result(content: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<serde_json::Value>(content).ok()?;
+    if parsed.get("error").is_some() {
+        if let Some(message) = parsed
+            .get("message")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+        {
+            return Some(message.to_string());
+        }
+        if let Some(error) = parsed.get("error").and_then(|value| value.as_str()) {
+            return Some(error.to_string());
+        }
+        return None;
+    }
+    parsed
+        .get("path")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
 }
 
 /// Marks a preview that stands in for more than the one line it shows.

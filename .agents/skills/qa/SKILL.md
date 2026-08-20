@@ -1,12 +1,12 @@
 ---
 name: qa
-description: Run scalable, isolated live QA for nac development. The top-level local orchestrator must parse n (default 4), dispatch one setup worker with this skill, copy its n assignment contracts verbatim into exactly n parallel test workers with this skill, then dispatch one aggregate worker with this skill using all test episodes; never rename slots, paths, or scopes after setup, setup and aggregate do not count toward n, and preloaded workers never dispatch.
+description: Run scalable, isolated live QA for nac development. The top-level local orchestrator must parse n (default 4), dispatch one setup worker with this skill, copy its n assignment contracts verbatim into exactly n parallel test workers with this skill, then dispatch one aggregate worker with this skill using all test episodes; setup selects or creates a clean worktree for the requested revision, every phase changes to that worktree, slots and paths stay immutable after setup, and preloaded workers never dispatch.
 compatibility: Requires a local unsandboxed Git checkout, Rust and web build tools, curl, and rootless Podman.
 ---
 
 # NAC quality assurance
 
-Run adversarial, evidence-backed QA against the committed development branch. Exercise the live branch-built server, not only unit tests. Preserve every worker's findings in independent ignored reports, then summarize the complete pass.
+Run adversarial, evidence-backed QA against one requested committed revision. Exercise the live branch-built server, not only unit tests. Preserve every worker's findings in independent ignored reports, then summarize the complete pass.
 
 This workflow tests; it does not fix. Never edit source, dependency files, generated assets, repository configuration, issues, or pull requests during a QA pass.
 
@@ -16,12 +16,14 @@ This workflow tests; it does not fix. Never edit source, dependency files, gener
 
 Caller requests about focus or duration are ordinary test context, not additional formal parameters.
 
+The process's starting directory is only a place from which to resolve the requested revision. Its branch, staged files, unstaged files, and untracked files are never infrastructure failures by themselves. Setup must select an existing clean worktree at the target commit or create one, change its working directory to that root, and run the pass there. Workers and aggregate must likewise change to the setup-defined root before inspecting Git or running commands.
+
 The top-level controller is not a QA test worker. In nac it sees this catalog description but cannot read or write files; it must use this exact choreography:
 
-1. Dispatch `qa/setup` with `skills: ["qa"]` and `mode=setup`, `n`, and the caller's complete scope/focus context.
-2. Read the retained setup episode. It must contain the absolute pass root, source SHA, binary, and `n` distinct assignment contracts.
-3. Dispatch exactly those `n` test workers together in one parallel wave. Copy every setup contract verbatim—especially `slot`, `scope`, `report`, and `evidence`—then add `skills: ["qa"]`, `qa/setup` as a source thread, the setup-proven `podman_mode`, `XDG_RUNTIME_DIR` only for local mode, and ephemeral connection fields only for remote mode. Never rename, repartition, or “improve” assignments after `RUN.json` exists.
-4. After all `n` finish, dispatch `qa/aggregate` with `skills: ["qa"]`, `mode=aggregate`, the exact setup-defined slots, `qa/setup`, every test worker that produced a retained episode, and explicit dispatch outcomes for workers without episodes. A failed or timed-out worker cannot be named as a source thread.
+1. Dispatch `qa/setup` with `skills: ["qa"]` and `mode=setup`, `n`, the caller's requested revision or PR, and the caller's complete scope/focus context.
+2. Read the retained setup episode. It must contain the absolute execution-worktree root, pass root, source SHA, binary, and `n` distinct assignment contracts.
+3. Dispatch exactly those `n` test workers together in one parallel wave. Copy every setup contract verbatim—especially `repo_root`, `slot`, `scope`, `report`, and `evidence`—then add `skills: ["qa"]`, `qa/setup` as a source thread, the setup-proven `podman_mode`, `XDG_RUNTIME_DIR` only for local mode, and ephemeral connection fields only for remote mode. Never rename, repartition, or “improve” assignments after `RUN.json` exists.
+4. After all `n` finish, dispatch `qa/aggregate` with `skills: ["qa"]`, `mode=aggregate`, the setup-defined `repo_root`, exact slots, `qa/setup`, every test worker that produced a retained episode, and explicit dispatch outcomes for workers without episodes. A failed or timed-out worker cannot be named as a source thread.
 5. Return the aggregate conclusion. Never substitute one all-purpose QA worker for this topology.
 
 Other harnesses must use the equivalent setup → exactly `n` peers → aggregate topology. A controller that has direct file/process tools may perform setup or aggregation itself, but those phases still do not count toward `n`.
@@ -36,7 +38,7 @@ Missing or unknown `mode` is `infra`; do not infer that a preloaded worker is th
 
 ## Invariants
 
-- Test one trusted, mechanically clean, committed revision from start through aggregation. Git cleanliness proves reproducibility, not trust: the caller must have authorized this SHA to execute repository-controlled build scripts and binaries on the host.
+- Resolve one trusted committed target, then test it from one mechanically clean execution worktree from setup through aggregation. Git cleanliness applies only to that selected worktree, not to the process's starting directory. The caller must have authorized the target SHA to execute repository-controlled build scripts and binaries on the host.
 - Keep the coordinator and branch-built `nac-web` on the host. Use a verified rootless Podman engine for nac sandbox sessions and controlled external service doubles. Never expose a Podman socket to a container or use nested Podman.
 - Give every worker a distinct server process, absolute home/config/store paths, loopback port, Podman resource namespace, evidence directory, and report.
 - Keep the repository read-only by discipline. Pass-owned ignored build output is allowed; no other source-tree writes are.
@@ -46,15 +48,18 @@ Missing or unknown `mode` is `infra`; do not infer that a preloaded worker is th
 
 ## Setup workflow
 
-### 1. Freeze the source
+### 1. Select and freeze the source worktree
 
-From the repository root:
+The setup worker may start in any worktree or subdirectory. It owns source selection for the pass:
 
-1. Read governing repository instructions.
-2. Record the root, current ref, and full `HEAD` SHA. Require that the caller owns or has reviewed and explicitly authorized this revision for host execution. Stop on an unreviewed third-party or otherwise untrusted commit.
-3. Require no staged or unstaged tracked changes and no untracked source inputs. Ignored build output and prior `.nac/qa/` passes do not make the source dirty. Do not stash, commit, reset, clean, or delete user work. If the source is dirty, stop: nac sandbox worktrees fork from `HEAD` and cannot validate uncommitted files.
-4. Require `podman --version` and `podman info --format '{{.Host.Security.Rootless}}'` to succeed and report `true`. The client user's UID does not prove a remote engine is rootless.
-5. Classify the selected engine as local or remote/VM-backed and prove it remains rootless after replacing `HOME`. For a local engine, capture `XDG_RUNTIME_DIR` ephemerally, require it to be an absolute existing directory owned by the current user, and prove rootless `podman info` with isolated HOME/XDG config plus that runtime directory. For a remote engine, read `podman system connection list --format json`, select its default connection, and map only its URI and identity path to ephemeral `CONTAINER_HOST` and `CONTAINER_SSHKEY`; prove rootless `podman info` with an isolated home. Return the mode and its ephemeral runtime fields in the setup episode, outside `RUN.json`; never copy the containers configuration tree.
+1. Read governing repository instructions and find the Git common repository without changing the starting checkout.
+2. Resolve the requested target to one immutable commit. For an explicit SHA or ref, peel it to a commit. For a PR, use the repository host's CLI or API to obtain its current head SHA and fetch that commit or PR ref without checking it out in the starting worktree. With no explicit target, use the starting checkout's `HEAD`; staged, unstaged, and untracked content is intentionally not part of that committed target.
+3. Require that the caller owns, reviewed, or explicitly authorized that target for host execution. A request to QA a named local branch, SHA, or PR is authorization for that target; stop on a different, unreviewed third-party revision.
+4. Parse `git worktree list --porcelain`. Prefer an existing worktree only when its `HEAD` equals the target SHA and it has no staged, unstaged, or untracked source inputs. Otherwise create a collision-safe detached worktree at the target with `git worktree add --detach <absolute-new-path> <target-sha>`. A dirty candidate is skipped, not cleaned and not an infrastructure failure; create another worktree instead.
+5. Immediately change the setup worker's process or tool working directory to the selected root and use that absolute root for every remaining command. Record it as `repo_root`. Never stash, commit, reset, clean, switch, or delete anything in the starting checkout or a rejected candidate.
+6. In `repo_root`, confirm the top-level path, exact `HEAD`, and mechanical cleanliness. If a newly created worktree cannot satisfy these checks, stop with the concrete Git error. Ignored build output and prior `.nac/qa/` passes do not make the selected worktree dirty.
+7. Require `podman --version` and `podman info --format '{{.Host.Security.Rootless}}'` to succeed and report `true`. The client user's UID does not prove a remote engine is rootless.
+8. Classify the selected engine as local or remote/VM-backed and prove it remains rootless after replacing `HOME`. For a local engine, capture `XDG_RUNTIME_DIR` ephemerally, require it to be an absolute existing directory owned by the current user, and prove rootless `podman info` with isolated HOME/XDG config plus that runtime directory. For a remote engine, read `podman system connection list --format json`, select its default connection, and map only its URI and identity path to ephemeral `CONTAINER_HOST` and `CONTAINER_SSHKEY`; prove rootless `podman info` with an isolated home. Return the mode and its ephemeral runtime fields in the setup episode, outside `RUN.json`; never copy the containers configuration tree.
 
 ### 2. Create the pass
 
@@ -75,7 +80,7 @@ Create a collision-safe directory beneath:
 Verify with `git check-ignore -v` that a prospective report resolves through the existing `.nac/` rule before dispatch. Never reuse or overwrite an earlier pass.
 Build once into a fresh pass-owned target directory with `CARGO_TARGET_DIR=<pass_root>/build-target make build`. Run the build with provider, proxy, SSH-agent, cloud, CI, token, password, and secret variables removed; retain only the host toolchain/cache variables it needs. Require the produced nac-web to be a regular non-symlink file, copy it to `<pass_root>/bin/nac-web`, make the copy non-writable, record its version and SHA-256, remove `build-target`, and confirm `HEAD` still equals the captured SHA. Use only that absolute pass-owned copy for every worker's server and `--worker-executable`; never use the shared incremental `target/` artifact or an installed binary.
 
-Write `RUN.json` atomically. Include the pass ID, root, ref, full SHA, pass-owned binary path/version/SHA-256, requested `n`, coordinator identity, start time, Podman version/mode, and worker assignments. Never include credentials or environment values; remote connection URI and identity path remain ephemeral in the setup episode.
+Write `RUN.json` atomically. Include the pass ID, execution-worktree `repo_root`, ref, full SHA, pass-owned binary path/version/SHA-256, requested `n`, coordinator identity, start time, Podman version/mode, and worker assignments. Never include credentials or environment values; remote connection URI and identity path remain ephemeral in the setup episode.
 
 `resources.jsonl` is an append-only coordinator ledger for resources the coordinator itself creates. Workers keep their own ledgers below `workers/<slot>/resources.jsonl`.
 
@@ -97,6 +102,7 @@ Each worker dispatch must include:
 
 ```text
 mode=worker
+repo_root=<absolute setup-selected execution worktree>
 pass_root=<absolute path>
 slot=<stable unique slot>
 source_sha=<full SHA>
@@ -108,16 +114,16 @@ caller_context=<relevant focus or time guidance>
 podman_mode=<local|remote>
 ```
 
-Return the pass root, captured SHA, pass-owned binary path/version/SHA-256, requested `n`, Podman mode, the selected mode's ephemeral runtime fields (`XDG_RUNTIME_DIR` for local or connection URI/key path for remote), and all `n` complete worker contracts in the retained setup episode. Do not dispatch them yourself.
+Return the execution-worktree root, pass root, captured SHA, pass-owned binary path/version/SHA-256, requested `n`, Podman mode, the selected mode's ephemeral runtime fields (`XDG_RUNTIME_DIR` for local or connection URI/key path for remote), and all `n` complete worker contracts in the retained setup episode. Do not dispatch them yourself.
 
 ## Aggregate workflow
 
-Run only with `mode=aggregate`, the absolute pass root, captured source SHA, requested `n`, expected slot/report paths, the setup episode, every available completed test-worker episode, and explicit dispatch outcomes for missing episodes. Validate these values against `RUN.json` before writing anything. Then:
+Run only with `mode=aggregate`, the absolute setup-defined `repo_root`, absolute pass root, captured source SHA, requested `n`, expected slot/report paths, the setup episode, every available completed test-worker episode, and explicit dispatch outcomes for missing episodes. Ignore the aggregate process's initial directory: resolve and change to `repo_root` first, then validate that root and the other values against `RUN.json` before writing anything. Then:
 
 1. Require one final report at every assigned path. If a worker exited before atomically finalizing its report, write an aggregate-owned `infra` stub for that slot from its dispatch outcome and partial evidence; never call it a pass.
 2. Recover cleanup after any crashed, cancelled, or timed-out worker. Validate each write-ahead worker ledger against its setup-defined slot, pass label, exact service names/cidfiles, pre-request Podman container-ID snapshot, pass-owned event log, ledgered observer PID/command, and setup-proven Podman engine. Stop and wait an exact leftover observer only after its command names the pass-owned event log, then ensure the log is closed. For a nac sandbox request without a completed response, consider only container IDs absent from the snapshot and created during the ledgered request window. Before removal, require `podman inspect` to prove the candidate's mount source lies under this slot's pass-owned isolated `NAC_HOME/worktrees/` and its mount destination equals the requested guest workspace. Remove only proven pending or created resources, then verify them absent. Stop and report exact leftovers when ownership cannot be proven.
 3. Confirm reports are regular files under the pass root, have unique paths, name the captured SHA, and link only to evidence under the same pass root.
-4. Confirm `HEAD` still equals the captured SHA and the pass-owned binary SHA-256 still matches `RUN.json`. Revision or binary drift invalidates the pass as infrastructure evidence.
+4. Confirm `git -C <repo_root> rev-parse HEAD` still equals the captured SHA, the selected worktree remains mechanically clean, and the pass-owned binary SHA-256 still matches `RUN.json`. Revision, worktree, or binary drift invalidates the pass as infrastructure evidence. Never inspect an unrelated startup checkout.
 5. Read every report. Deduplicate findings only in `SUMMARY.md`; never rewrite worker reports.
 6. Account for exactly `n` slots by primary status and separately count `clean`, `degraded`, and `failed` infrastructure outcomes. Preserve product findings even when their slot also has infrastructure failure; never count one slot under two primary statuses. Preserve contradictory results and repeated symptoms with source links.
 7. Record cleanup results and any exact resource IDs that remain. Do not remove pre-existing resources or earlier pass directories.
@@ -128,9 +134,9 @@ Run only with `mode=aggregate`, the absolute pass root, captured source SHA, req
 
 ### 1. Validate the assignment
 
-Require all worker dispatch fields. Resolve every path and reject any report/evidence/worker path outside `pass_root`. Require the report not to exist. Create only the assigned evidence and worker directories.
+Require all worker dispatch fields, including `repo_root`. Ignore the worker process's initial directory: resolve `repo_root`, require that it exactly matches `RUN.json`, and change the process or tool working directory there before any Git check or test command. Resolve every other path and reject any report/evidence/worker path outside `pass_root`. Require the report not to exist. Create only the assigned evidence and worker directories.
 
-Confirm repository `HEAD` equals `source_sha`, the source remains mechanically clean, and the supplied binary is an absolute regular non-symlink file whose version and SHA-256 match `RUN.json`. Re-hash it immediately before every host execution and SUT sandbox launch. If any check fails, write an `infra` report and clean up without testing a different revision or binary.
+Confirm `git -C <repo_root> rev-parse HEAD` equals `source_sha`, that selected worktree remains mechanically clean, and the supplied binary is an absolute regular non-symlink file whose version and SHA-256 match `RUN.json`. Re-hash it immediately before every host execution and SUT sandbox launch. State from any other checkout is irrelevant. If a selected-root or binary check fails, write an `infra` report and clean up without testing a different revision or binary.
 
 Do not dispatch threads. Do not write `SUMMARY.md`, `RUN.json`, another slot's directory, or the repository outside ignored build output.
 
@@ -162,7 +168,7 @@ Immediately before launch, re-hash the binary against `RUN.json`. Then launch ex
 --bind 127.0.0.1:0
 --no-open
 -y
--C <repository-root>
+-C <repo_root>
 --store-path <absolute worker store.db>
 --worker-executable <same supplied binary>
 ```
@@ -268,7 +274,7 @@ If cooperative cleanup is incomplete, set `Infrastructure: failed` and list exac
 Stop the affected worker or whole pass, preserving reachable evidence, when:
 
 - the session is sandboxed/remote instead of a local host coordinator;
-- the source is untrusted, dirty, moves from the captured SHA, or the pass-owned binary digest changes;
+- the target is untrusted, the selected execution worktree becomes dirty or moves from the captured SHA, or the pass-owned binary digest changes; never stop solely because the process started in another dirty worktree;
 - Podman is missing/unavailable or the selected local/remote engine is not verified rootless;
 - an absolute isolated home/store/report path cannot be established;
 - a server requires a non-loopback bind;

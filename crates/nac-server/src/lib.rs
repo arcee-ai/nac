@@ -2328,6 +2328,16 @@ impl SessionManager {
             .context("commit task failed")?
     }
 
+    pub async fn session_skills(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<nac_core::skill_catalog::SkillCatalogEntry>> {
+        Ok(self
+            .attach_session(session_id)
+            .await?
+            .skill_catalog_entries())
+    }
+
     pub async fn submit_prompt(
         &self,
         session_id: &str,
@@ -3062,6 +3072,7 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(workspace_revision_changes))
         .routes(routes!(session_snapshot, delete_session_handler))
         .routes(routes!(session_config_handler, update_config_handler))
+        .routes(routes!(session_skills_handler))
         .routes(routes!(submit_prompt))
         .routes(routes!(compaction::handler))
         .routes(routes!(revert::handler))
@@ -4847,6 +4858,21 @@ async fn delete_session_handler(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/skills",
+    operation_id = "get_sessions_session_id_skills",
+    tag = "sessions",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = Vec<nac_core::skill_catalog::SkillCatalogEntry>, content_type = "application/json"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn session_skills_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Vec<nac_core::skill_catalog::SkillCatalogEntry>>, ApiError> {
+    Ok(Json(manager.session_skills(&session_id).await?))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/config",
     operation_id = "get_sessions_session_id_config",
     tag = "sessions",
@@ -5568,6 +5594,7 @@ mod tests {
         ("GET", "/sessions"),
         ("GET", "/sessions/{session_id}"),
         ("GET", "/sessions/{session_id}/config"),
+        ("GET", "/sessions/{session_id}/skills"),
         ("GET", "/sessions/{session_id}/events"),
         ("GET", "/sessions/{session_id}/events/stream"),
         ("GET", "/sessions/{session_id}/messages"),
@@ -7231,6 +7258,76 @@ mod tests {
             response_json(response).await,
             serde_json::to_value(slash_command_definitions()).unwrap()
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn session_skills_route_uses_the_attached_session_registry() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("session_skills");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        let skills = root.join(".nac/skills");
+        for (name, description) in [
+            ("zeta", "Last skill alphabetically"),
+            ("demo", "Demonstrate the feature"),
+        ] {
+            let directory = skills.join(name);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("SKILL.md"),
+                format!(
+                    "---\nname: {name}\ndescription: {description}\ncompatibility: nac\n---\n\n{name} body\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let manager = test_manager(&root);
+        let request = CreateSessionRequest {
+            cwd: Some(root.clone()),
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+            ..CreateSessionRequest::default()
+        };
+        let populated = manager.create_session(request.clone()).await.unwrap();
+        let populated_id = populated.metadata.session_id.unwrap();
+
+        let app = router(manager.clone());
+        let response = get_response(
+            app.clone(),
+            &format!("/sessions/{populated_id}/skills"),
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await,
+            serde_json::json!([
+                {
+                    "name": "demo",
+                    "description": "Demonstrate the feature",
+                    "compatibility": "nac"
+                },
+                {
+                    "name": "zeta",
+                    "description": "Last skill alphabetically",
+                    "compatibility": "nac"
+                }
+            ])
+        );
+        std::fs::remove_dir_all(&skills).unwrap();
+        let empty = manager.create_session(request).await.unwrap();
+        let empty_id = empty.metadata.session_id.unwrap();
+
+        let response =
+            get_response(app.clone(), &format!("/sessions/{empty_id}/skills"), None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await, serde_json::json!([]));
+
+        let response = get_response(app, "/sessions/missing/skills", None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let _ = std::fs::remove_dir_all(root);
     }
 

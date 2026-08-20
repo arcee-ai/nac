@@ -53,6 +53,11 @@ pub mod mcp_configurations {
     };
 }
 
+/// User-facing metadata for skills discovered by a session.
+pub mod skill_catalog {
+    pub use crate::skills::SkillCatalogEntry;
+}
+
 mod paths;
 mod process;
 pub mod runtime;

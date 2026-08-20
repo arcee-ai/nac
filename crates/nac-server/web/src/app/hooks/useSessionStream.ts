@@ -196,6 +196,10 @@ export function useSessionStream(sessionId: string | null): void {
       onReplayBoundary: (boundary) => {
         if (epochId !== null && boundary.epoch_id !== epochId) {
           scheduleSnapshot(true);
+          void client.invalidateQueries({
+            queryKey: queryKeys.sessionSkills(id),
+            exact: true,
+          });
         }
         epochId = boundary.epoch_id;
       },
