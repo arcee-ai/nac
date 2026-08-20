@@ -1,4 +1,4 @@
 interface:
   display_name: "NAC Quality Assurance"
-  short_description: "Run scalable isolated live QA for NAC"
-  default_prompt: "Use $qa with n=4 to run an isolated live QA pass for this NAC development branch."
+  short_description: "Run isolated QA for a committed NAC revision"
+  default_prompt: "Use $qa with n=4 to run an isolated live QA pass for this NAC revision, selecting or creating a clean worktree before testing."
