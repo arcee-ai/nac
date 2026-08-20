@@ -4,7 +4,6 @@ import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
 import Icon, { IconName } from "../icon";
-import Tooltip from "../tooltip";
 
 interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
   title: string;
@@ -75,38 +74,29 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
                 : "text-btn-secondary group-hover:text-btn-secondary-hovered"
           }
         />
-        <Tooltip
-          title={title}
-          position={Tooltip.Position.BottomCenter}
-          sticky
-          className="min-w-0 flex-1"
-        >
-          <span className={cn("label-micro block w-full min-w-0 truncate text-left", labelClass)}>
-            {title}
-          </span>
-        </Tooltip>
+        <span className={cn("label-micro w-full min-w-0 truncate text-left", labelClass)}>
+          {title}
+        </span>
       </button>
       {onDismiss ? (
-        // Hidden rather than transparent, so the title gets the room back
-        // whenever the pointer is elsewhere. The wrapper is a plain div, so
-        // `hidden` reaches it; the button's own `display` would not.
-        <Tooltip
-          title="Close tab"
-          position={Tooltip.Position.BottomCenter}
-          sticky
+        <Button
+          variant={ButtonVariant.Tertiary}
+          size={ButtonSize.Small}
+          content={ButtonContent.Icon}
+          aria-label={`Close ${title}`}
+          onClick={onDismiss}
+          // Hidden rather than transparent, so the title gets the room back
+          // whenever the pointer is elsewhere. Keyboard focus reveals it too, but
+          // only the visible kind: clicking a tab leaves its title button focused,
+          // and plain `:focus` would strand the button on screen long after the
+          // pointer moved away.
+          //
+          // `.btn`'s own `display` is unlayered CSS, so a plain `hidden` never
+          // reaches it.
           className="shrink-0 !hidden group-hover:!inline-flex group-has-[:focus-visible]:!inline-flex absolute right-0 top-1/2 -translate-y-1/2"
         >
-          <Button
-            variant={ButtonVariant.Tertiary}
-            size={ButtonSize.Small}
-            content={ButtonContent.Icon}
-            aria-label={`Close ${title}`}
-            onClick={onDismiss}
-            className="shrink-0"
-          >
-            <Icon iconName={IconName.Close} />
-          </Button>
-        </Tooltip>
+          <Icon iconName={IconName.Close} />
+        </Button>
       ) : null}
     </div>
   );
