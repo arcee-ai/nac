@@ -887,6 +887,10 @@ impl Agent {
         self.tool_runtime.command_cancellation.clone()
     }
 
+    pub(crate) fn reset_command_cancellation(&self) {
+        self.tool_runtime.command_cancellation.reset();
+    }
+
     #[cfg(test)]
     pub(crate) fn provider_messages_for_test(&mut self) -> Vec<Message> {
         match &mut self.compaction {

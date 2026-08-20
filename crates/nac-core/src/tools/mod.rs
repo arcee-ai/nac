@@ -57,6 +57,10 @@ impl ThreadCancellation {
         }
     }
 
+    pub(crate) fn reset(&self) {
+        self.cancelled.store(false, Ordering::Release);
+    }
+
     pub(crate) fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }

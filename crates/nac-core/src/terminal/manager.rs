@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
 
-use crate::process::{isolate_process_group, terminate_child_tree};
+use crate::process::ProcessTreeGuard;
 use crate::sandbox::ExecutionBackend;
 use crate::tools::ThreadCancellation;
 
@@ -273,16 +273,22 @@ impl TerminalManager {
                 .map(|(key, value)| (key.to_string(), value.to_string())),
         );
         let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
-        if self.isolate_process_groups {
-            isolate_process_group(&mut command);
-        }
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
 
-        let mut child = match command.spawn() {
-            Ok(child) => child,
+        let spawned = if self.isolate_process_groups {
+            ProcessTreeGuard::spawn_supervised(&mut command)
+        } else {
+            command.spawn().map(|child| {
+                let process_tree = ProcessTreeGuard::for_child(&child);
+                (child, process_tree)
+            })
+        };
+        let (mut child, mut process_tree) = match spawned {
+            Ok(spawned) => spawned,
             Err(error) => {
                 return CommandOutput {
                     status: CommandStatus::SpawnError,
@@ -380,7 +386,7 @@ impl TerminalManager {
             if let Some(pidfile) = pidfile.as_deref() {
                 let _ = backend.terminal_pipe_kill(pidfile).await;
             }
-            match terminate_child_tree(&mut child).await {
+            match process_tree.terminate(&mut child).await {
                 Ok(()) => force_reader_shutdown = true,
                 Err(error) => {
                     reader_shutdown.cancel();
@@ -418,12 +424,35 @@ impl TerminalManager {
         tokio::pin!(reader_shutdown_timer);
         let mut reader_shutdown_pending = force_reader_shutdown;
         let mut append_failed = false;
+        let mut drain_cancelled = false;
         loop {
             tokio::select! {
                 biased;
                 _ = &mut reader_shutdown_timer, if reader_shutdown_pending => {
                     reader_shutdown.cancel();
                     reader_shutdown_pending = false;
+                }
+                _ = async {
+                    if let Some(cancellation) = cancellation {
+                        cancellation.cancelled().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                }, if !drain_cancelled => {
+                    drain_cancelled = true;
+                    status = CommandStatus::Cancelled;
+                    if let Some(pidfile) = pidfile.as_deref() {
+                        let _ = backend.terminal_pipe_kill(pidfile).await;
+                    }
+                    if let Err(error) = process_tree.terminate(&mut child).await {
+                        let cleanup_error = format!("command cleanup incomplete: {error}");
+                        runtime_error = Some(match runtime_error.take() {
+                            Some(existing) => format!("{existing}\n{cleanup_error}"),
+                            None => cleanup_error,
+                        });
+                    }
+                    exit_code = None;
+                    reader_shutdown.cancel();
                 }
                 chunk = receiver.recv() => {
                     let Some(chunk) = chunk else {
@@ -475,6 +504,8 @@ impl TerminalManager {
             }
             stderr_preview.push_str(&error);
         }
+
+        process_tree.disarm();
 
         CommandOutput {
             status,
@@ -1009,6 +1040,65 @@ mod tests {
             !path.exists(),
             "cancelled command produced a late side effect"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn aborting_one_shot_future_terminates_process_tree() {
+        let manager = TerminalManager::new();
+        let root =
+            std::env::temp_dir().join(format!("nac-command-abort-tree-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let leader_pid_path = root.join("leader-pid");
+        let ready = root.join("ready");
+        let late = root.join("late");
+        let command = format!(
+            "printf $$ > '{}'; printf ready > '{}'; (sleep 1; printf late > '{}') &",
+            leader_pid_path.display(),
+            ready.display(),
+            late.display()
+        );
+        let task_manager = manager.clone();
+        let task_backend = backend();
+        let task = tokio::spawn(async move {
+            task_manager
+                .exec_one_shot(
+                    &command,
+                    None,
+                    120,
+                    40,
+                    5_000,
+                    8_000,
+                    task_backend.as_ref(),
+                    None,
+                )
+                .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !ready.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("command did not start");
+        let leader_pid = std::fs::read_to_string(&leader_pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while unsafe { libc::kill(leader_pid, 0) } == 0 {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("shell leader did not exit");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+
+        sleep(Duration::from_millis(1_100)).await;
+        assert!(!late.exists(), "aborted command left a descendant running");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

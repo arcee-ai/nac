@@ -318,6 +318,7 @@ const INTERRUPTED_RUN_WARNING: &str =
 const FAILED_RUN_WARNING: &str =
     "The previous run failed before producing a complete response. Resubmit the prompt to continue.";
 const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
+const RUN_COMMAND_CLEANUP_GRACE: Duration = Duration::from_secs(7);
 
 struct DecodedThreadEvents {
     events: HashMap<String, Vec<AgentEvent>>,
@@ -526,6 +527,7 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    command_cancellation: crate::tools::ThreadCancellation,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
@@ -722,6 +724,7 @@ impl SessionService {
         };
         let session_snapshot = run_config.session.into_snapshot();
         let active_threads = run_config.agent.active_threads_handle();
+        let command_cancellation = run_config.agent.command_cancellation();
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
@@ -746,6 +749,7 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
+            command_cancellation,
             skills,
             has_sandbox,
             #[cfg(test)]
@@ -2151,6 +2155,8 @@ impl SessionService {
             });
         };
 
+        self.command_cancellation.cancel();
+
         let steering_store = self
             .metadata
             .session_id
@@ -2161,9 +2167,14 @@ impl SessionService {
             Err(error) => eprintln!("nac: failed to expire cancelled worker steering: {error:#}"),
         }
 
-        if let Some(task) = cancelling_run.task {
-            task.abort();
-            let _ = task.await;
+        if let Some(mut task) = cancelling_run.task {
+            if tokio::time::timeout(RUN_COMMAND_CLEANUP_GRACE, &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+                let _ = task.await;
+            }
         }
 
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
@@ -2259,6 +2270,7 @@ impl SessionService {
             service.set_run_transcript_baseline(&task_run_id, baseline);
             let (result, usage) = {
                 let mut agent = service.agent.lock().await;
+                agent.reset_command_cancellation();
                 agent.set_event_sink(EventSink::bus_with_context(
                     event_bus.clone(),
                     Some(task_run_id.clone()),
@@ -7184,6 +7196,77 @@ pub(super) mod tests {
                 .is_none()
         );
 
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn request_cancel_waits_for_active_command_tree_cleanup() {
+        let (parts, store_path) =
+            test_active_service("cancel_active_command_tree", "cancel-active-command-tree");
+        let active = parts
+            .service
+            .try_begin_run(None, "cancel active command")
+            .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-session-cancel-command-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let ready = root.join("ready");
+        let late = root.join("late");
+        let command = format!(
+            "printf ready > '{}'; (sleep 1; printf late > '{}') & wait",
+            ready.display(),
+            late.display()
+        );
+        let manager = crate::terminal::TerminalManager::new();
+        let backend = crate::sandbox::execution_backend_from_sandbox(
+            None,
+            &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+        );
+        let cancellation = parts.service.command_cancellation.clone();
+        let task = tokio::spawn(async move {
+            let output = manager
+                .exec_one_shot(
+                    &command,
+                    None,
+                    120,
+                    40,
+                    5_000,
+                    8_000,
+                    backend.as_ref(),
+                    Some(&cancellation),
+                )
+                .await;
+            assert_eq!(output.status, crate::terminal::CommandStatus::Cancelled);
+        });
+        parts.service.set_run_task(&active.run_id, task);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !ready.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("command did not start");
+        parts.service.request_cancel(&active.run_id).await.unwrap();
+
+        assert!(parts.service.active_run().is_none());
+        assert!(parts
+            .service
+            .recent_events(None, 32)
+            .1
+            .iter()
+            .any(|event| event.run_id.as_ref() == Some(&active.run_id)
+                && event.event == SessionEvent::RunCancelled));
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+        assert!(
+            !late.exists(),
+            "run cancellation returned before command-tree cleanup"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
