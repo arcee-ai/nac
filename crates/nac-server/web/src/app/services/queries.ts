@@ -3,6 +3,7 @@
 
 import { useCallback, useMemo } from "react";
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQueries,
@@ -650,6 +651,7 @@ export function useSessions(pollMs = SESSIONS_POLL_MS) {
     queryFn: ({ signal }) => api.listSessions({}, signal),
     refetchInterval: pollMs,
     staleTime: 0,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -709,6 +711,7 @@ export function useSessionSummary(id: string | null) {
     queryFn: ({ signal }) => api.listSessions({}, signal),
     refetchInterval: SESSIONS_POLL_MS,
     staleTime: 0,
+    placeholderData: keepPreviousData,
     select,
   });
 }
@@ -745,6 +748,9 @@ export function useSessionSnapshot(
     enabled: Boolean(id),
     // The stream invalidates this query, so a stale time only guards bursts.
     staleTime: 1000,
+    // Same session: keep the open snapshot on screen while a refetch runs.
+    // A different session must not inherit this one's files and transcript.
+    placeholderData: previousDataFrom(id ?? ""),
     ...options,
   });
 }

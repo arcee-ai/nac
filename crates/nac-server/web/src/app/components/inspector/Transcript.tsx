@@ -18,9 +18,6 @@ import {
   ChatSessionMessageVariant,
   Icon,
   IconName,
-  MessageBox,
-  MessageBoxSize,
-  MessageBoxVariant,
   ShimmerLoader,
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
@@ -96,15 +93,13 @@ interface TranscriptProps {
 export function TranscriptRecoveryNotice({ warning }: { warning?: string | null }) {
   if (!warning) return null;
   return (
-    <MessageBox
+    <ChatSessionMessage
       role="status"
-      variant={MessageBoxVariant.Info}
-      size={MessageBoxSize.Medium}
+      variant={ChatSessionMessageVariant.Info}
       title="Session recovered"
-      className="mb-4 w-fit max-w-full"
     >
       {warning}
-    </MessageBox>
+    </ChatSessionMessage>
   );
 }
 
@@ -492,8 +487,6 @@ export function Transcript({
             </div>
           ) : null}
 
-          <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />
-
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
               if (turn.kind === "user") {
@@ -610,6 +603,8 @@ export function Transcript({
               {notice.description}
             </ChatSessionMessage>
           ) : null}
+
+          <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />
         </div>
       </div>
 

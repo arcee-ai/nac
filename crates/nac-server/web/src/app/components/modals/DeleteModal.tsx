@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
+import { flushSync } from "react-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
@@ -44,17 +45,24 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
   const submit = async () => {
     if (!summary || remove.isPending) return;
     const id = summary.session_id;
+    const openPath = location.pathname;
+    const leaveOpenSession =
+      sessionIdFromPath(openPath) === id ? routeAfterDeletingOpenSession(summary, sessions) : null;
     try {
-      await remove.mutateAsync(id);
-      // A deleted session cannot stay on screen. An orphan falls back to the
-      // listing; a project chat stays in that project on a sibling, or on
-      // `/project/:id` which starts a replacement if it was the last one.
-      if (sessionIdFromPath(location.pathname) === id) {
-        navigate(routeAfterDeletingOpenSession(summary, sessions), { replace: true });
+      // Commit the new route before the cache drops this chat, otherwise the
+      // page paints one frame of "unassigned" over the project's remaining tabs.
+      if (leaveOpenSession) {
+        flushSync(() => {
+          navigate(leaveOpenSession, { replace: true });
+        });
       }
+      await remove.mutateAsync(id);
       toast.success("Session deleted");
       onClose();
     } catch (error) {
+      if (leaveOpenSession) {
+        navigate(openPath, { replace: true });
+      }
       toast.error(`Failed to delete: ${errorMessage(toRunError(error))}`);
     }
   };

@@ -4,6 +4,7 @@ import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
 import Icon, { IconName } from "../icon";
+import ShimmerLoader from "../loader/ShimmerLoader";
 
 interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
   title: string;
@@ -14,6 +15,18 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   forkedFromTitle?: string | null;
   /** Takes the tab off the strip. The chat itself is untouched. */
   onDismiss?: () => void;
+}
+
+/** Tab-shaped stand-in while the project's chats have not arrived yet. */
+export function ChatSessionTabSkeleton() {
+  return (
+    <div
+      className="chat-session-tab flex h-10 w-32 max-w-32 min-w-10 shrink-0 items-center px-2 py-1"
+      aria-hidden
+    >
+      <ShimmerLoader rows={1} className="w-full gap-0" rowClassName="h-3" />
+    </div>
+  );
 }
 
 /**

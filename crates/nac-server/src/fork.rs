@@ -203,7 +203,7 @@ fn persist_fork(
         .into_iter()
         .find(|summary| summary.session_id == source_id)
         .map(|summary| source_display_name(&summary))
-        .unwrap_or_else(|| "New Chat".to_string());
+        .unwrap_or_else(|| "New Session".to_string());
 
     let source_transcript_len = source.messages.len();
     let visible = prefix
@@ -343,7 +343,7 @@ fn source_display_name(summary: &sessions::SessionSummary) -> String {
     {
         return prompt.to_string();
     }
-    "New Chat".to_string()
+    "New Session".to_string()
 }
 
 fn fork_presentation_title(source_name: &str) -> String {

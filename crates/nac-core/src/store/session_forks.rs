@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::types::Message;
 
 /// Fallback when the origin has no presentation title and no stored name.
-const NEW_CHAT_TITLE: &str = "New Chat";
+const NEW_CHAT_TITLE: &str = "New Session";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
