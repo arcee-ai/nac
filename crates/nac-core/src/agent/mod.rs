@@ -80,54 +80,69 @@ Reply with your answer as ordinary text, or issue the tool call you meant to mak
 /// the orchestrator sees it on the `thread` tool result.
 const REPEATED_TOOL_FAILURE_LIMIT: usize = 3;
 
-fn tool_call_path(calls: &[ToolCall], call_id: &str) -> String {
+fn canonical_tool_arguments(raw: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|value| serde_json::to_string(&value).ok())
+        .unwrap_or_else(|| raw.to_string())
+}
+
+fn tool_call_arguments<'a>(calls: &'a [ToolCall], call_id: &str) -> &'a str {
     calls
         .iter()
         .find(|call| call.id == call_id)
-        .and_then(|call| serde_json::from_str::<serde_json::Value>(&call.function.arguments).ok())
-        .and_then(|value| {
-            value
-                .get("path")
-                .and_then(|path| path.as_str())
-                .map(str::to_string)
-        })
-        .unwrap_or_default()
+        .map(|call| call.function.arguments.as_str())
+        .unwrap_or("")
 }
 
-fn tool_result_error_code(result: &ToolResult) -> String {
-    result
-        .content
-        .as_text()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .and_then(|value| {
-            value
-                .get("error")
-                .and_then(|error| error.as_str())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| "error".to_string())
+fn tool_result_error_identity(result: &ToolResult) -> String {
+    let Some(text) = result.content.as_text() else {
+        return "error".to_string();
+    };
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(value) => match value.get("error") {
+            Some(error) => serde_json::to_string(error).unwrap_or_else(|_| error.to_string()),
+            None => serde_json::to_string(&value).unwrap_or_else(|_| text.to_string()),
+        },
+        Err(_) => text.to_string(),
+    }
 }
 
-fn failed_tool_round_signature(
+struct FailedToolRound {
+    signature: String,
+    detail: String,
+}
+
+fn failed_tool_round(
     calls: &[ToolCall],
     results: &[(String, String, ToolResult)],
-) -> Option<String> {
-    let mut parts: Vec<String> = results
-        .iter()
-        .filter(|(_, _, result)| result.is_error)
-        .map(|(id, name, result)| {
-            format!(
-                "{name}\t{}\t{}",
-                tool_call_path(calls, id),
-                tool_result_error_code(result)
-            )
-        })
-        .collect();
-    if parts.is_empty() {
+) -> Option<FailedToolRound> {
+    let mut signature_parts = Vec::new();
+    let mut detail_parts = Vec::new();
+    for (id, name, result) in results {
+        if !result.is_error {
+            continue;
+        }
+        let arguments = tool_call_arguments(calls, id);
+        let error = tool_result_error_identity(result);
+        signature_parts.push(format!(
+            "{name}\t{}\t{error}",
+            canonical_tool_arguments(arguments)
+        ));
+        detail_parts.push(format!(
+            "{name} {} {error}",
+            preview_tool_args(name, arguments)
+        ));
+    }
+    if signature_parts.is_empty() {
         return None;
     }
-    parts.sort();
-    Some(parts.join("\n"))
+    signature_parts.sort();
+    detail_parts.sort();
+    Some(FailedToolRound {
+        signature: signature_parts.join("\n"),
+        detail: preview(&detail_parts.join("; "), 400),
+    })
 }
 
 fn duration_millis(duration: Duration) -> u64 {
@@ -573,6 +588,7 @@ impl Agent {
         let mut iteration = 0usize;
         let mut empty_turn_nudged = false;
         let mut last_failure_signature: Option<String> = None;
+        let mut last_failure_detail = String::new();
         let mut repeated_failures = 0usize;
         let mut accumulated_usage = TokenUsage::default();
         loop {
@@ -790,26 +806,28 @@ impl Agent {
                 self.thread_name.clone(),
             )
             .await;
-            let repeated_identical_failure =
-                match failed_tool_round_signature(&tool_calls, &results) {
-                    Some(signature)
-                        if last_failure_signature.as_deref() == Some(signature.as_str()) =>
-                    {
-                        repeated_failures = repeated_failures.saturating_add(1);
-                        repeated_failures >= REPEATED_TOOL_FAILURE_LIMIT
-                    }
-                    Some(signature) => {
-                        last_failure_signature = Some(signature);
-                        repeated_failures = 1;
-                        false
-                    }
-                    None => {
-                        last_failure_signature = None;
-                        repeated_failures = 0;
-                        false
-                    }
-                };
-            let failure_signature = last_failure_signature.clone();
+            let repeated_identical_failure = match failed_tool_round(&tool_calls, &results) {
+                Some(round)
+                    if last_failure_signature.as_deref() == Some(round.signature.as_str()) =>
+                {
+                    last_failure_detail = round.detail;
+                    repeated_failures = repeated_failures.saturating_add(1);
+                    repeated_failures >= REPEATED_TOOL_FAILURE_LIMIT
+                }
+                Some(round) => {
+                    last_failure_signature = Some(round.signature);
+                    last_failure_detail = round.detail;
+                    repeated_failures = 1;
+                    false
+                }
+                None => {
+                    last_failure_signature = None;
+                    last_failure_detail.clear();
+                    repeated_failures = 0;
+                    false
+                }
+            };
+            let failure_detail = last_failure_detail.clone();
             let tool_messages =
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
@@ -848,9 +866,8 @@ impl Agent {
                 return Err(error);
             }
             if repeated_identical_failure {
-                let detail = failure_signature.unwrap_or_default().replace('\t', " ");
                 let error = anyhow!(
-                    "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {detail}"
+                    "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {failure_detail}"
                 );
                 // Same channel as a provider refusal: the message survives
                 // sanitization and is captured as `WorkerRun.model_error`,
