@@ -74,7 +74,10 @@ Reply with your answer as ordinary text, or issue the tool call you meant to mak
 /// Flash-class models can ignore a correct tool error and retry the same call
 /// forever (`write` + `expected_revision: null` on an existing file). The
 /// error stays on the tool result; this only stops the worker after the
-/// identical failing round has repeated enough times to be a loop.
+/// identical failing round has repeated enough times to be a loop. The stop
+/// is reported as `ModelError` so the parent dispatch keeps the reason (plain
+/// `Error` is reduced to "operation failed" before it leaves the worker) and
+/// the orchestrator sees it on the `thread` tool result.
 const REPEATED_TOOL_FAILURE_LIMIT: usize = 3;
 
 fn tool_call_path(calls: &[ToolCall], call_id: &str) -> String {
@@ -849,7 +852,11 @@ impl Agent {
                 let error = anyhow!(
                     "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {detail}"
                 );
-                self.emit(AgentEvent::Error {
+                // Same channel as a provider refusal: the message survives
+                // sanitization and is captured as `WorkerRun.model_error`,
+                // which `worker_failure_details` puts on the orchestrator's
+                // thread tool result.
+                self.emit(AgentEvent::ModelError {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
