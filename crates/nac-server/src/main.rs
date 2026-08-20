@@ -647,7 +647,7 @@ fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, 
         (&args.sandbox_mounts, false),
         (&args.sandbox_mounts_ro, true),
     ] {
-        for pair in values.chunks_exact(2) {
+        for pair in values.as_chunks::<2>().0 {
             let host = PathBuf::from(pair[0].clone());
             let guest = PathBuf::from(pair[1].clone());
             if !host.exists() {

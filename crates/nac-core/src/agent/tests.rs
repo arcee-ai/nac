@@ -622,3 +622,203 @@ async fn cancelled_image_result_still_emits_finished_event() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+fn test_tool_call(id: &str, name: &str, arguments: &str) -> ToolCall {
+    ToolCall {
+        id: id.to_string(),
+        call_type: "function".to_string(),
+        function: crate::types::FunctionCall {
+            name: name.to_string(),
+            arguments: arguments.to_string(),
+        },
+    }
+}
+
+fn json_tool_error(id: &str, name: &str, body: serde_json::Value) -> (String, String, ToolResult) {
+    (
+        id.to_string(),
+        name.to_string(),
+        ToolResult {
+            content: (body.to_string()).into(),
+            is_error: true,
+        },
+    )
+}
+
+fn text_tool_error(id: &str, name: &str, text: &str) -> (String, String, ToolResult) {
+    (
+        id.to_string(),
+        name.to_string(),
+        ToolResult::text(text, true),
+    )
+}
+
+#[test]
+fn failed_tool_round_matches_identical_create_only_writes() {
+    let calls = vec![test_tool_call(
+        "c1",
+        "write",
+        r#"{ "path": "docker-compose.yml", "contents": "services:\n", "expected_revision": null }"#,
+    )];
+    let results = vec![json_tool_error(
+        "c1",
+        "write",
+        serde_json::json!({
+            "error": "already_exists",
+            "message": "file already exists: docker-compose.yml",
+            "current_revision": "sha256:abc",
+        }),
+    )];
+    let first = failed_tool_round(&calls, &results).expect("failing write round");
+    let second = failed_tool_round(
+        &[test_tool_call(
+            "c2",
+            "write",
+            r#"{"contents":"services:\n","expected_revision":null,"path":"docker-compose.yml"}"#,
+        )],
+        &[json_tool_error(
+            "c2",
+            "write",
+            serde_json::json!({
+                "error": "already_exists",
+                "message": "file already exists: docker-compose.yml",
+                "current_revision": "sha256:abc",
+            }),
+        )],
+    )
+    .expect("retried write round");
+
+    assert_eq!(first.signature, second.signature);
+    assert!(first.detail.contains("write"));
+    assert!(first.detail.contains("docker-compose.yml"));
+    assert!(first.detail.contains("already_exists"));
+    assert!(
+        !first.detail.contains("services:"),
+        "stop detail must not dump write contents: {}",
+        first.detail
+    );
+}
+
+#[test]
+fn failed_tool_round_does_not_collapse_unrelated_failures() {
+    let write = failed_tool_round(
+        &[test_tool_call(
+            "w",
+            "write",
+            r#"{"path":"a.yml","expected_revision":null}"#,
+        )],
+        &[json_tool_error(
+            "w",
+            "write",
+            serde_json::json!({ "error": "already_exists" }),
+        )],
+    )
+    .unwrap();
+    let other_write = failed_tool_round(
+        &[test_tool_call(
+            "w2",
+            "write",
+            r#"{"path":"b.yml","expected_revision":null}"#,
+        )],
+        &[json_tool_error(
+            "w2",
+            "write",
+            serde_json::json!({ "error": "already_exists" }),
+        )],
+    )
+    .unwrap();
+    let thread_a = failed_tool_round(
+        &[test_tool_call(
+            "t1",
+            "thread",
+            r#"{"name":"worker-a","action":"build"}"#,
+        )],
+        &[text_tool_error(
+            "t1",
+            "thread",
+            "Thread 'worker-a' failed (exit 1):\nboom",
+        )],
+    )
+    .unwrap();
+    let thread_b = failed_tool_round(
+        &[test_tool_call(
+            "t2",
+            "thread",
+            r#"{"name":"worker-b","action":"test"}"#,
+        )],
+        &[text_tool_error(
+            "t2",
+            "thread",
+            "Thread 'worker-b' failed (exit 1):\nboom",
+        )],
+    )
+    .unwrap();
+    let grep_a = failed_tool_round(
+        &[test_tool_call("g1", "grep", r#"{"pattern":"foo"}"#)],
+        &[json_tool_error(
+            "g1",
+            "grep",
+            serde_json::json!({
+                "error": { "code": "invalid_regex", "message": "bad", "path": null }
+            }),
+        )],
+    )
+    .unwrap();
+    let grep_b = failed_tool_round(
+        &[test_tool_call("g2", "grep", r#"{"pattern":"bar"}"#)],
+        &[json_tool_error(
+            "g2",
+            "grep",
+            serde_json::json!({
+                "error": { "code": "invalid_regex", "message": "bad", "path": null }
+            }),
+        )],
+    )
+    .unwrap();
+    let exec_a = failed_tool_round(
+        &[test_tool_call(
+            "e1",
+            "exec_command",
+            r#"{"cmd":"ls missing-a"}"#,
+        )],
+        &[text_tool_error("e1", "exec_command", "exit 2")],
+    )
+    .unwrap();
+    let exec_b = failed_tool_round(
+        &[test_tool_call(
+            "e2",
+            "exec_command",
+            r#"{"cmd":"ls missing-b"}"#,
+        )],
+        &[text_tool_error("e2", "exec_command", "exit 2")],
+    )
+    .unwrap();
+
+    let signatures = [
+        write.signature,
+        other_write.signature,
+        thread_a.signature,
+        thread_b.signature,
+        grep_a.signature,
+        grep_b.signature,
+        exec_a.signature,
+        exec_b.signature,
+    ];
+    let unique = signatures.iter().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        unique.len(),
+        signatures.len(),
+        "unrelated failing rounds must not share a signature: {signatures:?}"
+    );
+}
+
+#[test]
+fn failed_tool_round_ignores_successful_results() {
+    let calls = vec![test_tool_call("ok", "read", r#"{"path":"a.rs"}"#)];
+    let results = vec![(
+        "ok".to_string(),
+        "read".to_string(),
+        ToolResult::text("ok", false),
+    )];
+    assert!(failed_tool_round(&calls, &results).is_none());
+}

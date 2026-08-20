@@ -90,6 +90,19 @@ impl MutationError {
         }
     }
 
+    fn already_exists(path: &str, current_revision: Option<String>) -> Self {
+        Self {
+            error: "already_exists",
+            message: format!(
+                "file already exists: {path}; expected_revision null only creates a missing file — read the file and retry write with its revision"
+            ),
+            committed: false,
+            current_revision,
+            new_revision: None,
+            durability: None,
+        }
+    }
+
     fn stale(path: &str, current_revision: String) -> Self {
         Self {
             error: "stale_revision",
@@ -826,10 +839,7 @@ fn publish_at(
         if result == -1 {
             let error = io::Error::last_os_error();
             return if error.kind() == io::ErrorKind::AlreadyExists {
-                Err(MutationError::precondition(
-                    "already_exists",
-                    format!("file already exists: {path_display}"),
-                ))
+                Err(MutationError::already_exists(path_display, None))
             } else {
                 Err(MutationError::io(path_display, error))
             };
@@ -930,9 +940,9 @@ fn prepare_new_bytes(
             expected_revision,
             content,
         } => match (expected_revision, old_bytes) {
-            (None, Some(_)) => Err(MutationError::precondition(
-                "already_exists",
-                format!("file already exists: {path_display}"),
+            (None, Some(old_bytes)) => Err(MutationError::already_exists(
+                path_display,
+                Some(revision(old_bytes)),
             )),
             (None, None) => Ok(content.into_bytes()),
             (Some(_), None) => Err(MutationError::precondition(
@@ -1169,10 +1179,7 @@ fn publish(
         match fs::hard_link(&temp_path, target) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                return Err(MutationError::precondition(
-                    "already_exists",
-                    format!("file already exists: {path_display}"),
-                ))
+                return Err(MutationError::already_exists(path_display, None))
             }
             Err(error) => return Err(MutationError::io(path_display, error)),
         }
@@ -1607,7 +1614,7 @@ def publish(
             try:
                 os.link(temp_path, path)
             except FileExistsError:
-                fail("already_exists", f"file already exists: {path}")
+                fail("already_exists", f"file already exists: {path}; expected_revision null only creates a missing file — read the file and retry write with its revision")
         published = True
         try:
             if fail_after_publish:
@@ -1751,7 +1758,11 @@ try:
     elif operation == "write":
         if expected is None:
             if old is not None:
-                fail("already_exists", f"file already exists: {original_path}")
+                fail(
+                    "already_exists",
+                    f"file already exists: {original_path}; expected_revision null only creates a missing file — read the file and retry write with its revision",
+                    current_revision=rev(old),
+                )
         else:
             if old is None:
                 fail("not_found", f"file not found: {original_path}")

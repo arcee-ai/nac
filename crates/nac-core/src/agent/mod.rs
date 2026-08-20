@@ -71,6 +71,80 @@ fn render_orchestrator_system_prompt(working_directory: &str, thread_timeout_sec
 const EMPTY_TURN_NUDGE: &str = "Your last turn arrived empty: no answer and no tool call. \
 Reply with your answer as ordinary text, or issue the tool call you meant to make.";
 
+/// Flash-class models can ignore a correct tool error and retry the same call
+/// forever (`write` + `expected_revision: null` on an existing file). The
+/// error stays on the tool result; this only stops the worker after the
+/// identical failing round has repeated enough times to be a loop. The stop
+/// is reported as `ModelError` so the parent dispatch keeps the reason (plain
+/// `Error` is reduced to "operation failed" before it leaves the worker) and
+/// the orchestrator sees it on the `thread` tool result.
+const REPEATED_TOOL_FAILURE_LIMIT: usize = 3;
+
+fn canonical_tool_arguments(raw: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|value| serde_json::to_string(&value).ok())
+        .unwrap_or_else(|| raw.to_string())
+}
+
+fn tool_call_arguments<'a>(calls: &'a [ToolCall], call_id: &str) -> &'a str {
+    calls
+        .iter()
+        .find(|call| call.id == call_id)
+        .map(|call| call.function.arguments.as_str())
+        .unwrap_or("")
+}
+
+fn tool_result_error_identity(result: &ToolResult) -> String {
+    let Some(text) = result.content.as_text() else {
+        return "error".to_string();
+    };
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(value) => match value.get("error") {
+            Some(error) => serde_json::to_string(error).unwrap_or_else(|_| error.to_string()),
+            None => serde_json::to_string(&value).unwrap_or_else(|_| text.to_string()),
+        },
+        Err(_) => text.to_string(),
+    }
+}
+
+struct FailedToolRound {
+    signature: String,
+    detail: String,
+}
+
+fn failed_tool_round(
+    calls: &[ToolCall],
+    results: &[(String, String, ToolResult)],
+) -> Option<FailedToolRound> {
+    let mut signature_parts = Vec::new();
+    let mut detail_parts = Vec::new();
+    for (id, name, result) in results {
+        if !result.is_error {
+            continue;
+        }
+        let arguments = tool_call_arguments(calls, id);
+        let error = tool_result_error_identity(result);
+        signature_parts.push(format!(
+            "{name}\t{}\t{error}",
+            canonical_tool_arguments(arguments)
+        ));
+        detail_parts.push(format!(
+            "{name} {} {error}",
+            preview_tool_args(name, arguments)
+        ));
+    }
+    if signature_parts.is_empty() {
+        return None;
+    }
+    signature_parts.sort();
+    detail_parts.sort();
+    Some(FailedToolRound {
+        signature: signature_parts.join("\n"),
+        detail: preview(&detail_parts.join("; "), 400),
+    })
+}
+
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -513,6 +587,9 @@ impl Agent {
 
         let mut iteration = 0usize;
         let mut empty_turn_nudged = false;
+        let mut last_failure_signature: Option<String> = None;
+        let mut last_failure_detail = String::new();
+        let mut repeated_failures = 0usize;
         let mut accumulated_usage = TokenUsage::default();
         loop {
             self.append_pending_steering_checked().await?;
@@ -722,13 +799,35 @@ impl Agent {
 
             let tool_calls = response.assistant.tool_calls.unwrap_or_default();
             let results = execute_tools_parallel(
-                tool_calls,
+                tool_calls.clone(),
                 self.tool_runtime.clone(),
                 self.client.clone(),
                 self.event_sink.clone(),
                 self.thread_name.clone(),
             )
             .await;
+            let repeated_identical_failure = match failed_tool_round(&tool_calls, &results) {
+                Some(round)
+                    if last_failure_signature.as_deref() == Some(round.signature.as_str()) =>
+                {
+                    last_failure_detail = round.detail;
+                    repeated_failures = repeated_failures.saturating_add(1);
+                    repeated_failures >= REPEATED_TOOL_FAILURE_LIMIT
+                }
+                Some(round) => {
+                    last_failure_signature = Some(round.signature);
+                    last_failure_detail = round.detail;
+                    repeated_failures = 1;
+                    false
+                }
+                None => {
+                    last_failure_signature = None;
+                    last_failure_detail.clear();
+                    repeated_failures = 0;
+                    false
+                }
+            };
+            let failure_detail = last_failure_detail.clone();
             let tool_messages =
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
@@ -760,6 +859,21 @@ impl Agent {
             if let Err(error) = self.push_batch_and_log(tool_messages).await {
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
+                });
+                self.tool_runtime.terminal_manager.remove_all().await;
+                return Err(error);
+            }
+            if repeated_identical_failure {
+                let error = anyhow!(
+                    "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {failure_detail}"
+                );
+                // Same channel as a provider refusal: the message survives
+                // sanitization and is captured as `WorkerRun.model_error`,
+                // which `worker_failure_details` puts on the orchestrator's
+                // thread tool result.
+                self.emit(AgentEvent::ModelError {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
