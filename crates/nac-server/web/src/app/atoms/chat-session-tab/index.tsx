@@ -5,7 +5,10 @@ import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
 import Icon, { IconName } from "../icon";
 
-interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
+interface ChatSessionTabProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "title"
+> {
   title: string;
   active?: boolean;
   /** Swaps the label for a shimmering one and shows a spinner. */
@@ -40,9 +43,11 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
 }) => {
   const labelClass = running
     ? "text-shimmer-basic group-hover:w-[calc(100%-36px)] group-hover:max-w-[calc(100%-36px)]"
-    : active
-      ? "text-btn-secondary-pressed group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]"
-      : "text-btn-secondary group-hover:text-btn-secondary-hovered group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]";
+    : forkedFromTitle
+      ? "text-btn-secondary group-hover:text-btn-secondary-hovered group-hover:w-[calc(100%-32px)] group-hover:max-w-[calc(100%-32px)]"
+      : active
+        ? "text-btn-secondary-pressed group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]"
+        : "text-btn-secondary group-hover:text-btn-secondary-hovered group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]";
 
   return (
     <div
@@ -72,7 +77,12 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
                 : "text-btn-secondary group-hover:text-btn-secondary-hovered"
           }
         />
-        <span className={cn("label-micro w-full min-w-0 truncate text-left", labelClass)}>
+        <span
+          className={cn(
+            "label-micro w-full min-w-0 truncate text-left",
+            labelClass,
+          )}
+        >
           {title}
         </span>
       </button>

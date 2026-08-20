@@ -8,6 +8,7 @@ import {
   useQueries,
   useQuery,
   type InfiniteData,
+  type QueryClient,
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query";
@@ -1086,16 +1087,39 @@ export function useCreateSession() {
   });
 }
 
+/**
+ * Session ids whose cached snapshot still shows `forkId` as a conversation
+ * fork. The open transcript is usually one of these; a background source tab
+ * has the same marker and would otherwise stay clickable after the fork is
+ * gone.
+ */
+function sessionIdsShowingFork(client: QueryClient, forkId: string): string[] {
+  const ids: string[] = [];
+  for (const query of client.getQueryCache().findAll({ queryKey: ["session"] })) {
+    const key = query.queryKey;
+    if (key[0] !== "session" || key[2] !== "snapshot" || typeof key[1] !== "string") {
+      continue;
+    }
+    const sessionId = key[1];
+    if (sessionId === forkId) continue;
+    const snapshot = query.state.data as SessionSnapshotResponse | undefined;
+    if (!snapshot?.forks?.some((fork) => fork.session_id === forkId)) continue;
+    ids.push(sessionId);
+  }
+  return ids;
+}
+
 export function useDeleteSession() {
   const invalidate = useInvalidators();
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteSession(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       void invalidate.sessions();
-      // Fork markers on other chats become the deleted state once the fork row
-      // is gone, so every open snapshot has to refetch.
-      void client.invalidateQueries({ queryKey: ["session"] });
+      client.removeQueries({ queryKey: queryKeys.sessionRoot(id) });
+      for (const sourceId of sessionIdsShowingFork(client, id)) {
+        void invalidate.sessionRoot(sourceId);
+      }
     },
   });
 }

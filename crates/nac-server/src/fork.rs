@@ -205,6 +205,7 @@ fn persist_fork(
         .map(|summary| source_display_name(&summary))
         .unwrap_or_else(|| "New Chat".to_string());
 
+    let source_transcript_len = source.messages.len();
     let visible = prefix
         .iter()
         .filter(|message| is_visible_response(message))
@@ -243,12 +244,48 @@ fn persist_fork(
 
     sessions::create_session(store_path, &fork)
         .map_err(|error| report_failure(source_id, "create the forked session", &error))?;
-    store::insert_session_fork(store_path, source_id, fork_id, message_idx, &source_name)
+    if let Err(error) = finish_persisted_fork(
+        store_path,
+        source_id,
+        fork_id,
+        &fork.messages,
+        source_transcript_len,
+        message_idx,
+        &source_name,
+    ) {
+        if let Err(cleanup) = sessions::delete_session(store_path, fork_id) {
+            eprintln!(
+                "nac: fork for session {source_id:?} failed after create; cleanup of {fork_id:?} also failed: {cleanup}"
+            );
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn finish_persisted_fork(
+    store_path: &std::path::Path,
+    source_id: &str,
+    fork_id: &str,
+    prefix: &[Message],
+    source_transcript_len: usize,
+    message_idx: usize,
+    source_name: &str,
+) -> Result<(), ForkSessionError> {
+    store::clone_session_conversation_artifacts(
+        store_path,
+        source_id,
+        fork_id,
+        prefix,
+        source_transcript_len,
+    )
+    .map_err(|error| report_failure(source_id, "clone conversation artifacts", &error))?;
+    store::insert_session_fork(store_path, source_id, fork_id, message_idx, source_name)
         .map_err(|error| report_failure(source_id, "record the fork link", &error))?;
     sessions::update_session_presentation(
         store_path,
         fork_id,
-        &fork_presentation_title(&source_name),
+        &fork_presentation_title(source_name),
         false,
         0,
     )
