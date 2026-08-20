@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -76,6 +76,67 @@ impl ThreadCancellation {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct ActiveToolRegistry {
+    count: AtomicUsize,
+    next_id: AtomicU64,
+    abortable: StdMutex<HashMap<u64, ThreadCancellation>>,
+    activity: Notify,
+}
+
+impl ActiveToolRegistry {
+    fn enter(self: &Arc<Self>, abortable: bool) -> (ActiveToolGuard, Option<ThreadCancellation>) {
+        self.count.fetch_add(1, Ordering::AcqRel);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let cancellation = abortable.then(ThreadCancellation::default);
+        if let Some(cancellation) = cancellation.as_ref() {
+            self.lock_abortable().insert(id, cancellation.clone());
+        }
+        (
+            ActiveToolGuard {
+                id,
+                registry: Arc::clone(self),
+            },
+            cancellation,
+        )
+    }
+
+    pub(crate) fn cancel_abortable(&self) {
+        for cancellation in self.lock_abortable().values() {
+            cancellation.cancel();
+        }
+    }
+
+    pub(crate) async fn wait_for_shutdown(&self) {
+        loop {
+            let notified = self.activity.notified();
+            if self.count.load(Ordering::Acquire) == 0 {
+                break;
+            }
+            notified.await;
+        }
+    }
+
+    fn lock_abortable(&self) -> std::sync::MutexGuard<'_, HashMap<u64, ThreadCancellation>> {
+        self.abortable
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+struct ActiveToolGuard {
+    id: u64,
+    registry: Arc<ActiveToolRegistry>,
+}
+
+impl Drop for ActiveToolGuard {
+    fn drop(&mut self) {
+        self.registry.lock_abortable().remove(&self.id);
+        self.registry.count.fetch_sub(1, Ordering::AcqRel);
+        self.registry.activity.notify_waiters();
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ActiveThreadDispatchState {
     Pending,
@@ -89,6 +150,7 @@ struct ActiveThreadDispatch {
 
 struct ActiveThreadState {
     dispatches: HashMap<String, ActiveThreadDispatch>,
+    cleanup_failures: Vec<String>,
     cancellation: ThreadCancellation,
     accepting: bool,
 }
@@ -97,6 +159,7 @@ impl Default for ActiveThreadState {
     fn default() -> Self {
         Self {
             dispatches: HashMap::new(),
+            cleanup_failures: Vec::new(),
             cancellation: ThreadCancellation::default(),
             accepting: true,
         }
@@ -132,6 +195,7 @@ impl ActiveThreadRegistry {
             return false;
         }
         state.cancellation = ThreadCancellation::default();
+        state.cleanup_failures.clear();
         state.accepting = true;
         true
     }
@@ -209,14 +273,14 @@ impl ActiveThreadRegistry {
         crate::store::expire_thread_steering(store_path, session_id, dispatch_id)
     }
 
-    pub async fn cancel_and_drain(
+    pub fn begin_cancellation(
         &self,
         steering_store: Option<(&Path, &str)>,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let (cancellation, targets) = {
+        let targets = {
             let mut state = self.lock();
             state.accepting = false;
-            let cancellation = state.cancellation.clone();
+            state.cancellation.cancel();
             let targets = state
                 .dispatches
                 .values()
@@ -225,35 +289,49 @@ impl ActiveThreadRegistry {
             state
                 .dispatches
                 .retain(|_, dispatch| dispatch.state == ActiveThreadDispatchState::Running);
-            (cancellation, targets)
+            targets
         };
-        cancellation.cancel();
         self.activity.notify_waiters();
 
         let mut expired = Vec::new();
         let mut steering_error = None;
         if let Some((store_path, session_id)) = steering_store {
-            for dispatch_id in &targets {
-                match crate::store::expire_thread_steering(store_path, session_id, dispatch_id) {
+            for dispatch_id in targets {
+                match crate::store::expire_thread_steering(store_path, session_id, &dispatch_id) {
                     Ok(records) => expired.extend(records),
                     Err(error) if steering_error.is_none() => steering_error = Some(error),
                     Err(_) => {}
                 }
             }
         }
-
-        loop {
-            let notified = self.activity.notified();
-            if self.lock().dispatches.is_empty() {
-                break;
-            }
-            notified.await;
-        }
-
         match steering_error {
             Some(error) => Err(error),
             None => Ok(expired),
         }
+    }
+
+    pub async fn wait_for_shutdown(&self) -> anyhow::Result<()> {
+        loop {
+            let notified = self.activity.notified();
+            let completed = {
+                let state = self.lock();
+                state.dispatches.is_empty().then(|| {
+                    if state.cleanup_failures.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!(state.cleanup_failures.join("\n")))
+                    }
+                })
+            };
+            if let Some(result) = completed {
+                return result;
+            }
+            notified.await;
+        }
+    }
+
+    pub(crate) fn record_cleanup_failure(&self, failure: String) {
+        self.lock().cleanup_failures.push(failure);
     }
 
     pub fn close_all(
@@ -301,44 +379,77 @@ mod active_thread_registry_tests {
     use super::*;
 
     #[tokio::test]
-    async fn cancellation_drains_running_dispatches_and_rejects_pending_work() {
+    async fn cancellation_waits_for_running_dispatch_shutdown() {
         let registry = Arc::new(ActiveThreadRegistry::default());
         assert!(registry.begin_run());
-        assert!(registry.mark("a", "dispatch-a"));
-        assert!(registry.mark("b", "dispatch-b"));
-        assert!(registry.mark("dependent", "dispatch-c"));
-        let cancellation_a = registry.start("a", "dispatch-a").unwrap();
-        let cancellation_b = registry.start("b", "dispatch-b").unwrap();
+        assert!(registry.mark("worker", "dispatch"));
+        let cancellation = registry.start("worker", "dispatch").unwrap();
 
-        let cancelling_registry = registry.clone();
-        let cancelling = tokio::spawn(async move {
-            cancelling_registry.cancel_and_drain(None).await.unwrap();
+        assert!(registry.begin_cancellation(None).unwrap().is_empty());
+        assert!(cancellation.is_cancelled());
+        assert!(registry.is_active("worker"));
+        assert!(!registry.mark("late", "late-dispatch"));
+
+        let waiting_registry = Arc::clone(&registry);
+        let waiting = tokio::spawn(async move {
+            waiting_registry.wait_for_shutdown().await.unwrap();
         });
-        tokio::time::timeout(Duration::from_secs(1), async {
-            cancellation_a.cancelled().await;
-            cancellation_b.cancelled().await;
-        })
-        .await
-        .expect("running dispatches did not receive cancellation");
-
-        assert!(registry.start("dependent", "dispatch-c").is_none());
-        assert!(!registry.is_active("dependent"));
-        assert!(!cancelling.is_finished());
-
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
         let missing = Path::new("/store/does/not/exist");
         assert!(registry
-            .close(missing, "session", "a", "dispatch-a")
+            .close(missing, "session", "worker", "dispatch")
             .is_err());
-        assert!(registry
-            .close(missing, "session", "b", "dispatch-b")
-            .is_err());
-        tokio::time::timeout(Duration::from_secs(1), cancelling)
-            .await
-            .expect("cancellation did not drain")
-            .unwrap();
-
+        waiting.await.unwrap();
         assert!(registry.names().is_empty());
-        registry.cancel_and_drain(None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_waits_for_detached_tool_shutdown() {
+        let registry = Arc::new(ActiveToolRegistry::default());
+        let (active, _) = registry.enter(false);
+        let waiting_registry = Arc::clone(&registry);
+        let waiting = tokio::spawn(async move {
+            waiting_registry.wait_for_shutdown().await;
+        });
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
+
+        drop(active);
+
+        waiting.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_signals_abortable_tools_immediately() {
+        assert!(tool_is_abortable("read"));
+        assert!(tool_is_abortable("mcp__remote"));
+        assert!(!tool_is_abortable("write"));
+        assert!(!tool_is_abortable("glob"));
+        assert!(!tool_is_abortable("grep"));
+        assert!(!tool_is_abortable("thread"));
+        let registry = Arc::new(ActiveToolRegistry::default());
+        let (active, cancellation) = registry.enter(true);
+        let cancellation = cancellation.unwrap();
+
+        registry.cancel_abortable();
+
+        tokio::time::timeout(Duration::from_secs(1), cancellation.cancelled())
+            .await
+            .expect("abortable tool did not receive cancellation");
+        drop(active);
+        registry.wait_for_shutdown().await;
+    }
+
+    #[test]
+    fn command_cancellation_can_reset_for_session_reuse() {
+        let cancellation = ThreadCancellation::default();
+        cancellation.cancel();
+        assert!(cancellation.is_cancelled());
+
+        cancellation.reset();
+
+        assert!(!cancellation.is_cancelled());
     }
 
     #[test]
@@ -374,6 +485,7 @@ pub struct ToolRuntime {
     pub mcp: Option<Arc<McpRegistry>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
+    pub active_tools: Arc<ActiveToolRegistry>,
     pub command_cancellation: ThreadCancellation,
     pub thread_timeout_secs: u64,
     /// Accumulated worker token usage from thread dispatches.  The agent
@@ -536,8 +648,48 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
 
     Ok(out)
 }
+fn tool_is_abortable(name: &str) -> bool {
+    !matches!(
+        name,
+        "write" | "edit" | "glob" | "grep" | "thread" | "thread_delete" | "workset_define"
+    )
+}
 
 pub async fn execute_tool(
+    name: &str,
+    args: Value,
+    runtime: &ToolRuntime,
+    client: &crate::model::ModelClient,
+) -> ToolResult {
+    let runtime = runtime.clone();
+    let client = client.clone();
+    let name = name.to_string();
+    let abortable = tool_is_abortable(&name);
+    let (active, cancellation) = runtime.active_tools.enter(abortable);
+    let task = tokio::spawn(async move {
+        let _active = active;
+        if let Some(cancellation) = cancellation {
+            tokio::select! {
+                _ = cancellation.cancelled() => ToolResult::text(
+                    crate::types::TOOL_CALL_CANCELLED_MARKER,
+                    true,
+                ),
+                result = execute_tool_inner(&name, args, &runtime, &client) => result,
+            }
+        } else {
+            execute_tool_inner(&name, args, &runtime, &client).await
+        }
+    });
+    match task.await {
+        Ok(result) => result,
+        Err(error) => ToolResult {
+            content: (format!("Tool task failed: {error}")).into(),
+            is_error: true,
+        },
+    }
+}
+
+async fn execute_tool_inner(
     name: &str,
     args: Value,
     runtime: &ToolRuntime,
@@ -669,6 +821,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         mcp: None,
         skills: None,
         terminal_manager: TerminalManager::new(),
+        active_tools: Arc::new(crate::tools::ActiveToolRegistry::default()),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         light_client: None,

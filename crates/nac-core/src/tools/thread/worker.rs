@@ -367,6 +367,7 @@ pub(super) async fn run_worker(
         _ = &mut deadline => WaitOutcome::TimedOut,
     };
     let mut cooperatively_cancelled = false;
+    let mut cooperative_cleanup_error = None;
     if matches!(outcome, WaitOutcome::Cancelled) {
         if let Some(mut stdin) = control_stdin.take() {
             let _ = stdin.write_all(b"cancel\n").await;
@@ -384,9 +385,13 @@ pub(super) async fn run_worker(
         };
         if acknowledged {
             if let Ok(wait_result) = timeout(COOPERATIVE_CLEANUP_GRACE, child.wait()).await {
-                wait_result?;
+                let status = wait_result?;
                 process_tree.mark_leader_reaped();
                 cooperatively_cancelled = true;
+                if !status.success() {
+                    cooperative_cleanup_error =
+                        Some(format!("worker cleanup exited with {status}"));
+                }
             }
         }
     } else if matches!(outcome, WaitOutcome::Exited(_)) {
@@ -399,7 +404,7 @@ pub(super) async fn run_worker(
 
     let timed_out = matches!(outcome, WaitOutcome::TimedOut);
     let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
-    let mut cleanup_error = None;
+    let mut cleanup_error = cooperative_cleanup_error;
     let mut force_reader_shutdown = false;
     if timed_out || (cancelled && !cooperatively_cancelled) {
         match process_tree.terminate(&mut child).await {
@@ -589,8 +594,7 @@ wait
             .expect("managed workers never became ready");
             runtime
                 .active_threads
-                .cancel_and_drain(Some((&runtime.store_path, "session")))
-                .await
+                .begin_cancellation(Some((&runtime.store_path, "session")))
         };
 
         let (worker_a, worker_b, cancellation) =

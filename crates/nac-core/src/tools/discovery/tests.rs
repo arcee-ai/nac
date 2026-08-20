@@ -710,6 +710,53 @@ async fn aborting_native_search_stops_promptly() {
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
+#[tokio::test]
+async fn run_cancellation_waits_for_native_search_shutdown() {
+    struct PauseGuard;
+    impl Drop for PauseGuard {
+        fn drop(&mut self) {
+            super::PAUSE_SEARCH_TASKS.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    let (runtime, root) = fixture_runtime();
+    let cancellation = runtime.command_cancellation.clone();
+    fs::write(root.join("src/large.txt"), vec![b'a'; 8 * 1024 * 1024])
+        .expect("write cancellation fixture");
+    super::PAUSE_SEARCH_TASKS.store(true, std::sync::atomic::Ordering::Release);
+    let _pause_guard = PauseGuard;
+    let task = tokio::spawn(async move {
+        execute(
+            "grep",
+            json!({
+                "pattern": "not-present",
+                "globs": ["src/large.txt"],
+                "case": "sensitive"
+            }),
+            &runtime,
+        )
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while super::ACTIVE_SEARCH_TASKS.load(std::sync::atomic::Ordering::Acquire) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("content search worker must start");
+
+    cancellation.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(1), task)
+        .await
+        .expect("run cancellation must stop and join the search")
+        .unwrap();
+    assert_eq!(
+        super::ACTIVE_SEARCH_TASKS.load(std::sync::atomic::Ordering::Acquire),
+        0
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn symlink_escapes_are_structured_and_never_followed() {

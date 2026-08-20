@@ -122,12 +122,17 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
         action,
     } = run_config;
 
+    let cancellation = agent.command_cancellation();
     spawn_cancellation_listener(
-        agent.command_cancellation(),
+        cancellation.clone(),
         #[cfg(test)]
         None,
     );
     let send_result = agent.send(&action).await;
+    if cancellation.is_cancelled() {
+        agent.confirm_command_shutdown().await?;
+        return Ok(());
+    }
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
     println!("{}", response);

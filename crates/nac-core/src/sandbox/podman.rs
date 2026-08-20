@@ -114,7 +114,12 @@ rm -f "$pidfile"
 exit "$status""#;
 
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
-pid=$(cat "$pidfile" 2>/dev/null) || exit 0
+attempts=0
+while ! pid=$(cat "$pidfile" 2>/dev/null); do
+  attempts=$((attempts + 1))
+  [ "$attempts" -ge 20 ] && exit 1
+  sleep 0.05
+done
 if [ -n "$pid" ]; then
   descendants() {
     parent=$1
@@ -134,6 +139,18 @@ if [ -n "$pid" ]; then
     kill -KILL "$child" 2>/dev/null || true
   done
   kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  attempts=0
+  while :; do
+    alive=0
+    kill -0 "-$pid" 2>/dev/null && alive=1
+    for target in $pid $pids; do
+      kill -0 "$target" 2>/dev/null && alive=1
+    done
+    [ "$alive" -eq 0 ] && break
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge 20 ] && exit 1
+    sleep 0.05
+  done
 fi
 rm -f "$pidfile""#;
 
@@ -407,7 +424,12 @@ impl PodmanSession {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
-        let _ = timeout(Duration::from_secs(2), command.status()).await;
+        let status = timeout(Duration::from_secs(2), command.status())
+            .await
+            .map_err(|_| anyhow!("podman command cleanup timed out"))??;
+        if !status.success() {
+            bail!("podman command cleanup exited with {status}");
+        }
         Ok(())
     }
 
@@ -989,8 +1011,25 @@ mod tests {
         assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidfile\""));
         assert!(SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
+
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
+        assert!(SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
+        assert!(SANDBOX_KILL_WRAPPER.contains("[ \"$attempts\" -ge 20 ] && exit 1"));
+    }
+    #[test]
+    fn kill_wrapper_rejects_a_missing_pidfile() {
+        let missing =
+            std::env::temp_dir().join(format!("nac-missing-pidfile-{}.pid", uuid::Uuid::new_v4()));
+        let status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_KILL_WRAPPER)
+            .arg("nac-kill")
+            .arg(missing)
+            .status()
+            .unwrap();
+
+        assert!(!status.success());
     }
 }

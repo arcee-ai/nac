@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 use tokio::time::sleep;
 
 use crate::process::ProcessTreeGuard;
@@ -34,6 +35,9 @@ const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    active_one_shots: Arc<AtomicUsize>,
+    active_one_shot_failures: Arc<StdMutex<Vec<String>>>,
+    active_one_shot_activity: Arc<Notify>,
     max_sessions: usize,
     isolate_process_groups: bool,
     output_registry: OutputRegistry,
@@ -60,6 +64,9 @@ impl TerminalManager {
     ) -> Result<Self> {
         Ok(Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            active_one_shots: Arc::new(AtomicUsize::new(0)),
+            active_one_shot_failures: Arc::new(StdMutex::new(Vec::new())),
+            active_one_shot_activity: Arc::new(Notify::new()),
             max_sessions: 16,
             isolate_process_groups,
             output_registry: OutputRegistry::new(limits)?,
@@ -239,6 +246,60 @@ impl TerminalManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub async fn exec_one_shot_managed(
+        &self,
+        cmd: String,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        yield_ms: u64,
+        max_output: usize,
+        backend: Arc<ExecutionBackend>,
+        cancellation: ThreadCancellation,
+    ) -> CommandOutput {
+        self.active_one_shots.fetch_add(1, Ordering::AcqRel);
+        let manager = self.clone();
+        let task = tokio::spawn(async move {
+            let _active = ActiveOneShotGuard {
+                manager: manager.clone(),
+            };
+            let output = manager
+                .exec_one_shot(
+                    &cmd,
+                    cwd,
+                    cols,
+                    rows,
+                    yield_ms,
+                    max_output,
+                    backend.as_ref(),
+                    Some(&cancellation),
+                )
+                .await;
+            if output.stderr_preview.contains("command cleanup incomplete") {
+                manager
+                    .lock_one_shot_failures()
+                    .push(output.stderr_preview.clone());
+            }
+            output
+        });
+        match task.await {
+            Ok(output) => output,
+            Err(error) => CommandOutput {
+                status: CommandStatus::SpawnError,
+                exit_code: None,
+                wall_time_ms: 0,
+                stdout_preview: String::new(),
+                stderr_preview: format!("command task failed: {error}"),
+                output_id: None,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                truncated: false,
+                overflowed: false,
+            },
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn exec_one_shot(
         &self,
         cmd: &str,
@@ -384,7 +445,13 @@ impl TerminalManager {
         let mut force_reader_shutdown = false;
         if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
-                let _ = backend.terminal_pipe_kill(pidfile).await;
+                if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
+                    let cleanup_error = format!("command cleanup incomplete: {error}");
+                    runtime_error = Some(match runtime_error.take() {
+                        Some(existing) => format!("{existing}\n{cleanup_error}"),
+                        None => cleanup_error,
+                    });
+                }
             }
             match process_tree.terminate(&mut child).await {
                 Ok(()) => force_reader_shutdown = true,
@@ -442,7 +509,13 @@ impl TerminalManager {
                     drain_cancelled = true;
                     status = CommandStatus::Cancelled;
                     if let Some(pidfile) = pidfile.as_deref() {
-                        let _ = backend.terminal_pipe_kill(pidfile).await;
+                        if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
+                            let cleanup_error = format!("command cleanup incomplete: {error}");
+                            runtime_error = Some(match runtime_error.take() {
+                                Some(existing) => format!("{existing}\n{cleanup_error}"),
+                                None => cleanup_error,
+                            });
+                        }
                     }
                     if let Err(error) = process_tree.terminate(&mut child).await {
                         let cleanup_error = format!("command cleanup incomplete: {error}");
@@ -535,7 +608,29 @@ impl TerminalManager {
         self.output_registry.page(output_id, stream, offset, limit)
     }
 
-    pub async fn remove_all(&self) {
+    pub fn begin_run(&self) {
+        if self.active_one_shots.load(Ordering::Acquire) == 0 {
+            self.lock_one_shot_failures().clear();
+        }
+    }
+
+    pub async fn wait_for_one_shot_shutdown(&self) -> Result<()> {
+        loop {
+            let notified = self.active_one_shot_activity.notified();
+            if self.active_one_shots.load(Ordering::Acquire) == 0 {
+                break;
+            }
+            notified.await;
+        }
+        let failures = self.lock_one_shot_failures().clone();
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(failures.join("\n")))
+        }
+    }
+
+    pub async fn terminate_sessions(&self) -> Result<()> {
         let sessions: Vec<TerminalSession> = self
             .sessions
             .lock()
@@ -543,15 +638,46 @@ impl TerminalManager {
             .drain()
             .map(|(_, session)| session)
             .collect();
+        let mut failures = Vec::new();
+        let mut failed_sessions = Vec::new();
         for mut session in sessions {
             if let Err(error) = session.kill().await {
-                eprintln!(
-                    "nac: terminal session '{}' cleanup incomplete during removal: {error:#}",
+                failures.push(format!(
+                    "terminal session '{}' cleanup incomplete: {error:#}",
                     session.name
-                );
+                ));
+                failed_sessions.push(session);
             }
         }
+        if !failed_sessions.is_empty() {
+            let mut sessions = self.sessions.lock().await;
+            for session in failed_sessions {
+                sessions.insert(session.name.clone(), session);
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(failures.join("\n")))
+        }
+    }
+
+    pub async fn remove_all(&self) {
+        if let Err(error) = self.terminate_sessions().await {
+            eprintln!("nac: terminal cleanup incomplete during removal: {error:#}");
+        }
         self.output_registry.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_cleanup_failure_for_test(&self, failure: &str) {
+        self.lock_one_shot_failures().push(failure.to_string());
+    }
+
+    fn lock_one_shot_failures(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
+        self.active_one_shot_failures
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub async fn get(&self, name: &str) -> Option<TerminalInfo> {
@@ -620,6 +746,17 @@ impl TerminalManager {
     }
 }
 
+struct ActiveOneShotGuard {
+    manager: TerminalManager,
+}
+
+impl Drop for ActiveOneShotGuard {
+    fn drop(&mut self) {
+        self.manager.active_one_shots.fetch_sub(1, Ordering::AcqRel);
+        self.manager.active_one_shot_activity.notify_waiters();
+    }
+}
+
 struct StreamChunk {
     stream: OutputStream,
     bytes: Vec<u8>,
@@ -682,6 +819,20 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(receiver.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn cleanup_failure_stays_sticky_until_a_new_run() {
+        let manager = TerminalManager::new();
+        manager
+            .lock_one_shot_failures()
+            .push("command cleanup incomplete: remote still alive".to_string());
+
+        assert!(manager.wait_for_one_shot_shutdown().await.is_err());
+        assert!(manager.wait_for_one_shot_shutdown().await.is_err());
+
+        manager.begin_run();
+        manager.wait_for_one_shot_shutdown().await.unwrap();
     }
     use super::*;
     use crate::paths::PathContext;

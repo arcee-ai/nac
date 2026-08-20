@@ -2451,6 +2451,7 @@ impl SessionManager {
             .await
         {
             Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
+            Err(error @ SessionCancelError::CleanupFailed { .. }) => Err(error.into()),
         }
     }
 

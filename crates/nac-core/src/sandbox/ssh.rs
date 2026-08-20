@@ -238,7 +238,12 @@ impl SshBackend {
         command.stdin(Stdio::null());
         command.stdout(Stdio::null());
         command.stderr(Stdio::null());
-        let _ = timeout(REMOTE_KILL_TIMEOUT, command.status()).await;
+        let status = timeout(REMOTE_KILL_TIMEOUT, command.status())
+            .await
+            .map_err(|_| anyhow::anyhow!("ssh command cleanup timed out"))??;
+        if !status.success() {
+            bail!("ssh command cleanup exited with {status}");
+        }
         Ok(())
     }
 

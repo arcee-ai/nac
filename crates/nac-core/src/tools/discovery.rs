@@ -194,6 +194,10 @@ impl SearchCancellation {
     fn flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.0)
     }
+
+    fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 impl Drop for SearchCancellation {
@@ -276,6 +280,9 @@ impl LocalFs {
 
 impl WorkspaceFs {
     async fn open(runtime: &ToolRuntime) -> SearchResult<Self> {
+        if runtime.command_cancellation.is_cancelled() {
+            return Err(SearchError::new("search_cancelled", "search cancelled"));
+        }
         match runtime.backend.as_ref() {
             ExecutionBackend::Local { workspace_cwd } => {
                 let root = tokio::fs::canonicalize(workspace_cwd)
@@ -405,23 +412,52 @@ impl WorkspaceFs {
                 let _ = tokio::io::copy(&mut stderr, &mut sink).await;
             });
         }
-        let sftp = Sftp::new(stdin, stdout, SftpOptions::default())
-            .await
-            .map_err(|error| {
+        let handshaken = {
+            let handshake = Sftp::new(stdin, stdout, SftpOptions::default());
+            tokio::pin!(handshake);
+            tokio::select! {
+                result = &mut handshake => Some(result),
+                _ = runtime.command_cancellation.cancelled() => None,
+            }
+        };
+        let sftp = match handshaken {
+            Some(result) => result.map_err(|error| {
                 SearchError::new(
                     "backend_protocol",
                     format!("SSH SFTP handshake failed: {error}"),
                 )
-            })?;
+            })?,
+            None => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Err(SearchError::new("search_cancelled", "search cancelled"));
+            }
+        };
         let requested = ssh.sftp_workspace_path();
         let mut fs = sftp.fs();
-        let root = fs.canonicalize(&requested).await.map_err(|error| {
-            SearchError::at(
-                "unreadable_path",
-                error.to_string(),
-                requested.display().to_string(),
-            )
-        })?;
+        let canonicalized = {
+            let canonicalize = fs.canonicalize(&requested);
+            tokio::pin!(canonicalize);
+            tokio::select! {
+                result = &mut canonicalize => Some(result),
+                _ = runtime.command_cancellation.cancelled() => None,
+            }
+        };
+        let root = match canonicalized {
+            Some(result) => result.map_err(|error| {
+                SearchError::at(
+                    "unreadable_path",
+                    error.to_string(),
+                    requested.display().to_string(),
+                )
+            })?,
+            None => {
+                drop(fs);
+                let _ = sftp.close().await;
+                let _ = child.wait().await;
+                return Err(SearchError::new("search_cancelled", "search cancelled"));
+            }
+        };
         Ok(Self::Remote(RemoteFs {
             root: root.clone(),
             absolute_roots: vec![requested, root.clone()],
@@ -1108,13 +1144,25 @@ async fn execute_inner(
     let cancellation = SearchCancellation::new();
     let cancellation_flag = cancellation.flag();
     let mut fs = WorkspaceFs::open(runtime).await?;
-    let result = match tool {
-        "glob" => run_glob(&mut fs, &args, &cancellation_flag).await,
-        "grep" => run_grep(&mut fs, &args, &cancellation_flag).await,
-        _ => Err(SearchError::new(
-            "invalid_arguments",
-            "unknown discovery tool",
-        )),
+    let result = {
+        let search = async {
+            match tool {
+                "glob" => run_glob(&mut fs, &args, &cancellation_flag).await,
+                "grep" => run_grep(&mut fs, &args, &cancellation_flag).await,
+                _ => Err(SearchError::new(
+                    "invalid_arguments",
+                    "unknown discovery tool",
+                )),
+            }
+        };
+        tokio::pin!(search);
+        tokio::select! {
+            result = &mut search => result,
+            _ = runtime.command_cancellation.cancelled() => {
+                cancellation.cancel();
+                search.await
+            }
+        }
     };
     fs.close().await;
     result
