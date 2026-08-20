@@ -423,7 +423,7 @@ mod active_thread_registry_tests {
     #[tokio::test]
     async fn cancellation_signals_abortable_tools_immediately() {
         assert!(tool_is_abortable("read"));
-        assert!(tool_is_abortable("mcp__remote"));
+        assert!(!tool_is_abortable("mcp__remote"));
         assert!(!tool_is_abortable("write"));
         assert!(!tool_is_abortable("glob"));
         assert!(!tool_is_abortable("grep"));
@@ -649,10 +649,11 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
     Ok(out)
 }
 fn tool_is_abortable(name: &str) -> bool {
-    !matches!(
-        name,
-        "write" | "edit" | "glob" | "grep" | "thread" | "thread_delete" | "workset_define"
-    )
+    !name.starts_with("mcp__")
+        && !matches!(
+            name,
+            "write" | "edit" | "glob" | "grep" | "thread" | "thread_delete" | "workset_define"
+        )
 }
 
 pub async fn execute_tool(

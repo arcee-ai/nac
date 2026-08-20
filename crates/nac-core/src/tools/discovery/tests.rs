@@ -661,24 +661,26 @@ async fn rust_regex_engine_handles_pathological_patterns_in_linear_time() {
 
 #[tokio::test]
 async fn aborting_native_search_stops_promptly() {
-    struct PauseGuard;
+    struct PauseGuard(String);
     impl Drop for PauseGuard {
         fn drop(&mut self) {
-            super::PAUSE_SEARCH_TASKS.store(false, std::sync::atomic::Ordering::Release);
+            super::set_search_task_paused(&self.0, false);
         }
     }
 
     let (runtime, root) = fixture_runtime();
-    fs::write(root.join("src/large.txt"), vec![b'a'; 8 * 1024 * 1024])
+    let search_path = format!("src/cancel-{}.txt", uuid::Uuid::new_v4());
+    fs::write(root.join(&search_path), vec![b'a'; 8 * 1024 * 1024])
         .expect("write cancellation fixture");
-    super::PAUSE_SEARCH_TASKS.store(true, std::sync::atomic::Ordering::Release);
-    let _pause_guard = PauseGuard;
+    super::set_search_task_paused(&search_path, true);
+    let _pause_guard = PauseGuard(search_path.clone());
+    let task_search_path = search_path.clone();
     let task = tokio::spawn(async move {
         execute(
             "grep",
             json!({
                 "pattern": "not-present",
-                "globs": ["src/large.txt"],
+                "globs": [task_search_path],
                 "case": "sensitive"
             }),
             &runtime,
@@ -686,7 +688,7 @@ async fn aborting_native_search_stops_promptly() {
         .await
     });
     tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        while super::ACTIVE_SEARCH_TASKS.load(std::sync::atomic::Ordering::Acquire) == 0 {
+        while super::active_search_tasks(&search_path) == 0 {
             tokio::task::yield_now().await;
         }
     })
@@ -699,9 +701,9 @@ async fn aborting_native_search_stops_promptly() {
     assert!(joined
         .expect_err("aborted task must not complete")
         .is_cancelled());
-    super::PAUSE_SEARCH_TASKS.store(false, std::sync::atomic::Ordering::Release);
+    super::set_search_task_paused(&search_path, false);
     tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        while super::ACTIVE_SEARCH_TASKS.load(std::sync::atomic::Ordering::Acquire) != 0 {
+        while super::active_search_tasks(&search_path) != 0 {
             tokio::task::yield_now().await;
         }
     })
@@ -712,25 +714,27 @@ async fn aborting_native_search_stops_promptly() {
 
 #[tokio::test]
 async fn run_cancellation_waits_for_native_search_shutdown() {
-    struct PauseGuard;
+    struct PauseGuard(String);
     impl Drop for PauseGuard {
         fn drop(&mut self) {
-            super::PAUSE_SEARCH_TASKS.store(false, std::sync::atomic::Ordering::Release);
+            super::set_search_task_paused(&self.0, false);
         }
     }
 
     let (runtime, root) = fixture_runtime();
     let cancellation = runtime.command_cancellation.clone();
-    fs::write(root.join("src/large.txt"), vec![b'a'; 8 * 1024 * 1024])
+    let search_path = format!("src/cancel-{}.txt", uuid::Uuid::new_v4());
+    fs::write(root.join(&search_path), vec![b'a'; 8 * 1024 * 1024])
         .expect("write cancellation fixture");
-    super::PAUSE_SEARCH_TASKS.store(true, std::sync::atomic::Ordering::Release);
-    let _pause_guard = PauseGuard;
+    super::set_search_task_paused(&search_path, true);
+    let _pause_guard = PauseGuard(search_path.clone());
+    let task_search_path = search_path.clone();
     let task = tokio::spawn(async move {
         execute(
             "grep",
             json!({
                 "pattern": "not-present",
-                "globs": ["src/large.txt"],
+                "globs": [task_search_path],
                 "case": "sensitive"
             }),
             &runtime,
@@ -738,7 +742,7 @@ async fn run_cancellation_waits_for_native_search_shutdown() {
         .await
     });
     tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        while super::ACTIVE_SEARCH_TASKS.load(std::sync::atomic::Ordering::Acquire) == 0 {
+        while super::active_search_tasks(&search_path) == 0 {
             tokio::task::yield_now().await;
         }
     })
@@ -750,10 +754,7 @@ async fn run_cancellation_waits_for_native_search_shutdown() {
         .await
         .expect("run cancellation must stop and join the search")
         .unwrap();
-    assert_eq!(
-        super::ACTIVE_SEARCH_TASKS.load(std::sync::atomic::Ordering::Acquire),
-        0
-    );
+    assert_eq!(super::active_search_tasks(&search_path), 0);
     fs::remove_dir_all(root).expect("remove fixture");
 }
 

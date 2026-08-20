@@ -93,6 +93,9 @@ fn start_guidance() -> String {
 }
 
 pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
+if ! (set -C; printf '%s' starting > "$pidfile") 2>/dev/null; then
+  exit 130
+fi
 if command -v setsid >/dev/null 2>&1; then
   setsid bash -c "$1" &
 else
@@ -100,14 +103,28 @@ else
   bash -c "$1" &
 fi
 pid=$!
-printf '%s' "$pid" > "$pidfile"
+pidtmp="${pidfile}.ready.$$"
+if ! printf '%s' "$pid" > "$pidtmp" || ! mv -f "$pidtmp" "$pidfile"; then
+  rm -f "$pidtmp"
+  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null
+  rm -f "$pidfile"
+  exit 125
+fi
 wait "$pid"
 status=$?
 rm -f "$pidfile"
 exit "$status""#;
 
 pub(crate) const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$1
-printf '%s' "$$" > "$pidfile"
+if ! (set -C; printf '%s' starting > "$pidfile") 2>/dev/null; then
+  exit 130
+fi
+pidtmp="${pidfile}.ready.$$"
+if ! printf '%s' "$$" > "$pidtmp" || ! mv -f "$pidtmp" "$pidfile"; then
+  rm -f "$pidtmp" "$pidfile"
+  exit 125
+fi
 bash -i
 status=$?
 rm -f "$pidfile"
@@ -115,7 +132,17 @@ exit "$status""#;
 
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
 attempts=0
-while ! pid=$(cat "$pidfile" 2>/dev/null); do
+while :; do
+  if pid=$(cat "$pidfile" 2>/dev/null); then
+    case "$pid" in
+      cancelled) exit 0 ;;
+      starting|'') ;;
+      *[!0-9]*) exit 1 ;;
+      *) [ "$pid" -gt 0 ] || exit 1; break ;;
+    esac
+  elif (set -C; printf '%s' cancelled > "$pidfile") 2>/dev/null; then
+    exit 0
+  fi
   attempts=$((attempts + 1))
   [ "$attempts" -ge 20 ] && exit 1
   sleep 0.05
@@ -1005,10 +1032,12 @@ mod tests {
     fn sandbox_wrappers_track_and_kill_process_group() {
         assert!(SANDBOX_EXEC_WRAPPER.contains("setsid bash -c"));
         assert!(
-            SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidfile\""),
+            SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidtmp\""),
             "exec wrapper: {SANDBOX_EXEC_WRAPPER}"
         );
-        assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidfile\""));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("mv -f \"$pidtmp\" \"$pidfile\""));
+        assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidtmp\""));
+        assert!(SANDBOX_PTY_WRAPPER.contains("mv -f \"$pidtmp\" \"$pidfile\""));
         assert!(SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
 
@@ -1018,18 +1047,53 @@ mod tests {
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("[ \"$attempts\" -ge 20 ] && exit 1"));
     }
+
     #[test]
-    fn kill_wrapper_rejects_a_missing_pidfile() {
-        let missing =
+    fn kill_wrapper_tombstones_a_missing_pidfile() {
+        let pidfile =
             std::env::temp_dir().join(format!("nac-missing-pidfile-{}.pid", uuid::Uuid::new_v4()));
+        let marker =
+            std::env::temp_dir().join(format!("nac-late-command-{}", uuid::Uuid::new_v4()));
+        let kill_status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_KILL_WRAPPER)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .status()
+            .unwrap();
+
+        assert!(kill_status.success());
+        assert_eq!(std::fs::read_to_string(&pidfile).unwrap(), "cancelled");
+
+        let exec_status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_EXEC_WRAPPER)
+            .arg("nac-exec")
+            .arg(format!("printf ran > '{}'", shell_escape_path(&marker)))
+            .arg(&pidfile)
+            .status()
+            .unwrap();
+
+        assert!(!exec_status.success());
+        assert!(!marker.exists());
+        let _ = std::fs::remove_file(pidfile);
+    }
+
+    #[test]
+    fn kill_wrapper_rejects_an_empty_pidfile() {
+        let pidfile =
+            std::env::temp_dir().join(format!("nac-empty-pidfile-{}.pid", uuid::Uuid::new_v4()));
+        std::fs::write(&pidfile, "").unwrap();
+
         let status = StdCommand::new("sh")
             .arg("-c")
             .arg(SANDBOX_KILL_WRAPPER)
             .arg("nac-kill")
-            .arg(missing)
+            .arg(&pidfile)
             .status()
             .unwrap();
 
         assert!(!status.success());
+        let _ = std::fs::remove_file(pidfile);
     }
 }

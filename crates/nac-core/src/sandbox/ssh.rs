@@ -229,11 +229,7 @@ impl SshBackend {
     }
 
     pub(crate) async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
-        let remote = format!(
-            "sh -c {} nac-kill {}",
-            shell_quote(SANDBOX_KILL_WRAPPER),
-            shell_quote_path(pidfile)
-        );
+        let remote = ssh_kill_command(pidfile);
         let mut command = self.ssh_command(&remote);
         command.stdin(Stdio::null());
         command.stdout(Stdio::null());
@@ -313,9 +309,21 @@ chmod 700 "$HOME/.cache/nac" "$pidfile_dir" || exit 125
     )
 }
 
+fn ssh_kill_command(pidfile: &str) -> String {
+    [
+        "bash".to_string(),
+        "-lc".to_string(),
+        shell_quote(&ssh_wrapper_script(SANDBOX_KILL_WRAPPER)),
+        "nac-kill".to_string(),
+        shell_quote_path(pidfile),
+    ]
+    .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command as StdCommand;
 
     fn backend() -> SshBackend {
         SshBackend::new("build-box".to_string(), PathBuf::from("/srv/work/project"))
@@ -588,5 +596,21 @@ mod tests {
                 OsString::from("/keys/ci"),
             ]
         );
+    }
+    #[test]
+    fn ssh_kill_creates_pidfile_directory_before_tombstoning() {
+        let home =
+            std::env::temp_dir().join(format!("nac-ssh-kill-{}", uuid::Uuid::new_v4().simple()));
+        let pidfile = home.join(".cache/nac/exec/command.pid");
+        let status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(ssh_kill_command(pidfile.to_str().unwrap()))
+            .env("HOME", &home)
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+        assert_eq!(std::fs::read_to_string(&pidfile).unwrap(), "cancelled");
+        let _ = std::fs::remove_dir_all(home);
     }
 }

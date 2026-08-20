@@ -2205,10 +2205,42 @@ impl SessionService {
             cleanup_failures.push(error.to_string());
         }
         if !cleanup_failures.is_empty() {
-            self.restore_run_after_cancel_cleanup_failure(&cancelling_run.snapshot.run_id);
+            let message = cleanup_failures.join("\n");
+            self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
+            self.normalize_failed_run_transcript().await;
+            let usage = self.agent.lock().await.last_usage.clone();
+            let event_message = match self
+                .persist_run_snapshot(
+                    &cancelling_run.snapshot,
+                    cancelling_run.transcript_baseline,
+                    None,
+                    usage,
+                    DurableRunTerminal::Failed,
+                )
+                .await
+            {
+                Ok(()) => format!("run cancellation cleanup failed: {message}"),
+                Err(error) => {
+                    eprintln!(
+                        "nac: failed to persist cleanup failure for run {}: {error:#}",
+                        cancelling_run.snapshot.run_id
+                    );
+                    format!(
+                        "run cancellation cleanup failed: {message}\nAdditionally, failed to persist session snapshot: {error:#}"
+                    )
+                }
+            };
+            self.event_bus.emit_with_context(
+                SessionEvent::RunFailed {
+                    message: event_message,
+                },
+                Some(cancelling_run.snapshot.run_id.clone()),
+                cancelling_run.snapshot.client_id.clone(),
+            );
+            self.clear_finished_run(&cancelling_run.snapshot.run_id);
             return Err(SessionCancelError::CleanupFailed {
                 run_id: cancelling_run.snapshot.run_id,
-                message: cleanup_failures.join("\n"),
+                message,
             });
         }
 
@@ -2725,16 +2757,6 @@ impl SessionService {
             task: active_run.task.take(),
             transcript_baseline: active_run.transcript_baseline,
         })
-    }
-
-    fn restore_run_after_cancel_cleanup_failure(&self, run_id: &SessionRunId) {
-        let mut guard = self.lock_active_operation();
-        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
-            return;
-        };
-        if &active_run.snapshot.run_id == run_id {
-            active_run.finishing = false;
-        }
     }
 
     fn run_prompt_commit(
@@ -7295,7 +7317,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_failure_never_emits_run_cancelled() {
+    async fn cleanup_failure_finishes_run_as_failed() {
         let (parts, store_path) =
             test_active_service("cancel_cleanup_failure", "cancel-cleanup-failure");
         let active = parts
@@ -7307,23 +7329,34 @@ pub(super) mod tests {
             .terminal_manager
             .record_cleanup_failure_for_test("remote process still alive");
 
-        for _ in 0..2 {
-            assert!(matches!(
-                parts.service.request_cancel(&active.run_id).await,
-                Err(SessionCancelError::CleanupFailed { .. })
-            ));
-            assert_eq!(
-                parts.service.active_run().map(|run| run.run_id),
-                Some(active.run_id.clone())
-            );
-            assert!(!parts
+        assert!(matches!(
+            parts.service.request_cancel(&active.run_id).await,
+            Err(SessionCancelError::CleanupFailed { .. })
+        ));
+        assert!(parts.service.active_run().is_none());
+        let events = parts.service.recent_events(None, 32).1;
+        assert!(!events.iter().any(|event| {
+            event.run_id.as_ref() == Some(&active.run_id)
+                && event.event == SessionEvent::RunCancelled
+        }));
+        assert!(events.iter().any(|event| {
+            event.run_id.as_ref() == Some(&active.run_id)
+                && matches!(&event.event, SessionEvent::RunFailed { .. })
+        }));
+
+        let next = parts
+            .service
+            .try_begin_run(None, "reuse after cleanup failure")
+            .unwrap();
+        assert!(
+            parts
                 .service
-                .recent_events(None, 32)
-                .1
-                .iter()
-                .any(|event| event.run_id.as_ref() == Some(&active.run_id)
-                    && event.event == SessionEvent::RunCancelled));
-        }
+                .finish_run_once(
+                    &next.run_id,
+                    RunOutcome::Failed("test cleanup".to_string(), None),
+                )
+                .await
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

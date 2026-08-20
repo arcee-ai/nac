@@ -52,25 +52,70 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const CURSOR_VERSION: u64 = 1;
 
 #[cfg(test)]
-static ACTIVE_SEARCH_TASKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ACTIVE_SEARCH_TASKS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, usize>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 #[cfg(test)]
-static PAUSE_SEARCH_TASKS: AtomicBool = AtomicBool::new(false);
+static PAUSED_SEARCH_TASKS: std::sync::LazyLock<std::sync::Mutex<HashSet<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
 
 #[cfg(test)]
-struct ActiveSearchTask;
+fn set_search_task_paused(path: &str, paused: bool) {
+    let mut paths = PAUSED_SEARCH_TASKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if paused {
+        paths.insert(path.to_string());
+    } else {
+        paths.remove(path);
+    }
+}
+
+#[cfg(test)]
+fn search_task_paused(path: &str) -> bool {
+    PAUSED_SEARCH_TASKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .contains(path)
+}
+
+#[cfg(test)]
+fn active_search_tasks(path: &str) -> usize {
+    ACTIVE_SEARCH_TASKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(path)
+        .copied()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+struct ActiveSearchTask(String);
 
 #[cfg(test)]
 impl ActiveSearchTask {
-    fn begin() -> Self {
-        ACTIVE_SEARCH_TASKS.fetch_add(1, Ordering::AcqRel);
-        Self
+    fn begin(path: &str) -> Self {
+        *ACTIVE_SEARCH_TASKS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(path.to_string())
+            .or_default() += 1;
+        Self(path.to_string())
     }
 }
 
 #[cfg(test)]
 impl Drop for ActiveSearchTask {
     fn drop(&mut self) {
-        ACTIVE_SEARCH_TASKS.fetch_sub(1, Ordering::AcqRel);
+        let mut tasks = ACTIVE_SEARCH_TASKS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(count) = tasks.get_mut(&self.0) else {
+            return;
+        };
+        *count -= 1;
+        if *count == 0 {
+            tasks.remove(&self.0);
+        }
     }
 }
 
@@ -1847,9 +1892,9 @@ async fn search_file(
     let initial_materialized_bytes = *materialized_bytes;
     match tokio::task::spawn_blocking(move || {
         #[cfg(test)]
-        let _active_search = ActiveSearchTask::begin();
+        let _active_search = ActiveSearchTask::begin(&path);
         #[cfg(test)]
-        while PAUSE_SEARCH_TASKS.load(Ordering::Acquire) && !cancellation.load(Ordering::Acquire) {
+        while search_task_paused(&path) && !cancellation.load(Ordering::Acquire) {
             std::thread::yield_now();
         }
         let mut materialized_bytes = initial_materialized_bytes;
