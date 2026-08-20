@@ -86,8 +86,11 @@ pub(crate) fn insert_session_fork_with_connection(
 /// The fork's transcript blob already holds the prefix, so orchestrator
 /// transcript-log rows are not copied. A prefix that is the whole source
 /// transcript copies every current artifact. A shorter prefix keeps only
-/// threads and worksets mentioned in those messages, and only as many
-/// dispatches as that prefix recorded.
+/// threads and worksets mentioned in those messages. History is cut at the
+/// last transcript-log timestamp in the prefix (or, without a log, at as
+/// many thread dispatches as that prefix recorded). Steering is copied by
+/// that same cutoff, not by tool-call ids — worker dispatch ids are a
+/// different UUID.
 pub fn clone_session_conversation_artifacts(
     path: &Path,
     source_session_id: &str,
@@ -105,6 +108,7 @@ pub fn clone_session_conversation_artifacts(
             &tx,
             source_session_id,
             fork_session_id,
+            prefix_len,
             &prefix_conversation_artifacts(prefix),
         )?;
     }
@@ -191,8 +195,10 @@ fn clone_prefix_conversation_artifacts(
     tx: &Transaction<'_>,
     source_session_id: &str,
     fork_session_id: &str,
+    prefix_len: i64,
     artifacts: &PrefixArtifacts,
 ) -> Result<()> {
+    let cutoff = prefix_created_at_cutoff(tx, source_session_id, prefix_len)?;
     for (thread_name, thread) in &artifacts.threads {
         let inserted = tx.execute(
             "INSERT INTO threads (name, session_id, created_at, updated_at)
@@ -205,80 +211,26 @@ fn clone_prefix_conversation_artifacts(
             continue;
         }
 
-        let episode_limit = if thread.dispatch_ids.is_empty() {
-            -1
-        } else {
-            i64::try_from(thread.dispatch_ids.len()).context("thread dispatch count overflowed")?
-        };
-        tx.execute(
-            "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
-             SELECT thread_name, ?1, action, content, status, created_at
-             FROM episodes
-             WHERE session_id = ?2 AND thread_name = ?3
-             ORDER BY id ASC
-             LIMIT ?4",
-            params![
-                fork_session_id,
-                source_session_id,
-                thread_name,
-                episode_limit
-            ],
+        if let Some(cutoff) = cutoff.as_deref() {
+            clone_thread_rows_through(tx, source_session_id, fork_session_id, thread_name, cutoff)?;
+            continue;
+        }
+
+        // No transcript-log timestamps: copy only as many dispatches as the
+        // prefix itself recorded. A mentioned-only thread has no count, so
+        // later source history is left behind rather than leaked.
+        let episode_limit =
+            i64::try_from(thread.dispatch_count).context("thread dispatch count overflowed")?;
+        if episode_limit == 0 {
+            continue;
+        }
+        clone_thread_rows_for_dispatches(
+            tx,
+            source_session_id,
+            fork_session_id,
+            thread_name,
+            episode_limit,
         )?;
-
-        if thread.dispatch_ids.is_empty() {
-            tx.execute(
-                "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
-                 SELECT ?1, thread_name, event_json, created_at
-                 FROM thread_events
-                 WHERE session_id = ?2 AND thread_name = ?3 AND thread_name != ?4
-                 ORDER BY id ASC",
-                params![
-                    fork_session_id,
-                    source_session_id,
-                    thread_name,
-                    ORCHESTRATOR_STEERING_TARGET
-                ],
-            )?;
-        } else {
-            tx.execute(
-                "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
-                 SELECT ?1, src.thread_name, src.event_json, src.created_at
-                 FROM thread_events src
-                 WHERE src.session_id = ?2
-                   AND src.thread_name = ?3
-                   AND src.thread_name != ?5
-                   AND (
-                       SELECT COUNT(*)
-                       FROM thread_events started
-                       WHERE started.session_id = src.session_id
-                         AND started.thread_name = src.thread_name
-                         AND started.id <= src.id
-                         AND json_extract(started.event_json, '$.type') = 'thread_started'
-                   ) <= ?4
-                 ORDER BY src.id ASC",
-                params![
-                    fork_session_id,
-                    source_session_id,
-                    thread_name,
-                    episode_limit,
-                    ORCHESTRATOR_STEERING_TARGET
-                ],
-            )?;
-        }
-
-        for dispatch_id in &thread.dispatch_ids {
-            tx.execute(
-                "INSERT INTO thread_steering
-                     (session_id, thread_name, dispatch_id, instruction, status,
-                      created_at, claimed_at, delivered_at, expired_at)
-                 SELECT ?1, thread_name, dispatch_id, instruction, status,
-                        created_at, claimed_at, delivered_at, expired_at
-                 FROM thread_steering
-                 WHERE session_id = ?2 AND thread_name = ?3 AND dispatch_id = ?4
-                 ORDER BY id ASC",
-                params![fork_session_id, source_session_id, thread_name, dispatch_id],
-            )?;
-        }
     }
 
     for workset_id in &artifacts.workset_ids {
@@ -308,6 +260,140 @@ fn clone_prefix_conversation_artifacts(
             params![fork_session_id, source_session_id, workset_id],
         )?;
     }
+    Ok(())
+}
+
+fn prefix_created_at_cutoff(
+    tx: &Transaction<'_>,
+    source_session_id: &str,
+    prefix_len: i64,
+) -> Result<Option<String>> {
+    if prefix_len <= 0 {
+        return Ok(None);
+    }
+    let cutoff: Option<String> = tx.query_row(
+        "SELECT MAX(created_at)
+         FROM thread_events
+         WHERE session_id = ?1
+           AND thread_name = ?2
+           AND json_extract(event_json, '$.nac_transcript_message.idx') IS NOT NULL
+           AND CAST(json_extract(event_json, '$.nac_transcript_message.idx') AS INTEGER) < ?3",
+        params![source_session_id, ORCHESTRATOR_STEERING_TARGET, prefix_len],
+        |row| row.get(0),
+    )?;
+    Ok(cutoff.filter(|value| !value.is_empty()))
+}
+
+fn clone_thread_rows_through(
+    tx: &Transaction<'_>,
+    source_session_id: &str,
+    fork_session_id: &str,
+    thread_name: &str,
+    cutoff: &str,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
+         SELECT thread_name, ?1, action, content, status, created_at
+         FROM episodes
+         WHERE session_id = ?2 AND thread_name = ?3 AND created_at <= ?4
+         ORDER BY id ASC",
+        params![fork_session_id, source_session_id, thread_name, cutoff],
+    )?;
+    tx.execute(
+        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+         SELECT ?1, thread_name, event_json, created_at
+         FROM thread_events
+         WHERE session_id = ?2
+           AND thread_name = ?3
+           AND thread_name != ?5
+           AND created_at <= ?4
+         ORDER BY id ASC",
+        params![
+            fork_session_id,
+            source_session_id,
+            thread_name,
+            cutoff,
+            ORCHESTRATOR_STEERING_TARGET
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO thread_steering
+             (session_id, thread_name, dispatch_id, instruction, status,
+              created_at, claimed_at, delivered_at, expired_at)
+         SELECT ?1, thread_name, dispatch_id, instruction, status,
+                created_at, claimed_at, delivered_at, expired_at
+         FROM thread_steering
+         WHERE session_id = ?2 AND thread_name = ?3 AND created_at <= ?4
+         ORDER BY id ASC",
+        params![fork_session_id, source_session_id, thread_name, cutoff],
+    )?;
+    Ok(())
+}
+
+fn clone_thread_rows_for_dispatches(
+    tx: &Transaction<'_>,
+    source_session_id: &str,
+    fork_session_id: &str,
+    thread_name: &str,
+    episode_limit: i64,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
+         SELECT thread_name, ?1, action, content, status, created_at
+         FROM episodes
+         WHERE session_id = ?2 AND thread_name = ?3
+         ORDER BY id ASC
+         LIMIT ?4",
+        params![
+            fork_session_id,
+            source_session_id,
+            thread_name,
+            episode_limit
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+         SELECT ?1, src.thread_name, src.event_json, src.created_at
+         FROM thread_events src
+         WHERE src.session_id = ?2
+           AND src.thread_name = ?3
+           AND src.thread_name != ?5
+           AND (
+               SELECT COUNT(*)
+               FROM thread_events started
+               WHERE started.session_id = src.session_id
+                 AND started.thread_name = src.thread_name
+                 AND started.id <= src.id
+                 AND json_extract(started.event_json, '$.type') = 'thread_started'
+           ) <= ?4
+         ORDER BY src.id ASC",
+        params![
+            fork_session_id,
+            source_session_id,
+            thread_name,
+            episode_limit,
+            ORCHESTRATOR_STEERING_TARGET
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO thread_steering
+             (session_id, thread_name, dispatch_id, instruction, status,
+              created_at, claimed_at, delivered_at, expired_at)
+         SELECT ?1, thread_name, dispatch_id, instruction, status,
+                created_at, claimed_at, delivered_at, expired_at
+         FROM thread_steering
+         WHERE session_id = ?2 AND thread_name = ?3
+           AND created_at <= COALESCE(
+               (SELECT MAX(created_at)
+                FROM thread_events
+                WHERE session_id = ?1 AND thread_name = ?3),
+               (SELECT MAX(created_at)
+                FROM episodes
+                WHERE session_id = ?1 AND thread_name = ?3)
+           )
+         ORDER BY id ASC",
+        params![fork_session_id, source_session_id, thread_name],
+    )?;
     Ok(())
 }
 
@@ -356,7 +442,7 @@ struct PrefixArtifacts {
 
 #[derive(Default)]
 struct ThreadPrefix {
-    dispatch_ids: Vec<String>,
+    dispatch_count: usize,
 }
 
 fn prefix_conversation_artifacts(prefix: &[Message]) -> PrefixArtifacts {
@@ -375,10 +461,7 @@ fn prefix_conversation_artifacts(prefix: &[Message]) -> PrefixArtifacts {
             match call.function.name.as_str() {
                 "thread" => {
                     if let Some(name) = json_nonempty_str(&arguments, "name") {
-                        let thread = artifacts.threads.entry(name).or_default();
-                        if !call.id.trim().is_empty() {
-                            thread.dispatch_ids.push(call.id.clone());
-                        }
+                        artifacts.threads.entry(name).or_default().dispatch_count += 1;
                     }
                     if let Some(sources) =
                         arguments.get("threads").and_then(|value| value.as_array())
