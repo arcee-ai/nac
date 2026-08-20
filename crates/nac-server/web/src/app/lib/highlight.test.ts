@@ -32,6 +32,31 @@ function line(kind: WorkspaceDiffLine["kind"], content: string): WorkspaceDiffLi
   };
 }
 
+function section(lines: WorkspaceDiffLine[]): WorkspaceDiffSection[] {
+  return [
+    {
+      stage: "unstaged",
+      status: "modified",
+      binary: false,
+      too_large: false,
+      truncated: false,
+      additions: lines.filter(({ kind }) => kind === "insert").length,
+      deletions: lines.filter(({ kind }) => kind === "delete").length,
+      error: null,
+      hunks: [
+        {
+          old_start: 1,
+          old_lines: lines.filter(({ kind }) => kind !== "insert").length,
+          new_start: 1,
+          new_lines: lines.filter(({ kind }) => kind !== "delete").length,
+          function_context: null,
+          lines,
+        },
+      ],
+    },
+  ];
+}
+
 describe("languageFromPath", () => {
   it("maps common extensions onto Shiki language ids", () => {
     expect(languageFromPath("src/main.rs")).toBe("rust");
@@ -42,6 +67,10 @@ describe("languageFromPath", () => {
     expect(languageFromPath("icon.svg")).toBe("xml");
     expect(languageFromPath("Cargo.toml")).toBe("toml");
     expect(languageFromPath("config.ini")).toBe("ini");
+    expect(languageFromPath("changes.diff")).toBe("diff");
+    expect(languageFromPath("changes.patch")).toBe("diff");
+    expect(languageFromPath("CHANGES.DIFF")).toBe("diff");
+    expect(languageFromPath("CHANGES.PATCH")).toBe("diff");
   });
 
   it("returns null when the extension is unknown", () => {
@@ -119,6 +148,20 @@ describe("highlightCode", () => {
     expect(flatten(lines ?? [])).toBe(source);
     expect(colorsOf(lines ?? []).some((color) => color?.includes("accent"))).toBe(true);
   });
+
+  it.each(["diff", "patch"] as const)("colours and reconstructs a .%s file", async (extension) => {
+    const source = "-old\n+new\n";
+    const lines = await highlightCode(`changes.${extension}`, source);
+
+    expect(lines).not.toBeNull();
+    expect(flatten(lines ?? [])).toBe(source);
+    expect(colorsOf([lines?.[0] ?? []])).toContain("var(--color-text-error-primary)");
+    expect(colorsOf([lines?.[1] ?? []])).toContain("var(--color-text-success-primary)");
+  });
+
+  it("returns null for a non-empty file with an unknown extension", async () => {
+    expect(await highlightCode("changes.unknownext", "-old\n+new\n")).toBeNull();
+  });
 });
 
 describe("highlightDiff", () => {
@@ -126,28 +169,7 @@ describe("highlightDiff", () => {
     const deleted = line("delete", "const a = 1;");
     const context = line("context", "const b = 2;");
     const inserted = line("insert", "const c = 3;");
-    const sections: WorkspaceDiffSection[] = [
-      {
-        stage: "unstaged",
-        status: "modified",
-        binary: false,
-        too_large: false,
-        truncated: false,
-        additions: 1,
-        deletions: 1,
-        error: null,
-        hunks: [
-          {
-            old_start: 1,
-            old_lines: 2,
-            new_start: 1,
-            new_lines: 2,
-            function_context: null,
-            lines: [deleted, context, inserted],
-          },
-        ],
-      },
-    ];
+    const sections = section([deleted, context, inserted]);
 
     const highlighted = await highlightDiff("src/app.ts", sections);
     expect(highlighted.get(deleted)?.length).toBeGreaterThan(0);
@@ -167,8 +189,24 @@ describe("highlightDiff", () => {
     ).toBe(inserted.content);
   });
 
-  it("returns an empty map for an unknown path extension", async () => {
-    const highlighted = await highlightDiff("notes.unknownext", []);
+  it.each(["diff", "patch"] as const)(
+    "colours and reconstructs .%s file diff lines",
+    async (extension) => {
+      const deleted = line("delete", "-old");
+      const inserted = line("insert", "+new");
+      const highlighted = await highlightDiff(`changes.${extension}`, section([deleted, inserted]));
+      const deletedTokens = highlighted.get(deleted);
+      const insertedTokens = highlighted.get(inserted);
+
+      expect(deletedTokens?.map(({ text }) => text).join("")).toBe(deleted.content);
+      expect(insertedTokens?.map(({ text }) => text).join("")).toBe(inserted.content);
+      expect(colorsOf([deletedTokens ?? []])).toContain("var(--color-text-error-primary)");
+      expect(colorsOf([insertedTokens ?? []])).toContain("var(--color-text-success-primary)");
+    },
+  );
+
+  it("returns an empty map for non-empty input with an unknown path extension", async () => {
+    const highlighted = await highlightDiff("notes.unknownext", section([line("context", "-old")]));
     expect(highlighted.size).toBe(0);
   });
 });
