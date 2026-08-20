@@ -97,6 +97,18 @@ describe("highlightSource", () => {
     const second = await highlightSource("rust", source);
     expect(second).toBe(first);
   });
+
+  it("highlights md fences as markdown and bash/toml by their grammar ids", async () => {
+    const markdown = await highlightSource("md", "# Title\n");
+    const bash = await highlightSource("bash", "echo hi\n");
+    const toml = await highlightSource("toml", 'name = "nac"\n');
+    const diff = await highlightSource("diff", "-old\n+new\n");
+    expect(flatten(markdown ?? [])).toBe("# Title\n");
+    expect(flatten(bash ?? [])).toBe("echo hi\n");
+    expect(flatten(toml ?? [])).toBe('name = "nac"\n');
+    expect(flatten(diff ?? [])).toBe("-old\n+new\n");
+    expect(colorsOf(toml ?? []).some((color) => color.includes("success"))).toBe(true);
+  });
 });
 
 describe("highlightCode", () => {

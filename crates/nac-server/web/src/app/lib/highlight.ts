@@ -9,8 +9,7 @@
 // what came before, but that only costs colours: every path here falls back to
 // plain text rather than risk showing altered code.
 
-import type { HighlighterCore } from "shiki/core";
-import type { LanguageRegistration, ThemedToken } from "@shikijs/types";
+import type { HighlighterCore, LanguageRegistration, ThemedToken } from "shiki/core";
 
 import type { WorkspaceDiffLine, WorkspaceDiffSection } from "@/app/types/api";
 
@@ -88,10 +87,16 @@ const LANGUAGE_BY_EXTENSION: LanguageByExtensionMap = {
 
 // Fence info strings models emit that are not already Shiki grammar ids.
 const LANGUAGE_ALIASES: Record<string, string> = {
+  cc: "cpp",
   cjs: "javascript",
   cs: "csharp",
   cts: "typescript",
+  h: "c",
+  hpp: "cpp",
+  htm: "html",
   js: "javascript",
+  kt: "kotlin",
+  md: "markdown",
   mjs: "javascript",
   mts: "typescript",
   py: "python",
@@ -99,6 +104,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   rs: "rust",
   sh: "bash",
   shell: "bash",
+  svg: "xml",
   ts: "typescript",
   yml: "yaml",
   zsh: "bash",
@@ -266,7 +272,8 @@ async function highlightBlock(language: string, text: string): Promise<CodeToken
     return null;
   }
 
-  if (import.meta.env.DEV && reconstructed(lines) !== text) {
+  // Colour the code only if the tokens spell out exactly what went in.
+  if (reconstructed(lines) !== text) {
     writeCache(key, null);
     return null;
   }

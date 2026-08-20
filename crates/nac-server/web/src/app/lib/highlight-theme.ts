@@ -1,4 +1,4 @@
-import type { ThemeRegistration } from "@shikijs/types";
+import type { ThemeRegistration } from "shiki/core";
 
 // Placeholder hex values TextMate will accept. `colorReplacements` maps each
 // one onto a nac CSS variable so light/dark follow the existing palette.
