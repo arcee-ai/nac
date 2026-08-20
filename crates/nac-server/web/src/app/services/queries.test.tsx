@@ -9,6 +9,7 @@ import {
   queryKeys,
   useLoadOlderMessages,
   useSessionsWithWorkspaceStats,
+  useSessionSkills,
   useThreadEventPages,
 } from "@/app/services/queries";
 import { fenceSessionSnapshot } from "@/app/services/sessionRefresh";
@@ -16,6 +17,7 @@ import type {
   ManagedSessionSummary,
   MessagesPageResponse,
   SessionSnapshotResponse,
+  SkillCatalogEntry,
   ThreadEventPage,
 } from "@/app/types/api";
 
@@ -24,11 +26,15 @@ import type {
 // module is inert unless explicitly enabled.
 const requests = {
   listSessions: vi.fn(),
+  listSessionSkills: vi.fn(),
   getMessages: vi.fn(),
   getThreadEvents: vi.fn(),
 };
 
 vi.spyOn(api, "listSessions").mockImplementation((...args) => requests.listSessions(...args));
+vi.spyOn(api, "listSessionSkills").mockImplementation((...args) =>
+  requests.listSessionSkills(...args),
+);
 vi.spyOn(api, "getMessages").mockImplementation((...args) => requests.getMessages(...args));
 vi.spyOn(api, "getThreadEvents").mockImplementation((...args) => requests.getThreadEvents(...args));
 
@@ -112,6 +118,11 @@ function ThreadPageHarness({ id, threadName }: { id: string; threadName: string 
   return (
     <output data-testid="thread-page">{result.data?.pages[0]?.events[0]?.id ?? "loading"}</output>
   );
+}
+
+function SkillHarness({ id }: { id: string }) {
+  const result = useSessionSkills(id);
+  return <output data-testid="skills">{result.data?.[0]?.name ?? "loading"}</output>;
 }
 
 describe("session-list polling split", () => {
@@ -288,5 +299,46 @@ describe("paged read fencing", () => {
     });
     expect(renderer.getByTestId("thread-page").textContent).toBe("20");
     renderer.unmount();
+  });
+});
+
+describe("session skill catalog", () => {
+  it("keys catalogs by session and refetches when a session remounts", async () => {
+    const reads = new Map<string, number>();
+    requests.listSessionSkills.mockImplementation((id: string) => {
+      const read = (reads.get(id) ?? 0) + 1;
+      reads.set(id, read);
+      return Promise.resolve([
+        {
+          name: `${id}-${read}`,
+          description: id,
+          compatibility: null,
+        } satisfies SkillCatalogEntry,
+      ]);
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const renderer = render(
+      <QueryClientProvider client={client}>
+        <SkillHarness id="A" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(renderer.getByTestId("skills").textContent).toBe("A-1"));
+
+    renderer.rerender(
+      <QueryClientProvider client={client}>
+        <SkillHarness id="B" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(renderer.getByTestId("skills").textContent).toBe("B-1"));
+
+    renderer.rerender(
+      <QueryClientProvider client={client}>
+        <SkillHarness id="A" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(renderer.getByTestId("skills").textContent).toBe("A-2"));
+    expect(requests.listSessionSkills.mock.calls.map(([id]) => id)).toEqual(["A", "B", "A"]);
   });
 });

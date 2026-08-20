@@ -1233,6 +1233,12 @@ export interface ReorderSessionsResponse {
   sessions: SessionSummarySnapshot[];
 }
 
+export interface SkillCatalogEntry {
+  name: string;
+  description: string;
+  compatibility: string | null;
+}
+
 export interface SlashCommandDefinition {
   command: string;
   name: string;

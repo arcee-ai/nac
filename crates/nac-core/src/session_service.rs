@@ -976,6 +976,13 @@ impl SessionService {
         commands::prepare_user_input(input, self.skills.as_deref())
     }
 
+    pub fn skill_catalog_entries(&self) -> Vec<crate::skill_catalog::SkillCatalogEntry> {
+        self.skills
+            .as_deref()
+            .map(SkillRegistry::catalog_entries)
+            .unwrap_or_default()
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn try_submit_prepared_prompt(
         &self,
@@ -4357,6 +4364,14 @@ pub(super) mod tests {
             "skill-expansion-session",
             client,
             Some(registry),
+        );
+        assert_eq!(
+            parts.service.skill_catalog_entries(),
+            vec![crate::skill_catalog::SkillCatalogEntry {
+                name: "demo".to_string(),
+                description: "demo skill".to_string(),
+                compatibility: None,
+            }]
         );
 
         // Preparation keeps the raw/display prompt exactly as typed and
