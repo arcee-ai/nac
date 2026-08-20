@@ -626,13 +626,7 @@ export function buildTranscript(
           kind: "workset",
           key,
           worksetId,
-          pending: worksetDefinePending(
-            call.id,
-            worksetId,
-            results,
-            createdAt[index] ?? null,
-            ctx,
-          ),
+          pending: worksetDefinePending(call.id, worksetId, results, createdAt[index] ?? null, ctx),
         });
       } else if (!SILENT_TOOLS.has(name)) {
         blocks.push({ kind: "tool", key, name, pending: !results.has(call.id) });

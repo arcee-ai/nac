@@ -58,9 +58,7 @@ const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
               <Icon iconName={IconName.Close} size={20} className="shrink-0" />
             )}
           </div>
-          <span className="code-micro opacity-75 whitespace-nowrap">
-            {idLabel}
-          </span>
+          <span className="code-micro opacity-75 whitespace-nowrap">{idLabel}</span>
         </div>
       </div>
     );
@@ -83,9 +81,7 @@ const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
           <span className="header-micro">{label}</span>
           <Icon iconName={IconName.Right} size={20} className="shrink-0" />
         </div>
-        <span className="code code-micro opacity-75 whitespace-nowrap">
-          {idLabel}
-        </span>
+        <span className="code code-micro opacity-75 whitespace-nowrap">{idLabel}</span>
       </div>
     </button>
   );

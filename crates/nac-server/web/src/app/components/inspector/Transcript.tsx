@@ -211,7 +211,8 @@ export function Transcript({
   // untouched between refetches, and the stream half hands its earlier turns
   // straight back, which is what keeps the memoized rows from re-rendering.
   const snapshotTurns = useMemo(
-    () => perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads, finishedToolCalls)),
+    () =>
+      perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads, finishedToolCalls)),
     [snapshot, liveThreads, finishedToolCalls],
   );
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
@@ -248,10 +249,7 @@ export function Transcript({
 
   const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
   const actionsBusy =
-    running ||
-    submitRun.isPending ||
-    regenerateRun.isPending ||
-    forkSession.isPending;
+    running || submitRun.isPending || regenerateRun.isPending || forkSession.isPending;
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
     prompt: string;

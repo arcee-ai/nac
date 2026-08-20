@@ -30,7 +30,7 @@ const ChatSessionLeadingMark: React.FC<ChatSessionLeadingMarkProps> = ({
   if (!sourceTitle) return null;
   const label = `Fork of ${sourceTitle}`;
   return (
-    <Tooltip title={label} sticky className="shrink-0">
+    <Tooltip title={label} position={Tooltip.Position.BottomCenter} sticky className="shrink-0">
       <span className="inline-flex shrink-0" aria-label={label}>
         <Icon iconName={IconName.Scheme} size={16} className={cn("shrink-0", className)} />
       </span>
