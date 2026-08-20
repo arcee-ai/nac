@@ -31,6 +31,7 @@ import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { loadLastLight, storeLastLight } from "@/app/lib/lastLight";
@@ -39,24 +40,23 @@ import {
   withoutInheritedCredential,
   CLEAR_EFFORT,
   csv,
-  launchLocationFromValues,
   nullable,
   serializeExtraHeaders,
 } from "@/app/lib/modelConfig";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { ApiError } from "@/app/services/api";
 import {
   useCreateModelConfig,
+  useCreateProject,
   useCreateSession,
   useModelCatalog,
   useSandboxActivity,
   useSandboxAvailability,
   useStoreInfo,
-  useUpdatePresentation,
 } from "@/app/services/queries";
 import type { BackendKind, CreateSessionRequest, SshTarget } from "@/app/types/api";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 type Mode = "local" | "ssh" | "sandbox";
 
@@ -112,14 +112,19 @@ interface FormError {
 }
 
 /** Remounted on every open so the form always starts from the configured defaults. */
-export function LaunchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: storeInfo } = useStoreInfo();
   const mounted = useExitTransition(open);
   if (!mounted) return null;
-  return <LaunchForm open={open} defaultCwd={storeInfo?.root_cwd ?? ""} onClose={onClose} />;
+  return <CreateProjectForm open={open} defaultCwd={storeInfo?.root_cwd ?? ""} onClose={onClose} />;
 }
 
-function LaunchForm({
+/**
+ * A project is a location plus the defaults its chats inherit, so the form asks
+ * for both and then opens the first chat: a project with nothing in it has
+ * nothing to show.
+ */
+function CreateProjectForm({
   open,
   defaultCwd,
   onClose,
@@ -130,13 +135,13 @@ function LaunchForm({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const createProject = useCreateProject();
   const createSession = useCreateSession();
   const createModelConfig = useCreateModelConfig();
-  const updatePresentation = useUpdatePresentation();
 
   const [mode, setMode] = useState<Mode>("local");
   const [cwd, setCwd] = useState(defaultCwd);
-  const [title, setTitle] = useState("");
+  const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
@@ -145,10 +150,7 @@ function LaunchForm({
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
-  const [light, setLight] = useState<LightSelection>({
-    mode: "single",
-    light: null,
-  });
+  const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
   const [error, setError] = useState<FormError | null>(null);
   // The host this form has actually reached. Everything remote — the working
   // directory above all — is meaningless until one connection has answered, so
@@ -173,7 +175,7 @@ function LaunchForm({
   const connected = isSsh ? connection : null;
   // A local or sandboxed session has nothing to connect to, so it is ready at once.
   const ready = !isSsh || connected !== null;
-  const busy = createSession.isPending || createModelConfig.isPending;
+  const busy = createProject.isPending || createSession.isPending || createModelConfig.isPending;
 
   // A sandboxed launch can spend minutes pulling the image on first run;
   // the polled phase plus an elapsed timer is the difference between
@@ -258,7 +260,7 @@ function LaunchForm({
     setCompaction(value);
   };
 
-  /** Paths belong to whichever machine runs the session, so they do not carry over. */
+  /** Paths belong to whichever machine runs the project, so they do not carry over. */
   const changeMode = (next: Mode) => {
     if (next === mode) return;
     setError(null);
@@ -286,7 +288,7 @@ function LaunchForm({
     if (isSsh && !connected) {
       setError({
         field: "ssh",
-        message: "Connect to the SSH host before creating a session.",
+        message: "Connect to the SSH host before creating a project.",
       });
       return;
     }
@@ -297,14 +299,14 @@ function LaunchForm({
     if (!selection) {
       setError({
         field: "config",
-        message: "Complete the provider configuration before creating a session.",
+        message: "Complete the provider configuration before creating a project.",
       });
       return;
     }
     if (light.mode === "dual" && !light.light) {
       setError({
         field: "config",
-        message: "Pick the light model before creating a session.",
+        message: "Pick the light model before creating a project.",
       });
       return;
     }
@@ -322,6 +324,9 @@ function LaunchForm({
     let baseUrl: string;
     let apiKeyEnv: string | null;
     let configuredEffort: string | null;
+    // Only a saved setup can become the project's default; a one-off catalog
+    // or file pick has no id to point at, so it stays on the first chat alone.
+    let defaultModelConfigId: string | null = null;
     try {
       if (selection.kind === "save") {
         const request =
@@ -335,6 +340,7 @@ function LaunchForm({
         baseUrl = record.base_url;
         apiKeyEnv = record.api_key_env;
         configuredEffort = record.reasoning_effort;
+        defaultModelConfigId = record.config_id;
       } else {
         backend = selection.backend;
         model = selection.model;
@@ -342,6 +348,7 @@ function LaunchForm({
         apiKeyEnv = selection.api_key_env;
         configuredEffort = selection.reasoning_effort;
         headers = headers ?? selection.extra_headers ?? undefined;
+        if (selection.kind === "resolved") defaultModelConfigId = selection.config_id ?? null;
       }
     } catch (saveError) {
       setError({
@@ -351,20 +358,37 @@ function LaunchForm({
       return;
     }
 
+    let projectId: string;
+    try {
+      const project = await createProject.mutateAsync({
+        name: nullable(name),
+        cwd,
+        ssh_host: connected?.ssh_host ?? null,
+        ssh_port: connected?.ssh_port ?? null,
+        ssh_identity_file: connected?.ssh_identity_file ?? null,
+        default_model_config_id: defaultModelConfigId,
+      });
+      projectId = project.project_id;
+    } catch (projectError) {
+      const duplicate = projectError instanceof ApiError && projectError.status === 409;
+      setError({
+        field: "cwd",
+        message: duplicate
+          ? "A project already uses this folder. Open it from the project list instead."
+          : humanErrorText(toRunError(projectError)),
+      });
+      return;
+    }
+
     const launchLight =
       light.mode === "dual" && light.light
         ? inheritPrimaryCredential(light.light, backend, apiKeyEnv)
         : null;
 
+    // The location is the project's, so the request must not restate it: the
+    // server rejects a project-selected create that also carries a cwd.
     const body: CreateSessionRequest = {
-      // The connection that answered, rather than what the fields hold now:
-      // this is the one already proved to work.
-      ...launchLocationFromValues({
-        cwd,
-        ssh_host: connected?.ssh_host ?? "",
-        ssh_port: connected?.ssh_port ? String(connected.ssh_port) : "",
-        ssh_identity_file: connected?.ssh_identity_file ?? "",
-      }),
+      project_id: projectId,
       model,
       base_url: baseUrl,
       backend,
@@ -376,7 +400,7 @@ function LaunchForm({
 
     const threshold = nullable(compaction);
     if (threshold !== null) body.orchestrator_compaction_threshold = Number(threshold);
-    if (!body.ssh_host) {
+    if (!connected) {
       const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
       setLaunchKey(activityKey);
       body.sandbox = {
@@ -396,32 +420,17 @@ function LaunchForm({
       const snapshot = await createSession.mutateAsync(body);
       const newId = snapshot.metadata.session_id;
       storeLastLight(launchLight && withoutInheritedCredential(launchLight, apiKeyEnv));
-      toast.success("Session created");
-
-      // A title is presentation state, so it is applied after creation.
-      const wantedTitle = nullable(title);
-      if (newId && wantedTitle) {
-        try {
-          await updatePresentation.mutateAsync({
-            id: newId,
-            title: wantedTitle,
-            pinned: false,
-            expectedVersion: 0,
-          });
-        } catch (renameError) {
-          toast.error(
-            `Session created, but the title was not saved: ${errorMessage(toRunError(renameError))}`,
-          );
-        }
-      }
-
-      if (newId) navigate(routes.session(newId));
+      toast.success("Project created");
+      navigate(newId ? routes.session(newId) : routes.project(projectId));
       onClose();
     } catch (createError) {
-      setError({
-        field: "config",
-        message: humanErrorText(toRunError(createError), backend),
-      });
+      // The project itself is saved, so the user is sent to it rather than
+      // being left with an error over a form whose work is already done.
+      toast.error(
+        `Project created, but the first chat failed: ${humanErrorText(toRunError(createError), backend)}`,
+      );
+      navigate(routes.project(projectId));
+      onClose();
     }
   };
 
@@ -451,7 +460,7 @@ function LaunchForm({
     <Modal
       open={open}
       onClose={onClose}
-      title="New Session"
+      title="New Project"
       size={ModalSize.Wide}
       flush
       className="h-[680px]"
@@ -464,7 +473,7 @@ function LaunchForm({
             loading={busy}
             disabled={Boolean(error) || !selection || !ready}
           >
-            Create Session
+            Create Project
           </StickyButton>
         ) : (
           <Button
@@ -475,7 +484,7 @@ function LaunchForm({
             loading={busy}
             disabled={Boolean(error) || !selection || !ready}
           >
-            Create Session
+            Create Project
           </Button>
         )
       }
@@ -498,7 +507,7 @@ function LaunchForm({
               </Button>
             ))}
           </div>
-          {/* What the chosen environment means for the session, which the three
+          {/* What the chosen environment means for the project, which the three
               one-word buttons cannot say on their own. */}
           <p className="pt-1 text-micro text-basic-muted">
             {MODES.find((item) => item.id === mode)?.description}
@@ -563,12 +572,12 @@ function LaunchForm({
               ) : null}
             </div>
             <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
-              <FieldLabel label="Title" />
+              <FieldLabel label="Project name" />
               <Input
                 inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                placeholder="Shown on the session card"
-                value={title}
-                onChange={(e) => edit(setTitle)(e.target.value)}
+                placeholder="Taken from the git remote"
+                value={name}
+                onChange={(e) => edit(setName)(e.target.value)}
                 className={`${isMobile ? "w-full" : ""}`}
               />
             </div>

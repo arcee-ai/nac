@@ -45,13 +45,16 @@ function IconAction({
   );
 }
 
-interface SessionCardActionsProps {
+interface ProjectCardActionsProps {
+  /** A card for a chat that belongs to no project gets its own verbs. */
+  orphan: boolean;
   pinned: boolean;
-  running: boolean;
-  onTogglePin: () => void;
-  onRename: () => void;
   onDelete: () => void;
-  onStop: () => void;
+  /** Projects only — an unassigned chat cannot be pinned. */
+  onTogglePin?: () => void;
+  onRename?: () => void;
+  /** Files an unassigned chat; only meaningful on an orphan card. */
+  onAssign?: () => void;
   /** Tablet/mobile reorder controls (Default sort). */
   reorder?: {
     canMoveUp: boolean;
@@ -62,18 +65,19 @@ interface SessionCardActionsProps {
 }
 
 /**
- * Row of per-card actions. A running session offers "stop" instead of "delete",
- * mirroring the design and avoiding a destructive action mid-run.
+ * Row of per-card actions. Both kinds of card can be renamed, deleted and
+ * reordered; a project can also be pinned, while an unassigned chat can be
+ * filed under a project instead.
  */
-export function SessionCardActions({
+export function ProjectCardActions({
+  orphan,
   pinned,
-  running,
+  onDelete,
   onTogglePin,
   onRename,
-  onDelete,
-  onStop,
+  onAssign,
   reorder,
-}: SessionCardActionsProps) {
+}: ProjectCardActionsProps) {
   return (
     <div
       className={
@@ -98,26 +102,38 @@ export function SessionCardActions({
           />
         </>
       ) : null}
-      <IconAction
-        title={pinned ? "Unpin session" : "Pin session"}
-        icon={pinned ? IconName.Unpin : IconName.Pin}
-        onClick={onTogglePin}
-      />
-      <IconAction title="Rename session" icon={IconName.Edit} onClick={onRename} />
-      {running ? (
-        <IconAction
-          title="Stop run"
-          icon={IconName.Stop}
-          variant={ButtonVariant.GhostDestructive}
-          onClick={onStop}
-        />
+      {orphan ? (
+        <>
+          {onRename ? <IconAction title="Edit" icon={IconName.Edit} onClick={onRename} /> : null}
+          {onAssign ? (
+            <IconAction title="Assign to project" icon={IconName.FolderOpen} onClick={onAssign} />
+          ) : null}
+          <IconAction
+            title="Delete chat"
+            icon={IconName.Trash}
+            variant={ButtonVariant.GhostDestructive}
+            onClick={onDelete}
+          />
+        </>
       ) : (
-        <IconAction
-          title="Delete session"
-          icon={IconName.Trash}
-          variant={ButtonVariant.GhostDestructive}
-          onClick={onDelete}
-        />
+        <>
+          {onTogglePin ? (
+            <IconAction
+              title={pinned ? "Unpin project" : "Pin project"}
+              icon={pinned ? IconName.Unpin : IconName.Pin}
+              onClick={onTogglePin}
+            />
+          ) : null}
+          {onRename ? (
+            <IconAction title="Rename project" icon={IconName.Edit} onClick={onRename} />
+          ) : null}
+          <IconAction
+            title="Delete project"
+            icon={IconName.Trash}
+            variant={ButtonVariant.GhostDestructive}
+            onClick={onDelete}
+          />
+        </>
       )}
     </div>
   );

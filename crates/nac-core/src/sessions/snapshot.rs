@@ -69,6 +69,7 @@ pub fn new_snapshot(
     let now = now_utc();
     SessionSnapshot {
         session_id,
+        project_id: None,
         cwd,
         model,
         base_url,
@@ -102,6 +103,7 @@ pub fn refresh_snapshot(
 ) -> SessionSnapshot {
     SessionSnapshot {
         session_id: snapshot.session_id.clone(),
+        project_id: snapshot.project_id.clone(),
         cwd: snapshot.cwd.clone(),
         model: snapshot.model.clone(),
         base_url: snapshot.base_url.clone(),

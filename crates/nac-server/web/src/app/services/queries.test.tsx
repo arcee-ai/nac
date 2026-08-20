@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, type RenderResult, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { api } from "@/app/services/api";
+import { api, type ListSessionsOptions } from "@/app/services/api";
 import {
   queryKeys,
   useLoadOlderMessages,
@@ -133,8 +133,8 @@ describe("session-list polling split", () => {
     // Hold the empty base response until after the late stats merge is
     // asserted — otherwise a 5ms base poll can race past the merge window.
     let allowEmptyBase = false;
-    requests.listSessions.mockImplementation((workspaceStats: boolean) => {
-      if (workspaceStats) {
+    requests.listSessions.mockImplementation((options: ListSessionsOptions) => {
+      if (options.workspaceStats) {
         statsRead += 1;
         if (statsRead === 1) return delayedStats.promise;
         return Promise.resolve([session("deleted", "stale", 99)]);

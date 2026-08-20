@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type React from "react";
 
 import { cn } from "@/app/lib/cn";
@@ -14,11 +15,12 @@ import {
   Select,
   type SelectItem,
 } from "@/app/atoms";
-import { SESSION_ENVS, type SessionEnv } from "@/app/lib/format";
+import { type SessionEnv } from "@/app/lib/format";
 import { providerLabel } from "@/app/lib/providers";
 import {
   RANGE_ITEMS,
   SORT_ITEMS,
+  pruneUnavailableFacets,
   setCreatedRange,
   setModifiedRange,
   setQuery,
@@ -30,6 +32,7 @@ import {
   useModifiedRange,
   useSelectedEnvs,
   useSelectedProviders,
+  useSessionEnvs,
   useSessionProviders,
   useSort,
   type RangeId,
@@ -92,12 +95,19 @@ function FilterRow({
   );
 }
 
+/**
+ * One facet, as a row of toggles.
+ *
+ * Only values something on the list actually has are offered, and a facet down
+ * to a single value is left out entirely by the caller: a chip every project
+ * matches sorts nothing, and saying "Local" over an all-local list reads as a
+ * choice that isn't there.
+ */
 function Chips<T extends string>({
   label,
   options,
   selected,
   onToggle,
-  emptyText,
   // SAFETY: the default labeler is only used for string options, where the
   // cast is the identity.
   labelOf = (option: T) => option as string,
@@ -107,7 +117,6 @@ function Chips<T extends string>({
   options: readonly T[];
   selected: readonly T[];
   onToggle: (value: T) => void;
-  emptyText?: string;
   labelOf?: (value: T) => string;
   /** Taller chips and a heavier label, for the phone's filters dialog. */
   touch: boolean;
@@ -121,26 +130,22 @@ function Chips<T extends string>({
       >
         {label}
       </div>
-      {options.length === 0 ? (
-        <div className="text-micro text-basic-muted">{emptyText}</div>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {options.map((option) => (
-            <Button
-              key={option}
-              // The 36px chip already carries the design's 16px padding.
-              size={touch ? ButtonSize.Medium : ButtonSize.Small}
-              content={ButtonContent.Text}
-              variant={selected.includes(option) ? ButtonVariant.Primary : ButtonVariant.Secondary}
-              onClick={() => onToggle(option)}
-              aria-pressed={selected.includes(option)}
-              style={touch ? undefined : CHIP_PADDING}
-            >
-              {labelOf(option)}
-            </Button>
-          ))}
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => (
+          <Button
+            key={option}
+            // The 36px chip already carries the design's 16px padding.
+            size={touch ? ButtonSize.Medium : ButtonSize.Small}
+            content={ButtonContent.Text}
+            variant={selected.includes(option) ? ButtonVariant.Primary : ButtonVariant.Secondary}
+            onClick={() => onToggle(option)}
+            aria-pressed={selected.includes(option)}
+            style={touch ? undefined : CHIP_PADDING}
+          >
+            {labelOf(option)}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -165,7 +170,15 @@ export function SessionFilters({
   const modifiedRange = useModifiedRange();
   const envs = useSelectedEnvs();
   const providers = useSelectedProviders();
+  const envOptions = useSessionEnvs(sessions);
   const providerOptions = useSessionProviders(sessions);
+
+  // Deleting the last project of some kind takes its chip away, and the
+  // selection has to go with it or the list stays narrowed by a control that is
+  // no longer on screen.
+  useEffect(() => {
+    pruneUnavailableFacets(envOptions, providerOptions);
+  }, [envOptions, providerOptions]);
 
   const commit =
     <T,>(apply: (value: T) => void) =>
@@ -183,10 +196,10 @@ export function SessionFilters({
               inputSize={InputSize.Medium}
               leading={InputLeading.Icon}
               leadingIconName={IconName.Search}
-              placeholder="Search sessions"
+              placeholder="Search projects"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search sessions"
+              aria-label="Search projects"
             />
           </Section>
           <Divider />
@@ -227,28 +240,35 @@ export function SessionFilters({
           stacked={mobile}
         />
       </Section>
-      <Divider />
-      <Section gap="gap-4">
-        <Chips<SessionEnv>
-          label="Environment"
-          options={SESSION_ENVS}
-          selected={envs}
-          onToggle={commit(toggleEnv)}
-          touch={mobile}
-        />
-      </Section>
-      <Divider />
-      <Section gap="gap-4">
-        <Chips
-          label="Provider"
-          options={providerOptions}
-          selected={providers}
-          onToggle={commit(toggleProvider)}
-          emptyText="No providers yet"
-          labelOf={providerLabel}
-          touch={mobile}
-        />
-      </Section>
+      {envOptions.length > 1 ? (
+        <>
+          <Divider />
+          <Section gap="gap-4">
+            <Chips<SessionEnv>
+              label="Environment"
+              options={envOptions}
+              selected={envs}
+              onToggle={commit(toggleEnv)}
+              touch={mobile}
+            />
+          </Section>
+        </>
+      ) : null}
+      {providerOptions.length > 1 ? (
+        <>
+          <Divider />
+          <Section gap="gap-4">
+            <Chips
+              label="Provider"
+              options={providerOptions}
+              selected={providers}
+              onToggle={commit(toggleProvider)}
+              labelOf={providerLabel}
+              touch={mobile}
+            />
+          </Section>
+        </>
+      ) : null}
     </div>
   );
 }

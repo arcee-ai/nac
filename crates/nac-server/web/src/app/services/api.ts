@@ -6,13 +6,17 @@
 import type { JsonObject } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import type {
+  AssignSessionRequest,
   BranchList,
   BrowseListing,
   CommitOutcome,
   CommitWorkspaceRequest,
   CompactSessionResponse,
   CreateModelConfigurationRequest,
+  CreateProjectRequest,
   CreateSessionRequest,
+  DeleteProjectResponse,
+  DeleteProjectSessions,
   DeviceLoginStarted,
   DeviceLoginState,
   LaunchModelDefaults,
@@ -34,10 +38,14 @@ import type {
   ModelConfigurationList,
   ModelConfigurationRecord,
   OrchestratorSteeringResponse,
+  ProjectList,
+  ProjectRecord,
   ProviderModelList,
   ProviderModelsRequest,
   RawSessionConfig,
   RecentEventsResponse,
+  ReorderProjectsRequest,
+  ReorderProjectsResponse,
   ReorderSessionsRequest,
   ReorderSessionsResponse,
   ResolvedModelConfiguration,
@@ -63,6 +71,7 @@ import type {
   ThreadSteeringResponse,
   UpdateConfigRequest,
   UpdateModelConfigurationRequest,
+  UpdateProjectRequest,
   UpdateSessionPresentationRequest,
   WorkspaceDiffStage,
   WorkspaceFileContent,
@@ -158,6 +167,12 @@ export interface WorkspaceDiffOptions {
   revision?: number | null;
   signal?: AbortSignal;
 }
+export interface ListSessionsOptions {
+  workspaceStats?: boolean;
+  /** Narrows the listing to one project; unassigned sessions are excluded. */
+  projectId?: string | null;
+}
+
 export interface SessionSnapshotOptions {
   messageLimit?: number;
   threadEventLimit?: number;
@@ -346,12 +361,38 @@ export const api = {
       body: { path },
     }),
 
-  listSessions: (workspaceStats = false, signal?: AbortSignal) =>
-    request<ManagedSessionSummary[]>(
-      "GET",
-      workspaceStats ? "/sessions?workspace_stats=true" : "/sessions",
-      { signal },
+  listProjects: (signal?: AbortSignal) => request<ProjectList>("GET", "/projects", { signal }),
+
+  createProject: (payload: CreateProjectRequest) =>
+    request<ProjectRecord>("POST", "/projects", { body: payload }),
+
+  updateProject: (projectId: string, payload: UpdateProjectRequest) =>
+    request<ProjectRecord>("PATCH", `/projects/${encodeURIComponent(projectId)}`, {
+      body: payload,
+    }),
+
+  /** Releases the project's sessions unless asked to delete them too. */
+  deleteProject: (projectId: string, sessions: DeleteProjectSessions = "keep") =>
+    request<DeleteProjectResponse>(
+      "DELETE",
+      `/projects/${encodeURIComponent(projectId)}?sessions=${sessions}`,
     ),
+
+  assignSessionToProject: (projectId: string, payload: AssignSessionRequest) =>
+    request<ProjectRecord>("POST", `/projects/${encodeURIComponent(projectId)}/sessions`, {
+      body: payload,
+    }),
+
+  reorderProjects: (payload: ReorderProjectsRequest) =>
+    request<ReorderProjectsResponse>("PUT", "/projects/order", { body: payload }),
+
+  listSessions: (options: ListSessionsOptions = {}, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (options.workspaceStats) params.set("workspace_stats", "true");
+    if (options.projectId) params.set("project_id", options.projectId);
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return request<ManagedSessionSummary[]>("GET", `/sessions${query}`, { signal });
+  },
 
   getSession: (id: string, options: SessionSnapshotOptions = {}) => {
     const params = new URLSearchParams();

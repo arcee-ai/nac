@@ -178,7 +178,7 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
           ref={anchorRef}
           onClick={handleMobileToggle}
           onTouchEnd={handleMobileToggle}
-          className="inline-block cursor-pointer"
+          className="inline-block"
         >
           {children}
         </div>

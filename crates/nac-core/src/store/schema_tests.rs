@@ -254,6 +254,75 @@ fn assert_current_schema(conn: &Connection) {
         .unwrap();
     assert!(latest_index_exists);
 
+    assert_eq!(
+        table_columns(conn, "projects"),
+        [
+            "project_id",
+            "name",
+            "description",
+            "cwd",
+            "ssh_host",
+            "ssh_port",
+            "ssh_identity_file",
+            "default_model_config_id",
+            "created_at",
+            "updated_at",
+            "pinned",
+            "sort_order",
+            "presentation_version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "session_projects"),
+        ["session_id", "project_id"]
+    );
+    let session_delete: String = conn
+        .query_row(
+            "SELECT on_delete
+             FROM pragma_foreign_key_list('session_projects')
+             WHERE \"table\" = 'sessions'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(session_delete, "CASCADE");
+    let project_delete: String = conn
+        .query_row(
+            "SELECT on_delete
+             FROM pragma_foreign_key_list('session_projects')
+             WHERE \"table\" = 'projects'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_delete, "RESTRICT");
+    let config_delete: String = conn
+        .query_row(
+            "SELECT on_delete
+             FROM pragma_foreign_key_list('projects')
+             WHERE \"table\" = 'model_configurations'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(config_delete, "RESTRICT");
+    for index in [
+        "idx_projects_location",
+        "idx_projects_default_model_config",
+        "idx_session_projects_project",
+    ] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1
+                 )",
+                params![index],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(exists, "missing project index {index}");
+    }
+
     let violation_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
             row.get(0)
@@ -296,6 +365,42 @@ fn main_v0_store_migrates_directly_to_v4() {
         .query_row("SELECT content FROM episodes", [], |row| row.get(0))
         .unwrap();
     assert_eq!(episode, "preserved");
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v14_store_adds_projects_without_classifying_existing_sessions() {
+    let path = temp_store_path("v14_projects");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    insert_legacy_session(&legacy, "legacy-session");
+    legacy
+        .execute_batch(
+            "DROP TABLE session_projects;
+             DROP TABLE projects;
+             PRAGMA user_version = 14;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+
+    let migrated = Connection::open(&path).unwrap();
+    assert_current_schema(&migrated);
+    let sessions: i64 = migrated
+        .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    let projects: i64 = migrated
+        .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+        .unwrap();
+    let links: i64 = migrated
+        .query_row("SELECT COUNT(*) FROM session_projects", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!((sessions, projects, links), (1, 0, 0));
+
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

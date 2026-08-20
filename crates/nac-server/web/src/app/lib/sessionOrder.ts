@@ -1,3 +1,4 @@
+import { parseStoreTime } from "@/app/lib/format";
 import type {
   ManagedSessionSummary,
   ReorderSessionsRequest,
@@ -6,16 +7,40 @@ import type {
 
 export type DropEdge = "before" | "after";
 
-/** Insert `sessionId` at `index` in `ids`, removing any prior occurrence. */
-export function placeSessionId(ids: string[], sessionId: string, index: number): string[] {
-  const without = ids.filter((id) => id !== sessionId);
+/** Insert `id` at `index` in `ids`, removing any prior occurrence. */
+export function placeIdAt(ids: string[], id: string, index: number): string[] {
+  const without = ids.filter((other) => other !== id);
   const clamped = Math.max(0, Math.min(index, without.length));
-  return [...without.slice(0, clamped), sessionId, ...without.slice(clamped)];
+  return [...without.slice(0, clamped), id, ...without.slice(clamped)];
+}
+
+/**
+ * Lay `entries` out in the order the user dragged the tabs into.
+ *
+ * Chats started since that arrangement are not in it, and go to the front,
+ * where the untouched newest-first order would have put them anyway.
+ */
+export function applyTabOrder(
+  entries: ManagedSessionSummary[],
+  order: readonly string[],
+): ManagedSessionSummary[] {
+  if (order.length === 0) return entries;
+  const rank = new Map(order.map((id, index) => [id, index]));
+  const placed: ManagedSessionSummary[] = [];
+  const fresh: ManagedSessionSummary[] = [];
+  for (const entry of entries) {
+    (rank.has(entry.summary.session_id) ? placed : fresh).push(entry);
+  }
+  placed.sort(
+    (a, b) => (rank.get(a.summary.session_id) ?? 0) - (rank.get(b.summary.session_id) ?? 0),
+  );
+  return [...fresh, ...placed];
 }
 
 export function compareSortOrder(a: SessionSummarySnapshot, b: SessionSummarySnapshot): number {
   return (
-    (a.sort_order ?? 0) - (b.sort_order ?? 0) || Date.parse(b.created_at) - Date.parse(a.created_at)
+    (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+    parseStoreTime(b.created_at) - parseStoreTime(a.created_at)
   );
 }
 
@@ -87,7 +112,7 @@ export function isNoOpMove(
   if (Boolean(entry.summary.pinned) !== targetPinned) return false;
   const group = pinGroup(sessions, targetPinned);
   const currentIds = group.map((e) => e.summary.session_id);
-  const nextIds = placeSessionId(currentIds, sessionId, targetIndex);
+  const nextIds = placeIdAt(currentIds, sessionId, targetIndex);
   return sameOrder(currentIds, nextIds);
 }
 

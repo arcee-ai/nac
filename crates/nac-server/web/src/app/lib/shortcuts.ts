@@ -66,7 +66,14 @@ export function matchesShortcut(event: KeyboardEvent, keys: string[]): boolean {
 }
 
 /**
- * Opens the launch modal. ⌘⇧O rather than ⌘N, which a browser keeps for its own
- * window and never hands to the page.
+ * Opens the new-project dialog. ⌘⇧O rather than ⌘N, which a browser keeps for
+ * its own window and never hands to the page.
  */
-export const NEW_SESSION_KEYS = [MOD, "shift", "o"];
+export const NEW_PROJECT_KEYS = [MOD, "shift", "o"];
+
+/**
+ * Starts a chat in the open project. Deliberately the same chord as
+ * `NEW_PROJECT_KEYS`: the two never apply at once, so "make me a new one" stays
+ * one gesture whose meaning follows whatever the page is showing.
+ */
+export const NEW_CHAT_KEYS = NEW_PROJECT_KEYS;

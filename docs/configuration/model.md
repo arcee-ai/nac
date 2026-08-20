@@ -11,6 +11,28 @@ Persisted session settings remain editable. In `nac-web`, open a session's **Set
 
 The new-session form and `POST /sessions` share one tri-state rule: omitting a model field inherits its new-session config value, and `null` clears it. So `api_key_env: null` removes a configured selector and `reasoning_effort: null` omits the effort, while `"none"` is a concrete effort value rather than a way to clear it; `extra_headers: {}` replaces configured headers with an empty map. `orchestrator_compaction_threshold` defaults to 70% of the resolved model's context window when omitted and is disabled by `null` or `0`. Resume always uses the value persisted with the session, and managed workers do not inherit this orchestrator-only setting.
 
+## Project defaults
+
+A project's optional saved model configuration is a new-session inheritance
+layer. Precedence is: explicit `POST /sessions` field, project configuration,
+working-directory configuration, then built-in resolution. A saved
+configuration supplies `model`, `backend`, `base_url`, `reasoning_effort`,
+`api_key_env`, `extra_headers`, `light_model`, and an explicit compaction
+threshold. Its absent reasoning or credential selector clears the
+working-directory value; an empty header map clears working-directory headers;
+an absent light model selects single-model operation. An absent saved
+compaction threshold leaves normal working-directory/built-in behavior.
+`initial_prompt` is not used by session creation.
+
+The ordinary create-request tri-state remains authoritative over the project
+layer: omission inherits, required model/backend/base URL fields reject
+`null`, optional selector/effort/header fields clear on `null`, light-model
+`null` disables it, and compaction `null` or `0` disables it. The merged result
+is persisted in the session. Project edits affect later sessions only; resume
+and session Settings PATCH never reread project defaults. A referenced saved
+configuration cannot be deleted until the project clears or changes its
+reference.
+
 ## Orchestrator compaction threshold
 
 The orchestrator compaction threshold is an optional absolute token count for new orchestrator sessions. When omitted, it defaults to 70% of the resolved model's context window (rounded to the nearest whole token). A positive value is captured in each new session; an explicit `null` or `0` disables creating new checkpoints. The create-session JSON field is `orchestrator_compaction_threshold`: omission applies the 70%-of-context default, while `null` or `0` disables it. GET returns the persisted positive value or `null`; PATCH omission preserves it, and PATCH `null` or `0` disables it. The web launch and Settings forms expose the same rules. A `[compaction]` section in config.toml is silently ignored — the threshold is no longer inherited from config.

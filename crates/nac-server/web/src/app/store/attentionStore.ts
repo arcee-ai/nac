@@ -55,3 +55,25 @@ export function clearAttention(id: string): void {
 }
 
 export const useAttention = (id: string) => useStore((s) => Boolean(s.flagged[id]));
+
+/**
+ * A project card stands in for the chats inside it, so it lights up when any of
+ * them finished unseen. The selector reduces to a boolean, so a change to an
+ * unrelated session never re-renders the card.
+ */
+export const useAnyAttention = (ids: string[]) =>
+  useStore((s) => ids.some((id) => Boolean(s.flagged[id])));
+
+/** Clears every chat of a project at once, when its card is opened. */
+export function clearAttentionAll(ids: string[]): void {
+  const flagged = getState().flagged;
+  const next = { ...flagged };
+  let changed = false;
+  for (const id of ids) {
+    if (next[id]) {
+      delete next[id];
+      changed = true;
+    }
+  }
+  if (changed) setState({ flagged: next });
+}

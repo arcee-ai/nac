@@ -143,6 +143,16 @@ export function formatSeconds(ms: number | null | undefined): string {
   return `${(Math.round(ms / 10) / 100).toFixed(2)}s`;
 }
 
+/** What a chat is called until something in it can name it. */
+export const NEW_CHAT_TITLE = "New Chat";
+
+/** A chat nobody has named and nobody has said anything in yet. */
+export function isUntitledSession(summary: SessionSummarySnapshot | null | undefined): boolean {
+  if (!summary) return false;
+  if (summary.title != null && summary.title.trim()) return false;
+  return !(summary.last_user_prompt ?? "").trim();
+}
+
 export function displaySessionTitle(summary: SessionSummarySnapshot | null | undefined): string {
   if (!summary) return "";
   if (summary.title != null && summary.title.trim()) {
@@ -150,7 +160,48 @@ export function displaySessionTitle(summary: SessionSummarySnapshot | null | und
   }
   const prompt = displayPromptFromMessageText(summary.last_user_prompt).trim();
   if (prompt) return prompt;
-  return shortId(summary.session_id) || "session";
+  return NEW_CHAT_TITLE;
+}
+
+/**
+ * The label every list, search box and action should use: numbered untitled
+ * chats when a map is supplied, otherwise the unnumbered display title.
+ */
+export function sessionTitle(
+  summary: SessionSummarySnapshot | null | undefined,
+  numbered: ReadonlyMap<string, string>,
+): string {
+  if (!summary) return "";
+  return numbered.get(summary.session_id) ?? displaySessionTitle(summary);
+}
+
+/**
+ * Tells the untitled chats apart, since they would otherwise all answer to the
+ * same name: the oldest keeps the plain "New Chat" and each later one takes the
+ * next number.
+ *
+ * Counting restarts per project — and once more over the chats that belong to
+ * none — so a project's tab strip reads 1, 2, 3 instead of skipping the numbers
+ * another project happened to take. Deleting one does renumber the chats after
+ * it, which is the price of naming them by their place rather than storing a
+ * name nobody chose.
+ *
+ * Timestamps are compared as text: the store writes them zero-padded and in
+ * UTC, so they sort correctly without being parsed into dates first.
+ */
+export function numberUntitledSessions(sessions: ManagedSessionSummary[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const takenPerProject = new Map<string, number>();
+  const untitled = sessions
+    .filter((entry) => isUntitledSession(entry.summary))
+    .sort((a, b) => a.summary.created_at.localeCompare(b.summary.created_at));
+  for (const { summary } of untitled) {
+    const project = summary.project_id ?? "";
+    const taken = takenPerProject.get(project) ?? 0;
+    takenPerProject.set(project, taken + 1);
+    names.set(summary.session_id, taken === 0 ? NEW_CHAT_TITLE : `${NEW_CHAT_TITLE} ${taken}`);
+  }
+  return names;
 }
 
 export function formatTokens(n: number | null | undefined): string {
@@ -213,12 +264,22 @@ export function formatClock(ms: number | null | undefined): string {
 }
 
 /**
- * A store timestamp as a short local date and time. The store writes UTC as
- * "YYYY-MM-DD HH:MM:SS" with no zone marker, which JavaScript would otherwise
- * read as local time and shift by the offset.
+ * A store timestamp as epoch milliseconds, or NaN if it cannot be read.
+ *
+ * The store writes UTC as "YYYY-MM-DD HH:MM:SS" with no zone marker, which
+ * `Date.parse` reads as local time. Left alone that shifts every timestamp by
+ * the viewer's offset, which is enough to file a project made a minute ago
+ * under yesterday. Anything that does name its zone is taken at its word.
  */
+export function parseStoreTime(value: string | null | undefined): number {
+  if (!value) return Number.NaN;
+  const isoish = value.replace(" ", "T");
+  return Date.parse(/(?:Z|[+-]\d\d:?\d\d)$/.test(isoish) ? isoish : `${isoish}Z`);
+}
+
+/** A store timestamp as a short local date and time. */
 export function formatStoreTime(value: string): string {
-  const parsed = new Date(`${value.replace(" ", "T")}Z`);
+  const parsed = new Date(parseStoreTime(value));
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString([], {
     month: "short",

@@ -372,13 +372,16 @@ export function Transcript({
       {/* Rows the size of the messages they stand in for, over the space those
           messages will fill. Laid out on top rather than in the flow, so the
           transcript can already be mounted underneath — hidden, but measured,
-          which is what lets it open at its own bottom edge. */}
+          which is what lets it open at its own bottom edge.
+          Coming in is delayed and going out is not, so a conversation that is
+          served from the cache, or simply arrives quickly, is swapped in over a
+          blank moment instead of behind rows nobody had time to read. */}
       <div
         role="status"
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-[96px] px-4 md:top-[72px] md:px-0",
-          revealed ? "opacity-0 transition-opacity duration-150 ease-in-out" : "opacity-100",
+          "pointer-events-none absolute inset-x-0 top-[96px] px-4 transition-opacity duration-150 ease-in-out md:top-[72px] md:px-0",
+          revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
         <div className="mx-auto w-full max-w-[840px]">
@@ -402,12 +405,13 @@ export function Transcript({
         </div>
       ) : null}
       <div ref={scrollRef} className={cn("h-full overflow-auto", fade, !revealed && "invisible")}>
-        {/* The top bar is fixed over this scroll region, so the first message
-            needs to clear it. */}
+        {/* The phone has the fixed top bar over this scroll region, so its
+            first message has to clear it. Wider layouts put the tab strip
+            between the two, and only need breathing room under it. */}
         <div
           ref={contentRef}
           className={cn(
-            "flex flex-col pt-[96px] md:pt-[72px] [&>*]:shrink-0 px-4 md:px-0",
+            "flex flex-col pt-[96px] md:pt-6 [&>*]:shrink-0 px-4 md:px-0",
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it.
             isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[840px]",

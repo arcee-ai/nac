@@ -3,13 +3,14 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 14 adds the bounded interrupted-run recovery row. 13 added the light-model
-// columns (`light_model_json` on both `sessions` and `model_configurations`) —
-// `open_runtime_connection` returns early whenever the stored version already
-// equals this one. (12 carries the same schema as 11, which added
-// episodes.status; 10 added the ssh_configurations table; 9 the per-session ssh
-// port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 14;
+// 16 adds project presentation columns (pin, order, version). 15 added projects
+// and their one-to-many session links. 14 added the bounded interrupted-run
+// recovery row. 13 added the light-model columns (`light_model_json` on both
+// `sessions` and `model_configurations`) — `open_runtime_connection` returns
+// early whenever the stored version already equals this one. (12 carries the
+// same schema as 11, which added episodes.status; 10 added the
+// ssh_configurations table; 9 the per-session ssh port and key columns.)
+const STORE_SCHEMA_VERSION: i64 = 16;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -366,10 +367,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
             ));
         }
     }
@@ -442,6 +443,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         "light_model_json",
         "TEXT",
     )?;
+    create_projects_tables(&transaction)?;
     create_ssh_configurations_table(&transaction)?;
     create_session_run_recovery_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
@@ -863,6 +865,72 @@ fn create_model_configurations_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Explicit project metadata and the optional, immutable session association.
+///
+/// Location identity mirrors session launch: NULL `ssh_host` means local;
+/// otherwise the complete stored SSH invocation tuple scopes the remote path.
+fn create_projects_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS projects (
+             project_id TEXT PRIMARY KEY,
+             name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+             description TEXT,
+             cwd TEXT NOT NULL CHECK (length(trim(cwd)) > 0),
+             ssh_host TEXT,
+             ssh_port INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535)),
+             ssh_identity_file TEXT,
+             default_model_config_id TEXT
+                 REFERENCES model_configurations(config_id) ON DELETE RESTRICT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             CHECK (
+                 (ssh_host IS NULL AND ssh_port IS NULL AND ssh_identity_file IS NULL)
+                 OR (ssh_host IS NOT NULL AND length(trim(ssh_host)) > 0)
+             )
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_location
+             ON projects (
+                 cwd,
+                 COALESCE(ssh_host, ''),
+                 COALESCE(ssh_port, 0),
+                 COALESCE(ssh_identity_file, '')
+             );
+         CREATE INDEX IF NOT EXISTS idx_projects_default_model_config
+             ON projects(default_model_config_id)
+             WHERE default_model_config_id IS NOT NULL;
+         CREATE TABLE IF NOT EXISTS session_projects (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             project_id TEXT NOT NULL
+                 REFERENCES projects(project_id) ON DELETE RESTRICT
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_projects_project
+             ON session_projects(project_id, session_id);",
+    )?;
+    // Pin, order, and the optimistic-concurrency counter mirror
+    // `session_presentations`, but live on `projects` itself because a project
+    // row always exists before it can be ordered.
+    ensure_column(
+        conn,
+        "projects",
+        "pinned",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1))",
+    )?;
+    ensure_column(
+        conn,
+        "projects",
+        "sort_order",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0)",
+    )?;
+    ensure_column(
+        conn,
+        "projects",
+        "presentation_version",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (presentation_version >= 0)",
+    )?;
+    Ok(())
+}
+
 /// Named SSH connection presets the launch UI can reuse.
 ///
 /// Global rather than per-session (no foreign key): a saved host is chosen when
@@ -1012,6 +1080,8 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
         "session_run_recovery",
+        "projects",
+        "session_projects",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

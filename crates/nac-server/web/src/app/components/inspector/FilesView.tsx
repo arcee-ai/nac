@@ -559,7 +559,7 @@ export function FilesView({
   const toggled = useToggledFolders();
   const fileListing = useFileListing();
 
-  const { data: listing, isLoading, error } = useWorkspaceFiles(sessionId, revision);
+  const { data: listing, error } = useWorkspaceFiles(sessionId, revision);
   const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
 
   // Workspace stats are computed when the snapshot is built, so entering the
@@ -616,7 +616,10 @@ export function FilesView({
   if (failure) {
     return <div className="p-6 label-small text-error-primary">{errorMessage(failure)}</div>;
   }
-  if (isLoading || !listing) {
+  // Only when there is nothing to show at all. A listing already on screen —
+  // this revision's, or the one before it while the switch is fetched — stays
+  // put, and the bar above the panel carries the news that a fetch is running.
+  if (!listing) {
     return <PanelLoading listTitle="Files" />;
   }
 

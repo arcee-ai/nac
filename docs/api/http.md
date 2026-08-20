@@ -22,6 +22,53 @@ with at most four targeting the same canonical store. Capacity waits are
 bounded. These limits are internal and intentionally not configurable, leaving
 descriptor headroom under the common 256-descriptor process limit.
 
+## Projects
+
+Projects are explicit, store-scoped records exposed by `GET /projects`,
+`POST /projects`, `PATCH /projects/{project_id}`, and
+`DELETE /projects/{project_id}`. A project owns one canonical local directory or
+one canonical directory on an SSH connection, plus a name, optional description,
+and optional saved model configuration. Creation canonicalizes local paths and
+verifies remote paths with the same SSH directory browse used by session launch.
+Canonical location duplicates return 409. Remote errors retain their existing
+classes: invalid or non-directory paths return 400, unreadable paths 403,
+missing paths 404, and transport or remote-command failures 502. A create that
+omits `name` derives one from the checkout's origin remote (`owner/repo`) for
+local locations, and falls back to the directory name.
+
+`POST /sessions` accepts an optional `project_id`; `GET /sessions` accepts the
+same field as a filter. Selection is explicit—NAC never infers a project from
+`cwd`. A project-selected create must not also send a nonblank `cwd` or SSH
+location field, and an SSH project cannot use sandbox options. Each session
+belongs to at most one project. Project location is immutable.
+
+`POST /projects/{project_id}/sessions` assigns an already-created session, whose
+`session_id` is the only body field. Membership is written once: a session that
+already belongs to a project returns 409, and so does one whose working
+directory and SSH tuple are not the project's location. There is no move or
+historical-backfill API, so reassignment requires no membership to exist yet.
+
+`DELETE /projects/{project_id}` releases rather than destroys. Its sessions keep
+their transcripts and reappear as unassigned, and the response lists them in
+`released_session_ids`. Pass `?sessions=delete` to take them down with the
+project instead; they are deleted one by one before the project row goes, and
+the response lists them in `deleted_session_ids`. A session that refuses to be
+deleted fails the whole request with the project still standing, so the rest are
+never left orphaned.
+
+Projects carry the same presentation fields as sessions: `pinned`, `sort_order`,
+and `presentation_version`. `PATCH` toggles `pinned`, which moves the project to
+the end of the target pin group and bumps the version. `PUT /projects/order`
+rewrites one pin group; the request must list every project in that group
+exactly once and carry each current `presentation_version`, otherwise it
+returns 409 rather than reordering a set that has since changed.
+
+The selected project ID appears in session summary and detail metadata.
+Project model defaults are copied into a new session, not read live. Later
+project edits affect only later sessions, and resume uses the session snapshot.
+Deleting a saved model configuration still referenced by a project returns
+409 and retains both the configuration and its credentials.
+
 ## Remote access
 
 Remote access delegates the authority of the local user to every client that
