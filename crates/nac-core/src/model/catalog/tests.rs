@@ -2,13 +2,13 @@ use super::test_support::EnvGuard;
 use super::*;
 use crate::model::{
     validate_model_reasoning_effort, EffectiveModelSettings, ReasoningEffort,
-    ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
+    ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL, XAI_AUTH_CANONICAL_BASE_URL,
 };
 use crate::TEST_ENV_LOCK;
 use sha2::Digest;
 use std::collections::BTreeMap;
 
-const ALL_PROVIDERS: [BackendKind; 8] = [
+const ALL_PROVIDERS: [BackendKind; 9] = [
     BackendKind::DeepSeekChat,
     BackendKind::FireworksChat,
     BackendKind::TogetherChat,
@@ -17,6 +17,7 @@ const ALL_PROVIDERS: [BackendKind; 8] = [
     BackendKind::AnthropicMessages,
     BackendKind::ArceeAuth,
     BackendKind::ArceeApi,
+    BackendKind::XaiAuth,
 ];
 
 const ALL_EFFORTS: [ReasoningEffort; 7] = [
@@ -43,6 +44,7 @@ fn every_provider_ships_a_default_entry_with_its_wire_api() {
         (BackendKind::AnthropicMessages, ApiKind::AnthropicMessages),
         (BackendKind::ArceeAuth, ApiKind::OpenAiCompletions),
         (BackendKind::ArceeApi, ApiKind::OpenAiCompletions),
+        (BackendKind::XaiAuth, ApiKind::OpenAiResponses),
     ];
     for (provider, api) in cases {
         let metadata = current().resolve(provider, "model-with-no-catalog-entry");
@@ -112,6 +114,26 @@ fn pre_s4_matrix_accepts(provider: BackendKind, model: &str, effort: ReasoningEf
             }
         }
         BackendKind::ArceeAuth | BackendKind::ArceeApi => false,
+        BackendKind::XaiAuth => {
+            if model == "grok-4.5" || model == "grok-4.3" || model == "grok-build-0.1" {
+                matches!(
+                    effort,
+                    ReasoningEffort::None
+                        | ReasoningEffort::Low
+                        | ReasoningEffort::Medium
+                        | ReasoningEffort::High
+                )
+            } else {
+                matches!(
+                    effort,
+                    ReasoningEffort::None
+                        | ReasoningEffort::Low
+                        | ReasoningEffort::Medium
+                        | ReasoningEffort::High
+                        | ReasoningEffort::Xhigh
+                )
+            }
+        }
     }
 }
 
@@ -670,7 +692,7 @@ fn generated_entries_satisfy_catalog_invariants() {
     // Snapshot pin: 79 agent-compatible generated models plus 21 hand-seeded
     // entries (2 deprecated deepseek models removed). Drift fails loudly here
     // at regen/seed-edit time, forcing a deliberate review.
-    assert_eq!(entry_count, 94, "catalog model count drifted");
+    assert_eq!(entry_count, 98, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -910,6 +932,11 @@ fn api_listing_serves_every_provider_with_auth_and_managed_urls() {
                 Some(ARCEE_AUTH_CANONICAL_BASE_URL)
             ),
             (BackendKind::ArceeApi, ProviderAuth::ApiKeyEnv, None),
+            (
+                BackendKind::XaiAuth,
+                ProviderAuth::XaiOauth,
+                Some(XAI_AUTH_CANONICAL_BASE_URL)
+            ),
         ]
     );
 }
@@ -959,6 +986,7 @@ fn api_listing_serves_catalog_default_base_urls() {
     );
     assert_eq!(default_base_url(BackendKind::ArceeAuth), None);
     assert_eq!(default_base_url(BackendKind::ChatGptCodexResponses), None);
+    assert_eq!(default_base_url(BackendKind::XaiAuth), None);
 }
 
 #[test]
@@ -990,6 +1018,7 @@ fn provider_for_model_resolves_unique_collision_and_unknown_ids() {
         provider_for_model("gpt-5.3-codex-spark"),
         Some(BackendKind::OpenAiResponses)
     );
+    assert_eq!(provider_for_model("grok-4.6"), Some(BackendKind::XaiAuth));
 
     // Unknown ids (including dated-snapshot shapes — the lookup is exact
     // only) stay unresolved.
@@ -1140,7 +1169,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
     // assertions (transient Overlay entries from the refresh tests).
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let listing = api_listing();
-    assert_eq!(listing.providers.len(), 8);
+    assert_eq!(listing.providers.len(), 9);
     let mut total = 0;
     for provider in &listing.providers {
         // `_default` is served as default_limits, never as a model entry;
@@ -1166,7 +1195,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 94, "catalog model count drifted");
+    assert_eq!(total, 98, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks
@@ -1175,6 +1204,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         BackendKind::ArceeAuth,
         BackendKind::ArceeApi,
         BackendKind::ChatGptCodexResponses,
+        BackendKind::XaiAuth,
     ] {
         let provider = listing
             .providers

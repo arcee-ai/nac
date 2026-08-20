@@ -92,6 +92,17 @@ fn stored_codex_auth() -> String {
     .to_string()
 }
 
+fn stored_xai_auth() -> String {
+    json!({
+        "type": "xai-oauth",
+        "access": "access-test",
+        "refresh": "refresh-test",
+        "expires_at_ms": u64::MAX,
+        "account": "account-test"
+    })
+    .to_string()
+}
+
 fn directory_names(path: &std::path::Path) -> Vec<String> {
     let mut names = std::fs::read_dir(path)
         .unwrap()
@@ -110,6 +121,8 @@ fn effective_settings(
         backend,
         if backend == BackendKind::ArceeAuth {
             "trinity-large-thinking"
+        } else if backend == BackendKind::XaiAuth {
+            "grok-4.6"
         } else {
             "test-model"
         }
@@ -138,6 +151,42 @@ fn arcee_auth_rejects_nonempty_api_key_env_before_credentials() {
     )
     .expect_err("managed Arcee configuration must reject api_key_env");
     assert_eq!(error.to_string(), expected);
+}
+
+#[test]
+fn stored_xai_auth_config_and_store_failures_remain_distinct() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let settings = effective_settings(BackendKind::XaiAuth, "https://api.x.ai/v1", None);
+
+    for (label, contents, expected) in [
+        ("missing-xai-auth", None, "not configured"),
+        ("malformed-xai-auth", Some("{not-json}"), "failed to parse"),
+        (
+            "wrong-provider-xai-auth",
+            Some(r#"{"type":"other"}"#),
+            "provider type",
+        ),
+        (
+            "blank-xai-auth",
+            Some(
+                r#"{"type":"xai-oauth","access":"secret-not-for-errors","refresh":" ","expires_at_ms":1,"account":"account"}"#,
+            ),
+            "nonblank field 'refresh'",
+        ),
+    ] {
+        let env = IsolatedModelEnv::new(label, None, None, None);
+        if let Some(contents) = contents {
+            write_test_credential(&env.home.join("xai_auth.json"), contents);
+        }
+        let error = ModelClient::from_effective_settings(settings.clone()).unwrap_err();
+        assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
+        assert!(error.to_string().contains(expected), "{error:#}");
+        assert!(!error.to_string().contains("secret-not-for-errors"));
+    }
+
+    let env = IsolatedModelEnv::new("valid-xai-auth", None, None, None);
+    write_test_credential(&env.home.join("xai_auth.json"), stored_xai_auth());
+    ModelClient::from_effective_settings(settings).unwrap();
 }
 
 #[test]

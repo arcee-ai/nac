@@ -288,6 +288,7 @@ pub enum ProviderAuth {
     ManagedArcee,
     /// Stored ChatGPT/Codex OAuth (`auth.json`).
     CodexOauth,
+    XaiOauth,
 }
 
 /// A provider `_default` entry's limits and effort support, as served by

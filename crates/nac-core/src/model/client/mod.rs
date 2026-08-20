@@ -140,6 +140,15 @@ pub fn validate_model_configuration(
                 .map_err(classify_model_configuration_error)?;
             chatgpt_codex::preflight_stored_auth().map_err(classify_stored_codex_auth_error)?;
         }
+        BackendKind::XaiAuth => {
+            let base_url = base_url.ok_or_else(|| {
+                model_configuration_error(
+                    "invalid model configuration: backend 'xai-auth' requires base_url",
+                )
+            })?;
+            xai::validate_base_url(base_url).map_err(classify_model_configuration_error)?;
+            xai::preflight_stored_auth().map_err(classify_stored_xai_auth_error)?;
+        }
         BackendKind::DeepSeekChat
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
@@ -248,6 +257,12 @@ impl ModelClient {
                 chatgpt_codex::validate_base_url(&settings.base_url)
                     .map_err(classify_model_configuration_error)?;
                 chatgpt_codex::preflight_stored_auth().map_err(classify_stored_codex_auth_error)?;
+                (String::new(), None)
+            }
+            BackendKind::XaiAuth => {
+                xai::validate_base_url(&settings.base_url)
+                    .map_err(classify_model_configuration_error)?;
+                xai::preflight_stored_auth().map_err(classify_stored_xai_auth_error)?;
                 (String::new(), None)
             }
             _ => (
@@ -581,6 +596,13 @@ impl ModelClient {
             self.prompt_cache_key.as_deref(),
         );
 
+        if self.backend == BackendKind::XaiAuth {
+            let value = self
+                .post_xai_auth_responses(&url, request, on_delta)
+                .await?;
+            return Ok(self.with_usage_cost(parse_openai_responses_response(&value, &url)?));
+        }
+
         let value = match on_delta {
             Some(_) => {
                 request["stream"] = Value::Bool(true);
@@ -596,6 +618,59 @@ impl ModelClient {
             None => self.post_json_with_retry(&url, &request).await?,
         };
         Ok(self.with_usage_cost(parse_openai_responses_response(&value, &url)?))
+    }
+
+    async fn post_xai_auth_responses(
+        &self,
+        url: &str,
+        mut request: Value,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<Value> {
+        let stream = on_delta.is_some();
+        if stream {
+            request["stream"] = Value::Bool(true);
+        }
+        let token = xai::stored_auth_for_request(&self.client).await?;
+        match self
+            .try_post_xai_auth(url, &request, &token, on_delta)
+            .await
+        {
+            Ok(value) => Ok(value),
+            Err(error) if error.status == Some(401) => {
+                let refreshed = xai::force_refresh_access_token(&self.client).await?;
+                self.try_post_xai_auth(url, &request, &refreshed, on_delta)
+                    .await
+                    .map_err(|error| anyhow!(error.message))
+            }
+            Err(error) => Err(anyhow!(error.message)),
+        }
+    }
+
+    async fn try_post_xai_auth(
+        &self,
+        url: &str,
+        body: &Value,
+        token: &str,
+        on_delta: DeltaSink<'_>,
+    ) -> std::result::Result<Value, ModelHttpError> {
+        if on_delta.is_some() {
+            return self
+                .try_post_sse_with_retry_headers(
+                    url,
+                    body,
+                    |request| request.header("Authorization", format!("Bearer {token}")),
+                    || ResponsesStreamFold::new(on_delta),
+                    &[token],
+                )
+                .await;
+        }
+        self.try_post_json_with_retry_headers(
+            url,
+            body,
+            |request| request.header("Authorization", format!("Bearer {token}")),
+            &[token],
+        )
+        .await
     }
 
     async fn send_anthropic_messages(

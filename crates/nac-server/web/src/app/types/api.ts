@@ -14,7 +14,8 @@ export type BackendKind =
   | "chatgpt-codex-responses"
   | "anthropic-messages"
   | "arcee-auth"
-  | "arcee-api";
+  | "arcee-api"
+  | "xai-auth";
 
 /** `nac_core::model::types::ReasoningEffort`, serialized lowercase. */
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -731,7 +732,7 @@ export interface GeneratedCredential {
 }
 
 /** Providers that sign in through a browser instead of taking an API key. */
-export type ManagedAuthProvider = "arcee" | "codex";
+export type ManagedAuthProvider = "arcee" | "codex" | "xai";
 
 /** What a managed provider currently has stored, signed in or not. */
 export interface ManagedAuthStatus {
@@ -959,7 +960,7 @@ export type ModelSource =
   | "fallback";
 
 /** `nac_core::model::catalog::ProviderAuth`: how a provider authenticates. */
-export type ProviderAuth = "api_key_env" | "managed_arcee" | "codex_oauth";
+export type ProviderAuth = "api_key_env" | "managed_arcee" | "codex_oauth" | "xai_oauth";
 
 /** Whether the server can currently authenticate as this provider. */
 export type AuthStatus = "ready" | "no_credential";

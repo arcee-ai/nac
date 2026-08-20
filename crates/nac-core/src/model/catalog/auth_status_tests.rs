@@ -64,6 +64,10 @@ fn stored_codex_auth() -> &'static str {
     r#"{"type":"chatgpt-codex","access":"access-test","refresh":"refresh-test","expires_at_ms":18446744073709551615,"account_id":"account-test"}"#
 }
 
+fn stored_xai_auth() -> &'static str {
+    r#"{"type":"xai-oauth","access":"access-test","refresh":"refresh-test","expires_at_ms":18446744073709551615,"account":"account-test"}"#
+}
+
 #[test]
 fn api_key_providers_read_ready_via_their_conventional_env_var() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
@@ -109,6 +113,9 @@ fn api_key_providers_without_credentials_hint_the_conventional_var() {
     let codex = provider(&listing, BackendKind::ChatGptCodexResponses);
     assert_eq!(codex.auth_status, AuthStatus::NoCredential);
     assert_eq!(codex.auth_hint.as_deref(), Some("nac-web codex-auth login"));
+    let xai = provider(&listing, BackendKind::XaiAuth);
+    assert_eq!(xai.auth_status, AuthStatus::NoCredential);
+    assert_eq!(xai.auth_hint.as_deref(), Some("nac-web xai-auth login"));
 }
 
 #[test]
@@ -142,6 +149,10 @@ fn managed_providers_read_ready_only_with_a_parseable_stored_credential() {
         provider(&listing, BackendKind::ChatGptCodexResponses).auth_status,
         AuthStatus::NoCredential
     );
+    assert_eq!(
+        provider(&listing, BackendKind::XaiAuth).auth_status,
+        AuthStatus::NoCredential
+    );
 
     // A parseable stored credential flips only its provider.
     write_credential(env.path(), "arcee_auth.json", stored_arcee_auth());
@@ -155,9 +166,14 @@ fn managed_providers_read_ready_only_with_a_parseable_stored_credential() {
     );
 
     write_credential(env.path(), "auth.json", stored_codex_auth());
+    write_credential(env.path(), "xai_auth.json", stored_xai_auth());
     let listing = api_listing();
     assert_eq!(
         provider(&listing, BackendKind::ChatGptCodexResponses).auth_status,
+        AuthStatus::Ready
+    );
+    assert_eq!(
+        provider(&listing, BackendKind::XaiAuth).auth_status,
         AuthStatus::Ready
     );
 

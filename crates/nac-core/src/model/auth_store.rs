@@ -349,7 +349,7 @@ impl FileLock {
         Ok(file)
     }
 
-    fn acquire(path: &Path) -> Result<Self> {
+    pub(super) fn acquire(path: &Path) -> Result<Self> {
         let file = Self::open_lock_file(path)?;
         lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
         Ok(Self { file })
