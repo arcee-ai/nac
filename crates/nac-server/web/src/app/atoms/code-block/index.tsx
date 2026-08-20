@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { cn } from "../../lib/cn";
-import { type CodeToken, highlightSource } from "../../lib/highlight";
+import { type CodeToken, highlightSource, tokenStyle } from "../../lib/highlight";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import CopyButton from "../button/CopyButton";
 import Icon, { IconName } from "../icon";
@@ -14,7 +14,7 @@ export enum CodeBlockSize {
 
 interface CodeBlockProps {
   code: string;
-  /** highlight.js language name. Unknown values just render as plain text. */
+  /** Shiki language id or alias. Unknown values just render as plain text. */
   language?: string;
   size?: CodeBlockSize;
   title?: React.ReactNode;
@@ -64,7 +64,7 @@ const CodeBody: React.FC<CodeBodyProps> = ({ code, lines, lineNumbers, wrap }) =
                   {tokens.length === 0
                     ? "\u00a0"
                     : tokens.map((token, position) => (
-                        <span key={position} className={token.className ?? undefined}>
+                        <span key={position} style={tokenStyle(token)}>
                           {token.text}
                         </span>
                       ))}
@@ -78,7 +78,7 @@ const CodeBody: React.FC<CodeBodyProps> = ({ code, lines, lineNumbers, wrap }) =
 };
 
 /**
- * Read-only code viewer with optional chrome. Colouring reuses the lowlight
+ * Read-only code viewer with optional chrome. Colouring reuses the Shiki
  * pass behind the diff viewer, so no second highlighter enters the bundle, and
  * the plain text is shown until (or unless) the tokens arrive.
  */
