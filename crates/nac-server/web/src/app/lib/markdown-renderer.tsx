@@ -9,7 +9,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import { useLocation, useNavigate } from "react-router-dom";
-import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
@@ -33,42 +32,7 @@ import {
 } from "@/app/store/sessionLayoutStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
 
-import bash from "highlight.js/lib/languages/bash";
-import css from "highlight.js/lib/languages/css";
-import diff from "highlight.js/lib/languages/diff";
-import go from "highlight.js/lib/languages/go";
-import json from "highlight.js/lib/languages/json";
-import markdown from "highlight.js/lib/languages/markdown";
-import python from "highlight.js/lib/languages/python";
-import rust from "highlight.js/lib/languages/rust";
-import sql from "highlight.js/lib/languages/sql";
-import toml from "highlight.js/lib/languages/ini";
-import typescript from "highlight.js/lib/languages/typescript";
-import xml from "highlight.js/lib/languages/xml";
-import yaml from "highlight.js/lib/languages/yaml";
-
-// Only the languages an agent transcript realistically contains; the full
-// highlight.js bundle would dwarf the rest of the app.
-const languages = {
-  bash,
-  css,
-  diff,
-  go,
-  json,
-  markdown,
-  python,
-  rust,
-  sql,
-  toml,
-  typescript,
-  xml,
-  yaml,
-};
-
 const remarkPlugins = [remarkGfm];
-const rehypePlugins = [
-  [rehypeHighlight, { languages, detect: true, ignoreMissing: true }] as const,
-];
 
 /** A plugin list as react-markdown takes it; the tuple types are not exported. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,9 +54,7 @@ function loadMathPlugins(): Promise<MathPlugins> {
   mathPlugins ??= import("@/app/lib/markdown-mathjax").then(
     ({ rehypeMathjaxPlugin, remarkMathPlugin }) => ({
       remark: [...remarkPlugins, remarkMathPlugin],
-      // Ahead of the highlighter, which would otherwise tokenize the TeX of a
-      // `language-math` block into spans before MathJax gets to read it.
-      rehype: [rehypeMathjaxPlugin, ...rehypePlugins],
+      rehype: [rehypeMathjaxPlugin],
     }),
   );
   return mathPlugins;
@@ -297,10 +259,6 @@ function Parsed({ source, streaming }: { source: string; streaming: boolean }) {
   const withoutMath = (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
-      // SAFETY: the plugin tuple types are not exported by the remark/rehype
-      // packages; the array holds only valid unified plugins.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- plugin tuple types are not exported
-      rehypePlugins={rehypePlugins as any}
       urlTransform={markdownUrlTransform}
       components={components}
     >

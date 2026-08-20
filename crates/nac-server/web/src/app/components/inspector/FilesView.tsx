@@ -30,7 +30,7 @@ import {
   type FileNode,
   type FileTreeDir,
 } from "@/app/lib/fileTree";
-import { highlightCode, highlightDiff, type CodeToken } from "@/app/lib/highlight";
+import { highlightCode, highlightDiff, tokenStyle, type CodeToken } from "@/app/lib/highlight";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import {
   queryKeys,
@@ -273,7 +273,7 @@ function CodeLine({
       <span className="flex-1 min-w-0 px-2 code code-small text-basic-primary whitespace-pre-wrap break-words">
         {tokens
           ? tokens.map((token, index) => (
-              <span key={index} className={token.className ?? undefined}>
+              <span key={index} style={tokenStyle(token)}>
                 {token.text}
               </span>
             ))

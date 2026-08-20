@@ -1,4 +1,6 @@
-/* Syntax highlighting for fenced code. Prose (headings, paragraphs, lists,
+/* Fenced-block chrome and inline code. Token colours are inline styles from
+   the Shiki highlighter (`lib/highlight.ts`), so light/dark follow the same
+   CSS variables as the rest of the app. Prose (headings, paragraphs, lists,
    tables, …) lives in `chat-response.css` — every Markdown root also carries
    the `chat-response` class so chat and side panels share one look. */
 
@@ -22,56 +24,4 @@
      to break rather than push the transcript sideways on a narrow screen. */
   overflow-wrap: anywhere;
   color: var(--color-text-basic-secondary);
-}
-
-.hljs-comment,
-.hljs-quote {
-  color: var(--color-text-basic-muted);
-  font-style: italic;
-}
-
-.hljs-keyword,
-.hljs-selector-tag,
-.hljs-literal,
-.hljs-type {
-  color: var(--color-text-accent-primary);
-}
-
-.hljs-string,
-.hljs-regexp,
-.hljs-addition {
-  color: var(--color-text-success-primary);
-}
-
-.hljs-number,
-.hljs-symbol,
-.hljs-bullet {
-  color: var(--color-text-danger-primary);
-}
-
-.hljs-title,
-.hljs-title.class_,
-.hljs-title.function_,
-.hljs-section,
-.hljs-built_in {
-  color: var(--color-text-info-primary);
-}
-
-.hljs-attr,
-.hljs-attribute,
-.hljs-variable,
-.hljs-template-variable {
-  color: var(--color-text-basic-secondary);
-}
-
-.hljs-deletion {
-  color: var(--color-text-error-primary);
-}
-
-.hljs-emphasis {
-  font-style: italic;
-}
-
-.hljs-strong {
-  font-weight: 600;
 }

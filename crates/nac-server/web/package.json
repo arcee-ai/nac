@@ -17,15 +17,14 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
     "clsx": "^2.1.1",
-    "lowlight": "^3.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.2",
-    "rehype-highlight": "^7.0.2",
     "rehype-mathjax": "^7.1.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "shiki": "4.4.3",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
