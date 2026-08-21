@@ -10,6 +10,7 @@ mod projects;
 mod render;
 mod run_recovery;
 mod schema;
+mod session_forks;
 mod ssh_configurations;
 mod steering;
 mod thread_events;
@@ -24,6 +25,11 @@ pub use projects::*;
 pub use render::*;
 pub(crate) use run_recovery::*;
 pub use schema::{check_readiness, default_store_path, initialize};
+pub use session_forks::{
+    clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
+    list_session_forks, SessionForkLink, SessionForkOrigin,
+};
+pub(crate) use session_forks::{fork_origin_from_parts, list_session_forks_with_connection};
 pub use ssh_configurations::*;
 pub use steering::*;
 pub use thread_events::*;

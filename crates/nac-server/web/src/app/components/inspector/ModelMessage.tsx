@@ -8,6 +8,7 @@ import {
   ChatSessionMessage,
   ChatSessionMessageVariant,
   CopyButton,
+  ForkSessionItem,
   Icon,
   IconName,
   ModelPill,
@@ -22,7 +23,7 @@ import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import { RUN_CANCELLED_MARKER, type ModelTurn } from "@/app/lib/transcript";
-import type { WorkspaceRevision } from "@/app/types/api";
+import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /**
@@ -77,6 +78,12 @@ interface ModelMessageProps {
   onRefresh?: ((messageIndex: number) => void) | null;
   /** Restore the session to the snapshot at the preceding prompt. */
   onRevert?: ((messageIndex: number, text: string) => void) | null;
+  /** Clone this turn into a new chat. */
+  onFork?: ((messageIndex: number) => void) | null;
+  /** Forks created from this model turn. */
+  forks?: SessionForkLink[];
+  onOpenFork?: (sessionId: string) => void;
+  onDismissFork?: (forkId: string) => void;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
   /**
@@ -107,6 +114,10 @@ export const ModelMessage = memo(function ModelMessage({
   userText = "",
   onRefresh = null,
   onRevert = null,
+  onFork = null,
+  forks = [],
+  onOpenFork,
+  onDismissFork,
   actionsDisabled = false,
   snapshotRevision = null,
   filesPanel = null,
@@ -114,6 +125,7 @@ export const ModelMessage = memo(function ModelMessage({
   perfRender("ModelMessage");
   const canRefresh = onRefresh != null && userMessageIndex != null;
   const canRevert = onRevert != null && userMessageIndex != null;
+  const forkIndex = turn.messageIndex;
   const copyText = modelCopyText(turn);
   // The stop applies to the whole turn, including the files its runs had
   // already written, so it closes the turn below the snapshot rather than
@@ -180,7 +192,13 @@ export const ModelMessage = memo(function ModelMessage({
                 return (
                   <ChatBadge
                     key={block.key}
-                    label={block.pending ? "Defining worksets…" : `Worksets_${block.worksetId}`}
+                    label={
+                      block.worksetId
+                        ? `Worksets_${block.worksetId}`
+                        : block.pending
+                          ? "Defining worksets…"
+                          : "Worksets"
+                    }
                     pending={block.pending}
                     active={selectedWorkset === block.worksetId}
                     onClick={() => onSelectWorkset(block.worksetId)}
@@ -217,6 +235,23 @@ export const ModelMessage = memo(function ModelMessage({
             />
           ) : null}
         </div>
+
+        {forks.length > 0 ? (
+          <div className="flex flex-col gap-2 pt-4 md:pl-3 [&>*]:shrink-0">
+            {forks.map((fork) => (
+              <ForkSessionItem
+                key={fork.session_id}
+                sessionId={fork.session_id}
+                title={fork.title}
+                deleted={fork.deleted}
+                onOpen={onOpenFork ? () => onOpenFork(fork.session_id) : undefined}
+                onDismiss={
+                  onDismissFork && fork.deleted ? () => onDismissFork(fork.session_id) : undefined
+                }
+              />
+            ))}
+          </div>
+        ) : null}
 
         {/* Same resend / revert endpoints as the user bubble above — they always
             address that prompt. Hidden while this turn is still streaming. */}
@@ -280,6 +315,22 @@ export const ModelMessage = memo(function ModelMessage({
                 </span>
               </Tooltip>
             )}
+
+            {onFork != null && forkIndex != null ? (
+              <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
+                <Button
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  content={ButtonContent.Icon}
+                  aria-label="Create fork"
+                  disabled={actionsDisabled}
+                  onClick={() => onFork(forkIndex)}
+                  className="md:!h-4 md:!min-h-4 md:!p-0"
+                >
+                  <Icon iconName={IconName.Scheme} size={16} />
+                </Button>
+              </Tooltip>
+            ) : null}
 
             <CopyButton
               value={copyText}

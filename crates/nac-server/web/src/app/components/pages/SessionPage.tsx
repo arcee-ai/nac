@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -111,12 +111,14 @@ export default function SessionPage() {
   }>();
   const navigate = useNavigate();
   const id = sessionId ?? null;
+  const [heldProjectId, setHeldProjectId] = useState<string | null>(null);
 
   perfRender("SessionPage");
 
   const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
-  const { data: allSessions = [] } = useSessions();
+  const { data: sessionList } = useSessions();
+  const allSessions = sessionList ?? [];
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
@@ -141,6 +143,13 @@ export default function SessionPage() {
     if (id) clearAttention(id);
     resetSessionSelection();
   }, [id]);
+
+  if (entry) {
+    const nextProjectId = entry.summary.project_id ?? null;
+    if (heldProjectId !== nextProjectId) {
+      setHeldProjectId(nextProjectId);
+    }
+  }
 
   if (!id) return <Navigate to={routes.list()} replace />;
   if (!isSessionPanel(panel)) {
@@ -186,7 +195,10 @@ export default function SessionPage() {
     <SessionSideBox sessionId={id} snapshot={snapshot} panel={panel} onPanelChange={goToPanel} />
   );
 
-  const projectId = entry?.summary.project_id ?? null;
+  // If the open id has just left the list, keep the project's tabs until the
+  // router lands on a sibling. Hash history applies that navigation on a later
+  // tick than the cache update.
+  const projectId = (entry ? entry.summary.project_id : heldProjectId) ?? null;
   const projectSessions = projectId
     ? allSessions
         .filter((session) => session.summary.project_id === projectId)

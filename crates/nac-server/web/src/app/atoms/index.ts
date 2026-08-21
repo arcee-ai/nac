@@ -8,7 +8,7 @@ export { default as ChatLoader, ChatLoaderSize } from "./chat-loader";
 export { default as ChatSessionButton } from "./chat-session-button";
 export { default as ChatSessionMessage, ChatSessionMessageVariant } from "./chat-session-message";
 export { default as ChatSessionOrphanAvatar } from "./chat-session-orphan-avatar";
-export { default as ChatSessionTab } from "./chat-session-tab";
+export { default as ChatSessionTab, ChatSessionTabSkeleton } from "./chat-session-tab";
 export { default as Checkbox } from "./checkbox";
 export { default as CodeBlock, CodeBlockSize } from "./code-block";
 export { default as CoverBackground } from "./cover-background";
@@ -17,6 +17,7 @@ export { default as DateSelector, type DateString, type DateStringRange } from "
 export { default as DropdownContent } from "./dropdown-content";
 export { default as EditableHeader, EditableHeaderSize } from "./editable-header";
 export { default as FileIcon, fileIconName } from "./file-icon";
+export { default as ForkSessionItem } from "./fork-session-item";
 export { default as Hint } from "./hint";
 export { default as HorizontalTabsItem, HorizontalTabsItemVariant } from "./horizontal-tabs-item";
 export { default as HoverHint, HoverHintSize } from "./hover-hint";

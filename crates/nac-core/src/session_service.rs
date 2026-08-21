@@ -211,6 +211,9 @@ pub struct SessionFrontendSnapshot {
     /// canonical user message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub covered_orchestrator_steering_ids: Vec<i64>,
+    /// Conversation forks created from a model turn in this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forks: Vec<crate::store::SessionForkLink>,
     pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
 }
@@ -332,6 +335,7 @@ struct FrontendSnapshotBlockingLoad {
     thread_event_boundary: SessionEventBoundary,
     thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     worksets: WorksetsSnapshot,
+    forks: Vec<crate::store::SessionForkLink>,
     run_recovery_warning: Option<String>,
     workspace: WorkspaceSnapshot,
 }
@@ -1055,6 +1059,7 @@ impl SessionService {
             thread_steering,
             run_recovery_warning,
             worksets,
+            forks,
         ) = {
             let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
             let session_id = self.metadata.session_id.as_deref();
@@ -1080,6 +1085,12 @@ impl SessionService {
                 })
                 .transpose()?
                 .unwrap_or_default();
+            let forks = session_id
+                .map(|session_id| {
+                    crate::store::list_session_forks_with_connection(&conn, session_id)
+                })
+                .transpose()?
+                .unwrap_or_default();
             let run_recovery_warning = session_id
                 .map(|session_id| {
                     crate::store::load_run_recovery_with_connection(&conn, session_id)
@@ -1102,6 +1113,7 @@ impl SessionService {
                 thread_steering,
                 run_recovery_warning,
                 worksets,
+                forks,
             )
         };
         Ok(FrontendSnapshotBlockingLoad {
@@ -1113,6 +1125,7 @@ impl SessionService {
             thread_steering,
             run_recovery_warning,
             worksets,
+            forks,
             workspace,
         })
     }
@@ -1333,6 +1346,7 @@ impl SessionService {
             thread_event_diagnostics: blocking.thread_events.diagnostics,
             thread_steering: blocking.thread_steering,
             covered_orchestrator_steering_ids,
+            forks: blocking.forks,
             worksets: blocking.worksets,
             workspace: blocking.workspace,
         };

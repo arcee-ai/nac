@@ -3,11 +3,13 @@
 
 import { useCallback, useMemo } from "react";
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
   type InfiniteData,
+  type QueryClient,
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query";
@@ -649,6 +651,7 @@ export function useSessions(pollMs = SESSIONS_POLL_MS) {
     queryFn: ({ signal }) => api.listSessions({}, signal),
     refetchInterval: pollMs,
     staleTime: 0,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -708,6 +711,7 @@ export function useSessionSummary(id: string | null) {
     queryFn: ({ signal }) => api.listSessions({}, signal),
     refetchInterval: SESSIONS_POLL_MS,
     staleTime: 0,
+    placeholderData: keepPreviousData,
     select,
   });
 }
@@ -744,6 +748,9 @@ export function useSessionSnapshot(
     enabled: Boolean(id),
     // The stream invalidates this query, so a stale time only guards bursts.
     staleTime: 1000,
+    // Same session: keep the open snapshot on screen while a refetch runs.
+    // A different session must not inherit this one's files and transcript.
+    placeholderData: previousDataFrom(id ?? ""),
     ...options,
   });
 }
@@ -1086,11 +1093,40 @@ export function useCreateSession() {
   });
 }
 
+/**
+ * Session ids whose cached snapshot still shows `forkId` as a conversation
+ * fork. The open transcript is usually one of these; a background source tab
+ * has the same marker and would otherwise stay clickable after the fork is
+ * gone.
+ */
+function sessionIdsShowingFork(client: QueryClient, forkId: string): string[] {
+  const ids: string[] = [];
+  for (const query of client.getQueryCache().findAll({ queryKey: ["session"] })) {
+    const key = query.queryKey;
+    if (key[0] !== "session" || key[2] !== "snapshot" || typeof key[1] !== "string") {
+      continue;
+    }
+    const sessionId = key[1];
+    if (sessionId === forkId) continue;
+    const snapshot = query.state.data as SessionSnapshotResponse | undefined;
+    if (!snapshot?.forks?.some((fork) => fork.session_id === forkId)) continue;
+    ids.push(sessionId);
+  }
+  return ids;
+}
+
 export function useDeleteSession() {
   const invalidate = useInvalidators();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteSession(id),
-    onSuccess: () => invalidate.sessions(),
+    onSuccess: (_data, id) => {
+      void invalidate.sessions();
+      client.removeQueries({ queryKey: queryKeys.sessionRoot(id) });
+      for (const sourceId of sessionIdsShowingFork(client, id)) {
+        void invalidate.sessionRoot(sourceId);
+      }
+    },
   });
 }
 
@@ -1256,6 +1292,34 @@ export function useRegenerateRun() {
       fenceSessionSnapshot(id, true);
       void invalidate.sessionRoot(id);
       void invalidate.sessions();
+    },
+  });
+}
+
+/**
+ * Clone the transcript through a finished model turn into a new session, then
+ * open that chat. The source snapshot has to refetch so the fork marker lands
+ * under the turn that was copied.
+ */
+export function useForkSession() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
+      api.forkSession(id, messageIdx),
+    onSuccess: (_data, { id }) => {
+      void invalidate.sessionRoot(id);
+      void invalidate.sessions();
+    },
+  });
+}
+
+export function useDismissSessionFork() {
+  const invalidate = useInvalidators();
+  return useMutation({
+    mutationFn: ({ id, forkId }: { id: string; forkId: string }) =>
+      api.dismissSessionFork(id, forkId),
+    onSuccess: (_data, { id }) => {
+      void invalidate.sessionRoot(id);
     },
   });
 }
