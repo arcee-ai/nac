@@ -15,6 +15,7 @@ pub(crate) fn api_key_backend(backend: BackendKind) -> bool {
             | BackendKind::OpenAiResponses
             | BackendKind::AnthropicMessages
             | BackendKind::ArceeApi
+            | BackendKind::OpencodeGo
     )
 }
 
@@ -117,6 +118,7 @@ fn builtin_provider_hosts(backend: BackendKind) -> &'static [&'static str] {
         BackendKind::DeepSeekChat => &["api.deepseek.com"],
         BackendKind::TogetherChat => &["api.together.xyz"],
         BackendKind::FireworksChat => &["api.fireworks.ai"],
+        BackendKind::OpencodeGo => &["opencode.ai"],
         BackendKind::ArceeApi | BackendKind::ArceeAuth | BackendKind::ChatGptCodexResponses => &[],
     }
 }

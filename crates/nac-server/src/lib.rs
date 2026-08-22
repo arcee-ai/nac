@@ -7335,7 +7335,7 @@ mod tests {
 
         assert!(body["catalog_version"].as_u64().unwrap() >= 1);
         let providers = body["providers"].as_array().unwrap();
-        assert_eq!(providers.len(), 8);
+        assert_eq!(providers.len(), 9);
         let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
 
         // Auth requirements and managed base URLs derive from the backend
@@ -7349,6 +7349,7 @@ mod tests {
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
         );
         assert_eq!(by_id("chatgpt-codex-responses")["auth"], "codex_oauth");
+        assert_eq!(by_id("opencode-go")["auth"], "api_key_env");
 
         // Catalog endpoint defaults: present for the five models.dev
         // providers and the hand-seeded arcee-api (exact values are pinned
@@ -7361,6 +7362,7 @@ mod tests {
             "openai-responses",
             "together-chat",
             "arcee-api",
+            "opencode-go",
         ] {
             assert!(
                 by_id(id)["default_base_url"].is_string(),

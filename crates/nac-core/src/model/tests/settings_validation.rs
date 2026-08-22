@@ -14,12 +14,14 @@ fn api_key_backends_validate_selectors_and_auto_select_the_conventional_var() {
         "DEEPSEEK_API_KEY",
         "FIREWORKS_API_KEY",
         "ARCEE_API_KEY",
+        "OPENCODE_API_KEY",
         "NAC_EXPLICIT_TEST_KEY",
     ];
     let original = names.map(|name| (name, std::env::var_os(name)));
     set_env("DEEPSEEK_API_KEY", None);
     set_env("FIREWORKS_API_KEY", None);
     set_env("ARCEE_API_KEY", None);
+    set_env("OPENCODE_API_KEY", None);
     set_env("OPENAI_API_KEY", Some("openai-selected"));
     set_env("TOGETHER_API_KEY", Some("together-selected"));
     set_env("ANTHROPIC_API_KEY", Some("anthropic-selected"));
@@ -32,6 +34,7 @@ fn api_key_backends_validate_selectors_and_auto_select_the_conventional_var() {
         (BackendKind::DeepSeekChat, "DEEPSEEK_API_KEY"),
         (BackendKind::FireworksChat, "FIREWORKS_API_KEY"),
         (BackendKind::ArceeApi, "ARCEE_API_KEY"),
+        (BackendKind::OpencodeGo, "OPENCODE_API_KEY"),
     ];
     for (backend, conventional) in backends {
         // The guided missing-credential error names the provider's
@@ -293,6 +296,7 @@ fn managed_backends_materialize_only_absent_base_urls() {
         (BackendKind::OpenAiResponses, "https://api.openai.com/v1"),
         (BackendKind::AnthropicMessages, "https://api.anthropic.com"),
         (BackendKind::ArceeApi, "https://api.arcee.ai/api/v1"),
+        (BackendKind::OpencodeGo, OPENCODE_GO_CANONICAL_BASE_URL),
     ] {
         let materialized = EffectiveModelSettings::from_optional(
             Some(backend),
@@ -320,6 +324,18 @@ fn managed_backends_materialize_only_absent_base_urls() {
             "{backend}"
         );
     }
+
+    let zen = EffectiveModelSettings::from_optional(
+        Some(BackendKind::OpencodeGo),
+        Some("kimi-k2.7-code".to_string()),
+        Some("https://opencode.ai/zen/v1".to_string()),
+        None,
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .expect_err("OpenCode Zen must not be accepted as OpenCode Go");
+    assert!(zen.downcast_ref::<ModelConfigurationError>().is_some());
+    assert!(zen.to_string().contains("/zen/go/v1"), "{zen:#}");
 }
 
 #[test]
@@ -383,6 +399,17 @@ fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence(
         ),
         (BackendKind::ArceeAuth, "model", &[]),
         (BackendKind::ArceeApi, "model", &[]),
+        (
+            BackendKind::OpencodeGo,
+            "model",
+            &[
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::Xhigh,
+            ],
+        ),
     ];
 
     for (backend, model, supported) in cases {
