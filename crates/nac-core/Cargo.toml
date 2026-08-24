@@ -3,6 +3,9 @@ name = "nac-core"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [lib]
 name = "nac_core"
 
@@ -12,26 +15,26 @@ test-support = []
 openapi = ["dep:utoipa"]
 
 [dependencies]
-tokio = { version = "1", default-features = false, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls", "stream"] }
+tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+reqwest = { workspace = true, features = ["json", "form", "rustls", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 bytes = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 semver = "1"
-anyhow = "1"
+anyhow.workspace = true
 rusqlite = { version = "0.32", features = ["bundled"] }
-uuid = { version = "1", features = ["serde", "v4"] }
-libc = "0.2"
+uuid = { workspace = true, features = ["serde", "v4"] }
+libc.workspace = true
 portable-pty = "0.8"
-rmcp = { version = "1.3.0", default-features = false, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
-toml = "0.8"
+rmcp = { workspace = true, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+toml.workspace = true
 toml_edit = "0.22"
 url = "2"
 serde_yaml_ng = "0.10"
 diffy = { version = "0.5.0", default-features = false }
 fs2 = "0.4"
-sha2 = "0.10"
+sha2.workspace = true
 rand = "0.9"
 regex = "1"
 base64 = "0.22"
@@ -41,6 +44,6 @@ grep-matcher = "0.1"
 grep-regex = "0.1"
 ignore = "0.4"
 openssh-sftp-client = { version = "0.15", default-features = false }
-utoipa = { version = "5.5", optional = true, features = ["uuid"] }
+utoipa = { workspace = true, optional = true, features = ["uuid"] }
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 parking_lot = "0.12"

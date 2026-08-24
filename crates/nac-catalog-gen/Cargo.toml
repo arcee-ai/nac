@@ -4,15 +4,18 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 # Dev-time tool: generates nac-core's checked-in model catalog baseline from
 # models.dev data. Never runs at build time (no build.rs) and is never linked
 # into nac binaries; the checked-in output keeps `--locked`/offline builds
 # hermetic. All dependencies are already in the workspace tree.
 [dependencies]
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "0.8"
-sha2 = "0.10"
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
-tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"] }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+sha2.workspace = true
+reqwest = { workspace = true, features = ["rustls"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
