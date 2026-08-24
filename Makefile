@@ -1,4 +1,4 @@
-.PHONY: all build dev release install test test-rust test-assets check lint format-check fmt clean help
+.PHONY: all build dev release install ci test test-rust test-assets check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -63,6 +63,9 @@ release:
 install:
 	$(CARGO) install --path crates/$(PKG) --bin $(BIN) --locked --force --root $(INSTALL_ROOT)
 
+## Run the same formatting, lint, and test gates expected in CI
+ci: format-check lint test
+
 ## Run workspace Rust tests and web asset checks
 test: test-rust test-assets
 
@@ -90,6 +93,11 @@ lint:
 	npm --prefix $(WEB_DIR) run lint
 	$(CARGO) clippy --workspace --locked --lib --bins -- -D warnings
 
+## Apply machine-safe Rust lint fixes, then format the workspace
+fix:
+	$(CARGO) clippy --workspace --locked --lib --bins --fix --allow-dirty --allow-staged
+	$(CARGO) fmt --all
+
 ## Check frontend and Rust formatting
 format-check:
 	npm --prefix $(WEB_DIR) run format:check
@@ -99,6 +107,22 @@ format-check:
 fmt:
 	npm --prefix $(WEB_DIR) run format
 	$(CARGO) fmt --all
+
+## Format-check and lint one crate: make crate-check CRATE=nac-core
+crate-check:
+	@test -n "$(CRATE)" || { printf '%s\n' 'error: set CRATE, e.g. make crate-check CRATE=nac-core'; exit 2; }
+	$(CARGO) fmt --package $(CRATE) -- --check
+	$(CARGO) clippy --locked --package $(CRATE) --lib --bins -- -D warnings
+
+## Test one crate: make crate-test CRATE=nac-core
+crate-test:
+	@test -n "$(CRATE)" || { printf '%s\n' 'error: set CRATE, e.g. make crate-test CRATE=nac-core'; exit 2; }
+	$(CARGO) test --locked --package $(CRATE)
+
+## Build one crate: make crate-build CRATE=nac-core
+crate-build:
+	@test -n "$(CRATE)" || { printf '%s\n' 'error: set CRATE, e.g. make crate-build CRATE=nac-core'; exit 2; }
+	$(CARGO) build --locked --package $(CRATE)
 
 ## Remove build artifacts
 clean:
@@ -114,12 +138,17 @@ help:
 		'  dev          Build and run nac-web, then open it in the default browser' \
 		'  release      Build nac-web (release)' \
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
+		'  ci           Run formatting, lint, and test gates' \
 		'  test         Run Rust tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  check        Run cargo check --workspace --locked' \
 		'  lint         Lint frontend and production Rust targets' \
+		'  fix          Apply safe Rust lint fixes and format Rust sources' \
 		'  format-check Check frontend and Rust formatting' \
 		'  fmt          Format frontend and Rust sources' \
+		'  crate-check  Format-check and lint $$CRATE' \
+		'  crate-test   Test $$CRATE' \
+		'  crate-build  Build $$CRATE' \
 		'  clean        Remove target/ artifacts' \
 		'  help         Show this help'

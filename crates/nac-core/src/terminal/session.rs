@@ -399,7 +399,12 @@ mod tests {
             registry.clone(),
         )
         .unwrap();
-        session.write(b"sleep 30 & echo NAC_CHILD:$!\r").unwrap();
+        // The PTY uses the account's configured login shell, which may not
+        // support POSIX job syntax (for example, Fish has no `$!`). Run the
+        // process-tree fixture through `sh` so the test is shell-independent.
+        session
+            .write(b"sh -c 'sleep 30 & echo NAC_CHILD:$!; wait'\r")
+            .unwrap();
 
         let mut cursor = 0;
         let mut output = String::new();
