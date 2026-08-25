@@ -1768,6 +1768,7 @@ impl SessionManager {
     ///   request is using it),
     /// - no client holds a live event-stream subscription (an open SSE
     ///   connection, which the eviction would close), and
+    /// - it owns no explicitly retained process-local terminal, and
     /// - it does not execute inside a sandbox container: dropping the service
     ///   would drop the `SandboxSession`, an owned container's `Drop` runs
     ///   `podman rm -f`, and the next resume builds a fresh container under a
@@ -1785,6 +1786,7 @@ impl SessionManager {
                     && !service.has_active_operation()
                     && Arc::strong_count(service) == 1
                     && !service.has_event_subscribers()
+                    && !service.has_retained_terminals()
                     && !service.has_sandbox()
             })
             .map(|(session_id, _)| session_id.clone())

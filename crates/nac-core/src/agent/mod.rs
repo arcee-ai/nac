@@ -458,7 +458,8 @@ impl Agent {
             AgentMode::Worker => crate::terminal::TerminalManager::for_worker_with_limits(
                 config.command_output_limits,
             )?,
-            AgentMode::Orchestrator | AgentMode::Direct => crate::terminal::TerminalManager::new(),
+            AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
+            AgentMode::Direct => crate::terminal::TerminalManager::for_direct(),
         };
         let allowed_tools = Arc::new(
             tool_defs
@@ -562,6 +563,10 @@ impl Agent {
         self.tool_runtime.skills.clone()
     }
 
+    pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
+        self.tool_runtime.terminal_manager.clone()
+    }
+
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
         self.send_inner(prompt, None).await
     }
@@ -618,7 +623,7 @@ impl Agent {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             });
-            self.tool_runtime.terminal_manager.remove_all().await;
+            self.tool_runtime.terminal_manager.settle_run().await;
             return Err(error);
         }
 
@@ -627,7 +632,7 @@ impl Agent {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             });
-            self.tool_runtime.terminal_manager.remove_all().await;
+            self.tool_runtime.terminal_manager.settle_run().await;
             return Err(error);
         }
 
@@ -703,7 +708,7 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.remove_all().await;
+                    self.tool_runtime.terminal_manager.settle_run().await;
                     return Err(error);
                 }
             };
@@ -742,7 +747,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.tool_runtime.terminal_manager.settle_run().await;
                 return Err(error);
             }
 
@@ -773,7 +778,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.tool_runtime.terminal_manager.settle_run().await;
                 return Err(error);
             }
             self.clear_partial_stream();
@@ -808,7 +813,7 @@ impl Agent {
                                 thread_name: self.thread_name.clone(),
                                 message: error.to_string(),
                             });
-                            self.tool_runtime.terminal_manager.remove_all().await;
+                            self.tool_runtime.terminal_manager.settle_run().await;
                             return Err(error);
                         }
                         continue;
@@ -823,7 +828,7 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.remove_all().await;
+                    self.tool_runtime.terminal_manager.settle_run().await;
                     return Err(error);
                 };
                 self.emit(AgentEvent::AssistantMessage {
@@ -835,7 +840,7 @@ impl Agent {
                 self.emit(AgentEvent::RunFinished {
                     thread_name: self.thread_name.clone(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.tool_runtime.terminal_manager.settle_run().await;
                 return Ok(content);
             }
 
@@ -884,7 +889,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.tool_runtime.terminal_manager.settle_run().await;
                 return Err(error);
             }
 
@@ -909,7 +914,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.tool_runtime.terminal_manager.settle_run().await;
                 return Err(error);
             }
             if repeated_identical_failure {
@@ -924,7 +929,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.tool_runtime.terminal_manager.settle_run().await;
                 return Err(error);
             }
         }
@@ -1777,7 +1782,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.tool_runtime.terminal_manager.settle_run().await;
                 Err(error)
             }
         }
@@ -1834,7 +1839,7 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.remove_all().await;
+                    self.tool_runtime.terminal_manager.settle_run().await;
                     Err(error)
                 }
             }

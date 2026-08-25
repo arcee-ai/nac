@@ -37,25 +37,33 @@ pub struct TerminalManager {
     max_sessions: usize,
     isolate_process_groups: bool,
     output_registry: OutputRegistry,
+    preserve_retained_on_settlement: bool,
+    instance_id: Arc<str>,
 }
 
 impl TerminalManager {
     pub fn new() -> Self {
-        Self::with_process_group_isolation(true, CommandOutputLimits::default())
+        Self::with_process_group_isolation(true, false, CommandOutputLimits::default())
+            .expect("default command output limits are valid")
+    }
+
+    pub(crate) fn for_direct() -> Self {
+        Self::with_process_group_isolation(true, true, CommandOutputLimits::default())
             .expect("default command output limits are valid")
     }
 
     pub(crate) fn for_worker_with_limits(limits: CommandOutputLimits) -> Result<Self> {
-        Self::with_process_group_isolation(false, limits)
+        Self::with_process_group_isolation(false, false, limits)
     }
 
     #[cfg(test)]
     pub(crate) fn with_limits(limits: CommandOutputLimits) -> Result<Self> {
-        Self::with_process_group_isolation(true, limits)
+        Self::with_process_group_isolation(true, false, limits)
     }
 
     fn with_process_group_isolation(
         isolate_process_groups: bool,
+        preserve_retained_on_settlement: bool,
         limits: CommandOutputLimits,
     ) -> Result<Self> {
         Ok(Self {
@@ -63,7 +71,30 @@ impl TerminalManager {
             max_sessions: 16,
             isolate_process_groups,
             output_registry: OutputRegistry::new(limits)?,
+            preserve_retained_on_settlement,
+            instance_id: Arc::from(uuid::Uuid::new_v4().to_string()),
         })
+    }
+
+    pub fn next_session_name(&self) -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        format!(
+            "shell-{}-{}",
+            self.instance_id,
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        )
+    }
+
+    pub fn missing_session_error(&self, name: &str) -> anyhow::Error {
+        if name.starts_with("shell-") && !name.starts_with(&format!("shell-{}-", self.instance_id))
+        {
+            anyhow!(
+                "terminal session '{name}' belonged to a previous nac service instance and was lost when that process-local terminal owner stopped"
+            )
+        } else {
+            anyhow!("terminal session '{name}' not found - it was closed or expired")
+        }
     }
 
     pub async fn create(
@@ -93,6 +124,7 @@ impl TerminalManager {
             while sessions.len() >= self.max_sessions {
                 let oldest_key = sessions
                     .iter()
+                    .filter(|(_, session)| !session.is_retained())
                     .min_by_key(|(_, session)| session.created_at)
                     .map(|(key, _)| key.clone());
                 if let Some(key) = oldest_key {
@@ -100,7 +132,10 @@ impl TerminalManager {
                         evicted.push(session);
                     }
                 } else {
-                    break;
+                    return Err(anyhow!(
+                        "terminal session limit reached: all {} sessions were explicitly retained",
+                        self.max_sessions
+                    ));
                 }
             }
             evicted
@@ -137,7 +172,7 @@ impl TerminalManager {
     ) -> Result<TerminalOutput> {
         let start = Instant::now();
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-            self.remove_all().await;
+            self.settle_run().await;
             return Err(anyhow!("terminal command cancelled"));
         }
         let bytes = parse_keys(input);
@@ -174,7 +209,7 @@ impl TerminalManager {
             )
             .await;
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-            self.remove_all().await;
+            self.settle_run().await;
             return Err(anyhow!("terminal command cancelled"));
         }
         wait_result?;
@@ -187,25 +222,25 @@ impl TerminalManager {
             Ok(preview) => preview,
             Err(error) => {
                 if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-                    self.remove_all().await;
+                    self.settle_run().await;
                     return Err(anyhow!("terminal command cancelled"));
                 }
                 return Err(error);
             }
         };
 
-        let ended_session = {
+        let (ended_session, retained) = {
             let mut sessions = self.sessions.lock().await;
             if let Some(session) = sessions.get_mut(name) {
                 session.set_preview_cursor(preview.end_offset);
                 session.refresh_status();
                 if session.is_alive() {
-                    None
+                    (None, session.is_retained())
                 } else {
-                    sessions.remove(name)
+                    (sessions.remove(name), false)
                 }
             } else {
-                None
+                (None, false)
             }
         };
 
@@ -221,12 +256,13 @@ impl TerminalManager {
             (Some(name.to_string()), None)
         };
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-            self.remove_all().await;
+            self.settle_run().await;
             return Err(anyhow!("terminal command cancelled"));
         }
 
         Ok(TerminalOutput {
             session_name,
+            retained,
             output_id,
             start_cursor: preview.start_offset,
             end_cursor: preview.end_offset,
@@ -523,6 +559,54 @@ impl TerminalManager {
         self.output_registry.clear();
     }
 
+    pub async fn settle_run(&self) {
+        if !self.preserve_retained_on_settlement {
+            self.remove_all().await;
+            return;
+        }
+        let foreground: Vec<TerminalSession> = {
+            let mut sessions = self.sessions.lock().await;
+            let names = sessions
+                .iter()
+                .filter(|(_, session)| !session.is_retained())
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>();
+            names
+                .into_iter()
+                .filter_map(|name| sessions.remove(&name))
+                .collect()
+        };
+        for mut session in foreground {
+            if let Err(error) = session.kill().await {
+                eprintln!(
+                    "nac: foreground terminal session '{}' cleanup incomplete: {error:#}",
+                    session.name
+                );
+            }
+        }
+    }
+
+    pub async fn retain(&self, name: &str) -> Result<TerminalInfo> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(name)
+            .ok_or_else(|| self.missing_session_error(name))?;
+        session.refresh_status();
+        if !session.is_alive() {
+            return Err(anyhow!("terminal session '{name}' has already exited"));
+        }
+        session.retain();
+        Ok(self.session_info(name, session))
+    }
+
+    pub fn has_retained(&self) -> bool {
+        self.sessions
+            .try_lock()
+            .map(|sessions| sessions.values().any(TerminalSession::is_retained))
+            // A concurrent terminal operation is not a safe eviction point.
+            .unwrap_or(true)
+    }
+
     pub async fn get(&self, name: &str) -> Option<TerminalInfo> {
         let mut sessions = self.sessions.lock().await;
         sessions.get_mut(name).map(|session| {
@@ -538,6 +622,7 @@ impl TerminalManager {
             cols: session.cols,
             rows: session.rows,
             alive: session.is_alive(),
+            retained: session.is_retained(),
             idle_ms: session.idle_duration().as_millis() as u64,
             pid: session.pid(),
         }
@@ -1110,6 +1195,72 @@ mod tests {
         sleep(Duration::from_millis(1_100)).await;
         assert!(!path.exists(), "cancelled PTY produced a late side effect");
         assert!(manager.get("pty-cancel").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_run_settlement_keeps_only_explicitly_retained_terminals() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let foreground = manager.next_session_name();
+        let retained = manager.next_session_name();
+        manager
+            .create(foreground.clone(), None, 120, 40, &backend)
+            .await
+            .unwrap();
+        manager
+            .create(retained.clone(), None, 120, 40, &backend)
+            .await
+            .unwrap();
+        let info = manager.retain(&retained).await.unwrap();
+        assert!(info.retained);
+
+        manager.settle_run().await;
+        assert!(manager.get(&foreground).await.is_none());
+        assert!(manager.get(&retained).await.unwrap().retained);
+        manager.remove_all().await;
+    }
+
+    #[tokio::test]
+    async fn direct_cancellation_stops_foreground_and_preserves_retained_terminal() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let foreground = manager.next_session_name();
+        let retained = manager.next_session_name();
+        manager
+            .create(foreground.clone(), None, 120, 40, &backend)
+            .await
+            .unwrap();
+        manager
+            .create(retained.clone(), None, 120, 40, &backend)
+            .await
+            .unwrap();
+        manager.retain(&retained).await.unwrap();
+        let cancellation = ThreadCancellation::default();
+        cancellation.cancel();
+        assert!(manager
+            .write_stdin(&foreground, "", 10, 100, Some(&cancellation))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cancelled"));
+        assert!(manager.get(&foreground).await.is_none());
+        assert!(manager.get(&retained).await.is_some());
+        manager.remove_all().await;
+    }
+
+    #[test]
+    fn stale_terminal_handle_reports_process_local_restart_loss() {
+        let prior = TerminalManager::for_direct();
+        let stale = prior.next_session_name();
+        let current = TerminalManager::for_direct();
+        assert!(current
+            .missing_session_error(&stale)
+            .to_string()
+            .contains("previous nac service instance"));
+        assert!(current
+            .missing_session_error(&current.next_session_name())
+            .to_string()
+            .contains("closed or expired"));
     }
 
     #[tokio::test]

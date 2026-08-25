@@ -41,9 +41,9 @@ Non-negotiable invariants:
 - Recorded inherited baseline: `make check` passes and an elevated `make ci`
   passed on 2026-08-24. Socket-binding `Operation not permitted` failures from
   a confined direct `make test` are environmental, not inherited regressions.
-- The native tool kernel, immutable behavior foundation, and first persistent
-  direct-primary create/resume/API vertical are committed. The durable direct
-  inbox implementation is in verification before its checkpoint commit.
+- The native tool kernel, immutable behavior foundation, persistent direct
+  primary, durable inbox, and behavior-specific compaction are committed. The
+  retained-terminal lifecycle is verified and ready for its checkpoint commit.
 
 ## Ordered milestones
 
@@ -53,10 +53,10 @@ Non-negotiable invariants:
 2. **Completed — Native tool-kernel seam.** Exercised typed native registration,
    runtime validation, dynamic dispatch/capability snapshots, admission
    metadata, central settlement, and duplicate rejection with real NAC tools.
-3. **In progress — Persistent direct session.** Add the compatible behavior
+3. **Completed — Persistent direct session.** Add the compatible behavior
    discriminator, generalized direct loop, direct compaction/recovery,
    session-owned terminals, run outcomes, and durable steer/queue inbox.
-4. **Pending — Permissions and safety.** Add ordered allow/ask/deny rules,
+4. **In progress — Permissions and safety.** Add ordered allow/ask/deny rules,
    canonical tool resources, interactive/headless approval behavior, saved
    grants, hard safety policy, and backend-specific defaults.
 5. **Pending — Direct `/goal`.** Add durable direct-only goal state, controls,
@@ -139,8 +139,10 @@ Non-negotiable invariants:
   The durable inbox slice added schema-18 persistence, atomic prompt/steer
   delivery, service promotion/restart wakeup, and REST CRUD. The current slice
   adds construction-selected direct compaction policy text and checkpoint
-  compatibility. Retained-terminal transition/loss reporting and UI controls
-  remain in progress.
+  compatibility. The terminal slice makes PTYs foreground by default, adds an
+  explicit retained transition, preserves retained handles across direct runs
+  and cancellation, blocks idle service eviction, and diagnoses handles from a
+  prior process-local owner. UI controls remain in the web milestone.
 
 ## Verification
 
@@ -187,6 +189,14 @@ Non-negotiable invariants:
   orchestrator compatibility, and the live direct auto-compaction request.
 - `cargo test -p nac-core compaction --locked` — 69 passed, 0 failed; `make
   lint` and `make check` also passed for the direct compaction slice.
+- Terminal lifecycle focused tests — passed for explicit retain transition,
+  foreground settlement/cancellation, retained survival, process-instance
+  loss reporting, output recovery, and process-tree cleanup; `make lint` and
+  `make check` passed afterward.
+- `cargo test -p nac-core --locked` — 984 passed, 9 ignored, 0 failed in
+  84.61s with the retained-terminal lifecycle.
+- `cargo test -p nac-server --locked` — 113 server and 21 CLI tests passed in
+  87.28s with retained terminals preventing unsafe idle service eviction.
 - Recorded pre-goal baseline: `make check` and elevated `make ci` passed on
   2026-08-24.
 
@@ -196,6 +206,7 @@ Non-negotiable invariants:
 - `3ae182a feat(core): persist session behavior`.
 - `edb14e4 feat(core): add persistent direct primary`.
 - `2fad41d feat(core): add durable direct inbox`.
+- `e460fec feat(core): specialize direct compaction`.
 
 ## Known problems and blockers
 
@@ -204,6 +215,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Checkpoint the direct-specific compaction policy, then complete retained-
-terminal transition/loss reporting before closing the persistent-direct
-milestone.
+Checkpoint the verified retained-terminal lifecycle, then begin ordered
+permissions and non-bypassable safety policy at the native tool invocation
+seam.

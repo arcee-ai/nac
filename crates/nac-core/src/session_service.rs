@@ -532,6 +532,7 @@ pub struct SessionService {
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
     skills: Option<Arc<SkillRegistry>>,
+    terminal_manager: crate::terminal::TerminalManager,
     /// True when this session executes inside a sandbox container. Dropping
     /// the last service reference drops the `SandboxSession`, and an owned
     /// container's `Drop` runs `podman rm -f`; the next resume builds a fresh
@@ -735,6 +736,7 @@ impl SessionService {
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
+        let terminal_manager = run_config.agent.terminal_manager();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
         // pass; later scans read only the newly appended tail rows.
@@ -757,6 +759,7 @@ impl SessionService {
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
             skills,
+            terminal_manager,
             has_sandbox,
             inbox_wake: Arc::new(Mutex::new(())),
             #[cfg(test)]
@@ -868,6 +871,10 @@ impl SessionService {
     /// these sessions.
     pub fn has_sandbox(&self) -> bool {
         self.has_sandbox
+    }
+
+    pub fn has_retained_terminals(&self) -> bool {
+        self.terminal_manager.has_retained()
     }
 
     pub fn active_run(&self) -> Option<ActiveRunSnapshot> {

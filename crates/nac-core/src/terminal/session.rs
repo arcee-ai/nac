@@ -32,6 +32,7 @@ pub struct TerminalSession {
     pub last_output_at: Instant,
     alive: Arc<AtomicBool>,
     exit_code: Option<i32>,
+    retained: bool,
     /// Remote process-tree cleanup: backends that return a pidfile from
     /// `terminal_pty_command` get a backend-side kill on session teardown.
     backend_cleanup: Option<(Arc<ExecutionBackend>, String)>,
@@ -139,6 +140,7 @@ impl TerminalSession {
             last_output_at: Instant::now(),
             alive,
             exit_code: None,
+            retained: false,
             backend_cleanup,
             cwd: resolved_cwd,
             cols,
@@ -190,6 +192,14 @@ impl TerminalSession {
 
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code
+    }
+
+    pub fn retain(&mut self) {
+        self.retained = true;
+    }
+
+    pub fn is_retained(&self) -> bool {
+        self.retained
     }
 
     pub fn idle_duration(&self) -> Duration {
