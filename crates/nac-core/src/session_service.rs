@@ -2552,6 +2552,12 @@ impl SessionService {
 
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             cancelling_run.command_cancellation.cancel();
+            // Terminal handles are session-owned and can be idle while the
+            // model is between tool calls. Cancellation must therefore settle
+            // foreground PTYs directly instead of relying on another terminal
+            // poll to observe the run-scoped cancellation token. Explicitly
+            // retained handles survive by the direct-session contract.
+            self.terminal_manager.settle_run().await;
         }
 
         let steering_store = self
@@ -8469,6 +8475,65 @@ pub(super) mod tests {
                 ..
             }) if content == "[run cancelled by user]"
         ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn direct_cancel_settles_foreground_terminal_without_another_tool_poll() {
+        let session_id = "session-cancel-foreground-pty";
+        let (parts, store_path) = test_direct_active_service(
+            "cancel_foreground_pty",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        let cwd = std::env::current_dir().unwrap();
+        let backend = crate::sandbox::execution_backend_from_sandbox(None, &cwd);
+        let terminal_name = parts.service.terminal_manager.next_session_name();
+        parts
+            .service
+            .terminal_manager
+            .create(
+                terminal_name.clone(),
+                "sleep 30",
+                Some(cwd),
+                120,
+                40,
+                &backend,
+            )
+            .await
+            .unwrap();
+        assert!(parts
+            .service
+            .terminal_manager
+            .get(&terminal_name)
+            .await
+            .is_some());
+
+        let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
+        {
+            let mut agent = parts.service.agent.lock().await;
+            agent
+                .push_and_log_run_prompt_for_test(
+                    Message::User {
+                        content: "cancel prompt".to_string(),
+                    },
+                    &active.run_id,
+                )
+                .await
+                .unwrap();
+        }
+
+        parts.service.request_cancel(&active.run_id).await.unwrap();
+        assert!(
+            parts
+                .service
+                .terminal_manager
+                .get(&terminal_name)
+                .await
+                .is_none(),
+            "cancellation must kill the foreground PTY even when no terminal tool is polling"
+        );
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

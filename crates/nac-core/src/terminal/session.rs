@@ -44,6 +44,7 @@ pub struct TerminalSession {
 impl TerminalSession {
     pub fn spawn(
         name: String,
+        command: &str,
         cwd: Option<PathBuf>,
         cols: u16,
         rows: u16,
@@ -61,7 +62,7 @@ impl TerminalSession {
             .context("Failed to open PTY pair")?;
 
         let envs = terminal_env_owned();
-        let (cmd, pidfile) = backend.terminal_pty_command(cwd.as_deref(), &envs);
+        let (cmd, pidfile) = backend.terminal_pty_command(command, cwd.as_deref(), &envs);
         // resolved_cwd mirrors the default-workdir fallback inside each
         // backend's terminal_pty_command: explicit cwd if provided, otherwise
         // the backend's default terminal directory. Keep these in sync.
@@ -71,7 +72,7 @@ impl TerminalSession {
         let child = pty_pair
             .slave
             .spawn_command(cmd)
-            .context("Failed to spawn bash in PTY")?;
+            .context("Failed to spawn command in PTY")?;
         #[cfg(target_os = "linux")]
         let mut child = child;
         #[cfg(target_os = "linux")]
@@ -402,6 +403,7 @@ mod tests {
             OutputRegistry::new(crate::terminal::CommandOutputLimits::default()).unwrap();
         let mut session = TerminalSession::spawn(
             "test".to_string(),
+            "bash",
             None,
             120,
             40,

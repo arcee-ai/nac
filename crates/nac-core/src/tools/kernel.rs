@@ -463,10 +463,27 @@ impl ToolSnapshot {
             Ok(prepared) => {
                 let _admission = prepared.descriptor().admission;
                 if let Some(broker) = &services.runtime.permission_broker {
+                    let resources = match crate::permissions::canonicalize_authorization_resources(
+                        prepared.permission_resources(),
+                        services.runtime.backend.as_ref(),
+                        &services.runtime.store_path,
+                    )
+                    .await
+                    {
+                        Ok(resources) => resources,
+                        Err(error) => {
+                            return ToolResult::text(
+                                format!(
+                                    "Error: permission target resolution failed for {name}: {error:#}"
+                                ),
+                                true,
+                            );
+                        }
+                    };
                     match broker
                         .authorize(
                             name,
-                            prepared.permission_resources(),
+                            &resources,
                             context,
                             &services.runtime.command_cancellation,
                         )

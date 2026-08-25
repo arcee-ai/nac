@@ -244,6 +244,7 @@ impl SshBackend {
 
     pub(crate) fn terminal_pty_command(
         &self,
+        cmd_str: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, Option<String>) {
@@ -254,6 +255,7 @@ impl SshBackend {
             "-lc".to_string(),
             shell_quote(&ssh_wrapper_script(SANDBOX_PTY_WRAPPER)),
             "nac-pty".to_string(),
+            shell_quote(cmd_str),
             shell_quote_path(&pidfile),
         ];
         let remote = self.remote_command_in_dir(dir, envs, &words);

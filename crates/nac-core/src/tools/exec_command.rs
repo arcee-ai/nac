@@ -123,34 +123,22 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
 
     let session_name = manager.next_session_name();
     manager
-        .create(session_name.clone(), cwd, 120, 40, &runtime.backend)
+        .create(session_name.clone(), &cmd, cwd, 120, 40, &runtime.backend)
         .await?;
-    let output = if cmd.trim().is_empty() {
-        manager
-            .write_stdin(
-                &session_name,
-                "",
-                200,
-                max_output,
-                Some(&runtime.command_cancellation),
-            )
-            .await?
-    } else {
-        manager
-            .write_stdin(
-                &session_name,
-                &format!("{cmd}\r"),
-                yield_ms,
-                max_output,
-                Some(&runtime.command_cancellation),
-            )
-            .await?
-    };
+    let output = manager
+        .write_stdin(
+            &session_name,
+            "",
+            yield_ms,
+            max_output,
+            Some(&runtime.command_cancellation),
+        )
+        .await?;
     Ok((serde_json::to_string_pretty(&output)?, false))
 }
 
 pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolResult {
-    let result = async {
+    let result: Result<_> = async {
         let session_id = require_str(args, "session_id")?;
         let chars = args.get("chars").and_then(Value::as_str).unwrap_or("");
         let retain = args.get("retain").and_then(Value::as_bool).unwrap_or(false);
@@ -163,9 +151,6 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
             .get("max_output_chars")
             .and_then(Value::as_u64)
             .unwrap_or(8_000) as usize;
-        if runtime.terminal_manager.get(&session_id).await.is_none() {
-            return Err(runtime.terminal_manager.missing_session_error(&session_id));
-        }
         let mut output = runtime
             .terminal_manager
             .write_stdin(
@@ -544,7 +529,7 @@ mod tests {
             output.contains("sentinel-git|sentinel-gcm|sentinel-gh"),
             "got: {output}"
         );
-        assert!(result["pty"]["session_name"].is_string());
+        assert!(result["pty"]["session_name"].is_null());
     }
 
     #[cfg(unix)]
@@ -582,6 +567,67 @@ mod tests {
         assert_eq!(value["stdout_preview"], "hello");
         assert_eq!(value["truncated"], false);
         assert!(value["output_id"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn short_pty_command_exits_without_leaving_a_general_shell() {
+        let runtime = test_runtime();
+        let result = execute_exec_command(
+            &json!({"cmd": "printf exact-pty", "tty": true, "yield_time_ms": 2_000}),
+            &runtime,
+        )
+        .await;
+        assert!(!result.is_error, "{}", result.content);
+        let value: Value =
+            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
+        assert_eq!(value["content_preview"], "exact-pty");
+        assert!(
+            value["session_name"].is_null(),
+            "the exact authorized process exited, so no unrestricted shell handle may remain: {value}"
+        );
+        assert_eq!(value["exit_code"], 0);
+        assert!(runtime
+            .terminal_manager
+            .get("shell-unknown")
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn pty_input_continues_only_the_exact_running_command() {
+        let runtime = test_runtime();
+        let started = execute_exec_command(
+            &json!({
+                "cmd": "IFS= read -r line; printf 'received:%s' \"$line\"",
+                "tty": true,
+                "yield_time_ms": 50
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!started.is_error, "{}", started.content);
+        let started: Value =
+            serde_json::from_str(started.content.as_text().expect("text tool result")).unwrap();
+        let session_id = started["session_name"]
+            .as_str()
+            .expect("the authorized command is still waiting for input");
+
+        let completed = execute_write_stdin(
+            &json!({"session_id": session_id, "chars": "hello<RET>", "yield_time_ms": 2_000}),
+            &runtime,
+        )
+        .await;
+        assert!(!completed.is_error, "{}", completed.content);
+        let completed: Value =
+            serde_json::from_str(completed.content.as_text().expect("text tool result")).unwrap();
+        assert!(
+            completed["content_preview"]
+                .as_str()
+                .is_some_and(|output| output.contains("received:hello")),
+            "got: {completed}"
+        );
+        assert!(completed["session_name"].is_null());
+        assert_eq!(completed["exit_code"], 0);
     }
 
     #[tokio::test]

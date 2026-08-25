@@ -169,7 +169,7 @@ impl NativeTool for LaunchTool {
             let background = input.background;
             let started = match controller
                 .start(ManagedOrchestratorStartRequest {
-                    parent_session_id: parent,
+                    parent_session_id: parent.clone(),
                     orchestrator_session_id: input.orchestrator_session_id,
                     description: input.description,
                     prompt: input.prompt,
@@ -197,9 +197,34 @@ impl NativeTool for LaunchTool {
                 );
             }
             let session_id = started.orchestrator_session_id.clone();
-            match controller.wait(&session_id, started.generation).await {
+            let outcome = tokio::select! {
+                outcome = controller.wait(&session_id, started.generation) => outcome,
+                _ = services.runtime.command_cancellation.cancelled() => {
+                    let cancel_controller = controller.clone();
+                    let cancel_parent = parent.clone();
+                    let cancel_session = session_id.clone();
+                    let cancellation = tokio::spawn(async move {
+                        cancel_controller.cancel(&cancel_parent, &cancel_session).await
+                    });
+                    match cancellation.await {
+                        Ok(Ok(cancelled)) => Ok(cancelled),
+                        Ok(Err(error)) => Err(error.context(
+                            "parent cancellation could not cancel foreground orchestrator",
+                        )),
+                        Err(error) => Err(anyhow::anyhow!(
+                            "foreground orchestrator cancellation task failed: {error}"
+                        )),
+                    }
+                }
+            };
+            match outcome {
                 Ok(record) => record_result(record),
-                Err(error) => ToolResult::text(format!("Error: {error:#}"), true),
+                Err(error) => ToolResult::text(
+                    format!(
+                        "Error: foreground orchestrator failed (orchestrator_session_id: {session_id}): {error:#}"
+                    ),
+                    true,
+                ),
             }
         })
     }
@@ -444,6 +469,7 @@ fn owned(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     use super::*;
@@ -451,6 +477,8 @@ mod tests {
 
     struct FakeController {
         starts: Mutex<Vec<ManagedOrchestratorStartRequest>>,
+        block_wait: AtomicBool,
+        cancels: AtomicUsize,
     }
 
     fn record(
@@ -492,6 +520,9 @@ mod tests {
             _orchestrator_session_id: &'a str,
             _generation: u64,
         ) -> OrchestrationFuture<'a, ManagedOrchestratorRecord> {
+            if self.block_wait.load(Ordering::SeqCst) {
+                return Box::pin(std::future::pending());
+            }
             Box::pin(async {
                 Ok(record(
                     ManagedOrchestratorStatus::Completed,
@@ -530,6 +561,7 @@ mod tests {
             _parent_session_id: &'a str,
             _orchestrator_session_id: &'a str,
         ) -> OrchestrationFuture<'a, ManagedOrchestratorRecord> {
+            self.cancels.fetch_add(1, Ordering::SeqCst);
             Box::pin(async {
                 Ok(record(
                     ManagedOrchestratorStatus::Cancelled,
@@ -551,6 +583,8 @@ mod tests {
         ));
         let controller = Arc::new(FakeController {
             starts: Mutex::new(Vec::new()),
+            block_wait: AtomicBool::new(false),
+            cancels: AtomicUsize::new(0),
         });
         crate::orchestration_control::register_controller(store_path.clone(), controller.clone());
         let mut runtime = crate::tools::test_runtime();
@@ -610,5 +644,55 @@ mod tests {
             starts[1].execution_mode,
             ManagedOrchestratorExecutionMode::Background
         );
+    }
+
+    #[tokio::test]
+    async fn parent_cancellation_cancels_foreground_orchestrator_generation() {
+        let store_path = std::env::temp_dir().join(format!(
+            "nac_orchestrator_cancel_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let controller = Arc::new(FakeController {
+            starts: Mutex::new(Vec::new()),
+            block_wait: AtomicBool::new(true),
+            cancels: AtomicUsize::new(0),
+        });
+        crate::orchestration_control::register_controller(store_path.clone(), controller.clone());
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path;
+        runtime.session_id = Some("parent-1".to_string());
+        runtime.allowed_tools = Some(Arc::new(
+            crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        ));
+        let cancellation = runtime.command_cancellation.clone();
+        let client = crate::model::ModelClient::new_for_test();
+
+        let launch = tokio::spawn(async move {
+            crate::tools::execute_tool(
+                "orchestrator_launch",
+                json!({
+                    "description": "implement persistence",
+                    "prompt": "implement and verify",
+                    "background": false
+                }),
+                &runtime,
+                &client,
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        cancellation.cancel();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), launch)
+            .await
+            .expect("foreground launch must settle after parent cancellation")
+            .unwrap();
+        assert!(result.is_error, "cancelled foreground work is a tool error");
+        let record: ManagedOrchestratorRecord =
+            serde_json::from_str(result.content.as_text().unwrap()).unwrap();
+        assert_eq!(record.status, ManagedOrchestratorStatus::Cancelled);
+        assert_eq!(controller.cancels.load(Ordering::SeqCst), 1);
     }
 }

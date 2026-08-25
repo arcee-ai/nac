@@ -1365,7 +1365,7 @@ fn secure_open_lock(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-fn resolve_target_path(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn resolve_target_path(path: &Path) -> io::Result<PathBuf> {
     let absolute = if path.is_absolute() {
         lexical_normalize(path)
     } else {

@@ -64,12 +64,30 @@ pub fn insert_permission_grants(
     backend: &str,
     session_config_version: i64,
 ) -> Result<Vec<PermissionGrantRecord>> {
-    if session_id.trim().is_empty() || action.trim().is_empty() {
+    let grants = resources
+        .iter()
+        .map(|resource| (action.to_string(), resource.clone()))
+        .collect::<Vec<_>>();
+    insert_permission_grant_set(path, session_id, &grants, backend, session_config_version)
+}
+
+pub(crate) fn insert_permission_grant_set(
+    path: &Path,
+    session_id: &str,
+    grants: &[(String, String)],
+    backend: &str,
+    session_config_version: i64,
+) -> Result<Vec<PermissionGrantRecord>> {
+    if session_id.trim().is_empty() || grants.iter().any(|(action, _)| action.trim().is_empty()) {
         return Err(anyhow!(
             "permission grant session and action must not be empty"
         ));
     }
-    if resources.is_empty() || resources.iter().any(|resource| resource.trim().is_empty()) {
+    if grants.is_empty()
+        || grants
+            .iter()
+            .any(|(_, resource)| resource.trim().is_empty())
+    {
         return Err(anyhow!("permission grant resources must not be empty"));
     }
     if !matches!(backend, "local" | "podman" | "ssh") {
@@ -84,7 +102,7 @@ pub fn insert_permission_grants(
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let now = now_utc();
-    for resource in resources {
+    for (action, resource) in grants {
         transaction.execute(
             "INSERT OR IGNORE INTO permission_grants
              (id, session_id, action, resource, backend, session_config_version, created_at)
@@ -162,6 +180,45 @@ mod tests {
         assert!(list_permission_grants(&path, "session-a")
             .unwrap()
             .is_empty());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn multi_action_grant_set_commits_atomically() {
+        let path = std::env::temp_dir()
+            .join(format!("nac-permission-grant-set-{}", uuid::Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        insert_permission_grant_set(
+            &path,
+            "session-a",
+            &[
+                ("execute".to_string(), "command:[cargo][test]*".to_string()),
+                ("read".to_string(), "/outside/Cargo.toml".to_string()),
+            ],
+            "local",
+            0,
+        )
+        .unwrap();
+        let grants = list_permission_grants(&path, "session-a").unwrap();
+        assert_eq!(grants.len(), 2);
+        assert!(grants.iter().any(|grant| grant.action == "execute"));
+        assert!(grants.iter().any(|grant| grant.action == "read"));
+
+        let error = insert_permission_grant_set(
+            &path,
+            "session-a",
+            &[
+                ("edit".to_string(), "/outside/a".to_string()),
+                (String::new(), "/outside/b".to_string()),
+            ],
+            "local",
+            0,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must not be empty"));
+        assert_eq!(list_permission_grants(&path, "session-a").unwrap().len(), 2);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

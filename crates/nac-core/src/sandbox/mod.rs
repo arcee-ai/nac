@@ -429,11 +429,12 @@ impl SandboxSession {
 
     pub fn terminal_pty_command(
         &self,
+        cmd: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, String) {
         match self {
-            Self::Podman(inner) => inner.terminal_pty_command(cwd, envs),
+            Self::Podman(inner) => inner.terminal_pty_command(cmd, cwd, envs),
         }
     }
 
