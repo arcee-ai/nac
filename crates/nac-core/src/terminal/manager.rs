@@ -147,6 +147,12 @@ impl TerminalManager {
                 .collect()
         };
         for mut session in exited {
+            if let Err(error) = session.kill().await {
+                eprintln!(
+                    "nac: exited terminal session '{}' descendant cleanup incomplete: {error:#}",
+                    session.name
+                );
+            }
             self.remember_completed(&mut session).await;
         }
 
@@ -317,6 +323,12 @@ impl TerminalManager {
         };
 
         let (session_name, exit_code) = if let Some(mut session) = ended_session {
+            if let Err(error) = session.kill().await {
+                eprintln!(
+                    "nac: exited terminal session '{}' descendant cleanup incomplete: {error:#}",
+                    session.name
+                );
+            }
             let exit_code = self.remember_completed(&mut session).await;
             (None, exit_code)
         } else {

@@ -36,10 +36,11 @@ export default function ProjectRedirectPage() {
   );
 
   const loading = projectsQuery.isLoading || sessionsQuery.isLoading;
+  const refreshing = projectsQuery.isFetching || sessionsQuery.isFetching;
   const unavailable = projectsQuery.isError || sessionsQuery.isError;
   const ownershipLoaded = projectsQuery.isSuccess && sessionsQuery.isSuccess;
   const needsFirstChat =
-    !loading && !unavailable && ownershipLoaded && project != null && newest == null;
+    !loading && !refreshing && !unavailable && ownershipLoaded && project != null && newest == null;
 
   const startChat = actions.newChat;
   useEffect(() => {

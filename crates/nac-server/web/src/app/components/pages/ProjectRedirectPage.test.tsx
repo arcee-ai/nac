@@ -42,12 +42,14 @@ beforeEach(() => {
   fakes.projects.mockReset().mockReturnValue({
     data: { projects: [{ project_id: "project-1" }] },
     isLoading: false,
+    isFetching: false,
     isError: false,
     isSuccess: true,
   });
   fakes.sessions.mockReset().mockReturnValue({
     data: [],
     isLoading: false,
+    isFetching: false,
     isError: false,
     isSuccess: true,
   });
@@ -66,6 +68,7 @@ describe("project redirect", () => {
     fakes.sessions.mockReturnValue({
       data: undefined,
       isLoading: false,
+      isFetching: false,
       isError: true,
       isSuccess: false,
     });
@@ -78,6 +81,7 @@ describe("project redirect", () => {
     fakes.projects.mockReturnValue({
       data: undefined,
       isLoading: false,
+      isFetching: false,
       isError: true,
       isSuccess: false,
     });
@@ -90,8 +94,22 @@ describe("project redirect", () => {
     fakes.sessions.mockReturnValue({
       data: undefined,
       isLoading: false,
+      isFetching: false,
       isError: false,
       isSuccess: false,
+    });
+    mount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.newChat).not.toHaveBeenCalled();
+  });
+
+  it("does not create a chat from stale successful ownership data during refetch", async () => {
+    fakes.sessions.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: true,
+      isError: false,
+      isSuccess: true,
     });
     mount();
     await new Promise((resolve) => setTimeout(resolve, 0));
