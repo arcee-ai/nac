@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
 import { Loader, LoaderSize } from "@/app/atoms";
-import { parseStoreTime } from "@/app/lib/format";
+import { newestPrimarySessionForProject } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useProjects, useSessions } from "@/app/services/queries";
@@ -30,15 +30,10 @@ export default function ProjectRedirectPage() {
     () => projectsQuery.data?.projects.find((entry) => entry.project_id === projectId) ?? null,
     [projectsQuery.data, projectId],
   );
-  const newest = useMemo(() => {
-    const owned = (sessionsQuery.data ?? []).filter(
-      (entry) => entry.summary.project_id === projectId,
-    );
-    owned.sort(
-      (a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at),
-    );
-    return owned[0] ?? null;
-  }, [sessionsQuery.data, projectId]);
+  const newest = useMemo(
+    () => newestPrimarySessionForProject(sessionsQuery.data ?? [], projectId),
+    [sessionsQuery.data, projectId],
+  );
 
   const loading = projectsQuery.isLoading || sessionsQuery.isLoading;
   const needsFirstChat = !loading && project != null && newest == null;

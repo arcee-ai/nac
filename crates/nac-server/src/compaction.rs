@@ -77,6 +77,13 @@ impl SessionManager {
         {
             return Err(CompactSessionError::NotFound);
         }
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| report_failure(session_id, "verify session ownership", &error))?
+            .is_some()
+        {
+            return Err(CompactSessionError::NotFound);
+        }
 
         let handle = {
             let gate = self.lifecycle_gate(session_id);
@@ -93,6 +100,13 @@ impl SessionManager {
             if !self
                 .persisted_operation_session_exists(session_id)
                 .map_err(|error| report_failure(session_id, "recheck persisted session", &error))?
+            {
+                return Err(CompactSessionError::NotFound);
+            }
+            if self
+                .session_lineage(session_id)
+                .map_err(|error| report_failure(session_id, "recheck session ownership", &error))?
+                .is_some()
             {
                 return Err(CompactSessionError::NotFound);
             }

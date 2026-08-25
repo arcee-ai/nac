@@ -37,6 +37,17 @@ function bySessionRecency(a: ManagedSessionSummary, b: ManagedSessionSummary): n
   return parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at);
 }
 
+export function newestPrimarySessionForProject(
+  sessions: ManagedSessionSummary[],
+  projectId: string,
+): ManagedSessionSummary | null {
+  return (
+    primarySessions(sessions)
+      .filter((entry) => entry.summary.project_id === projectId)
+      .sort(bySessionRecency)[0] ?? null
+  );
+}
+
 /**
  * Join projects with their sessions, newest session first inside each project.
  * Backend order is preserved so pinned projects stay on top.

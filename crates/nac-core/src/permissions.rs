@@ -130,6 +130,19 @@ struct PendingPermissionGuard {
     request_id: String,
 }
 
+struct PermissionWaiterLiveness {
+    live: Arc<StdMutex<bool>>,
+}
+
+impl Drop for PermissionWaiterLiveness {
+    fn drop(&mut self) {
+        *self
+            .live
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+    }
+}
+
 impl Drop for PendingPermissionGuard {
     fn drop(&mut self) {
         if let Some(broker) = self.broker.upgrade() {
@@ -218,38 +231,14 @@ impl PermissionBroker {
             .pending
             .remove(request_id)
             .ok_or_else(|| anyhow::anyhow!("permission request '{request_id}' was not found"))?;
-
-        if reply == PermissionReply::Always {
-            let grants = pending
-                .request
-                .resources
-                .iter()
-                .filter_map(|resource| {
-                    resource
-                        .save_resource
-                        .as_ref()
-                        .map(|save| (resource.action.clone(), save.clone()))
-                })
-                .collect::<Vec<_>>();
-            if !grants.is_empty() {
-                crate::store::insert_permission_grant_set(
-                    &self.store_path,
-                    &self.session_id,
-                    &grants,
-                    self.backend,
-                    self.session_config_version,
-                )?;
-            }
-        }
-
+        pending.reply.send(reply).map_err(|_| {
+            anyhow::anyhow!("permission request '{request_id}' is no longer active")
+        })?;
         self.emit(crate::events::SessionEvent::PermissionReplied {
             request_id: request_id.to_string(),
             reply,
         });
-        pending
-            .reply
-            .send(reply)
-            .map_err(|_| anyhow::anyhow!("permission request '{request_id}' is no longer active"))
+        Ok(())
     }
 
     pub(crate) async fn authorize(
@@ -360,6 +349,10 @@ impl PermissionBroker {
             broker: Arc::downgrade(self),
             request_id: request.id.clone(),
         };
+        let waiter_live = Arc::new(StdMutex::new(true));
+        let _waiter_liveness = PermissionWaiterLiveness {
+            live: Arc::clone(&waiter_live),
+        };
         self.emit(crate::events::SessionEvent::PermissionAsked {
             request: request.clone(),
         });
@@ -367,20 +360,20 @@ impl PermissionBroker {
         tokio::pin!(receiver);
         let result = tokio::select! {
             biased;
-            reply = &mut receiver => Self::reply_outcome(reply),
+            reply = &mut receiver => self.reply_outcome(reply, &request, &waiter_live).await,
             () = cancellation.cancelled() => {
                 let reason = "run was cancelled while awaiting approval".to_string();
                 if self.dismiss_pending(&request.id, reason.clone()) {
                     AuthorizationOutcome::Denied(reason)
                 } else {
-                    Self::reply_outcome(receiver.await)
+                    self.reply_outcome(receiver.await, &request, &waiter_live).await
                 }
             },
             reason = self.interactive_subscriber_unavailable(interactive) => {
                 if self.dismiss_pending(&request.id, reason.clone()) {
                     AuthorizationOutcome::Denied(reason)
                 } else {
-                    Self::reply_outcome(receiver.await)
+                    self.reply_outcome(receiver.await, &request, &waiter_live).await
                 }
             },
             () = tokio::time::sleep(APPROVAL_TIMEOUT) => {
@@ -388,22 +381,69 @@ impl PermissionBroker {
                 if self.dismiss_pending(&request.id, reason.clone()) {
                     AuthorizationOutcome::Denied(reason)
                 } else {
-                    Self::reply_outcome(receiver.await)
+                    self.reply_outcome(receiver.await, &request, &waiter_live).await
                 }
             },
         };
-        // A reply owns the request by removing it before durable grants are
-        // written. If receiving the reply won the select, there is nothing to
-        // dismiss; if a signal won after that claim, the branch awaited the
-        // reply instead of racing cancellation against persisted authority.
+        // A reply owns the request by removing it and successfully delivering
+        // to this exact waiter. Durable grants are written only after receipt,
+        // so a dropped receiver can never leave authority behind.
         result
     }
 
-    fn reply_outcome(
+    async fn reply_outcome(
+        &self,
         reply: Result<PermissionReply, tokio::sync::oneshot::error::RecvError>,
+        request: &PermissionRequest,
+        waiter_live: &Arc<StdMutex<bool>>,
     ) -> AuthorizationOutcome {
         match reply {
-            Ok(PermissionReply::Once | PermissionReply::Always) => AuthorizationOutcome::Allowed,
+            Ok(PermissionReply::Once) => AuthorizationOutcome::Allowed,
+            Ok(PermissionReply::Always) => {
+                let grants = request
+                    .resources
+                    .iter()
+                    .filter_map(|resource| {
+                        resource
+                            .save_resource
+                            .as_ref()
+                            .map(|save| (resource.action.clone(), save.clone()))
+                    })
+                    .collect::<Vec<_>>();
+                if grants.is_empty() {
+                    AuthorizationOutcome::Allowed
+                } else {
+                    let store_path = self.store_path.clone();
+                    let session_id = self.session_id.clone();
+                    let backend = self.backend;
+                    let session_config_version = self.session_config_version;
+                    let waiter_live = Arc::clone(waiter_live);
+                    match tokio::task::spawn_blocking(move || {
+                        crate::store::insert_permission_grant_set_if_waiter_live(
+                            &store_path,
+                            &session_id,
+                            &grants,
+                            backend,
+                            session_config_version,
+                            &waiter_live,
+                        )
+                    })
+                    .await
+                    {
+                        Ok(Ok(Some(_))) => AuthorizationOutcome::Allowed,
+                        Ok(Ok(None)) => AuthorizationOutcome::Denied(
+                            "the permission waiter ended before the approved grant could be saved; the operation was not executed"
+                                .to_string(),
+                        ),
+                        Ok(Err(error)) => AuthorizationOutcome::Denied(format!(
+                            "the approved permission grant could not be saved; the operation was not executed: {error}"
+                        )),
+                        Err(error) => AuthorizationOutcome::Denied(format!(
+                            "the approved permission grant task failed; the operation was not executed: {error}"
+                        )),
+                    }
+                }
+            }
             Ok(PermissionReply::Reject) => AuthorizationOutcome::Denied(
                 "the user rejected this permission request".to_string(),
             ),
@@ -1171,18 +1211,8 @@ fn shell_path_resources(
     backend: &ExecutionBackend,
 ) -> Vec<PermissionResource> {
     let mut paths = Vec::<PathBuf>::new();
-    for (index, token) in tokens.iter().enumerate().skip(1) {
-        let candidate = token
-            .split_once('=')
-            .filter(|(option, _)| option.starts_with('-'))
-            .map_or(token.as_str(), |(_, value)| value);
-        let previous_takes_path = index > 0
-            && matches!(
-                tokens[index - 1].as_str(),
-                "--manifest-path" | "--config" | "--output" | "-C" | "-f" | "--file"
-            );
-        if previous_takes_path || looks_like_shell_path(candidate) {
-            let requested = Path::new(candidate);
+    for index in 1..tokens.len() {
+        if let Some((_, requested)) = shell_path_candidate(tokens, index) {
             let path = if requested.is_absolute() {
                 requested.to_path_buf()
             } else {
@@ -1207,12 +1237,229 @@ fn looks_like_shell_path(value: &str) -> bool {
         || value.starts_with(".env.")
 }
 
+fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>, &Path)> {
+    let token = tokens.get(index)?;
+    let (option, candidate) = token
+        .split_once('=')
+        .filter(|(option, _)| option.starts_with('-'))
+        .map_or((None, token.as_str()), |(option, value)| {
+            (Some(option), value)
+        });
+    let previous_takes_path = index > 0
+        && matches!(
+            tokens[index - 1].as_str(),
+            "--manifest-path" | "--config" | "--output" | "-C" | "-f" | "--file"
+        );
+    let known_bare_path = candidate.contains('/') && bare_relative_path_position(tokens, index);
+    (previous_takes_path || looks_like_shell_path(candidate) || known_bare_path)
+        .then(|| (option, Path::new(candidate)))
+}
+
+fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    let command = effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .unwrap_or_default();
+    if command != "rg" || index <= command_index {
+        return false;
+    }
+    let token = &tokens[index];
+    let option = token
+        .split_once('=')
+        .filter(|(option, _)| option.starts_with('-'))
+        .map(|(option, _)| option);
+    let previous = index.checked_sub(1).and_then(|index| tokens.get(index));
+    const NON_PATH_RG_OPTIONS: &[&str] = &[
+        "-e",
+        "--regexp",
+        "-g",
+        "--glob",
+        "--iglob",
+        "-t",
+        "--type",
+        "--type-add",
+        "--type-clear",
+        "-r",
+        "--replace",
+    ];
+    if option.is_some_and(|option| NON_PATH_RG_OPTIONS.contains(&option))
+        || previous.is_some_and(|option| NON_PATH_RG_OPTIONS.contains(&option.as_str()))
+    {
+        return false;
+    }
+    effective.iter().any(|token| token == "--files") || index > command_index + 1
+}
+
+pub(crate) fn bind_authorized_shell_command(
+    command: &str,
+    cwd: &Path,
+    resources: &[PermissionResource],
+) -> anyhow::Result<String> {
+    let ParsedShell::Supported(segments) = parse_shell(command) else {
+        return Ok(command.to_string());
+    };
+    let spans = supported_shell_word_spans(command)
+        .ok_or_else(|| anyhow::anyhow!("authorized command could not be tokenized for binding"))?;
+    if spans.len() != segments.len()
+        || spans.iter().zip(&segments).any(|(spans, tokens)| {
+            spans.iter().map(|span| &span.value).collect::<Vec<_>>()
+                != tokens.iter().collect::<Vec<_>>()
+        })
+    {
+        return Err(anyhow::anyhow!(
+            "authorized command tokenization changed before binding"
+        ));
+    }
+
+    let mut authorized_paths = resources
+        .iter()
+        .filter(|resource| resource.action == "execute_path")
+        .map(|resource| resource.resource.as_str());
+    let cwd = lexical_normalize(cwd);
+    let mut replacements = Vec::<(usize, usize, String)>::new();
+    for (tokens, spans) in segments.iter().zip(spans) {
+        let mut canonical_by_requested = Vec::<(PathBuf, String)>::new();
+        for (index, span) in spans.iter().enumerate().skip(1) {
+            let Some((option, requested)) = shell_path_candidate(tokens, index) else {
+                continue;
+            };
+            let requested = if requested.is_absolute() {
+                requested.to_path_buf()
+            } else {
+                cwd.join(requested)
+            };
+            let canonical = if let Some((_, canonical)) = canonical_by_requested
+                .iter()
+                .find(|(seen, _)| seen == &requested)
+            {
+                canonical.clone()
+            } else {
+                let canonical = authorized_paths
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("authorized command path is missing"))?
+                    .to_string();
+                canonical_by_requested.push((requested, canonical.clone()));
+                canonical
+            };
+            let bound = option.map_or(canonical.clone(), |option| format!("{option}={canonical}"));
+            replacements.push((span.start, span.end, shell_quote(&bound)));
+        }
+    }
+    if authorized_paths.next().is_some() {
+        return Err(anyhow::anyhow!(
+            "authorized command contains unmatched path resources"
+        ));
+    }
+    let mut rebound = command.to_string();
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        rebound.replace_range(start..end, &replacement);
+    }
+    Ok(rebound)
+}
+
+#[derive(Debug)]
+struct ShellWordSpan {
+    start: usize,
+    end: usize,
+    value: String,
+}
+
+fn supported_shell_word_spans(command: &str) -> Option<Vec<Vec<ShellWordSpan>>> {
+    if matches!(parse_shell(command), ParsedShell::Opaque) {
+        return None;
+    }
+    let mut segments = Vec::new();
+    let mut segment = Vec::new();
+    let mut start = None;
+    let mut value = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut chars = command.char_indices().peekable();
+    let push = |segment: &mut Vec<ShellWordSpan>,
+                start: &mut Option<usize>,
+                value: &mut String,
+                end: usize| {
+        if !value.is_empty() {
+            segment.push(ShellWordSpan {
+                start: start.take().expect("non-empty shell word has a start"),
+                end,
+                value: std::mem::take(value),
+            });
+        } else {
+            *start = None;
+        }
+    };
+    while let Some((index, current)) = chars.next() {
+        if escaped {
+            value.push(current);
+            escaped = false;
+            continue;
+        }
+        if current == '\\' && quote != Some('\'') {
+            start.get_or_insert(index);
+            escaped = true;
+            continue;
+        }
+        if let Some(active) = quote {
+            if current == active {
+                quote = None;
+            } else {
+                value.push(current);
+            }
+            continue;
+        }
+        if current == '\'' || current == '"' {
+            start.get_or_insert(index);
+            quote = Some(current);
+            continue;
+        }
+        if current.is_whitespace() {
+            push(&mut segment, &mut start, &mut value, index);
+            continue;
+        }
+        let boundary = matches!(current, ';' | '\n' | '|' | '&');
+        if boundary {
+            push(&mut segment, &mut start, &mut value, index);
+            if !segment.is_empty() {
+                segments.push(std::mem::take(&mut segment));
+            }
+            if matches!(current, '|' | '&')
+                && chars.peek().is_some_and(|(_, next)| *next == current)
+            {
+                chars.next();
+            }
+            continue;
+        }
+        start.get_or_insert(index);
+        value.push(current);
+    }
+    push(&mut segment, &mut start, &mut value, command.len());
+    if !segment.is_empty() {
+        segments.push(segment);
+    }
+    Some(segments)
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_./:=+,-".contains(&byte))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 fn opaque_hard_shell_denial(
     command: &str,
     cwd: &Path,
     backend: &ExecutionBackend,
 ) -> Option<String> {
-    let tokens = opaque_unquoted_tokens(command);
+    let tokens = opaque_literal_tokens(command);
     for index in 0..tokens.len() {
         if let Some(reason) = hard_shell_denial(&tokens[index..], cwd, backend) {
             return Some(reason);
@@ -1221,16 +1468,14 @@ fn opaque_hard_shell_denial(
     None
 }
 
-fn opaque_unquoted_tokens(command: &str) -> Vec<String> {
+fn opaque_literal_tokens(command: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut word = String::new();
     let mut quote = None;
     let mut escaped = false;
     for current in command.chars() {
         if escaped {
-            if quote.is_none() {
-                word.push(current);
-            }
+            word.push(current);
             escaped = false;
             continue;
         }
@@ -1241,6 +1486,8 @@ fn opaque_unquoted_tokens(command: &str) -> Vec<String> {
         if let Some(active) = quote {
             if current == active {
                 quote = None;
+            } else {
+                word.push(current);
             }
             continue;
         }
@@ -1576,6 +1823,8 @@ mod tests {
             "git checkout .",
             "sh -c 'git reset --hard'",
             "bash -lc 'sudo make install'",
+            "sh -c 'git reset --hard' > /tmp/result",
+            "bash -lc 'sudo make install' > /tmp/result",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
@@ -1613,6 +1862,47 @@ mod tests {
             resource.action == "external_directory"
                 && resource.resource == outside.canonicalize().unwrap().display().to_string()
         }));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bare_relative_command_paths_are_canonicalized_and_bound_into_the_command() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!(
+            "nac-command-path-permission-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = base.join("workspace");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret"), "needle").unwrap();
+        symlink(&outside, workspace.join("outside-link")).unwrap();
+        let backend = local(&workspace);
+        let projected = shell_resources("rg needle outside-link/secret", &workspace, &backend);
+        let canonical = canonicalize_authorization_resources(&projected, &backend, Path::new(""))
+            .await
+            .unwrap();
+        let canonical_secret = outside.canonicalize().unwrap().join("secret");
+        assert!(canonical.iter().any(|resource| {
+            resource.action == "execute_path"
+                && resource.resource == canonical_secret.display().to_string()
+        }));
+        assert!(canonical.iter().any(|resource| {
+            resource.action == "external_directory"
+                && resource.resource == canonical_secret.display().to_string()
+        }));
+
+        let bound = bind_authorized_shell_command(
+            "rg needle outside-link/secret",
+            &workspace.canonicalize().unwrap(),
+            &canonical,
+        )
+        .unwrap();
+        assert_eq!(bound, format!("rg needle {}", canonical_secret.display()));
+        assert!(!bound.contains("outside-link"));
         let _ = std::fs::remove_dir_all(base);
     }
 
@@ -1926,6 +2216,44 @@ mod tests {
         assert_eq!(grants.len(), 2);
         assert!(grants.iter().any(|grant| grant.action == "execute"));
         assert!(grants.iter().any(|grant| grant.action == "read"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn abort_after_reply_claim_rolls_back_blocked_always_grant() {
+        let (path, broker) = broker_fixture();
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let authorize = {
+            let broker = Arc::clone(&broker);
+            tokio::spawn(async move {
+                broker
+                    .authorize(
+                        "exec_command",
+                        &[
+                            PermissionResource::new("execute", "command:[curl][example.com]")
+                                .with_save_resource("command:[curl]*"),
+                        ],
+                        &crate::tools::kernel::ToolCallContext::default(),
+                        &crate::tools::ThreadCancellation::default(),
+                    )
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        let request = broker.pending().pop().expect("pending approval");
+        let lock = rusqlite::Connection::open(&path).unwrap();
+        lock.busy_timeout(Duration::from_secs(5)).unwrap();
+        lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        broker.reply(&request.id, PermissionReply::Always).unwrap();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        authorize.abort();
+        let _ = authorize.await;
+        lock.execute_batch("ROLLBACK").unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(broker.grants().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

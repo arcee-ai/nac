@@ -78,6 +78,43 @@ pub(crate) fn insert_permission_grant_set(
     backend: &str,
     session_config_version: i64,
 ) -> Result<Vec<PermissionGrantRecord>> {
+    insert_permission_grant_set_inner(
+        path,
+        session_id,
+        grants,
+        backend,
+        session_config_version,
+        None,
+    )?
+    .ok_or_else(|| anyhow!("permission grant insertion unexpectedly lost its waiter"))
+}
+
+pub(crate) fn insert_permission_grant_set_if_waiter_live(
+    path: &Path,
+    session_id: &str,
+    grants: &[(String, String)],
+    backend: &str,
+    session_config_version: i64,
+    waiter_live: &std::sync::Mutex<bool>,
+) -> Result<Option<Vec<PermissionGrantRecord>>> {
+    insert_permission_grant_set_inner(
+        path,
+        session_id,
+        grants,
+        backend,
+        session_config_version,
+        Some(waiter_live),
+    )
+}
+
+fn insert_permission_grant_set_inner(
+    path: &Path,
+    session_id: &str,
+    grants: &[(String, String)],
+    backend: &str,
+    session_config_version: i64,
+    waiter_live: Option<&std::sync::Mutex<bool>>,
+) -> Result<Option<Vec<PermissionGrantRecord>>> {
     if session_id.trim().is_empty() || grants.iter().any(|(action, _)| action.trim().is_empty()) {
         return Err(anyhow!(
             "permission grant session and action must not be empty"
@@ -118,8 +155,25 @@ pub(crate) fn insert_permission_grant_set(
             ],
         )?;
     }
+    let waiter_guard = waiter_live.map(|waiter| {
+        waiter
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    });
+    if waiter_guard.as_deref().is_some_and(|live| !*live) {
+        return Ok(None);
+    }
+    // Holding the waiter lock through commit gives grant persistence one clear
+    // linearization point with authorization-task teardown. If teardown wins,
+    // the transaction rolls back; if commit wins, the reply had a live waiter.
     transaction.commit()?;
-    list_effective_permission_grants(path, session_id, backend, session_config_version)
+    drop(waiter_guard);
+    Ok(Some(list_effective_permission_grants(
+        path,
+        session_id,
+        backend,
+        session_config_version,
+    )?))
 }
 
 pub fn delete_permission_grant(path: &Path, session_id: &str, grant_id: &str) -> Result<()> {

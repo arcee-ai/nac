@@ -80,11 +80,17 @@ pub fn fresh_general_child_messages(
         _ => None,
     });
     let parent_base = crate::agent::render_direct_system_prompt(parent_working_directory);
+    let delegating_parent_base =
+        crate::agent::render_direct_with_orchestrator_system_prompt(parent_working_directory);
     // Schema-17 prototypes and hand-authored fixture rows may predate the
     // canonical direct system head. They still get a safe fresh child prompt,
     // but have no persisted project-instruction suffix to inherit.
     let project_suffix = parent_system
-        .and_then(|system| system.strip_prefix(&parent_base))
+        .and_then(|system| {
+            system
+                .strip_prefix(&delegating_parent_base)
+                .or_else(|| system.strip_prefix(&parent_base))
+        })
         .unwrap_or_default();
     let mut child =
         crate::agent::render_general_child_system_prompt(parent_working_directory, description);
@@ -97,5 +103,31 @@ pub fn validate_general_profile(profile: &str) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!("unknown traditional child profile '{profile}'"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delegating_parent_does_not_give_managed_orchestrator_instructions_to_child() {
+        let cwd = "/workspace";
+        let parent = format!(
+            "{}\n\nProject instruction: preserve compatibility.",
+            crate::agent::render_direct_with_orchestrator_system_prompt(cwd)
+        );
+        let messages = fresh_general_child_messages(
+            &[Message::System { content: parent }],
+            cwd,
+            "review one subsystem",
+        )
+        .unwrap();
+        let Message::System { content } = &messages[0] else {
+            panic!("child must start with a system message");
+        };
+        assert!(content.contains("Project instruction: preserve compatibility."));
+        assert!(!content.contains("orchestrator_*"));
+        assert!(!content.contains("## Managed orchestration"));
     }
 }
