@@ -22,6 +22,9 @@ export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "
 /** Dispatch weight class when a light model is configured, serialized lowercase. */
 export type DispatchWeight = "light" | "heavy";
 
+/** Immutable execution topology selected when a session is created. */
+export type SessionBehavior = "orchestrator" | "direct" | "direct-with-orchestrator";
+
 /**
  * The optional light worker model. Same shape on records and requests: the
  * credential is always a selector name, never a key value.
@@ -112,6 +115,7 @@ export type MessageRole = Message["role"];
 
 export interface SessionSummarySnapshot {
   session_id: string;
+  behavior: SessionBehavior;
   project_id?: string;
   cwd: string;
   model: string;
@@ -566,7 +570,44 @@ export type SessionEvent =
   /** The orchestrator transcript grew: a message was committed to the log. */
   | { type: "transcript_appended"; transcript_len: number }
   /** A revert cut the transcript back; everything past this length is gone. */
-  | { type: "transcript_reverted"; transcript_len: number };
+  | { type: "transcript_reverted"; transcript_len: number }
+  | { type: "permission_asked"; request: PermissionRequest }
+  | { type: "permission_replied"; request_id: string; reply: PermissionReply }
+  | { type: "permission_dismissed"; request_id: string; reason: string };
+
+export type PermissionReply = "once" | "always" | "reject";
+
+export interface PermissionRequestResource {
+  action: string;
+  resource: string;
+  display: string;
+  /** A server-derived narrow pattern that may be remembered safely. */
+  save_resource?: string;
+}
+
+export interface PermissionRequest {
+  id: string;
+  session_id: string;
+  call_id: string | null;
+  tool: string;
+  resources: PermissionRequestResource[];
+  created_at_epoch_ms: number;
+}
+
+export interface PermissionGrantRecord {
+  id: string;
+  session_id: string;
+  action: string;
+  resource: string;
+  backend: "local" | "podman" | "ssh";
+  session_config_version: number;
+  created_at: string;
+}
+
+export interface PermissionStateResponse {
+  requests: PermissionRequest[];
+  grants: PermissionGrantRecord[];
+}
 
 export interface SessionEventBoundary {
   epoch_id: string;
@@ -1116,6 +1157,7 @@ export interface SandboxRequest {
 }
 
 export interface CreateSessionRequest {
+  behavior?: SessionBehavior;
   project_id?: string | null;
   cwd?: string | null;
   model?: RequestField<string>;

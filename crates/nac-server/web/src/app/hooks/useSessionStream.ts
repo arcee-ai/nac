@@ -190,6 +190,16 @@ export function useSessionStream(sessionId: string | null): void {
             queryKey: queryKeys.workspaceRevisions(id),
           });
         }
+        if (
+          envelope.event.type === "permission_asked" ||
+          envelope.event.type === "permission_replied" ||
+          envelope.event.type === "permission_dismissed"
+        ) {
+          void client.invalidateQueries({
+            queryKey: queryKeys.sessionPermissions(id),
+            exact: true,
+          });
+        }
       },
       onAssistantDelta: applyAssistantDelta,
       onStatus: setStreamStatus,

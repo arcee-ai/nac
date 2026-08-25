@@ -381,6 +381,7 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();

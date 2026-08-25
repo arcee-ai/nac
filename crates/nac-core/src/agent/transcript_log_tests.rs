@@ -46,6 +46,7 @@ fn transcript_test_agent(
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .expect("agent config must be valid")

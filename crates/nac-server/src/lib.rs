@@ -64,6 +64,7 @@ use nac_core::{
         ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
+    permissions::{PermissionReply, PermissionRequest},
     projects::{self, ProjectRecord, ProjectStoreError},
     runtime::{
         self, CredentialDestinationPolicy, ModelOptions, NacConfig, OptionalModelOption,
@@ -77,7 +78,7 @@ use nac_core::{
     },
     sessions,
     ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
-    store::{InboxDelivery, SessionInboxRecord},
+    store::{InboxDelivery, PermissionGrantRecord, SessionInboxRecord},
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
@@ -948,6 +949,17 @@ pub struct UpdateInboxItemRequest {
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct CancelInboxItemRequest {
     pub expected_version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct ReplyPermissionRequest {
+    pub reply: PermissionReply,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct PermissionStateResponse {
+    pub requests: Vec<PermissionRequest>,
+    pub grants: Vec<PermissionGrantRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -2219,6 +2231,31 @@ impl SessionManager {
             .cancel_direct_inbox_item(item_id, request.expected_version)
     }
 
+    pub async fn permission_state(&self, session_id: &str) -> Result<PermissionStateResponse> {
+        let service = self.attach_session(session_id).await?;
+        Ok(PermissionStateResponse {
+            requests: service.list_permission_requests()?,
+            grants: service.list_permission_grants()?,
+        })
+    }
+
+    pub async fn reply_permission_request(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        reply: PermissionReply,
+    ) -> Result<()> {
+        self.attach_session(session_id)
+            .await?
+            .reply_permission_request(request_id, reply)
+    }
+
+    pub async fn delete_permission_grant(&self, session_id: &str, grant_id: &str) -> Result<()> {
+        self.attach_session(session_id)
+            .await?
+            .delete_permission_grant(grant_id)
+    }
+
     pub async fn thread_events(
         &self,
         session_id: &str,
@@ -3185,6 +3222,9 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(session_messages))
         .routes(routes!(list_direct_inbox, create_direct_inbox_item))
         .routes(routes!(update_direct_inbox_item, cancel_direct_inbox_item))
+        .routes(routes!(permission_state))
+        .routes(routes!(reply_permission_request))
+        .routes(routes!(delete_permission_grant))
         .routes(routes!(thread_events))
         .routes(routes!(workspace_diff))
         .routes(routes!(workspace_files))
@@ -4690,6 +4730,60 @@ async fn cancel_direct_inbox_item(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/permissions",
+    operation_id = "get_sessions_session_id_permissions",
+    tag = "permissions",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = PermissionStateResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn permission_state(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<PermissionStateResponse>, ApiError> {
+    Ok(Json(manager.permission_state(&session_id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/permissions/{request_id}",
+    operation_id = "post_sessions_session_id_permissions_request_id",
+    tag = "permissions",
+    params(("session_id" = String, Path), ("request_id" = String, Path)),
+    request_body(content = ReplyPermissionRequest, content_type = "application/json"),
+    responses((status = 204, description = "Permission request answered"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn reply_permission_request(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, request_id)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<ReplyPermissionRequest>, JsonRejection>,
+) -> std::result::Result<StatusCode, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    manager
+        .reply_permission_request(&session_id, &request_id, request.reply)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/sessions/{session_id}/permissions/grants/{grant_id}",
+    operation_id = "delete_sessions_session_id_permissions_grants_grant_id",
+    tag = "permissions",
+    params(("session_id" = String, Path), ("grant_id" = String, Path)),
+    responses((status = 204, description = "Remembered grant removed"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn delete_permission_grant(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, grant_id)): AxumPath<(String, String)>,
+) -> std::result::Result<StatusCode, ApiError> {
+    manager
+        .delete_permission_grant(&session_id, &grant_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/threads/{thread_name}/events",
     operation_id = "get_sessions_session_id_threads_thread_name_events",
     tag = "conversation",
@@ -5796,6 +5890,10 @@ mod tests {
         ("DELETE", "/projects/{project_id}"),
         ("DELETE", "/sessions/{session_id}"),
         ("DELETE", "/sessions/{session_id}/inbox/{item_id}"),
+        (
+            "DELETE",
+            "/sessions/{session_id}/permissions/grants/{grant_id}",
+        ),
         ("DELETE", "/ssh-configs/{config_id}"),
         ("GET", "/auth"),
         ("GET", "/auth/{provider}/login/{login_id}"),
@@ -5818,6 +5916,7 @@ mod tests {
         ("GET", "/sessions/{session_id}/events/stream"),
         ("GET", "/sessions/{session_id}/inbox"),
         ("GET", "/sessions/{session_id}/messages"),
+        ("GET", "/sessions/{session_id}/permissions"),
         ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
         ("GET", "/sessions/{session_id}/workspace/branches"),
         ("GET", "/sessions/{session_id}/workspace/diff"),
@@ -5851,6 +5950,7 @@ mod tests {
         ("POST", "/sessions/{session_id}/cancel-active-run"),
         ("POST", "/sessions/{session_id}/compact"),
         ("POST", "/sessions/{session_id}/inbox"),
+        ("POST", "/sessions/{session_id}/permissions/{request_id}"),
         ("POST", "/sessions/{session_id}/regenerate"),
         ("POST", "/sessions/{session_id}/revert"),
         ("POST", "/sessions/{session_id}/runs"),
@@ -5910,6 +6010,8 @@ mod tests {
             .replace("{server_name}", "missing-server")
             .replace("{config_id}", "missing-config")
             .replace("{session_id}", "missing-session")
+            .replace("{request_id}", "missing-request")
+            .replace("{grant_id}", "missing-grant")
             .replace("{thread_name}", "missing-thread")
             .replace("{revision_id}", "1")
     }
@@ -8343,6 +8445,72 @@ mod tests {
             .unwrap();
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn direct_permission_http_api_lists_replies_and_removes_revision_bound_grants() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("direct_permission_http");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-permission-test-key"));
+        seed_direct_session(&root, "direct");
+        seed_editable_session(&root, "orchestrator");
+        let grant_id = nac_core::store::insert_permission_grants(
+            &root.join("store.db"),
+            "direct",
+            "execute",
+            &["command:[cargo][test]*".to_string()],
+            "local",
+            0,
+        )
+        .unwrap()[0]
+            .id
+            .clone();
+        let app = router(test_manager(&root));
+
+        let list = get_response(app.clone(), "/sessions/direct/permissions", None).await;
+        assert_eq!(list.status(), StatusCode::OK);
+        let state: PermissionStateResponse =
+            serde_json::from_slice(&response_body(list).await).unwrap();
+        assert!(state.requests.is_empty());
+        assert_eq!(state.grants.len(), 1);
+        assert_eq!(state.grants[0].id, grant_id);
+
+        let missing_reply = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/direct/permissions/missing")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"reply":"once"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_reply.status(), StatusCode::NOT_FOUND);
+
+        let delete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/sessions/direct/permissions/grants/{grant_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+        let list = get_response(app.clone(), "/sessions/direct/permissions", None).await;
+        let state: PermissionStateResponse =
+            serde_json::from_slice(&response_body(list).await).unwrap();
+        assert!(state.grants.is_empty());
+
+        let rejected = get_response(app, "/sessions/orchestrator/permissions", None).await;
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
         let _ = std::fs::remove_dir_all(root);
     }
 

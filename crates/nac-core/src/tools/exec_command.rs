@@ -280,6 +280,7 @@ mod tests {
             worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
             light_client: None,
             allowed_tools: None,
+            permission_broker: None,
         }
     }
 

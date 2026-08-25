@@ -533,6 +533,7 @@ pub struct SessionService {
     /// without taking the agent lock.
     skills: Option<Arc<SkillRegistry>>,
     terminal_manager: crate::terminal::TerminalManager,
+    permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// True when this session executes inside a sandbox container. Dropping
     /// the last service reference drops the `SandboxSession`, and an owned
     /// container's `Drop` runs `podman rm -f`; the next resume builds a fresh
@@ -698,6 +699,12 @@ impl SessionService {
         run_config
             .agent
             .set_event_sink(EventSink::bus(event_bus.clone()));
+        let permission_broker = run_config
+            .agent
+            .configure_permission_broker(config_version.unwrap_or(0));
+        if let Some(broker) = &permission_broker {
+            broker.attach_event_bus(event_bus.clone());
+        }
         if let Some(run_id) = run_config.agent.take_interrupted_run_recovery() {
             event_bus.emit_with_context(
                 SessionEvent::RunFailed {
@@ -760,6 +767,7 @@ impl SessionService {
             active_threads,
             skills,
             terminal_manager,
+            permission_broker,
             has_sandbox,
             inbox_wake: Arc::new(Mutex::new(())),
             #[cfg(test)]
@@ -1008,6 +1016,33 @@ impl SessionService {
             ));
         }
         Ok(())
+    }
+
+    fn direct_permission_broker(&self) -> Result<&Arc<crate::permissions::PermissionBroker>> {
+        self.require_direct_behavior()?;
+        self.permission_broker
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("direct permission broker is unavailable"))
+    }
+
+    pub fn list_permission_requests(&self) -> Result<Vec<crate::permissions::PermissionRequest>> {
+        Ok(self.direct_permission_broker()?.pending())
+    }
+
+    pub fn list_permission_grants(&self) -> Result<Vec<crate::store::PermissionGrantRecord>> {
+        self.direct_permission_broker()?.grants()
+    }
+
+    pub fn reply_permission_request(
+        &self,
+        request_id: &str,
+        reply: crate::permissions::PermissionReply,
+    ) -> Result<()> {
+        self.direct_permission_broker()?.reply(request_id, reply)
+    }
+
+    pub fn delete_permission_grant(&self, grant_id: &str) -> Result<()> {
+        self.direct_permission_broker()?.delete_grant(grant_id)
     }
 
     pub fn list_direct_inbox(&self) -> Result<Vec<crate::store::SessionInboxRecord>> {
@@ -3719,6 +3754,7 @@ pub(super) mod tests {
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 light_client: None,
+                permission_rules: Vec::new(),
             },
         )
         .expect("agent config must be valid")
@@ -3884,6 +3920,7 @@ pub(super) mod tests {
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 light_client: None,
+                permission_rules: Vec::new(),
             },
         )
         .expect("agent config must be valid");

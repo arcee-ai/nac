@@ -72,6 +72,7 @@ fn compaction_test_agent_with_mode(
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap()

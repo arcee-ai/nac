@@ -379,7 +379,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 18);
+    assert_eq!(STORE_SCHEMA_VERSION, 19);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -412,6 +412,39 @@ fn v17_store_adds_the_durable_session_inbox() {
             "delivered_at",
             "cancelled_at",
             "version",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v18_store_adds_revision_bound_permission_grants() {
+    let path = temp_store_path("v18_permission_grants");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE permission_grants; PRAGMA user_version = 18;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "permission_grants"),
+        [
+            "id",
+            "session_id",
+            "action",
+            "resource",
+            "backend",
+            "session_config_version",
+            "created_at",
         ]
     );
     assert_eq!(
