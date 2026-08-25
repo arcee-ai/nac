@@ -1019,7 +1019,17 @@ fn command_grant_candidate(tokens: &[String]) -> String {
         .first()
         .and_then(|command| command.rsplit('/').next())
         .unwrap_or_default();
-    if tokens.is_empty() || BANNED.contains(&command) || is_broad_command(tokens) {
+    let contains_banned_wrapper = tokens.iter().any(|token| {
+        token
+            .rsplit('/')
+            .next()
+            .is_some_and(|token| BANNED.contains(&token))
+    });
+    if tokens.is_empty()
+        || BANNED.contains(&command)
+        || contains_banned_wrapper
+        || is_broad_command(tokens)
+    {
         return canonical_command(tokens);
     }
     let width = tokens.len().min(2);
@@ -1124,6 +1134,9 @@ fn literal_env_split_string(tokens: &[String]) -> Option<&str> {
     while let Some(option) = tokens.get(index) {
         if matches!(option.as_str(), "-S" | "--split-string") {
             return tokens.get(index + 1).map(String::as_str);
+        }
+        if let Some(body) = option.strip_prefix("--split-string=") {
+            return Some(body);
         }
         if matches!(option.as_str(), "-u" | "--unset" | "-C" | "--chdir") {
             index += 2;
@@ -1259,11 +1272,7 @@ fn shell_path_resources(
     let mut paths = Vec::<(PathBuf, bool)>::new();
     for index in 0..tokens.len() {
         if let Some((_, requested)) = shell_path_candidate(tokens, index) {
-            let path = if requested.is_absolute() {
-                requested.to_path_buf()
-            } else {
-                cwd.join(requested)
-            };
+            let path = shell_path_requested_path(tokens, index, requested, cwd);
             let mutating = shell_path_is_mutating(tokens, index);
             if let Some((_, existing_mutating)) =
                 paths.iter_mut().find(|(existing, _)| existing == &path)
@@ -1306,9 +1315,37 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
             tokens[index - 1].as_str(),
             "--manifest-path" | "--config" | "--output" | "-o" | "-C" | "-f" | "--file"
         );
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    let explicit_command_path = index == command_index && candidate.contains('/');
     let known_bare_path = bare_relative_path_position(tokens, index);
-    (previous_takes_path || looks_like_shell_path(candidate) || known_bare_path)
+    (previous_takes_path
+        || explicit_command_path
+        || looks_like_shell_path(candidate)
+        || known_bare_path)
         .then(|| (option, Path::new(candidate)))
+}
+
+fn shell_path_requested_path(
+    tokens: &[String],
+    index: usize,
+    requested: &Path,
+    cwd: &Path,
+) -> PathBuf {
+    if requested.is_absolute() {
+        return requested.to_path_buf();
+    }
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    if bare_relative_path_position(tokens, index)
+        && effective
+            .first()
+            .and_then(|command| command.rsplit('/').next())
+            == Some("git")
+    {
+        return git_effective_cwd(tokens, command_index, cwd).join(requested);
+    }
+    cwd.join(requested)
 }
 
 fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
@@ -1351,6 +1388,7 @@ fn rg_bare_relative_path_position(tokens: &[String], command_index: usize, index
         "-E",
         "--encoding",
         "--engine",
+        "--field-match-separator",
         "-g",
         "--glob",
         "--iglob",
@@ -1415,27 +1453,28 @@ fn rg_bare_relative_path_position(tokens: &[String], command_index: usize, index
 }
 
 fn git_bare_relative_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
-    let Some(subcommand) = tokens.get(command_index + 1).map(String::as_str) else {
+    let Some(subcommand_index) = git_subcommand_index(tokens, command_index) else {
         return false;
     };
+    let subcommand = tokens[subcommand_index].as_str();
     if !matches!(subcommand, "diff" | "log" | "show" | "status") {
         return false;
     }
-    if let Some(separator) = tokens[command_index + 2..]
+    if let Some(separator) = tokens[subcommand_index + 1..]
         .iter()
         .position(|token| token == "--")
-        .map(|offset| command_index + 2 + offset)
+        .map(|offset| subcommand_index + 1 + offset)
     {
         return index > separator;
     }
     if subcommand != "diff"
-        || !tokens[command_index + 2..]
+        || !tokens[subcommand_index + 1..]
             .iter()
             .any(|token| token == "--no-index")
     {
         return false;
     }
-    let operands = (command_index + 2..tokens.len())
+    let operands = (subcommand_index + 1..tokens.len())
         .filter(|candidate| !tokens[*candidate].starts_with('-'))
         .collect::<Vec<_>>();
     operands
@@ -1443,6 +1482,57 @@ fn git_bare_relative_path_position(tokens: &[String], command_index: usize, inde
         .rev()
         .take(2)
         .any(|candidate| *candidate == index)
+}
+
+fn git_subcommand_index(tokens: &[String], command_index: usize) -> Option<usize> {
+    let mut index = command_index + 1;
+    while let Some(option) = tokens.get(index) {
+        if matches!(
+            option.as_str(),
+            "-C" | "-c"
+                | "--git-dir"
+                | "--work-tree"
+                | "--namespace"
+                | "--super-prefix"
+                | "--config-env"
+        ) {
+            index += 2;
+        } else if option.starts_with('-') {
+            index += 1;
+        } else {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn git_effective_cwd(tokens: &[String], command_index: usize, cwd: &Path) -> PathBuf {
+    let mut effective = cwd.to_path_buf();
+    let mut index = command_index + 1;
+    while let Some(option) = tokens.get(index) {
+        if option == "-C" {
+            let Some(requested) = tokens.get(index + 1) else {
+                break;
+            };
+            effective = if Path::new(requested).is_absolute() {
+                PathBuf::from(requested)
+            } else {
+                effective.join(requested)
+            };
+            effective = lexical_normalize(&effective);
+            index += 2;
+        } else if matches!(
+            option.as_str(),
+            "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env"
+        ) {
+            index += 2;
+        } else if option.starts_with('-') {
+            index += 1;
+        } else {
+            break;
+        }
+    }
+    effective
 }
 
 pub(crate) fn bind_authorized_shell_command(
@@ -1478,11 +1568,7 @@ pub(crate) fn bind_authorized_shell_command(
             let Some((option, requested)) = shell_path_candidate(tokens, index) else {
                 continue;
             };
-            let requested = if requested.is_absolute() {
-                requested.to_path_buf()
-            } else {
-                cwd.join(requested)
-            };
+            let requested = shell_path_requested_path(tokens, index, requested, &cwd);
             let canonical = if let Some((_, canonical)) = canonical_by_requested
                 .iter()
                 .find(|(seen, _)| seen == &requested)
@@ -1984,6 +2070,7 @@ mod tests {
             "bash -lc 'sudo make install'",
             "bash --rcfile /dev/null -c 'sudo make install'",
             "env -S 'sudo make install'",
+            "env --split-string='sudo make install'",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
             "bash -lc 'sudo make install' > /tmp/result",
@@ -2148,6 +2235,53 @@ mod tests {
             .unwrap(),
             canonical_tool.display().to_string()
         );
+
+        let slash_executable_projected = shell_resources("outside-link/tool", &workspace, &backend);
+        let slash_executable_canonical = canonicalize_authorization_resources(
+            &slash_executable_projected,
+            &backend,
+            Path::new(""),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            bind_authorized_shell_command(
+                "outside-link/tool",
+                &workspace.canonicalize().unwrap(),
+                &slash_executable_canonical,
+            )
+            .unwrap(),
+            canonical_tool.display().to_string()
+        );
+
+        let repo = workspace.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("local"), "needle").unwrap();
+        symlink(&outside, repo.join("outside-link")).unwrap();
+        let git_global_projected = shell_resources(
+            "git -C repo diff --no-index local outside-link/secret",
+            &workspace,
+            &backend,
+        );
+        let git_global_canonical =
+            canonicalize_authorization_resources(&git_global_projected, &backend, Path::new(""))
+                .await
+                .unwrap();
+        let canonical_repo = repo.canonicalize().unwrap();
+        assert_eq!(
+            bind_authorized_shell_command(
+                "git -C repo diff --no-index local outside-link/secret",
+                &workspace.canonicalize().unwrap(),
+                &git_global_canonical,
+            )
+            .unwrap(),
+            format!(
+                "git -C {} diff --no-index {} {}",
+                canonical_repo.display(),
+                canonical_repo.join("local").display(),
+                canonical_secret.display()
+            )
+        );
         let _ = std::fs::remove_dir_all(base);
     }
 
@@ -2209,6 +2343,25 @@ mod tests {
         .unwrap();
         assert!(formatting_bound.contains("--field-match-separator=a/b"));
         assert!(!formatting_bound.contains("--field-match-separator=/workspace/a/b"));
+
+        let separated_formatting = "rg needle --field-match-separator a/b .";
+        let separated_resources =
+            shell_resources(separated_formatting, Path::new("/workspace"), &backend);
+        let separated_bound = bind_authorized_shell_command(
+            separated_formatting,
+            Path::new("/workspace"),
+            &separated_resources,
+        )
+        .unwrap();
+        assert!(separated_bound.contains("--field-match-separator a/b"));
+        assert!(!separated_bound.contains("--field-match-separator /workspace/a/b"));
+
+        let env_split = shell_resources("env -S 'printf ok'", Path::new("/workspace"), &backend);
+        assert!(!env_split[0]
+            .save_resource
+            .as_deref()
+            .expect("env split-string should have an exact save resource")
+            .ends_with('*'));
     }
 
     #[tokio::test]
