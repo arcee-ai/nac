@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { orphanSessions, primarySessions, projectEntries } from "@/app/lib/projects";
+import {
+  newestPrimarySessionForProject,
+  orphanSessions,
+  primarySessions,
+  projectEntries,
+} from "@/app/lib/projects";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 function session(
@@ -59,5 +64,18 @@ describe("project chat ownership", () => {
       projectEntries([project], sessions)[0].sessions.map((entry) => entry.summary.session_id),
     ).toEqual(["parent"]);
     expect(orphanSessions(sessions).map((entry) => entry.summary.session_id)).toEqual(["orphan"]);
+  });
+
+  it("redirects a project to its newest primary chat even when a child is newer", () => {
+    const parent = session("parent", "project");
+    parent.summary.updated_at = "2026-08-25T00:00:01Z";
+    const child = session("child", "project", true);
+    child.summary.updated_at = "2026-08-25T00:00:03Z";
+    const newerParent = session("newer-parent", "project");
+    newerParent.summary.updated_at = "2026-08-25T00:00:02Z";
+
+    expect(
+      newestPrimarySessionForProject([parent, child, newerParent], "project")?.summary.session_id,
+    ).toBe("newer-parent");
   });
 });

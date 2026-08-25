@@ -2960,6 +2960,17 @@ impl SessionManager {
         thread_name: &str,
         request: ThreadSteeringRequest,
     ) -> Result<ThreadSteeringResponse> {
+        self.require_primary_operation_session(session_id)?;
+        self.queue_thread_steering_unchecked(session_id, thread_name, request)
+            .await
+    }
+
+    async fn queue_thread_steering_unchecked(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        request: ThreadSteeringRequest,
+    ) -> Result<ThreadSteeringResponse> {
         let service = self.attach_session(session_id).await?;
         let record = service
             .queue_thread_steering(thread_name, &request.instruction)
@@ -2973,6 +2984,16 @@ impl SessionManager {
     }
 
     pub async fn queue_orchestrator_steering(
+        &self,
+        session_id: &str,
+        request: OrchestratorSteeringRequest,
+    ) -> Result<OrchestratorSteeringResponse> {
+        self.require_primary_operation_session(session_id)?;
+        self.queue_orchestrator_steering_unchecked(session_id, request)
+            .await
+    }
+
+    async fn queue_orchestrator_steering_unchecked(
         &self,
         session_id: &str,
         request: OrchestratorSteeringRequest,
@@ -3025,6 +3046,11 @@ impl SessionManager {
     }
 
     pub async fn cancel_active_run(&self, session_id: &str) -> Result<()> {
+        self.require_primary_operation_session(session_id)?;
+        self.cancel_active_run_unchecked(session_id).await
+    }
+
+    async fn cancel_active_run_unchecked(&self, session_id: &str) -> Result<()> {
         let service = self.attach_session(session_id).await?;
         let Some(active) = service.active_run() else {
             return Ok(());
@@ -3934,7 +3960,6 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
     ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
         Box::pin(async move {
             let manager = self.manager()?;
-            let operations = orchestration::OrchestrationOperations::new(manager.clone());
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("managed orchestrator prompt is empty"));
             }
@@ -3960,8 +3985,13 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             let service = manager.attach_session(&orchestrator_session_id).await?;
             if relation.status == ManagedOrchestratorStatus::Running {
                 if service.active_run().is_some() {
-                    operations
-                        .steer(&orchestrator_session_id, request.prompt, None)
+                    manager
+                        .queue_orchestrator_steering_unchecked(
+                            &orchestrator_session_id,
+                            OrchestratorSteeringRequest {
+                                instruction: request.prompt,
+                            },
+                        )
                         .await?;
                     return Ok(relation);
                 }
@@ -4014,23 +4044,29 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
     ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
         Box::pin(async move {
             let manager = self.manager()?;
-            let operations = orchestration::OrchestrationOperations::new(manager.clone());
             let relation =
                 manager.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
             if relation.status != ManagedOrchestratorStatus::Running {
                 return Err(anyhow!("managed orchestrator is not running"));
             }
             if let Some(thread_name) = thread_name {
-                operations
-                    .steer(
+                manager
+                    .queue_thread_steering_unchecked(
                         orchestrator_session_id,
-                        instruction.to_string(),
-                        Some(thread_name.to_string()),
+                        thread_name,
+                        ThreadSteeringRequest {
+                            instruction: instruction.to_string(),
+                        },
                     )
                     .await?;
             } else {
-                operations
-                    .steer(orchestrator_session_id, instruction.to_string(), None)
+                manager
+                    .queue_orchestrator_steering_unchecked(
+                        orchestrator_session_id,
+                        OrchestratorSteeringRequest {
+                            instruction: instruction.to_string(),
+                        },
+                    )
                     .await?;
             }
             manager.managed_orchestrator(parent_session_id, orchestrator_session_id)
@@ -4088,7 +4124,9 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             if relation.status != ManagedOrchestratorStatus::Running {
                 return Ok(relation);
             }
-            manager.cancel_active_run(orchestrator_session_id).await?;
+            manager
+                .cancel_active_run_unchecked(orchestrator_session_id)
+                .await?;
             manager
                 .monitor_managed_orchestrator(orchestrator_session_id, relation.generation)
                 .await
@@ -7278,6 +7316,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("goal clear conflict")
             || message.contains("child concurrency limit")
             || message.contains("managed orchestrator concurrency limit")
+            || message.contains("delegated sessions accept")
             || message.contains("already has running generation")
             || message.contains("already has a running generation")
             || message.contains("running in another process")
@@ -11161,6 +11200,96 @@ mod tests {
         assert!(managed_run_error
             .to_string()
             .contains("accept work only through their parent"));
+
+        for delegated in [&child, &orchestrator] {
+            let steering_error = manager
+                .queue_orchestrator_steering(
+                    delegated,
+                    OrchestratorSteeringRequest {
+                        instruction: "bypass parent steering".to_string(),
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(steering_error
+                .to_string()
+                .contains("accept work only through their parent"));
+            let cancellation_error = manager.cancel_active_run(delegated).await.unwrap_err();
+            assert!(cancellation_error
+                .to_string()
+                .contains("accept work only through their parent"));
+            assert_eq!(
+                manager.revert_session(delegated, 0).await.unwrap_err(),
+                RevertSessionError::NotFound
+            );
+            assert_eq!(
+                manager
+                    .regenerate_session_run(delegated, 0)
+                    .await
+                    .unwrap_err(),
+                RegenerateSessionError::NotFound
+            );
+            assert_eq!(
+                manager.compact_session(delegated).await.unwrap_err(),
+                CompactSessionError::NotFound
+            );
+        }
+
+        let app = router(manager.clone());
+        for delegated in [&child, &orchestrator] {
+            let steering = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/sessions/{delegated}/steering"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"instruction":"bypass"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(steering.status(), StatusCode::CONFLICT);
+            let cancel = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/sessions/{delegated}/cancel-active-run"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(cancel.status(), StatusCode::CONFLICT);
+            for action in ["revert", "regenerate"] {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri(format!("/sessions/{delegated}/{action}"))
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(r#"{"message_idx":0}"#))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::NOT_FOUND, "{action}");
+            }
+            let compact = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/sessions/{delegated}/compact"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(compact.status(), StatusCode::NOT_FOUND);
+        }
 
         let child_error =
             ApiError::from(manager.traditional_child("parent-b", &child).unwrap_err());

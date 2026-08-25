@@ -705,7 +705,22 @@ fn bind_legacy_authorized_resources(
                 .into_iter()
                 .next()
                 .ok_or_else(|| invalid("authorized command working directory is missing"))?;
+            let command = object
+                .get("cmd")
+                .and_then(Value::as_str)
+                .ok_or_else(|| invalid("decoded command is missing"))?;
+            let command = crate::permissions::bind_authorized_shell_command(
+                command,
+                std::path::Path::new(&cwd),
+                resources,
+            )
+            .map_err(|error| {
+                invalid(&format!(
+                    "authorized command paths could not be bound: {error:#}"
+                ))
+            })?;
             object.insert("workdir".to_string(), Value::String(cwd));
+            object.insert("cmd".to_string(), Value::String(command));
         }
         6 | 7 => {}
         _ => unreachable!("unknown built-in direct tool kind"),
@@ -1366,6 +1381,25 @@ mod discovery_tool_definition_tests {
         assert_eq!(admissions["glob"], kernel::ToolAdmission::Parallel);
         assert_eq!(admissions["write"], kernel::ToolAdmission::Exclusive);
         assert_eq!(admissions["exec_command"], kernel::ToolAdmission::Exclusive);
+    }
+
+    #[test]
+    fn exec_binding_rewrites_authorized_paths_and_workdir_into_the_invocation() {
+        let mut input = serde_json::json!({
+            "cmd": "rg needle outside-link/secret",
+            "workdir": "/workspace-link"
+        });
+        let resources = vec![
+            kernel::PermissionResource::new("execute", "command:[rg][needle][outside-link/secret]"),
+            kernel::PermissionResource::new("execute_path", "/outside/secret"),
+            kernel::PermissionResource::new("external_directory", "/outside/secret"),
+            kernel::PermissionResource::new("execute_cwd", "/workspace"),
+        ];
+
+        super::bind_legacy_authorized_resources(5, &mut input, &resources).unwrap();
+
+        assert_eq!(input["cmd"], "rg needle /outside/secret");
+        assert_eq!(input["workdir"], "/workspace");
     }
 
     #[test]

@@ -221,6 +221,11 @@ export async function waitForRunIdle(
 }
 
 async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
+  if (process.platform === "win32") {
+    throw new Error(
+      "production E2E requires POSIX process groups so descendant cleanup can be verified",
+    );
+  }
   const runRoot = testInfo.outputPath("run");
   const workspace = path.join(runRoot, "workspace");
   const nacHome = path.join(runRoot, "nac-home");
@@ -261,7 +266,7 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
     ],
     {
       cwd: workspace,
-      detached: process.platform !== "win32",
+      detached: true,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -323,9 +328,18 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
     throw error;
   }
 
-  await fs.writeFile(
-    path.join(runRoot, "process.json"),
-    JSON.stringify({ pid: server.pid, binaryPath, baseUrl, provider: provider.baseUrl }, null, 2),
+  await runStartupStepWithCleanup(
+    () =>
+      fs.writeFile(
+        path.join(runRoot, "process.json"),
+        JSON.stringify(
+          { pid: server.pid, binaryPath, baseUrl, provider: provider.baseUrl },
+          null,
+          2,
+        ),
+      ),
+    [() => terminateProcessGroup(server), () => provider.stop()],
+    "E2E startup bookkeeping",
   );
   return {
     baseUrl,
@@ -406,30 +420,102 @@ async function attachIfPresent(
   }
 }
 
-async function terminateProcessGroup(child: ChildProcess): Promise<void> {
+type TerminationTiming = {
+  graceMs?: number;
+  killMs?: number;
+  pollMs?: number;
+};
+
+export async function terminateProcessGroup(
+  child: ChildProcess,
+  timing: TerminationTiming = {},
+): Promise<void> {
   if (child.pid == null) return;
-  const rootExited = child.exitCode != null || child.signalCode != null;
-  const signal = (name: NodeJS.Signals): void => {
+  if (process.platform === "win32") {
+    await terminateWindowsProcessTree(child);
+    return;
+  }
+
+  const pid = child.pid;
+  const graceMs = timing.graceMs ?? 3_000;
+  const killMs = timing.killMs ?? 3_000;
+  const pollMs = timing.pollMs ?? 25;
+  const signalGroup = (name: NodeJS.Signals): void => {
     try {
-      if (process.platform === "win32") child.kill(name);
-      else process.kill(-child.pid!, name);
+      process.kill(-pid, name);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   };
-  if (rootExited) {
-    // The leader may exit while a detached descendant remains in the original
-    // group. POSIX can still address that group; ESRCH means it is already gone.
-    if (process.platform !== "win32") signal("SIGTERM");
-    return;
-  }
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  signal("SIGTERM");
+
+  if (!processGroupExists(pid)) return;
+  signalGroup("SIGTERM");
   try {
-    await withTimeout(exited, 3_000, "nac-web graceful termination");
+    await waitForProcessGroupExit(pid, graceMs, pollMs, "nac-web process-group termination");
   } catch {
-    signal("SIGKILL");
-    await withTimeout(exited, 3_000, "nac-web forced termination");
+    signalGroup("SIGKILL");
+    await waitForProcessGroupExit(pid, killMs, pollMs, "nac-web forced process-group termination");
+  }
+}
+
+export async function runStartupStepWithCleanup<T>(
+  operation: () => Promise<T>,
+  cleanups: Array<() => Promise<void>>,
+  label: string,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const cleanup = await Promise.allSettled(cleanups.map((cleanupStep) => cleanupStep()));
+    const cleanupFailures = cleanup
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError([error, ...cleanupFailures], `${label} and cleanup failed`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
+
+function processGroupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    throw error;
+  }
+}
+
+async function waitForProcessGroupExit(
+  pid: number,
+  timeoutMs: number,
+  pollMs: number,
+  label: string,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(pid)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+async function terminateWindowsProcessTree(child: ChildProcess): Promise<void> {
+  if (child.pid == null || child.exitCode != null || child.signalCode != null) return;
+  const taskkill = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    taskkill.once("error", reject);
+    taskkill.once("exit", (code) => resolve(code));
+  });
+  if (exitCode !== 0 && child.exitCode == null && child.signalCode == null) {
+    throw new Error(`taskkill failed for E2E process tree ${child.pid} with exit code ${exitCode}`);
   }
 }
 
