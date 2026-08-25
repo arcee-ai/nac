@@ -1138,6 +1138,9 @@ fn literal_env_split_string(tokens: &[String]) -> Option<&str> {
         if let Some(body) = option.strip_prefix("--split-string=") {
             return Some(body);
         }
+        if let Some(body) = option.strip_prefix("-S").filter(|body| !body.is_empty()) {
+            return Some(body);
+        }
         if matches!(option.as_str(), "-u" | "--unset" | "-C" | "--chdir") {
             index += 2;
         } else if option.starts_with('-') || is_environment_assignment(option) {
@@ -1304,6 +1307,20 @@ fn looks_like_shell_path(value: &str) -> bool {
 
 fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>, &Path)> {
     let token = tokens.get(index)?;
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    let git_command = effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        == Some("git");
+    if git_command {
+        if let Some(candidate) = token
+            .strip_prefix("-C")
+            .filter(|candidate| !candidate.is_empty())
+        {
+            return Some((Some("-C"), Path::new(candidate)));
+        }
+    }
     let (option, candidate) = token
         .split_once('=')
         .filter(|(option, _)| option.starts_with('-'))
@@ -1315,11 +1332,14 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
             tokens[index - 1].as_str(),
             "--manifest-path" | "--config" | "--output" | "-o" | "-C" | "-f" | "--file"
         );
-    let effective = effective_command_tokens(tokens);
-    let command_index = tokens.len().saturating_sub(effective.len());
+    let git_global_path = git_command
+        && (option
+            .is_some_and(|option| matches!(option, "--git-dir" | "--work-tree" | "--exec-path"))
+            || index > 0 && matches!(tokens[index - 1].as_str(), "--git-dir" | "--work-tree"));
     let explicit_command_path = index == command_index && candidate.contains('/');
     let known_bare_path = bare_relative_path_position(tokens, index);
     (previous_takes_path
+        || git_global_path
         || explicit_command_path
         || looks_like_shell_path(candidate)
         || known_bare_path)
@@ -1337,13 +1357,19 @@ fn shell_path_requested_path(
     }
     let effective = effective_command_tokens(tokens);
     let command_index = tokens.len().saturating_sub(effective.len());
-    if bare_relative_path_position(tokens, index)
-        && effective
-            .first()
-            .and_then(|command| command.rsplit('/').next())
-            == Some("git")
+    if effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        == Some("git")
     {
-        return git_effective_cwd(tokens, command_index, cwd).join(requested);
+        if git_c_path_position(tokens, command_index, index) {
+            return git_effective_cwd_before(tokens, command_index, index, cwd).join(requested);
+        }
+        if git_global_path_position(tokens, command_index, index)
+            || bare_relative_path_position(tokens, index)
+        {
+            return git_effective_cwd(tokens, command_index, cwd).join(requested);
+        }
     }
     cwd.join(requested)
 }
@@ -1506,21 +1532,55 @@ fn git_subcommand_index(tokens: &[String], command_index: usize) -> Option<usize
     None
 }
 
-fn git_effective_cwd(tokens: &[String], command_index: usize, cwd: &Path) -> PathBuf {
+fn git_c_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    index > command_index
+        && (tokens.get(index - 1).is_some_and(|option| option == "-C")
+            || tokens
+                .get(index)
+                .is_some_and(|option| option.starts_with("-C") && option.len() > 2))
+}
+
+fn git_global_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    if index <= command_index {
+        return false;
+    }
+    let token = &tokens[index];
+    token.starts_with("--git-dir=")
+        || token.starts_with("--work-tree=")
+        || token.starts_with("--exec-path=")
+        || tokens
+            .get(index - 1)
+            .is_some_and(|option| matches!(option.as_str(), "--git-dir" | "--work-tree"))
+}
+
+fn git_effective_cwd_before(
+    tokens: &[String],
+    command_index: usize,
+    before_index: usize,
+    cwd: &Path,
+) -> PathBuf {
     let mut effective = cwd.to_path_buf();
     let mut index = command_index + 1;
-    while let Some(option) = tokens.get(index) {
-        if option == "-C" {
-            let Some(requested) = tokens.get(index + 1) else {
+    while index < before_index {
+        let Some(option) = tokens.get(index) else {
+            break;
+        };
+        let requested = if option == "-C" {
+            if index + 1 >= before_index {
                 break;
-            };
+            }
+            tokens.get(index + 1).map(String::as_str)
+        } else {
+            option.strip_prefix("-C").filter(|value| !value.is_empty())
+        };
+        if let Some(requested) = requested {
             effective = if Path::new(requested).is_absolute() {
                 PathBuf::from(requested)
             } else {
                 effective.join(requested)
             };
             effective = lexical_normalize(&effective);
-            index += 2;
+            index += if option == "-C" { 2 } else { 1 };
         } else if matches!(
             option.as_str(),
             "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env"
@@ -1533,6 +1593,10 @@ fn git_effective_cwd(tokens: &[String], command_index: usize, cwd: &Path) -> Pat
         }
     }
     effective
+}
+
+fn git_effective_cwd(tokens: &[String], command_index: usize, cwd: &Path) -> PathBuf {
+    git_effective_cwd_before(tokens, command_index, tokens.len(), cwd)
 }
 
 pub(crate) fn bind_authorized_shell_command(
@@ -1582,7 +1646,13 @@ pub(crate) fn bind_authorized_shell_command(
                 canonical_by_requested.push((requested, canonical.clone()));
                 canonical
             };
-            let bound = option.map_or(canonical.clone(), |option| format!("{option}={canonical}"));
+            let bound = option.map_or(canonical.clone(), |option| {
+                if option == "-C" {
+                    format!("-C{canonical}")
+                } else {
+                    format!("{option}={canonical}")
+                }
+            });
             replacements.push((span.start, span.end, shell_quote(&bound)));
         }
     }
@@ -2070,6 +2140,7 @@ mod tests {
             "bash -lc 'sudo make install'",
             "bash --rcfile /dev/null -c 'sudo make install'",
             "env -S 'sudo make install'",
+            "env -S'sudo make install'",
             "env --split-string='sudo make install'",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
@@ -2280,6 +2351,64 @@ mod tests {
                 canonical_repo.display(),
                 canonical_repo.join("local").display(),
                 canonical_secret.display()
+            )
+        );
+
+        let nested = repo.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let repeated_c = shell_resources("git -C repo -C nested status", &workspace, &backend);
+        let repeated_c = canonicalize_authorization_resources(&repeated_c, &backend, Path::new(""))
+            .await
+            .unwrap();
+        assert_eq!(
+            bind_authorized_shell_command(
+                "git -C repo -C nested status",
+                &workspace.canonicalize().unwrap(),
+                &repeated_c,
+            )
+            .unwrap(),
+            format!(
+                "git -C {} -C {} status",
+                canonical_repo.display(),
+                nested.canonicalize().unwrap().display()
+            )
+        );
+
+        let attached_c = shell_resources("git -Crepo status", &workspace, &backend);
+        let attached_c = canonicalize_authorization_resources(&attached_c, &backend, Path::new(""))
+            .await
+            .unwrap();
+        assert_eq!(
+            bind_authorized_shell_command(
+                "git -Crepo status",
+                &workspace.canonicalize().unwrap(),
+                &attached_c,
+            )
+            .unwrap(),
+            format!("git -C{} status", canonical_repo.display())
+        );
+
+        let git_dir_command = "git --git-dir=outside-link/repo/.git status";
+        let git_dir = shell_resources(git_dir_command, &workspace, &backend);
+        let git_dir = canonicalize_authorization_resources(&git_dir, &backend, Path::new(""))
+            .await
+            .unwrap();
+        assert!(git_dir.iter().any(|resource| {
+            resource.action == "external_directory"
+                && resource
+                    .resource
+                    .starts_with(canonical_outside.to_str().unwrap())
+        }));
+        assert_eq!(
+            bind_authorized_shell_command(
+                git_dir_command,
+                &workspace.canonicalize().unwrap(),
+                &git_dir,
+            )
+            .unwrap(),
+            format!(
+                "git --git-dir={} status",
+                canonical_outside.join("repo/.git").display()
             )
         );
         let _ = std::fs::remove_dir_all(base);
