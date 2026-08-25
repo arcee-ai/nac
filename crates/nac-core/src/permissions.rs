@@ -1032,7 +1032,15 @@ fn command_grant_candidate(tokens: &[String]) -> String {
     {
         return canonical_command(tokens);
     }
-    let width = tokens.len().min(2);
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    let width = if command == "git" {
+        git_subcommand_index(tokens, command_index)
+            .map(|index| index + 1)
+            .unwrap_or(tokens.len())
+    } else {
+        tokens.len().min(2)
+    };
     format!("{}*", canonical_command(&tokens[..width]))
 }
 
@@ -1046,17 +1054,22 @@ fn hard_shell_denial_inner(
     backend: &ExecutionBackend,
     depth: usize,
 ) -> Option<String> {
-    if depth < 8 {
-        if let Some(body) = literal_env_split_string(tokens) {
-            let denial = match parse_shell(body) {
-                ParsedShell::Supported(segments) => segments
-                    .into_iter()
-                    .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
-                ParsedShell::Opaque => opaque_hard_shell_denial(body, cwd, backend),
-            };
-            if denial.is_some() {
-                return denial;
-            }
+    if let Some(body) = literal_env_split_string(tokens) {
+        if depth >= 8 {
+            return Some("nested env split-string depth exceeds the safety limit".to_string());
+        }
+        let body = match env_split_string_policy_body(body) {
+            Ok(body) => body,
+            Err(reason) => return Some(reason.to_string()),
+        };
+        let denial = match parse_shell(&body) {
+            ParsedShell::Supported(segments) => segments
+                .into_iter()
+                .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
+            ParsedShell::Opaque => opaque_hard_shell_denial(&body, cwd, backend),
+        };
+        if denial.is_some() {
+            return denial;
         }
     }
     let tokens = effective_command_tokens(tokens);
@@ -1150,6 +1163,29 @@ fn literal_env_split_string(tokens: &[String]) -> Option<&str> {
         }
     }
     None
+}
+
+fn env_split_string_policy_body(body: &str) -> Result<String, &'static str> {
+    let mut normalized = String::with_capacity(body.len());
+    let mut chars = body.chars();
+    while let Some(current) = chars.next() {
+        if current == '$' {
+            return Err("dynamic env split-string expansion is blocked");
+        }
+        if current != '\\' {
+            normalized.push(current);
+            continue;
+        }
+        let Some(escaped) = chars.next() else {
+            return Err("unsupported env split-string escape is blocked");
+        };
+        match escaped {
+            '_' | 'f' | 'n' | 'r' | 't' | 'v' => normalized.push(' '),
+            'c' => break,
+            _ => return Err("unsupported env split-string escape is blocked"),
+        }
+    }
+    Ok(normalized)
 }
 
 fn effective_command_tokens(tokens: &[String]) -> &[String] {
@@ -1313,12 +1349,13 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
         .first()
         .and_then(|command| command.rsplit('/').next())
         == Some("git");
-    if git_command {
-        if let Some(candidate) = token
-            .strip_prefix("-C")
-            .filter(|candidate| !candidate.is_empty())
-        {
-            return Some((Some("-C"), Path::new(candidate)));
+    let command = effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .unwrap_or_default();
+    if command == "dd" {
+        if let Some(candidate) = token.strip_prefix("of=") {
+            return Some((Some("of"), Path::new(candidate)));
         }
     }
     let (option, candidate) = token
@@ -1327,11 +1364,21 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
         .map_or((None, token.as_str()), |(option, value)| {
             (Some(option), value)
         });
+    let git_subcommand = git_command
+        .then(|| git_subcommand_index(tokens, command_index))
+        .flatten();
+    let git_global_c_value = git_command
+        && index > 0
+        && tokens[index - 1] == "-C"
+        && git_subcommand.is_some_and(|subcommand| index < subcommand);
     let previous_takes_path = index > 0
         && matches!(
             tokens[index - 1].as_str(),
-            "--manifest-path" | "--config" | "--output" | "-o" | "-C" | "-f" | "--file"
-        );
+            "--manifest-path" | "--config" | "--output" | "-o" | "-f" | "--file"
+        )
+        || git_global_c_value
+        || index > 0 && matches!(command, "make" | "tar") && tokens[index - 1] == "-C"
+        || command == "unzip" && index > 0 && tokens[index - 1] == "-d";
     let git_global_path = git_command
         && (option
             .is_some_and(|option| matches!(option, "--git-dir" | "--work-tree" | "--exec-path"))
@@ -1379,8 +1426,47 @@ fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
         .split_once('=')
         .filter(|(option, _)| option.starts_with('-'))
         .map(|(option, _)| option);
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    let command = effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .unwrap_or_default();
+    let writer_operand = index > command_index
+        && matches!(
+            command,
+            "chmod"
+                | "chown"
+                | "chgrp"
+                | "cp"
+                | "install"
+                | "ln"
+                | "mkdir"
+                | "mv"
+                | "rsync"
+                | "rmdir"
+                | "tee"
+                | "touch"
+                | "truncate"
+        )
+        && !tokens[index].starts_with('-');
+    let in_place_editor = index > command_index
+        && matches!(command, "perl" | "sed")
+        && tokens[command_index + 1..index].iter().any(|token| {
+            token == "-i" || token.starts_with("-i") || token.starts_with("--in-place")
+        });
+    let extracts_into_path = command == "tar"
+        && tokens[command_index + 1..]
+            .iter()
+            .any(|token| token == "--extract" || token.starts_with('-') && token.contains('x'));
+    let destructive_find = command == "find" && tokens.iter().any(|token| token == "-delete");
     option == Some("--output")
         || index > 0 && matches!(tokens[index - 1].as_str(), "--output" | "-o")
+        || writer_operand
+        || command == "dd" && tokens[index].starts_with("of=")
+        || in_place_editor
+        || extracts_into_path
+        || destructive_find
 }
 
 fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
@@ -1534,10 +1620,8 @@ fn git_subcommand_index(tokens: &[String], command_index: usize) -> Option<usize
 
 fn git_c_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
     index > command_index
-        && (tokens.get(index - 1).is_some_and(|option| option == "-C")
-            || tokens
-                .get(index)
-                .is_some_and(|option| option.starts_with("-C") && option.len() > 2))
+        && tokens.get(index - 1).is_some_and(|option| option == "-C")
+        && git_subcommand_index(tokens, command_index).is_some_and(|subcommand| index < subcommand)
 }
 
 fn git_global_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
@@ -1571,7 +1655,7 @@ fn git_effective_cwd_before(
             }
             tokens.get(index + 1).map(String::as_str)
         } else {
-            option.strip_prefix("-C").filter(|value| !value.is_empty())
+            None
         };
         if let Some(requested) = requested {
             effective = if Path::new(requested).is_absolute() {
@@ -1580,7 +1664,7 @@ fn git_effective_cwd_before(
                 effective.join(requested)
             };
             effective = lexical_normalize(&effective);
-            index += if option == "-C" { 2 } else { 1 };
+            index += 2;
         } else if matches!(
             option.as_str(),
             "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env"
@@ -1773,6 +1857,23 @@ fn opaque_hard_shell_denial(
     backend: &ExecutionBackend,
 ) -> Option<String> {
     let tokens = opaque_literal_tokens(command);
+    if tokens.iter().any(|token| {
+        let path = Path::new(token);
+        looks_like_shell_path(token)
+            && path_contains_component(
+                &if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    cwd.join(path)
+                },
+                ".git",
+            )
+    }) {
+        return Some(
+            "opaque shell access to Git metadata is blocked; use a supported non-destructive command"
+                .to_string(),
+        );
+    }
     for index in 0..tokens.len() {
         if let Some(reason) = hard_shell_denial(&tokens[index..], cwd, backend) {
             return Some(reason);
@@ -2142,6 +2243,8 @@ mod tests {
             "env -S 'sudo make install'",
             "env -S'sudo make install'",
             "env --split-string='sudo make install'",
+            "env --split-string='sudo\\_id'",
+            "env --split-string='${PROTECTED_COMMAND} id'",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
             "bash -lc 'sudo make install' > /tmp/result",
@@ -2374,20 +2477,6 @@ mod tests {
             )
         );
 
-        let attached_c = shell_resources("git -Crepo status", &workspace, &backend);
-        let attached_c = canonicalize_authorization_resources(&attached_c, &backend, Path::new(""))
-            .await
-            .unwrap();
-        assert_eq!(
-            bind_authorized_shell_command(
-                "git -Crepo status",
-                &workspace.canonicalize().unwrap(),
-                &attached_c,
-            )
-            .unwrap(),
-            format!("git -C{} status", canonical_repo.display())
-        );
-
         let git_dir_command = "git --git-dir=outside-link/repo/.git status";
         let git_dir = shell_resources(git_dir_command, &workspace, &backend);
         let git_dir = canonicalize_authorization_resources(&git_dir, &backend, Path::new(""))
@@ -2411,6 +2500,35 @@ mod tests {
                 canonical_outside.join("repo/.git").display()
             )
         );
+
+        let work_tree_command = "git -C repo --work-tree outside-link status";
+        let work_tree = shell_resources(work_tree_command, &workspace, &backend);
+        let work_tree = canonicalize_authorization_resources(&work_tree, &backend, Path::new(""))
+            .await
+            .unwrap();
+        assert_eq!(
+            bind_authorized_shell_command(
+                work_tree_command,
+                &workspace.canonicalize().unwrap(),
+                &work_tree,
+            )
+            .unwrap(),
+            format!(
+                "git -C {} --work-tree {} status",
+                canonical_repo.display(),
+                canonical_outside.display()
+            )
+        );
+
+        for command in [
+            "git grep -C2 needle",
+            "git diff -C50%",
+            "git grep -C 2 needle",
+        ] {
+            let resources = shell_resources(command, &workspace, &backend);
+            let bound = bind_authorized_shell_command(command, &workspace, &resources).unwrap();
+            assert_eq!(bound, command, "subcommand -C value must remain data");
+        }
         let _ = std::fs::remove_dir_all(base);
     }
 
@@ -2458,6 +2576,43 @@ mod tests {
         assert!(protected_output
             .iter()
             .any(|resource| resource.action == "edit" && resource.hard_denial.is_some()));
+
+        for command in [
+            "tee .git/nac-owned",
+            "touch .git/nac-owned",
+            "dd if=/dev/null of=.git/nac-owned",
+            "sed -i s/a/b/ .git/config",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            assert!(resources
+                .iter()
+                .any(|resource| { resource.action == "edit" && resource.hard_denial.is_some() }));
+        }
+        assert!(shell_resources(
+            "printf pwned > .git/nac-owned",
+            Path::new("/workspace"),
+            &backend,
+        )[0]
+        .hard_denial
+        .is_some());
+
+        let git_status = shell_resources("git -C repo status", Path::new("/workspace"), &backend);
+        let git_status_save = git_status[0]
+            .save_resource
+            .as_deref()
+            .expect("Git status should have a remembered prefix");
+        assert_eq!(git_status_save, "command:[git][-C][repo][status]*");
+        assert!(!wildcard_match(
+            git_status_save,
+            &canonical_command(&[
+                "git".to_string(),
+                "-C".to_string(),
+                "repo".to_string(),
+                "config".to_string(),
+                "nac.review".to_string(),
+                "pwned".to_string(),
+            ])
+        ));
 
         let formatting = "rg -n --field-match-separator=a/b needle .";
         let formatting_resources = shell_resources(formatting, Path::new("/workspace"), &backend);
