@@ -3809,10 +3809,9 @@ impl nac_core::traditional_children::TraditionalChildController
             if relation.status == nac_core::store::TraditionalChildStatus::Running {
                 if service.active_run().is_some() {
                     service
-                        .enqueue_direct_input(
+                        .enqueue_traditional_child_input(
                             nac_core::store::InboxDelivery::Steer,
                             &request.prompt,
-                            None,
                         )
                         .await?;
                 } else {
