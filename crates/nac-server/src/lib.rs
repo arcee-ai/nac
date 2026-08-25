@@ -7343,6 +7343,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("managed orchestrator sessions cannot launch")
             || message.contains("host-backed shared workspace")
             || message.contains("frontend command")
+            || message.contains("traditional child sessions cannot own autonomous goals")
             || message.contains("only for direct behaviors")
         {
             StatusCode::BAD_REQUEST
@@ -10307,6 +10308,35 @@ mod tests {
 
         let rejected = get_response(app, "/sessions/orchestrator/goal", None).await;
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn traditional_child_goal_http_api_is_bad_request() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("traditional_child_goal_http");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("child-goal-test-key"));
+        seed_direct_session(&root, "direct");
+        let manager = test_manager(&root);
+        let child_session_id = manager
+            .create_traditional_child_session("direct", "general", "child goal ownership")
+            .await
+            .unwrap();
+        let app = router(manager);
+
+        let response = get_response(app, &format!("/sessions/{child_session_id}/goal"), None).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(
+            body["error"],
+            serde_json::Value::String(
+                "traditional child sessions cannot own autonomous goals".to_string()
+            )
+        );
+
         let _ = std::fs::remove_dir_all(root);
     }
 

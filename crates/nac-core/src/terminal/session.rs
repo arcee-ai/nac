@@ -14,7 +14,7 @@ use super::{ArtifactKind, OutputRegistry, OutputStream};
 #[cfg(all(unix, not(target_os = "linux")))]
 use crate::process::signal_descendants;
 #[cfg(target_os = "linux")]
-use crate::process::{process_identity_matches, process_start_time, signal_descendants};
+use crate::process::{process_start_time, signal_descendants};
 use crate::sandbox::ExecutionBackend;
 
 pub struct TerminalSession {
@@ -26,6 +26,8 @@ pub struct TerminalSession {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     #[cfg(target_os = "linux")]
     root_start_time: u64,
+    #[cfg(unix)]
+    process_group_id: Option<libc::pid_t>,
     _pty_pair: portable_pty::PtyPair,
     _reader_thread: std::thread::JoinHandle<()>,
     pub created_at: Instant,
@@ -86,6 +88,12 @@ impl TerminalSession {
             };
             start_time
         };
+        #[cfg(unix)]
+        let process_group_id = child.process_id().and_then(|pid| {
+            let pid = pid as libc::pid_t;
+            let group = unsafe { libc::getpgid(pid) };
+            (group == pid).then_some(group)
+        });
 
         let reader = pty_pair
             .master
@@ -135,6 +143,8 @@ impl TerminalSession {
             child,
             #[cfg(target_os = "linux")]
             root_start_time,
+            #[cfg(unix)]
+            process_group_id,
             _pty_pair: pty_pair,
             _reader_thread: reader_thread,
             created_at: Instant::now(),
@@ -185,10 +195,44 @@ impl TerminalSession {
             return;
         }
 
+        #[cfg(unix)]
+        if self.process_group_id.is_some() && self.root_exited_without_reaping() {
+            // WNOWAIT leaves the exited group leader as a zombie, so its pid
+            // and process-group id cannot be recycled between this ownership
+            // check and the signal. This reaches surviving same-group
+            // descendants without risking a later kill of an unrelated group.
+            self.signal_process_group(libc::SIGKILL);
+            self.process_group_id = None;
+        }
+
         if let Ok(Some(status)) = self.child.try_wait() {
             self.exit_code = Some(status.exit_code() as i32);
+            #[cfg(unix)]
+            {
+                // Never retain an id after reaping. If the pre-reap ownership
+                // check was unavailable or failed, leaking an unusual
+                // descendant is safer than signaling a recycled group id.
+                self.process_group_id = None;
+            }
             self.alive.store(false, Ordering::SeqCst);
         }
+    }
+
+    #[cfg(unix)]
+    fn root_exited_without_reaping(&self) -> bool {
+        let Some(pid) = self.child.process_id().map(|pid| pid as libc::pid_t) else {
+            return false;
+        };
+        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        result == 0 && unsafe { info.si_pid() } == pid
     }
 
     pub fn exit_code(&self) -> Option<i32> {
@@ -219,12 +263,12 @@ impl TerminalSession {
         self.refresh_status();
         #[cfg(unix)]
         let descendant_result = if self.exit_code.is_none() {
-            let descendant_result = self.signal_descendants(libc::SIGKILL);
-            self.signal_process_group(libc::SIGKILL);
-            descendant_result
+            self.signal_descendants(libc::SIGKILL)
         } else {
             Ok(())
         };
+        #[cfg(unix)]
+        self.signal_process_group(libc::SIGKILL);
 
         self.reap_child().await;
         self.alive.store(false, Ordering::SeqCst);
@@ -269,28 +313,19 @@ impl TerminalSession {
 
     #[cfg(target_os = "linux")]
     fn signal_process_group(&self, signal: libc::c_int) {
-        let Some(pid) = self.child.process_id().map(|pid| pid as libc::pid_t) else {
+        let Some(pgid) = self.process_group_id else {
             return;
         };
-        if !process_identity_matches(pid, self.root_start_time) {
-            return;
-        }
         unsafe {
-            let pgid = libc::getpgid(pid);
-            if pgid > 0 {
-                libc::kill(-pgid, signal);
-            }
+            libc::kill(-pgid, signal);
         }
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]
     fn signal_process_group(&self, signal: libc::c_int) {
-        if let Some(pid) = self.child.process_id() {
+        if let Some(pgid) = self.process_group_id {
             unsafe {
-                let pgid = libc::getpgid(pid as libc::pid_t);
-                if pgid > 0 {
-                    libc::kill(-pgid, signal);
-                }
+                libc::kill(-pgid, signal);
             }
         }
     }
@@ -330,8 +365,9 @@ impl Drop for TerminalSession {
         #[cfg(unix)]
         if self.exit_code.is_none() {
             let _ = self.signal_descendants(libc::SIGTERM);
-            self.signal_process_group(libc::SIGTERM);
         }
+        #[cfg(unix)]
+        self.signal_process_group(libc::SIGTERM);
         self.alive.store(false, Ordering::SeqCst);
     }
 }
@@ -390,6 +426,30 @@ mod tests {
                     .ok()
             })
         })
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn exited_pty_descendant_helper() {
+        if std::env::var_os("NAC_EXITED_PTY_DESCENDANT_HELPER").is_none() {
+            return;
+        }
+        let pid = unsafe { libc::getpid() };
+        let parent = unsafe { libc::getppid() };
+        let group = unsafe { libc::getpgid(parent) };
+        assert!(group > 0);
+        assert_eq!(unsafe { libc::setpgid(0, group) }, 0);
+        unsafe {
+            libc::signal(libc::SIGHUP, libc::SIG_IGN);
+        }
+        println!("NAC_CHILD:{pid}");
+        std::io::stdout().flush().unwrap();
+        unsafe {
+            libc::close(libc::STDIN_FILENO);
+            libc::close(libc::STDOUT_FILENO);
+            libc::close(libc::STDERR_FILENO);
+        }
+        std::thread::sleep(Duration::from_secs(30));
     }
 
     #[tokio::test]
@@ -460,5 +520,87 @@ mod tests {
             }
         }
         assert!(!still_running, "background child survived PTY cleanup");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn completed_pty_root_kills_surviving_process_group() {
+        let backend = crate::sandbox::execution_backend_from_sandbox(
+            None,
+            &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+        );
+        let registry =
+            OutputRegistry::new(crate::terminal::CommandOutputLimits::default()).unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let executable = format!(
+            "'{}'",
+            executable.display().to_string().replace('\'', "'\"'\"'")
+        );
+        let command = format!(
+            "NAC_EXITED_PTY_DESCENDANT_HELPER=1 {executable} --exact terminal::session::tests::exited_pty_descendant_helper --nocapture & sleep 0.2"
+        );
+        let mut session = TerminalSession::spawn(
+            "exited-root".to_string(),
+            &command,
+            None,
+            120,
+            40,
+            &backend,
+            registry.clone(),
+        )
+        .unwrap();
+
+        let mut cursor = 0;
+        let mut output = String::new();
+        let mut child_pid = None;
+        for _ in 0..40 {
+            let page = registry
+                .page(
+                    session.output_id(),
+                    OutputStream::Combined,
+                    cursor,
+                    32 * 1024,
+                )
+                .unwrap();
+            cursor = page.next_offset;
+            output.push_str(&page.content);
+            child_pid = parse_child_pid(&output);
+            if child_pid.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let child_pid = child_pid.unwrap_or_else(|| panic!("child pid not found in: {output:?}"));
+        assert!(
+            process_running(child_pid),
+            "background child exited too early"
+        );
+
+        for _ in 0..40 {
+            session.refresh_status();
+            if session.exit_code().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(session.exit_code().is_some(), "PTY root did not exit");
+
+        let mut still_running = false;
+        for _ in 0..40 {
+            still_running = process_running(child_pid);
+            if !still_running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if still_running {
+            unsafe {
+                libc::kill(child_pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+        assert!(
+            !still_running,
+            "background child survived exited-root PTY cleanup"
+        );
     }
 }

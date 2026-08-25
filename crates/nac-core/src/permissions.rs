@@ -1092,6 +1092,50 @@ fn hard_shell_denial_inner(
     }
     let tokens = effective_command_tokens(tokens);
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
+    if depth >= 8 && embedded_command_body(tokens).is_some() {
+        return Some("nested executable wrapper depth exceeds the safety limit".to_string());
+    }
+    if let Some(body) = embedded_command_body(tokens) {
+        let denial = match parse_shell(body) {
+            ParsedShell::Supported(segments) => segments
+                .into_iter()
+                .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
+            ParsedShell::Opaque => opaque_hard_shell_denial(body, cwd, backend),
+        };
+        if denial.is_some() {
+            return denial;
+        }
+    }
+    if command == "xargs" {
+        if depth >= 8 {
+            return Some("nested executable wrapper depth exceeds the safety limit".to_string());
+        }
+        match xargs_command_tokens(tokens) {
+            Ok(Some(command)) => {
+                if is_broad_command(command) {
+                    return Some(
+                        "xargs invocation of a broad interpreter is blocked because input can become executable arguments"
+                            .to_string(),
+                    );
+                }
+                if let Some(denial) = hard_shell_denial_inner(command, cwd, backend, depth + 1) {
+                    return Some(denial);
+                }
+            }
+            Ok(None) => {}
+            Err(reason) => return Some(reason.to_string()),
+        }
+    }
+    if command == "find" {
+        if depth >= 8 && find_exec_commands(tokens).next().is_some() {
+            return Some("nested executable wrapper depth exceeds the safety limit".to_string());
+        }
+        for command in find_exec_commands(tokens) {
+            if let Some(denial) = hard_shell_denial_inner(command, cwd, backend, depth + 1) {
+                return Some(denial);
+            }
+        }
+    }
     if matches!(
         command.as_str(),
         "sudo" | "doas" | "su" | "shutdown" | "reboot"
@@ -1147,6 +1191,121 @@ fn literal_shell_command_body(tokens: &[String]) -> Option<&str> {
                 .then_some(index)
         })?;
     tokens.get(option_index + 1).map(String::as_str)
+}
+
+fn embedded_command_body(tokens: &[String]) -> Option<&str> {
+    let effective = effective_command_tokens(tokens);
+    let command = effective.first()?.rsplit('/').next()?;
+    if command != "rg" {
+        return None;
+    }
+    effective
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, token)| {
+            if token == "--pre" {
+                effective.get(index + 1).map(String::as_str)
+            } else {
+                token.strip_prefix("--pre=")
+            }
+        })
+}
+
+fn xargs_command_tokens(tokens: &[String]) -> Result<Option<&[String]>, &'static str> {
+    const VALUE_OPTIONS: &[&str] = &[
+        "-a",
+        "--arg-file",
+        "-d",
+        "--delimiter",
+        "-E",
+        "--eof",
+        "-I",
+        "--replace",
+        "-L",
+        "--max-lines",
+        "-n",
+        "--max-args",
+        "-P",
+        "--max-procs",
+        "-s",
+        "--max-chars",
+        "--process-slot-var",
+    ];
+    const FLAG_OPTIONS: &[&str] = &[
+        "-0",
+        "--null",
+        "--show-limits",
+        "-p",
+        "--interactive",
+        "-r",
+        "--no-run-if-empty",
+        "-t",
+        "--verbose",
+        "-x",
+        "--exit",
+        "--help",
+        "--version",
+        "-e",
+        "-i",
+        "-l",
+        "-o",
+    ];
+    const ATTACHED_VALUE_OPTIONS: &[&str] = &[
+        "-a", "-d", "-E", "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s",
+    ];
+    let effective = effective_command_tokens(tokens);
+    let mut index = 1;
+    while let Some(token) = effective.get(index) {
+        if token == "--" {
+            return Ok(effective
+                .get(index + 1..)
+                .filter(|command| !command.is_empty()));
+        }
+        if !token.starts_with('-') || token == "-" {
+            return Ok(Some(&effective[index..]));
+        }
+        let option = token
+            .split_once('=')
+            .map_or(token.as_str(), |(name, _)| name);
+        index += 1;
+        if VALUE_OPTIONS.contains(&option) && !token.contains('=') && token == option {
+            index += 1;
+        } else if FLAG_OPTIONS.contains(&option)
+            || ATTACHED_VALUE_OPTIONS
+                .iter()
+                .any(|prefix| token.starts_with(prefix) && token.len() > prefix.len())
+        {
+        } else {
+            return Err("unsupported xargs option syntax is blocked");
+        }
+    }
+    Ok(None)
+}
+
+fn find_exec_commands(tokens: &[String]) -> impl Iterator<Item = &[String]> {
+    let effective = effective_command_tokens(tokens);
+    let mut commands = Vec::new();
+    let mut index = 1;
+    while index < effective.len() {
+        if matches!(
+            effective[index].as_str(),
+            "-exec" | "-execdir" | "-ok" | "-okdir"
+        ) {
+            let start = index + 1;
+            let end = effective[start..]
+                .iter()
+                .position(|token| matches!(token.as_str(), ";" | "+"))
+                .map_or(effective.len(), |offset| start + offset);
+            if start < end {
+                commands.push(&effective[start..end]);
+            }
+            index = end.saturating_add(1);
+        } else {
+            index += 1;
+        }
+    }
+    commands.into_iter()
 }
 
 fn literal_env_split_string(tokens: &[String]) -> Option<(&str, &str, &[String])> {
@@ -1312,7 +1471,8 @@ fn is_broad_command(tokens: &[String]) -> bool {
         "bash", "bun", "dash", "deno", "fish", "node", "nodejs", "npm", "perl", "php", "pnpm",
         "python", "python3", "ruby", "sh", "yarn", "zsh",
     ];
-    effective_command_tokens(tokens)
+    let effective = effective_command_tokens(tokens);
+    let command_is_broad = effective
         .first()
         .and_then(|command| command.rsplit('/').next())
         .is_some_and(|command| {
@@ -1320,7 +1480,10 @@ fn is_broad_command(tokens: &[String]) -> bool {
             BROAD.contains(&command.as_str())
                 || command.starts_with("python3.")
                 || command.starts_with("node-")
-        })
+                || command == "xargs"
+                || command == "find" && find_exec_commands(effective).next().is_some()
+        });
+    command_is_broad || embedded_command_body(effective).is_some()
 }
 
 fn shell_path_resources(
@@ -1373,6 +1536,20 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
         .first()
         .and_then(|command| command.rsplit('/').next())
         .unwrap_or_default();
+    let git_subcommand = git_command
+        .then(|| git_subcommand_index(tokens, command_index))
+        .flatten();
+    if git_command
+        && index > command_index
+        && git_subcommand.is_some_and(|subcommand| index < subcommand)
+    {
+        if let Some(candidate) = token
+            .strip_prefix("-C")
+            .filter(|candidate| !candidate.is_empty())
+        {
+            return Some((Some("-C"), Path::new(candidate)));
+        }
+    }
     if command == "dd" {
         if let Some(candidate) = token.strip_prefix("of=") {
             return Some((Some("of"), Path::new(candidate)));
@@ -1384,9 +1561,6 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
         .map_or((None, token.as_str()), |(option, value)| {
             (Some(option), value)
         });
-    let git_subcommand = git_command
-        .then(|| git_subcommand_index(tokens, command_index))
-        .flatten();
     let git_global_c_value = git_command
         && index > 0
         && tokens[index - 1] == "-C"
@@ -1639,9 +1813,15 @@ fn git_subcommand_index(tokens: &[String], command_index: usize) -> Option<usize
 }
 
 fn git_c_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
-    index > command_index
-        && tokens.get(index - 1).is_some_and(|option| option == "-C")
-        && git_subcommand_index(tokens, command_index).is_some_and(|subcommand| index < subcommand)
+    if index <= command_index
+        || !git_subcommand_index(tokens, command_index).is_some_and(|subcommand| index < subcommand)
+    {
+        return false;
+    }
+    tokens.get(index - 1).is_some_and(|option| option == "-C")
+        || tokens[index]
+            .strip_prefix("-C")
+            .is_some_and(|path| !path.is_empty())
 }
 
 fn git_global_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
@@ -1675,7 +1855,9 @@ fn git_effective_cwd_before(
             }
             tokens.get(index + 1).map(String::as_str)
         } else {
-            None
+            option
+                .strip_prefix("-C")
+                .filter(|requested| !requested.is_empty())
         };
         if let Some(requested) = requested {
             effective = if Path::new(requested).is_absolute() {
@@ -1684,7 +1866,7 @@ fn git_effective_cwd_before(
                 effective.join(requested)
             };
             effective = lexical_normalize(&effective);
-            index += 2;
+            index += if option == "-C" { 2 } else { 1 };
         } else if matches!(
             option.as_str(),
             "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env"
@@ -2279,6 +2461,12 @@ mod tests {
             "env --split-string='sudo\\_id'",
             "env \"-Sgit\\_reset\\_--hard\"",
             "env --split-string='${PROTECTED_COMMAND} id'",
+            "xargs -n1 sudo true",
+            "xargs sh -c",
+            "xargs --unknown-option value",
+            "find . -exec sudo true \\;",
+            "rg --pre sudo needle .",
+            "rg --pre=sudo needle .",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
             "bash -lc 'sudo make install' > /tmp/result",
@@ -2321,6 +2509,25 @@ mod tests {
                 .hard_denial
                 .is_some()
         );
+
+        let preprocessor = shell_resources(
+            "rg --pre sh needle input.txt",
+            Path::new("/workspace"),
+            &backend,
+        );
+        assert!(preprocessor
+            .iter()
+            .any(|resource| resource.action == "execute_broad"));
+        assert!(preprocessor
+            .iter()
+            .all(|resource| resource.hard_denial.is_none()));
+        assert!(shell_resources(
+            "printf x | xargs -n1 sudo true",
+            Path::new("/workspace"),
+            &backend,
+        )
+        .iter()
+        .any(|resource| resource.hard_denial.is_some()));
     }
 
     #[cfg(unix)]
@@ -2540,6 +2747,25 @@ mod tests {
                 canonical_repo.display(),
                 nested.canonicalize().unwrap().display()
             )
+        );
+
+        let attached_c_command = "git -Coutside-link status";
+        let attached_c = shell_resources(attached_c_command, &workspace, &backend);
+        let attached_c = canonicalize_authorization_resources(&attached_c, &backend, Path::new(""))
+            .await
+            .unwrap();
+        assert!(attached_c.iter().any(|resource| {
+            resource.action == "external_directory"
+                && resource.resource == canonical_outside.display().to_string()
+        }));
+        assert_eq!(
+            bind_authorized_shell_command(
+                attached_c_command,
+                &workspace.canonicalize().unwrap(),
+                &attached_c,
+            )
+            .unwrap(),
+            format!("git -C{} status", canonical_outside.display())
         );
 
         let git_dir_command = "git --git-dir=outside-link/repo/.git status";
