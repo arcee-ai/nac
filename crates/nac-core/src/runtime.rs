@@ -943,6 +943,7 @@ async fn build_run_config_inner(
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
                 mode: agent_mode,
+                session_behavior: Some(behavior),
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
@@ -1039,6 +1040,7 @@ async fn build_run_config_inner(
         AgentConfig {
             command_output_limits: worker_command_output_limits(config)?,
             mode: agent_mode,
+            session_behavior: Some(behavior),
             store_path: store_path.clone(),
             session_id: Some(session_id.clone()),
             orchestrator_compaction_threshold,
@@ -1193,6 +1195,7 @@ pub async fn build_managed_worker_config(
         AgentConfig {
             command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some(options.dispatch.session_id.clone()),
             orchestrator_compaction_threshold: None,
@@ -1593,6 +1596,7 @@ async fn build_resume_config_from_snapshot(
         AgentConfig {
             command_output_limits: worker_command_output_limits(config)?,
             mode: agent_mode,
+            session_behavior: Some(snapshot.behavior),
             store_path: store_path.clone(),
             session_id: Some(snapshot.session_id.clone()),
             orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
@@ -1994,6 +1998,40 @@ mod tests {
                 .collect::<Vec<_>>(),
             crate::tools::DIRECT_TOOL_NAMES
         );
+
+        let delegating = build_run_config_for_project_with_behavior(
+            RunOptions {
+                workspace_cwd: root.clone(),
+                config_cwd: Some(root.clone()),
+                worker_executable: None,
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                model: test_openai_model_options(),
+                orchestrator_compaction_threshold: Some(32_000),
+                sandbox: SandboxOptions::default(),
+                ssh: SshOptions::default(),
+            },
+            &NacConfig::default(),
+            None,
+            sessions::SessionBehavior::DirectWithOrchestrator,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            delegating
+                .agent
+                .tool_definitions_for_test()
+                .iter()
+                .map(|definition| definition.function.name.as_str())
+                .collect::<Vec<_>>(),
+            crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
+        );
+        assert!(matches!(
+            delegating.agent.messages.first(),
+            Some(Message::System { content })
+                if content.contains("separate durable NAC orchestrator sessions")
+        ));
 
         let _ = std::fs::remove_dir_all(root);
         restore_env("OPENAI_API_KEY", original_api_key);

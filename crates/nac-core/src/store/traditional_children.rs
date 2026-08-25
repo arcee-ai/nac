@@ -197,6 +197,44 @@ pub fn create_traditional_child_relationship(
     profile: &str,
     description: &str,
 ) -> Result<TraditionalChildRecord> {
+    let connection = open_runtime_connection(path)?;
+    create_traditional_child_relationship_with_connection(
+        &connection,
+        parent_session_id,
+        child_session_id,
+        profile,
+        description,
+    )
+}
+
+pub fn create_traditional_child_session(
+    path: &Path,
+    snapshot: &crate::sessions::SessionSnapshot,
+    parent_session_id: &str,
+    profile: &str,
+    description: &str,
+) -> Result<TraditionalChildRecord> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::sessions::insert_new_session_in_transaction(&transaction, path, snapshot)?;
+    let child = create_traditional_child_relationship_with_connection(
+        &transaction,
+        parent_session_id,
+        &snapshot.session_id,
+        profile,
+        description,
+    )?;
+    transaction.commit()?;
+    Ok(child)
+}
+
+fn create_traditional_child_relationship_with_connection(
+    connection: &rusqlite::Connection,
+    parent_session_id: &str,
+    child_session_id: &str,
+    profile: &str,
+    description: &str,
+) -> Result<TraditionalChildRecord> {
     let parent_session_id = parent_session_id.trim();
     let child_session_id = child_session_id.trim();
     let description = normalized_description(description)?;
@@ -210,7 +248,6 @@ pub fn create_traditional_child_relationship(
         return Err(anyhow!("unknown traditional child profile '{profile}'"));
     }
 
-    let connection = open_runtime_connection(path)?;
     let parent_behavior: String = connection
         .query_row(
             "SELECT behavior FROM sessions WHERE session_id = ?1",
@@ -224,7 +261,7 @@ pub fn create_traditional_child_relationship(
             "traditional children are available only to direct parent sessions"
         ));
     }
-    if load_child_with_connection(&connection, parent_session_id)?.is_some() {
+    if load_child_with_connection(connection, parent_session_id)?.is_some() {
         return Err(anyhow!(
             "traditional child nesting limit reached (1): child sessions cannot launch children"
         ));
@@ -256,7 +293,7 @@ pub fn create_traditional_child_relationship(
             now
         ],
     )?;
-    load_child_with_connection(&connection, child_session_id)?
+    load_child_with_connection(connection, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child relationship disappeared after creation"))
 }
 
@@ -553,6 +590,35 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("nesting limit"));
+    }
+
+    #[test]
+    fn delegated_session_creation_rolls_back_when_relationship_creation_fails() {
+        let path = fixture("atomic-create-rollback");
+        let mut snapshot = crate::sessions::new_snapshot(
+            "atomic-child".to_string(),
+            path.parent().unwrap().to_path_buf(),
+            "test-model".to_string(),
+            "https://example.invalid".to_string(),
+            crate::model::BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            None,
+            std::collections::BTreeMap::new(),
+        );
+        snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+        assert!(create_traditional_child_session(
+            &path,
+            &snapshot,
+            "parent",
+            GENERAL_CHILD_PROFILE,
+            ""
+        )
+        .is_err());
+        assert!(!crate::sessions::session_exists(&path, "atomic-child").unwrap());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

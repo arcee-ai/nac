@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,7 @@ use crate::tools::kernel::PermissionResource;
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APPROVAL_SUBSCRIBER_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const DELEGATED_APPROVAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -122,6 +123,22 @@ struct PendingPermission {
 #[derive(Default)]
 struct PermissionBrokerState {
     pending: HashMap<String, PendingPermission>,
+}
+
+struct PendingPermissionGuard {
+    broker: Weak<PermissionBroker>,
+    request_id: String,
+}
+
+impl Drop for PendingPermissionGuard {
+    fn drop(&mut self) {
+        if let Some(broker) = self.broker.upgrade() {
+            broker.dismiss_pending(
+                &self.request_id,
+                "the operation awaiting approval ended before a reply".to_string(),
+            );
+        }
+    }
 }
 
 /// Per-direct-session approval coordinator. Pending prompts are intentionally
@@ -267,7 +284,15 @@ impl PermissionBroker {
         };
         let decision = self.policy.evaluate(resources, &remembered);
         match decision.effect {
-            PermissionEffect::Allow => return AuthorizationOutcome::Allowed,
+            PermissionEffect::Allow => {
+                return if cancellation.is_cancelled() {
+                    AuthorizationOutcome::Denied(
+                        "run was cancelled before authorization completed".to_string(),
+                    )
+                } else {
+                    AuthorizationOutcome::Allowed
+                };
+            }
             PermissionEffect::Deny => {
                 return AuthorizationOutcome::Denied(
                     decision
@@ -287,7 +312,16 @@ impl PermissionBroker {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_ref()
             .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
-        if !interactive {
+        let delegated_child =
+            match crate::store::load_traditional_child(&self.store_path, &self.session_id) {
+                Ok(child) => child.is_some(),
+                Err(error) => {
+                    return AuthorizationOutcome::Denied(format!(
+                        "delegated ownership could not be checked before approval: {error}"
+                    ));
+                }
+            };
+        if !interactive && !delegated_child {
             return AuthorizationOutcome::Denied(
                 "approval is required, but no interactive session client is connected; the operation was not executed"
                     .to_string(),
@@ -322,6 +356,10 @@ impl PermissionBroker {
                     reply: sender,
                 },
             );
+        let _pending_guard = PendingPermissionGuard {
+            broker: Arc::downgrade(self),
+            request_id: request.id.clone(),
+        };
         self.emit(crate::events::SessionEvent::PermissionAsked {
             request: request.clone(),
         });
@@ -338,8 +376,7 @@ impl PermissionBroker {
                     Self::reply_outcome(receiver.await)
                 }
             },
-            () = self.interactive_subscriber_lost() => {
-                let reason = "the interactive session client disconnected while approval was pending".to_string();
+            reason = self.interactive_subscriber_unavailable(interactive) => {
                 if self.dismiss_pending(&request.id, reason.clone()) {
                     AuthorizationOutcome::Denied(reason)
                 } else {
@@ -406,6 +443,32 @@ impl PermissionBroker {
                 return;
             }
         }
+    }
+
+    async fn interactive_subscriber_unavailable(&self, initially_connected: bool) -> String {
+        if !initially_connected {
+            let connected = tokio::time::timeout(DELEGATED_APPROVAL_CONNECT_TIMEOUT, async {
+                loop {
+                    tokio::time::sleep(APPROVAL_SUBSCRIBER_POLL_INTERVAL).await;
+                    let interactive = self
+                        .event_bus
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .as_ref()
+                        .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
+                    if interactive {
+                        return;
+                    }
+                }
+            })
+            .await;
+            if connected.is_err() {
+                return "approval is required, but no interactive parent session client connected; the operation was not executed"
+                    .to_string();
+            }
+        }
+        self.interactive_subscriber_lost().await;
+        "the interactive session client disconnected while approval was pending".to_string()
     }
 
     fn emit(&self, event: crate::events::SessionEvent) {
@@ -654,7 +717,14 @@ pub(crate) async fn canonicalize_authorization_resources(
     backend: &ExecutionBackend,
     store_path: &Path,
 ) -> anyhow::Result<Vec<PermissionResource>> {
-    let path_actions = ["read", "edit", "glob", "grep", "execute_path"];
+    let path_actions = [
+        "read",
+        "edit",
+        "glob",
+        "grep",
+        "execute_cwd",
+        "execute_path",
+    ];
     let projected_paths = resources
         .iter()
         .filter(|resource| path_actions.contains(&resource.action.as_str()))
@@ -687,17 +757,8 @@ pub(crate) fn shell_resources(
     cwd: &Path,
     backend: &ExecutionBackend,
 ) -> Vec<PermissionResource> {
-    let workspace = lexical_normalize(&backend.default_terminal_cwd());
     let cwd = lexical_normalize(cwd);
     let mut resources = Vec::new();
-    if !path_is_within(&cwd, &workspace) {
-        let display = cwd.display().to_string();
-        resources.push(
-            PermissionResource::new("external_directory", display.clone())
-                .with_display(display)
-                .with_save_resource(external_directory_pattern(&cwd)),
-        );
-    }
 
     match parse_shell(command) {
         ParsedShell::Supported(segments) => {
@@ -735,6 +796,13 @@ pub(crate) fn shell_resources(
             );
         }
     }
+    resources.extend(file_resources(
+        "execute_cwd",
+        cwd,
+        backend,
+        Path::new(""),
+        false,
+    ));
     resources
 }
 
@@ -912,6 +980,15 @@ fn command_grant_candidate(tokens: &[String]) -> String {
 }
 
 fn hard_shell_denial(tokens: &[String], cwd: &Path, backend: &ExecutionBackend) -> Option<String> {
+    hard_shell_denial_inner(tokens, cwd, backend, 0)
+}
+
+fn hard_shell_denial_inner(
+    tokens: &[String],
+    cwd: &Path,
+    backend: &ExecutionBackend,
+    depth: usize,
+) -> Option<String> {
     let tokens = effective_command_tokens(tokens);
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
     if matches!(
@@ -940,7 +1017,37 @@ fn hard_shell_denial(tokens: &[String], cwd: &Path, backend: &ExecutionBackend) 
             "recursive deletion of the workspace or filesystem root is blocked".to_string(),
         );
     }
+    if matches!(command.as_str(), "bash" | "dash" | "fish" | "sh" | "zsh") {
+        if depth >= 8 {
+            return Some("nested shell command depth exceeds the safety limit".to_string());
+        }
+        if let Some(body) = literal_shell_command_body(tokens) {
+            let denial = match parse_shell(body) {
+                ParsedShell::Supported(segments) => segments
+                    .into_iter()
+                    .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
+                ParsedShell::Opaque => opaque_hard_shell_denial(body, cwd, backend),
+            };
+            if denial.is_some() {
+                return denial;
+            }
+        }
+    }
     None
+}
+
+fn literal_shell_command_body(tokens: &[String]) -> Option<&str> {
+    let option_index = tokens
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, token)| {
+            token
+                .strip_prefix('-')
+                .is_some_and(|flags| flags.contains('c'))
+                .then_some(index)
+        })?;
+    tokens.get(option_index + 1).map(String::as_str)
 }
 
 fn effective_command_tokens(tokens: &[String]) -> &[String] {
@@ -1466,6 +1573,8 @@ mod tests {
             "busybox rm -rf /workspace",
             "sudo make install > /tmp/result",
             "git checkout .",
+            "sh -c 'git reset --hard'",
+            "bash -lc 'sudo make install'",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
@@ -1474,6 +1583,36 @@ mod tests {
                 "wrapper or opaque syntax must not bypass hard denial: {command}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn command_workdir_is_canonicalized_before_policy() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!(
+            "nac-command-workdir-permission-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = base.join("workspace");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, workspace.join("link")).unwrap();
+        let backend = local(&workspace);
+        let projected = shell_resources("rg needle", &workspace.join("link"), &backend);
+        let canonical = canonicalize_authorization_resources(&projected, &backend, Path::new(""))
+            .await
+            .unwrap();
+        assert!(canonical.iter().any(|resource| {
+            resource.action == "execute_cwd"
+                && resource.resource == outside.canonicalize().unwrap().display().to_string()
+        }));
+        assert!(canonical.iter().any(|resource| {
+            resource.action == "external_directory"
+                && resource.resource == outside.canonicalize().unwrap().display().to_string()
+        }));
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
@@ -1531,6 +1670,51 @@ mod tests {
             matches!(outcome, AuthorizationOutcome::Denied(reason) if reason.contains("no interactive"))
         );
         assert!(broker.pending().is_empty());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delegated_child_allows_its_parent_ui_time_to_connect_and_reply() {
+        let (path, broker) = broker_fixture();
+        crate::store::insert_test_session(&path, "parent");
+        crate::store::open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id IN ('parent', 'session-a')",
+                [],
+            )
+            .unwrap();
+        crate::store::create_traditional_child_relationship(
+            &path,
+            "parent",
+            "session-a",
+            crate::store::GENERAL_CHILD_PROFILE,
+            "approval bridge",
+        )
+        .unwrap();
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        broker.attach_event_bus(bus.clone());
+        let authorize = {
+            let broker = Arc::clone(&broker);
+            tokio::spawn(async move {
+                broker
+                    .authorize(
+                        "exec_command",
+                        &[PermissionResource::new(
+                            "execute",
+                            "command:[curl][example.com]",
+                        )],
+                        &crate::tools::kernel::ToolCallContext::default(),
+                        &crate::tools::ThreadCancellation::default(),
+                    )
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        let request = broker.pending().pop().expect("deferred child approval");
+        let _parent_ui = bus.subscribe_assistant_deltas();
+        broker.reply(&request.id, PermissionReply::Once).unwrap();
+        assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -1605,6 +1789,38 @@ mod tests {
             crate::events::SessionEvent::PermissionDismissed { reason, .. }
                 if reason.contains("cancelled")
         ));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn aborting_authorization_dismisses_prompt_before_any_stale_grant_reply() {
+        let (path, broker) = broker_fixture();
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let authorize = {
+            let broker = Arc::clone(&broker);
+            tokio::spawn(async move {
+                broker
+                    .authorize(
+                        "exec_command",
+                        &[
+                            PermissionResource::new("execute", "command:[curl][example.com]")
+                                .with_save_resource("command:[curl]*"),
+                        ],
+                        &crate::tools::kernel::ToolCallContext::default(),
+                        &crate::tools::ThreadCancellation::default(),
+                    )
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        let request = broker.pending().pop().expect("pending approval");
+        authorize.abort();
+        let _ = authorize.await;
+        assert!(broker.pending().is_empty());
+        assert!(broker.reply(&request.id, PermissionReply::Always).is_err());
+        assert!(broker.grants().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

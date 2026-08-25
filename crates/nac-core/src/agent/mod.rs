@@ -193,6 +193,10 @@ pub(crate) enum RunPromptCommitStatus {
 
 pub struct AgentConfig {
     pub mode: AgentMode,
+    /// Authoritative immutable behavior for a persistent top-level session.
+    /// Fresh sessions are constructed before their row exists, so callers
+    /// must not rely on a store reread to distinguish the two direct modes.
+    pub session_behavior: Option<crate::sessions::SessionBehavior>,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub orchestrator_compaction_threshold: Option<u64>,
@@ -400,12 +404,14 @@ impl Agent {
         };
         let direct_behavior = if mode == AgentMode::Direct && traditional_child.is_none() {
             config
-                .session_id
-                .as_deref()
-                .and_then(|session_id| {
-                    crate::sessions::load_session(&config.store_path, session_id).ok()
+                .session_behavior
+                .or_else(|| {
+                    config.session_id.as_deref().and_then(|session_id| {
+                        crate::sessions::load_session(&config.store_path, session_id)
+                            .ok()
+                            .map(|snapshot| snapshot.behavior)
+                    })
                 })
-                .map(|snapshot| snapshot.behavior)
                 .unwrap_or(crate::sessions::SessionBehavior::Direct)
         } else {
             crate::sessions::SessionBehavior::Direct
@@ -592,6 +598,7 @@ impl Agent {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
+                session_behavior: None,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,

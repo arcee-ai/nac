@@ -23,6 +23,7 @@ import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
+import { primarySessions } from "@/app/lib/projects";
 import { perfRender } from "@/app/lib/perfDebug";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
@@ -208,7 +209,7 @@ export default function SessionPage() {
 
   const projectId = entry?.summary.project_id ?? null;
   const projectSessions = projectId
-    ? allSessions
+    ? primarySessions(allSessions)
         .filter((session) => session.summary.project_id === projectId)
         .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];

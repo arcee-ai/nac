@@ -322,6 +322,9 @@ pub struct LaunchModelDefaults {
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ManagedSessionSummary {
     pub summary: SessionSummarySnapshot,
+    /// Delegated sessions remain addressable by id, but clients use lineage
+    /// to keep them out of primary chat navigation and enforce ownership UI.
+    pub lineage: Option<SessionLineageSnapshot>,
     pub active: bool,
     pub active_run: Option<ActiveRunSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1622,14 +1625,15 @@ impl SessionManager {
                 })
                 .map(|summary| {
                     let active_service = active.get(&summary.session_id);
-                    ManagedSessionSummary {
+                    Ok(ManagedSessionSummary {
+                        lineage: self.session_lineage(&summary.session_id)?,
                         active: active_service.is_some(),
                         active_run: active_service.and_then(|service| service.active_run()),
                         summary,
                         workspace_diff: None,
-                    }
+                    })
                 })
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>>>()?
         };
 
         if include_workspace_stats {
@@ -2289,6 +2293,26 @@ impl SessionManager {
         }
     }
 
+    fn require_primary_operation_session(&self, session_id: &str) -> Result<()> {
+        self.require_persisted_operation_session(session_id)?;
+        if self.session_lineage(session_id)?.is_some() {
+            return Err(anyhow!(
+                "delegated sessions accept work only through their parent"
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_primary_direct_session(&self, session_id: &str) -> Result<()> {
+        self.require_persisted_operation_session(session_id)?;
+        if self.session_lineage(session_id)?.is_some() {
+            return Err(anyhow!(
+                "delegated sessions accept input only through their parent"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
         sessions::load_session_config(&self.inner.store_path, session_id)
     }
@@ -2347,6 +2371,7 @@ impl SessionManager {
     }
 
     pub async fn list_direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
+        self.require_primary_direct_session(session_id)?;
         self.attach_session(session_id).await?.list_direct_inbox()
     }
 
@@ -2355,6 +2380,7 @@ impl SessionManager {
         session_id: &str,
         request: CreateInboxItemRequest,
     ) -> Result<SessionInboxRecord> {
+        self.require_primary_direct_session(session_id)?;
         let service = self.attach_session(session_id).await?;
         let prompt = match service.prepare_user_input(&request.prompt) {
             PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
@@ -2378,6 +2404,7 @@ impl SessionManager {
         item_id: i64,
         request: UpdateInboxItemRequest,
     ) -> Result<SessionInboxRecord> {
+        self.require_primary_direct_session(session_id)?;
         self.attach_session(session_id)
             .await?
             .update_direct_inbox_item(item_id, request.expected_version, request.delivery)
@@ -2390,6 +2417,7 @@ impl SessionManager {
         item_id: i64,
         request: CancelInboxItemRequest,
     ) -> Result<SessionInboxRecord> {
+        self.require_primary_direct_session(session_id)?;
         self.attach_session(session_id)
             .await?
             .cancel_direct_inbox_item(item_id, request.expected_version)
@@ -2860,14 +2888,14 @@ impl SessionManager {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
-        self.require_persisted_operation_session(session_id)?;
+        self.require_primary_operation_session(session_id)?;
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         // The OS lease closes the cross-process gap between checking durable
         // state and synchronously establishing active-run state.
         let operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
-        self.require_persisted_operation_session(session_id)?;
+        self.require_primary_operation_session(session_id)?;
         let service = self
             .attach_current_operation_service_locked(session_id, &operation_lease)
             .await?;
@@ -3406,22 +3434,12 @@ impl SessionManager {
         orchestrator.project_id = parent.project_id;
         orchestrator.light_model = parent.light_model;
         orchestrator.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
-        sessions::create_session(&self.inner.store_path, &orchestrator)?;
-        if let Err(error) = nac_core::store::create_managed_orchestrator_relationship(
+        nac_core::store::create_managed_orchestrator_session(
             &self.inner.store_path,
+            &orchestrator,
             parent_session_id,
-            &orchestrator_session_id,
             description,
-        ) {
-            if let Err(cleanup) =
-                sessions::delete_session(&self.inner.store_path, &orchestrator_session_id)
-            {
-                eprintln!(
-                    "nac: failed to remove unowned orchestrator session {orchestrator_session_id}: {cleanup:#}"
-                );
-            }
-            return Err(error);
-        }
+        )?;
         Ok(orchestrator_session_id)
     }
 
@@ -3728,23 +3746,13 @@ impl SessionManager {
         child.behavior = sessions::SessionBehavior::Direct;
         child.project_id = parent.project_id;
         child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
-        sessions::create_session(&self.inner.store_path, &child)?;
-        if let Err(error) = nac_core::store::create_traditional_child_relationship(
+        nac_core::store::create_traditional_child_session(
             &self.inner.store_path,
+            &child,
             parent_session_id,
-            &child_session_id,
             profile,
             description,
-        ) {
-            if let Err(cleanup) =
-                sessions::delete_session(&self.inner.store_path, &child_session_id)
-            {
-                eprintln!(
-                    "nac: failed to remove unowned child session {child_session_id}: {cleanup:#}"
-                );
-            }
-            return Err(error);
-        }
+        )?;
         Ok(child_session_id)
     }
 }
@@ -3775,19 +3783,12 @@ impl nac_core::traditional_children::TraditionalChildController
                         .await?
                 }
             };
-            let relation = nac_core::store::load_traditional_child(
+            let relation = nac_core::store::load_traditional_child_for_parent(
                 &manager.inner.store_path,
+                &request.parent_session_id,
                 &child_session_id,
             )?
-            .ok_or_else(|| {
-                anyhow!("traditional child session '{child_session_id}' was not found")
-            })?;
-            if relation.parent_session_id != request.parent_session_id {
-                return Err(anyhow!(
-                    "session '{child_session_id}' is not a child of parent '{}'",
-                    request.parent_session_id
-                ));
-            }
+            .ok_or_else(|| anyhow!("traditional child was not found"))?;
             if relation.profile != request.profile {
                 return Err(anyhow!(
                     "traditional child profile is immutable (expected '{}')",
@@ -11121,6 +11122,47 @@ mod tests {
             .await
             .unwrap();
 
+        let summaries = manager.list_sessions(false).await.unwrap();
+        assert!(summaries
+            .iter()
+            .find(|entry| entry.summary.session_id == child)
+            .and_then(|entry| entry.lineage.as_ref())
+            .is_some_and(|lineage| lineage.kind == SessionLineageKind::TraditionalChild));
+        assert!(summaries
+            .iter()
+            .find(|entry| entry.summary.session_id == orchestrator)
+            .and_then(|entry| entry.lineage.as_ref())
+            .is_some_and(|lineage| lineage.kind == SessionLineageKind::ManagedOrchestrator));
+
+        let inbox_error = manager.list_direct_inbox(&child).await.unwrap_err();
+        assert!(inbox_error
+            .to_string()
+            .contains("accept input only through their parent"));
+        let run_error = manager
+            .submit_prompt(
+                &child,
+                SubmitPromptRequest {
+                    prompt: "bypass parent ownership".to_string(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(run_error
+            .to_string()
+            .contains("accept work only through their parent"));
+        let managed_run_error = manager
+            .submit_prompt(
+                &orchestrator,
+                SubmitPromptRequest {
+                    prompt: "bypass parent ownership".to_string(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(managed_run_error
+            .to_string()
+            .contains("accept work only through their parent"));
+
         let child_error =
             ApiError::from(manager.traditional_child("parent-b", &child).unwrap_err());
         assert_eq!(child_error.status, StatusCode::NOT_FOUND);
@@ -11138,6 +11180,25 @@ mod tests {
             "traditional child was not found"
         );
         assert!(!child_cancel_error.message.contains(&child));
+        let continuation_error =
+            nac_core::traditional_children::controller_for(&root.join("store.db"))
+                .unwrap()
+                .start(
+                    nac_core::traditional_children::TraditionalChildStartRequest {
+                        parent_session_id: "parent-b".to_string(),
+                        child_session_id: Some(child.clone()),
+                        profile: "general".to_string(),
+                        description: "owned child".to_string(),
+                        prompt: "must remain opaque".to_string(),
+                        execution_mode: TraditionalChildExecutionMode::Foreground,
+                    },
+                )
+                .await
+                .unwrap_err();
+        assert_eq!(
+            continuation_error.to_string(),
+            "traditional child was not found"
+        );
 
         let orchestrator_error = ApiError::from(
             manager

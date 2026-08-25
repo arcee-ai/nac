@@ -53,6 +53,7 @@ fn compaction_test_agent_with_mode(
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode,
+            session_behavior: None,
             store_path,
             session_id: session_id.map(str::to_string),
             orchestrator_compaction_threshold: threshold,

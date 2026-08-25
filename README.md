@@ -105,5 +105,9 @@ tests, `make test-e2e` for isolated real-browser tests against the embedded
 server and a credential-free scripted model, and `make test-durability` for the
 focused lifecycle/crash-window regressions. Install the E2E browser once with
 `npm --prefix crates/nac-server/web exec -- playwright install chromium`.
+`make ci` is the portable unit, lint, formatting, and committed-asset lane; a
+full release-equivalent local check additionally runs `make test-e2e` and
+`make test-durability`, matching the browser and crash-window gates called out
+separately in release CI.
 
 nac is licensed under [Apache 2.0](LICENSE).

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, type RenderResult } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSessionStream } from "@/app/hooks/useSessionStream";
+import { useDelegatedPermissionStream, useSessionStream } from "@/app/hooks/useSessionStream";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
 import { resetRuntime } from "@/app/store/runtimeStore";
@@ -137,6 +137,11 @@ function Harness() {
   return null;
 }
 
+function DelegatedPermissionHarness() {
+  useDelegatedPermissionStream("child-session", true);
+  return null;
+}
+
 async function mount(client: QueryClient): Promise<RenderResult> {
   const renderer = render(
     <QueryClientProvider client={client}>
@@ -160,6 +165,29 @@ afterEach(() => {
 });
 
 describe("session stream request coordination", () => {
+  it("keeps a child permission stream live without mounting the child transcript", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const renderer = render(
+      <QueryClientProvider client={client}>
+        <DelegatedPermissionHarness />
+      </QueryClientProvider>,
+    );
+    await act(async () => undefined);
+    const stream_source = source();
+    expect(stream_source.url).toContain("/sessions/child-session/events/stream");
+
+    await act(async () => stream_source.onopen?.());
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.sessionPermissions("child-session"),
+      exact: true,
+    });
+    await act(async () => renderer.unmount());
+    expect(stream_source.readyState).toBe(FakeEventSource.CLOSED);
+  });
+
   it("coalesces a 100-commit burst into one in-flight tail and one follow-up", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },

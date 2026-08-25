@@ -68,7 +68,7 @@ release:
 install:
 	$(CARGO) install --path crates/$(PKG) --bin $(BIN) --locked --force --root $(INSTALL_ROOT)
 
-## Run the same formatting, lint, and test gates expected in CI
+## Run portable formatting, lint, unit, and asset gates (release CI also runs test-e2e)
 ci: format-check lint test
 
 ## Run workspace Rust tests, frontend tests, and web asset checks
@@ -104,6 +104,8 @@ test-durability:
 	$(CARGO) test --locked -p nac-core cancellation_adopts_a_committed_single_direct_steer_after_async_abort
 	$(CARGO) test --locked -p nac-core canonical_terminal_recovery_is_retained_until_relationship_settlement
 	$(CARGO) test --locked -p nac-core child_terminal_crash_window_recovers_report_and_delivers_once
+	$(CARGO) test --locked -p nac-core child_pre_prompt_crash_is_interrupted_and_delivered_once_after_restart
+	$(CARGO) test --locked -p nac-core shared_store_recovery_after_peer_crash_preserves_committed_transcript
 	$(CARGO) test --locked -p nac-server parent_deletion_excludes_late_child_relationship_commit
 	$(CARGO) test --locked -p nac-server managed_monitor_treats_peer_lease_as_live
 	$(CARGO) test --locked -p nac-server managed_binding_failure_precedes_run_and_prompt_execution

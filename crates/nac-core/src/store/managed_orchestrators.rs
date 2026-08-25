@@ -97,6 +97,40 @@ pub fn create_managed_orchestrator_relationship(
     orchestrator_session_id: &str,
     description: &str,
 ) -> Result<ManagedOrchestratorRecord> {
+    let connection = open_runtime_connection(path)?;
+    create_managed_orchestrator_relationship_with_connection(
+        &connection,
+        parent_session_id,
+        orchestrator_session_id,
+        description,
+    )
+}
+
+pub fn create_managed_orchestrator_session(
+    path: &Path,
+    snapshot: &crate::sessions::SessionSnapshot,
+    parent_session_id: &str,
+    description: &str,
+) -> Result<ManagedOrchestratorRecord> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::sessions::insert_new_session_in_transaction(&transaction, path, snapshot)?;
+    let orchestrator = create_managed_orchestrator_relationship_with_connection(
+        &transaction,
+        parent_session_id,
+        &snapshot.session_id,
+        description,
+    )?;
+    transaction.commit()?;
+    Ok(orchestrator)
+}
+
+fn create_managed_orchestrator_relationship_with_connection(
+    connection: &rusqlite::Connection,
+    parent_session_id: &str,
+    orchestrator_session_id: &str,
+    description: &str,
+) -> Result<ManagedOrchestratorRecord> {
     let description = description.trim();
     if description.is_empty() || description.chars().count() > 120 {
         return Err(anyhow!(
@@ -106,7 +140,6 @@ pub fn create_managed_orchestrator_relationship(
     if parent_session_id == orchestrator_session_id {
         return Err(anyhow!("a session cannot manage itself as an orchestrator"));
     }
-    let connection = open_runtime_connection(path)?;
     let behavior = |session_id: &str| -> Result<String> {
         connection
             .query_row(
@@ -133,7 +166,7 @@ pub fn create_managed_orchestrator_relationship(
          VALUES (?1, ?2, ?2, ?3, 'idle', 0, ?4, ?4)",
         params![orchestrator_session_id, parent_session_id, description, now],
     )?;
-    load_with_connection(&connection, orchestrator_session_id)?
+    load_with_connection(connection, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator relationship disappeared after creation"))
 }
 
@@ -403,6 +436,28 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("direct-with-orchestrator"));
+    }
+
+    #[test]
+    fn managed_session_creation_rolls_back_when_relationship_creation_fails() {
+        let path = fixture("atomic-create-rollback");
+        let mut snapshot = crate::sessions::new_snapshot(
+            "atomic-orchestrator".to_string(),
+            path.parent().unwrap().to_path_buf(),
+            "test-model".to_string(),
+            "https://example.invalid".to_string(),
+            crate::model::BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            None,
+            std::collections::BTreeMap::new(),
+        );
+        snapshot.behavior = crate::sessions::SessionBehavior::Orchestrator;
+        assert!(create_managed_orchestrator_session(&path, &snapshot, "parent", "").is_err());
+        assert!(!crate::sessions::session_exists(&path, "atomic-orchestrator").unwrap());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

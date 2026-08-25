@@ -18,6 +18,13 @@ const fakes = {
   cancel: vi.fn(),
 };
 
+class SilentEventSource {
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  addEventListener() {}
+  close() {}
+}
+
 vi.spyOn(api, "listTraditionalChildren").mockImplementation((...args) => fakes.list(...args));
 vi.spyOn(api, "startTraditionalChild").mockImplementation((...args) => fakes.start(...args));
 vi.spyOn(api, "cancelTraditionalChild").mockImplementation((...args) => fakes.cancel(...args));
@@ -50,6 +57,12 @@ function mount(children: TraditionalChildRecord[] = []) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   client.setQueryData(queryKeys.traditionalChildren(SESSION_ID), children);
+  for (const record of children) {
+    client.setQueryData(queryKeys.sessionPermissions(record.child_session_id), {
+      requests: [],
+      grants: [],
+    });
+  }
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
@@ -62,6 +75,7 @@ function mount(children: TraditionalChildRecord[] = []) {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("EventSource", SilentEventSource);
   fakes.list.mockReset().mockResolvedValue([]);
   fakes.start.mockReset().mockImplementation(async () => child());
   fakes.cancel.mockReset().mockImplementation(async () => child("cancelled"));

@@ -847,6 +847,8 @@ export interface SessionLineage {
 
 export interface ManagedSessionSummary {
   summary: SessionSummarySnapshot;
+  /** Null for primary chats; populated for parent-owned delegated sessions. */
+  lineage?: SessionLineage | null;
   active: boolean;
   active_run?: ActiveRunSnapshot;
   /** Present only when the list was requested with `workspace_stats=true`. */

@@ -47,6 +47,10 @@ impl ReadInput {
     pub fn path(&self) -> &str {
         &self.path
     }
+
+    pub(crate) fn bind_authorized_path(&mut self, path: &str) {
+        self.path = path.to_string();
+    }
 }
 
 #[derive(Deserialize)]

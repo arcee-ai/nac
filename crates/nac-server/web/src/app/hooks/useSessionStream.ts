@@ -244,6 +244,42 @@ export function useSessionStream(sessionId: string | null): void {
 }
 
 /**
+ * Keep a delegated child's approval channel live from its parent chat without
+ * applying that child's runtime events to the parent's transcript store.
+ */
+export function useDelegatedPermissionStream(sessionId: string, enabled: boolean): void {
+  const client = useQueryClient();
+
+  useEffect(() => {
+    if (!enabled) return;
+    const refresh = () => {
+      void client.invalidateQueries({
+        queryKey: queryKeys.sessionPermissions(sessionId),
+        exact: true,
+      });
+    };
+    const dispose = subscribeToSessionEvents(sessionId, {
+      onEnvelope: (envelope) => {
+        if (
+          envelope.event.type === "permission_asked" ||
+          envelope.event.type === "permission_replied" ||
+          envelope.event.type === "permission_dismissed"
+        ) {
+          refresh();
+        }
+      },
+      onStatus: (status) => {
+        if (status === "live") refresh();
+      },
+      onReplayBoundary: refresh,
+      onReplayGap: refresh,
+      onLagged: refresh,
+    });
+    return dispose;
+  }, [client, enabled, sessionId]);
+}
+
+/**
  * Reconcile the live running flag with the snapshot, so a reload during a run
  * does not show the session as idle until the next event arrives.
  */

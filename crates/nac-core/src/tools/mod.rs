@@ -499,6 +499,20 @@ impl kernel::NativeTool for ReadTool {
         ))
     }
 
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        let path = resources
+            .iter()
+            .find(|resource| resource.action == "read")
+            .ok_or_else(|| ToolResult::text("Error: authorized read target is missing", true))?;
+        input.bind_authorized_path(&path.resource);
+        Ok(())
+    }
+
     fn execute<'a>(
         &'a self,
         input: Self::Input,
@@ -613,6 +627,15 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
         legacy_permission_resources(KIND, input, services.runtime)
     }
 
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        bind_legacy_authorized_resources(KIND, input, resources)
+    }
+
     fn execute<'a>(
         &'a self,
         input: Self::Input,
@@ -634,6 +657,60 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
             }
         })
     }
+}
+
+fn bind_legacy_authorized_resources(
+    kind: u8,
+    input: &mut Value,
+    resources: &[kernel::PermissionResource],
+) -> Result<(), ToolResult> {
+    let invalid = |message: &str| ToolResult::text(format!("Error: {message}"), true);
+    let canonical = |action: &str| {
+        resources
+            .iter()
+            .filter(|resource| resource.action == action)
+            .map(|resource| resource.resource.clone())
+            .collect::<Vec<_>>()
+    };
+    let object = input
+        .as_object_mut()
+        .ok_or_else(|| invalid("decoded tool arguments are not an object"))?;
+    match kind {
+        1 | 2 => {
+            let path = canonical("edit")
+                .into_iter()
+                .next()
+                .ok_or_else(|| invalid("authorized mutation target is missing"))?;
+            object.insert("path".to_string(), Value::String(path));
+        }
+        3 => {
+            let root = canonical("glob")
+                .into_iter()
+                .next()
+                .ok_or_else(|| invalid("authorized glob root is missing"))?;
+            object.insert("root".to_string(), Value::String(root));
+        }
+        4 => {
+            let roots = canonical("grep");
+            if roots.is_empty() {
+                return Err(invalid("authorized grep roots are missing"));
+            }
+            object.insert(
+                "roots".to_string(),
+                Value::Array(roots.into_iter().map(Value::String).collect()),
+            );
+        }
+        5 => {
+            let cwd = canonical("execute_cwd")
+                .into_iter()
+                .next()
+                .ok_or_else(|| invalid("authorized command working directory is missing"))?;
+            object.insert("workdir".to_string(), Value::String(cwd));
+        }
+        6 | 7 => {}
+        _ => unreachable!("unknown built-in direct tool kind"),
+    }
+    Ok(())
 }
 
 fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResult> {
@@ -1357,6 +1434,82 @@ mod discovery_tool_definition_tests {
         let _ = std::fs::remove_dir_all(directory);
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn approved_mutation_executes_against_the_bound_canonical_target() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-bound-authorized-target-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        let first = root.join("first");
+        let second = root.join("second");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let link = workspace.join("link");
+        symlink(&first, &link).unwrap();
+
+        let store_path = root.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session-a");
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            store_path.clone(),
+            "session-a".to_string(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [crate::permissions::PermissionRule::new(
+                "edit",
+                "*",
+                crate::permissions::PermissionEffect::Ask,
+            )],
+        ));
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = workspace.clone();
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace);
+        runtime.store_path = store_path;
+        runtime.session_id = Some("session-a".to_string());
+        runtime.permission_broker = Some(Arc::clone(&broker));
+        let client = crate::model::ModelClient::new_for_test();
+
+        let call = super::execute_tool(
+            "write",
+            serde_json::json!({
+                "path":"link/result.txt",
+                "content":"bound\n",
+                "expected_revision":null
+            }),
+            &runtime,
+            &client,
+        );
+        let approve = async {
+            loop {
+                if let Some(request) = broker.pending().pop() {
+                    std::fs::remove_file(&link).unwrap();
+                    symlink(&second, &link).unwrap();
+                    broker
+                        .reply(&request.id, crate::permissions::PermissionReply::Once)
+                        .unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let (result, ()) = tokio::join!(call, approve);
+        assert!(!result.is_error, "{}", result.content);
+        assert_eq!(
+            std::fs::read_to_string(first.join("result.txt")).unwrap(),
+            "bound\n"
+        );
+        assert!(!second.join("result.txt").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn prepared_builtin_calls_project_validated_correlated_permission_resources() {
         let directory =
@@ -1399,11 +1552,12 @@ mod discovery_tool_definition_tests {
             shell
                 .permission_resources()
                 .iter()
-                .map(|resource| resource.resource.as_str())
+                .map(|resource| resource.resource.clone())
                 .collect::<Vec<_>>(),
-            [
-                "command:[git][status][--short]",
-                "command:[cargo][test][-p][nac-core]",
+            vec![
+                "command:[git][status][--short]".to_string(),
+                "command:[cargo][test][-p][nac-core]".to_string(),
+                directory.canonicalize().unwrap().display().to_string(),
             ]
         );
 

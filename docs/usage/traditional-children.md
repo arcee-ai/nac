@@ -7,6 +7,12 @@ shares the parent's workspace and inherits the parent's model, backend, project,
 sandbox or SSH configuration, and configured permission rules. Remembered
 permission grants are not inherited.
 
+When a running child needs new approval, the parent chat keeps a child-scoped
+permission connection open and presents that request beside the child controls.
+The child transcript remains non-composable but exposes the same approval
+control. A child waits briefly for the parent UI to establish this connection;
+without one, the request fails closed and the operation is not executed.
+
 Open the people control beside the direct-session composer to start, inspect,
 continue, steer, cancel, or open a child transcript. The first visible profile
 is `general`. It exposes exactly `read`, `write`, `edit`, `glob`, `grep`,
