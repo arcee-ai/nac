@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,8 @@ type SessionBehavior = "orchestrator" | "direct" | "direct-with-orchestrator";
 
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webRoot, "../../../..");
+const cleanupMarkers = new WeakMap<ChildProcess, string>();
+const cleanupMarkerEnvironment = "NAC_E2E_CLEANUP_ID";
 
 export type EmbeddedHarness = {
   baseUrl: string;
@@ -269,6 +272,7 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
     resolveAddress = resolve;
     rejectAddress = reject;
   });
+  const cleanupMarker = randomUUID();
   const server = spawn(
     binaryPath,
     [
@@ -297,9 +301,11 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
         RUST_BACKTRACE: "1",
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
+        [cleanupMarkerEnvironment]: cleanupMarker,
       },
     },
   );
+  cleanupMarkers.set(server, cleanupMarker);
 
   const parseReadiness = (chunk: Buffer, buffered: string): string => {
     const text = chunk.toString("utf8");
@@ -452,6 +458,7 @@ type TerminationTiming = {
   graceMs?: number;
   killMs?: number;
   pollMs?: number;
+  marker?: string;
 };
 
 export async function terminateProcessGroup(
@@ -468,7 +475,8 @@ export async function terminateProcessGroup(
   const graceMs = timing.graceMs ?? 3_000;
   const killMs = timing.killMs ?? 3_000;
   const pollMs = timing.pollMs ?? 25;
-  const tracked = new Set<number>([pid, ...(await processDescendants(pid))]);
+  const marker = timing.marker ?? cleanupMarkers.get(child);
+  const tracked = new Set<number>([pid, ...(await processDescendants(pid, marker))]);
   const signalGroup = (name: NodeJS.Signals): void => {
     try {
       process.kill(-pid, name);
@@ -486,9 +494,10 @@ export async function terminateProcessGroup(
       graceMs,
       pollMs,
       "nac-web process-tree termination",
+      marker,
     );
   } catch {
-    await refreshTrackedDescendants(tracked);
+    await refreshTrackedDescendants(tracked, marker);
     signalTrackedProcesses(tracked, "SIGKILL", signalGroup);
     await waitForTrackedProcessExit(
       pid,
@@ -496,6 +505,7 @@ export async function terminateProcessGroup(
       killMs,
       pollMs,
       "nac-web forced process-tree termination",
+      marker,
     );
   }
 }
@@ -548,8 +558,10 @@ function signalTrackedProcesses(
   }
 }
 
-async function processTable(): Promise<Array<{ pid: number; ppid: number }>> {
-  const ps = spawn("ps", ["-axo", "pid=,ppid="], { stdio: ["ignore", "pipe", "pipe"] });
+async function processTable(): Promise<Array<{ pid: number; ppid: number; command: string }>> {
+  const ps = spawn("ps", ["eww", "-axo", "pid=,ppid=,command="], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let stdout = "";
   let stderr = "";
   ps.stdout?.on("data", (chunk: Buffer) => {
@@ -565,14 +577,20 @@ async function processTable(): Promise<Array<{ pid: number; ppid: number }>> {
   if (code !== 0) throw new Error(`ps failed while inspecting E2E process tree: ${stderr.trim()}`);
   return stdout
     .split("\n")
-    .map((line) => line.trim().split(/\s+/).map(Number))
-    .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid))
-    .map(([pid, ppid]) => ({ pid, ppid }));
+    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/))
+    .filter((match): match is RegExpMatchArray => match != null)
+    .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] ?? "" }));
 }
 
-async function processDescendants(rootPid: number): Promise<number[]> {
+async function processDescendants(rootPid: number, marker?: string): Promise<number[]> {
   const table = await processTable();
-  const descendants = new Set<number>();
+  const markerText = marker == null ? undefined : `${cleanupMarkerEnvironment}=${marker}`;
+  const descendants = new Set<number>(
+    table
+      .filter((process) => markerText != null && process.command.includes(markerText))
+      .map((process) => process.pid),
+  );
+  descendants.delete(rootPid);
   let changed = true;
   while (changed) {
     changed = false;
@@ -590,8 +608,12 @@ async function processDescendants(rootPid: number): Promise<number[]> {
   return [...descendants];
 }
 
-async function refreshTrackedDescendants(tracked: Set<number>): Promise<void> {
+async function refreshTrackedDescendants(tracked: Set<number>, marker?: string): Promise<void> {
   const table = await processTable();
+  const markerText = marker == null ? undefined : `${cleanupMarkerEnvironment}=${marker}`;
+  for (const process of table) {
+    if (markerText != null && process.command.includes(markerText)) tracked.add(process.pid);
+  }
   let changed = true;
   while (changed) {
     changed = false;
@@ -610,12 +632,13 @@ async function waitForTrackedProcessExit(
   timeoutMs: number,
   pollMs: number,
   label: string,
+  marker?: string,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (processGroupExists(pid) || [...tracked].some(processExists)) {
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
     await new Promise((resolve) => setTimeout(resolve, pollMs));
-    await refreshTrackedDescendants(tracked);
+    await refreshTrackedDescendants(tracked, marker);
   }
 }
 
