@@ -136,15 +136,19 @@ fn assert_session_cascade(conn: &Connection, table: &str) {
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
-    assert_eq!(
-        foreign_keys,
-        vec![(
-            "sessions".to_string(),
-            "session_id".to_string(),
-            "session_id".to_string(),
-            "CASCADE".to_string(),
-        )],
-        "unexpected foreign key for {table}"
+    let session_keys = foreign_keys
+        .iter()
+        .filter(|(target, _, _, _)| target == "sessions")
+        .collect::<Vec<_>>();
+    assert!(
+        !session_keys.is_empty(),
+        "missing session foreign key for {table}"
+    );
+    assert!(
+        session_keys.iter().all(|(_, _, target_column, on_delete)| {
+            target_column == "session_id" && on_delete == "CASCADE"
+        }),
+        "unexpected session foreign key for {table}: {foreign_keys:?}"
     );
 }
 
@@ -245,12 +249,32 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
+    assert_eq!(
+        table_columns(conn, "managed_orchestrators"),
+        [
+            "orchestrator_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "description",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
+            "completion_inbox_id",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
     for table in [
         "thread_steering",
         "thread_events",
         "session_inbox",
         "session_goals",
         "traditional_children",
+        "managed_orchestrators",
     ] {
         assert_session_cascade(conn, table);
     }
@@ -427,7 +451,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 20);
+    assert_eq!(STORE_SCHEMA_VERSION, 22);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -573,6 +597,46 @@ fn v20_store_adds_durable_traditional_children() {
             "failure",
             "change_summary",
             "verification_summary",
+            "completion_inbox_id",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v21_store_adds_durable_managed_orchestrators() {
+    let path = temp_store_path("v21_managed_orchestrators");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE managed_orchestrators; PRAGMA user_version = 21;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "managed_orchestrators"),
+        [
+            "orchestrator_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "description",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
             "completion_inbox_id",
             "created_at",
             "updated_at",

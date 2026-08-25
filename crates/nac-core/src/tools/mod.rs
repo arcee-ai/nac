@@ -32,6 +32,7 @@ pub(crate) mod goal;
 pub mod grep;
 pub mod kernel;
 pub(crate) mod mutation;
+pub(crate) mod orchestrator;
 pub mod read;
 pub(crate) mod subagent;
 pub mod thread;
@@ -545,6 +546,36 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 14] = [
     "subagent_status",
     "subagent_cancel",
 ];
+pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
+    "orchestrator_launch",
+    "orchestrator_status",
+    "orchestrator_steer",
+    "orchestrator_read",
+    "orchestrator_wait",
+    "orchestrator_cancel",
+];
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = [
+    "read",
+    "write",
+    "edit",
+    "glob",
+    "grep",
+    "exec_command",
+    "write_stdin",
+    "read_command_output",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "subagent",
+    "subagent_status",
+    "subagent_cancel",
+    "orchestrator_launch",
+    "orchestrator_status",
+    "orchestrator_steer",
+    "orchestrator_read",
+    "orchestrator_wait",
+    "orchestrator_cancel",
+];
 
 impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
     type Input = Value;
@@ -731,6 +762,12 @@ fn worker_tool_registry(
         .register(subagent::SubagentTool)
         .register(subagent::SubagentStatusTool)
         .register(subagent::SubagentCancelTool)
+        .register(orchestrator::LaunchTool)
+        .register(orchestrator::StatusTool)
+        .register(orchestrator::SteerTool)
+        .register(orchestrator::ReadTool)
+        .register(orchestrator::WaitTool)
+        .register(orchestrator::CancelTool)
         .finish()?;
     // Keep the native instance retrievable; direct Rust callers do not need a
     // JSON round-trip to execute the same registered read operation.
@@ -756,10 +793,21 @@ pub fn direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
         .definitions()
 }
 
+pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
+    let snapshot = worker_tool_registry(image_read)
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
+        .expect("direct-with-orchestrator capability selection must be complete");
+    debug_assert!(ORCHESTRATOR_CONTROL_TOOL_NAMES
+        .iter()
+        .all(|name| snapshot.contains(name)));
+    snapshot.definitions()
+}
+
 pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission> {
     worker_tool_registry(false)
         .expect("built-in direct tool registration must be collision-free")
-        .snapshot(DIRECT_TOOL_NAMES)
+        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
         .expect("built-in direct capability selection must be complete")
         .admission(name)
 }
@@ -859,8 +907,8 @@ pub async fn execute_tool_with_context(
 
     let direct = worker_tool_registry(client.supports_image_tool_results())
         .expect("built-in direct tool registration must be collision-free")
-        .snapshot(DIRECT_TOOL_NAMES)
-        .expect("built-in direct capability selection must be complete");
+        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
+        .expect("complete direct capability selection must be available");
     if direct.contains(name) {
         return direct
             .invoke(
@@ -1002,7 +1050,7 @@ mod discovery_tool_definition_tests {
     }
 
     #[test]
-    fn direct_registry_adds_goal_tools_without_changing_worker_inventory() {
+    fn direct_registries_preserve_exact_topology_capabilities() {
         let worker = worker_tool_definitions(false)
             .into_iter()
             .map(|definition| definition.function.name)
@@ -1011,9 +1059,14 @@ mod discovery_tool_definition_tests {
             .into_iter()
             .map(|definition| definition.function.name)
             .collect::<Vec<_>>();
+        let delegating = super::direct_with_orchestrator_tool_definitions(false)
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>();
         assert_eq!(worker, super::WORKER_TOOL_NAMES);
         assert_eq!(direct, super::DIRECT_TOOL_NAMES);
-        assert_eq!(&direct[8..], ["create_goal", "get_goal", "update_goal"]);
+        assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
+        assert_eq!(&delegating[14..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
     }
 
     #[tokio::test]
