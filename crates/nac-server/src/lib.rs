@@ -80,7 +80,7 @@ use nac_core::{
     ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     store::{
         GoalStatus, InboxDelivery, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
-        UserGoalUpdate,
+        TraditionalChildExecutionMode, TraditionalChildRecord, UserGoalUpdate,
     },
     types::Message,
     view::{self, SessionSummarySnapshot},
@@ -141,6 +141,19 @@ struct SessionManagerInner {
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
     managed_logins: managed_auth::ManagedLoginRegistry,
+}
+
+struct ServerTraditionalChildController {
+    manager: Weak<SessionManagerInner>,
+}
+
+impl ServerTraditionalChildController {
+    fn manager(&self) -> Result<SessionManager> {
+        self.manager
+            .upgrade()
+            .map(|inner| SessionManager { inner })
+            .ok_or_else(|| anyhow!("session manager is no longer available"))
+    }
 }
 
 /// Identifies a checkout across sessions. The connection has to be part of it:
@@ -975,6 +988,16 @@ pub struct ClearGoalRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct StartTraditionalChildRequest {
+    pub profile: String,
+    pub description: String,
+    pub prompt: String,
+    pub child_session_id: Option<String>,
+    #[serde(default)]
+    pub background: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ReplyPermissionRequest {
     pub reply: PermissionReply,
 }
@@ -1233,10 +1256,10 @@ impl SessionManager {
             .transpose()?
             .unwrap_or(std::env::current_exe().context("failed to resolve current executable")?);
 
-        Ok(Self {
+        let manager = Self {
             inner: Arc::new(SessionManagerInner {
                 root_cwd,
-                store_path,
+                store_path: store_path.clone(),
                 worker_executable,
                 active_sessions: RwLock::new(HashMap::new()),
 
@@ -1245,7 +1268,14 @@ impl SessionManager {
                 git_probe_cache: RwLock::new(HashMap::new()),
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
             }),
-        })
+        };
+        nac_core::traditional_children::register_controller(
+            store_path,
+            Arc::new(ServerTraditionalChildController {
+                manager: Arc::downgrade(&manager.inner),
+            }),
+        );
+        Ok(manager)
     }
 
     pub fn store_info(&self) -> StoreInfo {
@@ -2079,6 +2109,28 @@ impl SessionManager {
     }
 
     async fn wake_direct_inbox(&self, service: &SessionService) -> Result<()> {
+        let child = service.reconcile_traditional_child_terminal().await?;
+        if child.is_none() {
+            let metadata = service.metadata();
+            let Some(parent_session_id) = metadata.session_id.as_deref() else {
+                return Ok(());
+            };
+            let running_children = nac_core::store::list_traditional_children(
+                &self.inner.store_path,
+                parent_session_id,
+            )?
+            .into_iter()
+            .filter(|child| child.status == nac_core::store::TraditionalChildStatus::Running)
+            .map(|child| child.child_session_id)
+            .collect::<Vec<_>>();
+            for child_session_id in running_children {
+                // Attaching a child reconciles an abandoned generation from its
+                // durable run-recovery row. The parent is already cached before
+                // this method runs, so the resulting completion wake does not
+                // need to re-enter the parent's lifecycle gate.
+                Box::pin(self.attach_session(&child_session_id)).await?;
+            }
+        }
         if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
             service.start_next_direct_inbox_item().await?;
         }
@@ -2306,6 +2358,86 @@ impl SessionManager {
         self.attach_session(session_id)
             .await?
             .clear_direct_goal(goal_id, expected_version)
+    }
+
+    pub async fn list_traditional_children(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<Vec<TraditionalChildRecord>> {
+        let service = self.attach_session(parent_session_id).await?;
+        if service.metadata().behavior == sessions::SessionBehavior::Orchestrator {
+            return Err(anyhow!(
+                "traditional children are available only for direct behaviors"
+            ));
+        }
+        if nac_core::store::load_traditional_child(&self.inner.store_path, parent_session_id)?
+            .is_some()
+        {
+            return Err(anyhow!(
+                "traditional child nesting limit reached (1): child sessions cannot launch children"
+            ));
+        }
+        nac_core::store::list_traditional_children(&self.inner.store_path, parent_session_id)
+    }
+
+    pub async fn start_traditional_child(
+        &self,
+        parent_session_id: &str,
+        request: StartTraditionalChildRequest,
+    ) -> Result<TraditionalChildRecord> {
+        self.attach_session(parent_session_id).await?;
+        let controller = nac_core::traditional_children::controller_for(&self.inner.store_path)?;
+        let background = request.background;
+        let child = controller
+            .start(
+                nac_core::traditional_children::TraditionalChildStartRequest {
+                    parent_session_id: parent_session_id.to_string(),
+                    child_session_id: request.child_session_id,
+                    profile: request.profile,
+                    description: request.description,
+                    prompt: request.prompt,
+                    execution_mode: if background {
+                        TraditionalChildExecutionMode::Background
+                    } else {
+                        TraditionalChildExecutionMode::Foreground
+                    },
+                },
+            )
+            .await?;
+        if background {
+            Ok(child)
+        } else {
+            controller
+                .wait(&child.child_session_id, child.generation)
+                .await
+        }
+    }
+
+    pub fn traditional_child(
+        &self,
+        parent_session_id: &str,
+        child_session_id: &str,
+    ) -> Result<TraditionalChildRecord> {
+        let child =
+            nac_core::store::load_traditional_child(&self.inner.store_path, child_session_id)?
+                .ok_or_else(|| {
+                    anyhow!("traditional child session '{child_session_id}' was not found")
+                })?;
+        if child.parent_session_id != parent_session_id {
+            return Err(anyhow!(
+                "session '{child_session_id}' is not a child of parent '{parent_session_id}'"
+            ));
+        }
+        Ok(child)
+    }
+
+    pub async fn cancel_traditional_child(
+        &self,
+        parent_session_id: &str,
+        child_session_id: &str,
+    ) -> Result<TraditionalChildRecord> {
+        let controller = nac_core::traditional_children::controller_for(&self.inner.store_path)?;
+        controller.cancel(parent_session_id, child_session_id).await
     }
 
     pub async fn reply_permission_request(
@@ -2689,6 +2821,21 @@ impl SessionManager {
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
+        let children =
+            nac_core::store::list_traditional_children(&self.inner.store_path, session_id)?;
+        for child in children {
+            if child.status == nac_core::store::TraditionalChildStatus::Running {
+                // This generation is being removed with its parent, so its
+                // cancellation must not enqueue a result that would wake the
+                // parent in the middle of deletion.
+                nac_core::store::set_traditional_child_execution_mode(
+                    &self.inner.store_path,
+                    &child.child_session_id,
+                    TraditionalChildExecutionMode::Foreground,
+                )?;
+            }
+            Box::pin(self.delete_session(&child.child_session_id)).await?;
+        }
         // Submission, config changes, and deletion share this gate. The
         // operation lease extends the exclusion to independent processes and
         // remains held through deletion so an old run cannot save the row back.
@@ -2993,6 +3140,259 @@ impl SessionManager {
             operation_lease,
         ))
     }
+
+    async fn create_traditional_child_session(
+        &self,
+        parent_session_id: &str,
+        profile: &str,
+        description: &str,
+    ) -> Result<String> {
+        nac_core::traditional_children::validate_general_profile(profile)?;
+        let parent_service = self.attach_session(parent_session_id).await?;
+        let parent_metadata = parent_service.metadata();
+        if parent_metadata.behavior == sessions::SessionBehavior::Orchestrator {
+            return Err(anyhow!(
+                "traditional children are available only to direct parent sessions"
+            ));
+        }
+        if parent_metadata.sandbox_status != "off" && parent_metadata.workspace_host_path.is_none()
+        {
+            return Err(anyhow!(
+                "traditional children require a host-backed shared workspace for sandboxed sessions"
+            ));
+        }
+        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
+        if nac_core::store::load_traditional_child(&self.inner.store_path, parent_session_id)?
+            .is_some()
+        {
+            return Err(anyhow!(
+                "traditional child nesting limit reached (1): child sessions cannot launch children"
+            ));
+        }
+        let messages = nac_core::traditional_children::fresh_general_child_messages(
+            &parent.messages,
+            &parent_metadata.cwd,
+            description,
+        )?;
+        let child_session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = sessions::new_snapshot(
+            child_session_id.clone(),
+            parent.cwd,
+            parent.model,
+            parent.base_url,
+            parent.backend,
+            parent.reasoning_effort,
+            parent.sandbox_spec,
+            parent.ssh,
+            messages,
+            parent.api_key_env,
+            parent.extra_headers,
+        );
+        child.behavior = sessions::SessionBehavior::Direct;
+        child.project_id = parent.project_id;
+        child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
+        sessions::create_session(&self.inner.store_path, &child)?;
+        if let Err(error) = nac_core::store::create_traditional_child_relationship(
+            &self.inner.store_path,
+            parent_session_id,
+            &child_session_id,
+            profile,
+            description,
+        ) {
+            if let Err(cleanup) =
+                sessions::delete_session(&self.inner.store_path, &child_session_id)
+            {
+                eprintln!(
+                    "nac: failed to remove unowned child session {child_session_id}: {cleanup:#}"
+                );
+            }
+            return Err(error);
+        }
+        Ok(child_session_id)
+    }
+}
+
+impl nac_core::traditional_children::TraditionalChildController
+    for ServerTraditionalChildController
+{
+    fn start<'a>(
+        &'a self,
+        request: nac_core::traditional_children::TraditionalChildStartRequest,
+    ) -> nac_core::traditional_children::ChildFuture<'a, nac_core::store::TraditionalChildRecord>
+    {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            nac_core::traditional_children::validate_general_profile(&request.profile)?;
+            if request.prompt.trim().is_empty() {
+                return Err(anyhow!("traditional child prompt is empty"));
+            }
+            let child_session_id = match request.child_session_id {
+                Some(child_session_id) => child_session_id,
+                None => {
+                    manager
+                        .create_traditional_child_session(
+                            &request.parent_session_id,
+                            &request.profile,
+                            &request.description,
+                        )
+                        .await?
+                }
+            };
+            let relation = nac_core::store::load_traditional_child(
+                &manager.inner.store_path,
+                &child_session_id,
+            )?
+            .ok_or_else(|| {
+                anyhow!("traditional child session '{child_session_id}' was not found")
+            })?;
+            if relation.parent_session_id != request.parent_session_id {
+                return Err(anyhow!(
+                    "session '{child_session_id}' is not a child of parent '{}'",
+                    request.parent_session_id
+                ));
+            }
+            if relation.profile != request.profile {
+                return Err(anyhow!(
+                    "traditional child profile is immutable (expected '{}')",
+                    relation.profile
+                ));
+            }
+            if relation.description != request.description.trim() {
+                return Err(anyhow!(
+                    "traditional child description is immutable (expected '{}')",
+                    relation.description
+                ));
+            }
+            let service = manager.attach_session(&child_session_id).await?;
+            let mut relation = service
+                .reconcile_traditional_child_terminal()
+                .await?
+                .unwrap_or(relation);
+            if relation.status == nac_core::store::TraditionalChildStatus::Running {
+                relation = nac_core::store::set_traditional_child_execution_mode(
+                    &manager.inner.store_path,
+                    &child_session_id,
+                    request.execution_mode,
+                )?;
+                if service.active_run().is_some() {
+                    service
+                        .enqueue_direct_input(
+                            nac_core::store::InboxDelivery::Steer,
+                            &request.prompt,
+                            None,
+                        )
+                        .await?;
+                } else {
+                    nac_core::store::create_session_inbox_item(
+                        &manager.inner.store_path,
+                        &child_session_id,
+                        nac_core::store::InboxDelivery::Steer,
+                        &request.prompt,
+                        relation.run_id.as_deref(),
+                        None,
+                    )?;
+                }
+                return Ok(relation);
+            }
+            service
+                .try_submit_traditional_child_prompt(request.prompt, request.execution_mode)
+                .map_err(anyhow::Error::new)?;
+            nac_core::store::load_traditional_child(&manager.inner.store_path, &child_session_id)?
+                .ok_or_else(|| anyhow!("traditional child disappeared after run admission"))
+        })
+    }
+
+    fn wait<'a>(
+        &'a self,
+        child_session_id: &'a str,
+        generation: u64,
+    ) -> nac_core::traditional_children::ChildFuture<'a, nac_core::store::TraditionalChildRecord>
+    {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            loop {
+                let child = nac_core::store::load_traditional_child(
+                    &manager.inner.store_path,
+                    child_session_id,
+                )?
+                .ok_or_else(|| {
+                    anyhow!("traditional child session '{child_session_id}' was not found")
+                })?;
+                if child.generation != generation {
+                    return Err(anyhow!(
+                        "traditional child generation {generation} was superseded by {}",
+                        child.generation
+                    ));
+                }
+                if child.status.is_terminal() {
+                    return Ok(child);
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+    }
+
+    fn cancel<'a>(
+        &'a self,
+        parent_session_id: &'a str,
+        child_session_id: &'a str,
+    ) -> nac_core::traditional_children::ChildFuture<'a, nac_core::store::TraditionalChildRecord>
+    {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            let child = nac_core::store::load_traditional_child(
+                &manager.inner.store_path,
+                child_session_id,
+            )?
+            .ok_or_else(|| {
+                anyhow!("traditional child session '{child_session_id}' was not found")
+            })?;
+            if child.parent_session_id != parent_session_id {
+                return Err(anyhow!(
+                    "session '{child_session_id}' is not a child of parent '{parent_session_id}'"
+                ));
+            }
+            let service = manager.attach_session(child_session_id).await?;
+            let child = service
+                .reconcile_traditional_child_terminal()
+                .await?
+                .unwrap_or(child);
+            if child.status != nac_core::store::TraditionalChildStatus::Running {
+                return Ok(child);
+            }
+            let active = service.active_run().ok_or_else(|| {
+                anyhow!("traditional child '{child_session_id}' is running in another process")
+            })?;
+            service
+                .request_cancel(&active.run_id)
+                .await
+                .map_err(anyhow::Error::new)?;
+            nac_core::store::load_traditional_child(&manager.inner.store_path, child_session_id)?
+                .ok_or_else(|| anyhow!("traditional child disappeared after cancellation"))
+        })
+    }
+
+    fn wake<'a>(
+        &'a self,
+        session_id: &'a str,
+    ) -> nac_core::traditional_children::ChildFuture<'a, ()> {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            let cached = {
+                let active = manager.inner.active_sessions.read().await;
+                active.get(session_id).cloned()
+            };
+            let service = if let Some(service) = cached {
+                service
+            } else {
+                manager.attach_session(session_id).await?
+            };
+            if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
+                service.start_next_direct_inbox_item().await?;
+            }
+            Ok(())
+        })
+    }
 }
 
 fn response_compression_layer() -> CompressionLayer<impl Predicate> {
@@ -3293,6 +3693,9 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(update_direct_inbox_item, cancel_direct_inbox_item))
         .routes(routes!(get_direct_goal, create_direct_goal))
         .routes(routes!(update_direct_goal, clear_direct_goal))
+        .routes(routes!(list_traditional_children, start_traditional_child))
+        .routes(routes!(get_traditional_child))
+        .routes(routes!(cancel_traditional_child))
         .routes(routes!(permission_state))
         .routes(routes!(reply_permission_request))
         .routes(routes!(delete_permission_grant))
@@ -4880,6 +5283,82 @@ async fn clear_direct_goal(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/children",
+    operation_id = "get_sessions_session_id_children",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Traditional children", body = Vec<TraditionalChildRecord>, content_type = "application/json"), (status = 400, description = "Direct behavior required", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn list_traditional_children(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Vec<TraditionalChildRecord>>, ApiError> {
+    Ok(Json(manager.list_traditional_children(&session_id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/children",
+    operation_id = "post_sessions_session_id_children",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = StartTraditionalChildRequest, content_type = "application/json"),
+    responses((status = 201, description = "Child created, continued, or steered", body = TraditionalChildRecord, content_type = "application/json"), (status = 400, description = "Invalid child request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Child concurrency or run conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn start_traditional_child(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<StartTraditionalChildRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<TraditionalChildRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            manager
+                .start_traditional_child(&session_id, request)
+                .await?,
+        ),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/children/{child_session_id}",
+    operation_id = "get_sessions_session_id_children_child_session_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("child_session_id" = String, Path)),
+    responses((status = 200, description = "Traditional child status", body = TraditionalChildRecord, content_type = "application/json"), (status = 404, description = "Child not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn get_traditional_child(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, child_session_id)): AxumPath<(String, String)>,
+) -> std::result::Result<Json<TraditionalChildRecord>, ApiError> {
+    Ok(Json(
+        manager.traditional_child(&session_id, &child_session_id)?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/children/{child_session_id}/cancel",
+    operation_id = "post_sessions_session_id_children_child_session_id_cancel",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("child_session_id" = String, Path)),
+    responses((status = 200, description = "Traditional child cancelled", body = TraditionalChildRecord, content_type = "application/json"), (status = 404, description = "Child not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Child run is remote or unavailable", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn cancel_traditional_child(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, child_session_id)): AxumPath<(String, String)>,
+) -> std::result::Result<Json<TraditionalChildRecord>, ApiError> {
+    Ok(Json(
+        manager
+            .cancel_traditional_child(&session_id, &child_session_id)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/permissions",
     operation_id = "get_sessions_session_id_permissions",
     tag = "permissions",
@@ -5992,6 +6471,9 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("no longer current")
             || message.contains("unfinished goal")
             || message.contains("goal clear conflict")
+            || message.contains("child concurrency limit")
+            || message.contains("already has running generation")
+            || message.contains("running in another process")
         {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
@@ -6002,6 +6484,10 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("prompt is empty")
             || message.contains("goal objective is empty")
             || message.contains("goal token budget")
+            || message.contains("traditional child prompt is empty")
+            || message.contains("traditional child profile")
+            || message.contains("traditional child nesting limit")
+            || message.contains("host-backed shared workspace")
             || message.contains("frontend command")
             || message.contains("only for direct behaviors")
         {
@@ -6067,6 +6553,8 @@ mod tests {
         ("GET", "/sandbox/availability"),
         ("GET", "/sessions"),
         ("GET", "/sessions/{session_id}"),
+        ("GET", "/sessions/{session_id}/children"),
+        ("GET", "/sessions/{session_id}/children/{child_session_id}"),
         ("GET", "/sessions/{session_id}/config"),
         ("GET", "/sessions/{session_id}/skills"),
         ("GET", "/sessions/{session_id}/events"),
@@ -6108,6 +6596,11 @@ mod tests {
         ("POST", "/sessions/launch-defaults"),
         ("POST", "/sessions/{session_id}/cancel-active-run"),
         ("POST", "/sessions/{session_id}/compact"),
+        ("POST", "/sessions/{session_id}/children"),
+        (
+            "POST",
+            "/sessions/{session_id}/children/{child_session_id}/cancel",
+        ),
         ("POST", "/sessions/{session_id}/goal"),
         ("POST", "/sessions/{session_id}/inbox"),
         ("POST", "/sessions/{session_id}/permissions/{request_id}"),
@@ -8444,6 +8937,86 @@ mod tests {
         (base_url, receiver)
     }
 
+    fn scripted_direct_responses(responses: &[&str]) -> (String, std::sync::mpsc::Receiver<usize>) {
+        use std::io::{Read, Write};
+
+        let listener =
+            std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind scripted direct model");
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let responses = responses
+            .iter()
+            .map(|response| response.to_string())
+            .collect::<Vec<_>>();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for (index, text) in responses.into_iter().enumerate() {
+                let (mut socket, _) = listener.accept().expect("accept direct model request");
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match socket.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => request.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let body = serde_json::json!({
+                    "status": "completed",
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                })
+                .to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).unwrap();
+                socket.flush().unwrap();
+                sender.send(index).unwrap();
+            }
+        });
+        (base_url, receiver)
+    }
+
+    fn stalled_then_scripted_direct_response() -> (
+        String,
+        std::sync::mpsc::Receiver<usize>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        use std::io::{Read, Write};
+
+        let listener =
+            std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind stalled direct model");
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (request_sender, request_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept direct model request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match socket.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => request.extend_from_slice(&buffer[..read]),
+                }
+            }
+            request_sender.send(0).unwrap();
+            release_receiver.recv().unwrap();
+            let body = serde_json::json!({
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "cancelled child response"}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes());
+            let _ = socket.flush();
+        });
+        (base_url, request_receiver, release_sender)
+    }
+
     #[tokio::test]
     async fn attaching_direct_session_wakes_oldest_persisted_inbox_item() {
         let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
@@ -8831,6 +9404,324 @@ mod tests {
 
         let rejected = get_response(app, "/sessions/orchestrator/goal", None).await;
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn traditional_child_http_api_runs_foreground_then_delivers_background_completion() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("traditional_child_http");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("traditional-child-test-key"));
+        let (base_url, requests) = scripted_direct_responses(&[
+            "foreground child done\n\n## Verification\nfocused test passed",
+            "background child done",
+            "parent received child completion",
+        ]);
+        seed_direct_session_with_base_url(&root, "direct", base_url);
+        seed_editable_session(&root, "orchestrator");
+        let manager = test_manager(&root);
+        let app = router(manager.clone());
+
+        let foreground = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/direct/children")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"profile":"general","description":"inspect child flow","prompt":"inspect the flow","background":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(foreground.status(), StatusCode::CREATED);
+        let foreground: TraditionalChildRecord =
+            serde_json::from_slice(&response_body(foreground).await).unwrap();
+        assert_eq!(
+            foreground.status,
+            nac_core::store::TraditionalChildStatus::Completed
+        );
+        assert_eq!(foreground.generation, 1);
+        assert_eq!(
+            foreground.report.as_deref(),
+            Some("foreground child done\n\n## Verification\nfocused test passed")
+        );
+        assert_eq!(
+            foreground.verification_summary.as_deref(),
+            Some("focused test passed")
+        );
+        assert!(
+            nac_core::store::list_session_inbox(&root.join("store.db"), "direct")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+
+        let background = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/direct/children")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"profile":"general","description":"inspect child flow","prompt":"continue with the second pass","child_session_id":"{}","background":true}}"#,
+                        foreground.child_session_id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(background.status(), StatusCode::CREATED);
+        let background: TraditionalChildRecord =
+            serde_json::from_slice(&response_body(background).await).unwrap();
+        assert_eq!(background.child_session_id, foreground.child_session_id);
+        assert_eq!(background.generation, 2);
+        assert_eq!(
+            background.status,
+            nac_core::store::TraditionalChildStatus::Running
+        );
+        assert_eq!(
+            background.execution_mode,
+            Some(TraditionalChildExecutionMode::Background)
+        );
+        tokio::task::spawn_blocking(move || {
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 1);
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 2);
+        })
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let child = manager
+                    .traditional_child("direct", &foreground.child_session_id)
+                    .unwrap();
+                if child.status == nac_core::store::TraditionalChildStatus::Completed {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background child should settle");
+        let status = get_response(
+            app.clone(),
+            &format!("/sessions/direct/children/{}", foreground.child_session_id),
+            None,
+        )
+        .await;
+        assert_eq!(status.status(), StatusCode::OK);
+        let completed: TraditionalChildRecord =
+            serde_json::from_slice(&response_body(status).await).unwrap();
+        assert_eq!(completed.generation, 2);
+        assert_eq!(completed.report.as_deref(), Some("background child done"));
+        assert!(completed.completion_inbox_id.is_some());
+        let parent_inbox =
+            nac_core::store::list_session_inbox(&root.join("store.db"), "direct").unwrap();
+        assert_eq!(parent_inbox.len(), 1);
+        assert_eq!(
+            parent_inbox[0].status,
+            nac_core::store::InboxStatus::Delivered
+        );
+        assert!(parent_inbox[0]
+            .content
+            .contains(&foreground.child_session_id));
+
+        let child_snapshot =
+            sessions::load_session(&root.join("store.db"), &foreground.child_session_id).unwrap();
+        assert_eq!(child_snapshot.behavior, sessions::SessionBehavior::Direct);
+        assert!(matches!(
+            child_snapshot.messages.first(),
+            Some(Message::System { content }) if content.contains("traditional child coding agent")
+        ));
+
+        let rejected = get_response(app, "/sessions/orchestrator/children", None).await;
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn traditional_child_cancel_endpoint_propagates_to_active_generation() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("traditional_child_cancel");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("traditional-child-cancel-key"));
+        let (base_url, requests, release) = stalled_then_scripted_direct_response();
+        seed_direct_session_with_base_url(&root, "direct", base_url);
+        let manager = test_manager(&root);
+        let app = router(manager.clone());
+
+        let start = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/direct/children")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"profile":"general","description":"cancel active child","prompt":"wait for cancellation","background":true}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start.status(), StatusCode::CREATED);
+        let running: TraditionalChildRecord =
+            serde_json::from_slice(&response_body(start).await).unwrap();
+        assert_eq!(
+            running.status,
+            nac_core::store::TraditionalChildStatus::Running
+        );
+        tokio::task::spawn_blocking(move || {
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        })
+        .await
+        .unwrap();
+
+        let cancel = tokio::time::timeout(
+            Duration::from_secs(10),
+            app.clone().oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/sessions/direct/children/{}/cancel",
+                        running.child_session_id
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            ),
+        )
+        .await
+        .expect("cancel endpoint should not hang")
+        .unwrap();
+        assert_eq!(cancel.status(), StatusCode::OK);
+        let cancelled: TraditionalChildRecord =
+            serde_json::from_slice(&response_body(cancel).await).unwrap();
+        assert_eq!(
+            cancelled.status,
+            nac_core::store::TraditionalChildStatus::Cancelled
+        );
+        assert_eq!(cancelled.generation, 1);
+        assert!(cancelled.completion_inbox_id.is_some());
+        release.send(()).unwrap();
+
+        let inbox = nac_core::store::list_session_inbox(&root.join("store.db"), "direct").unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert!(inbox[0].content.contains("cancelled"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn parent_attachment_reconciles_abandoned_background_child_exactly_once() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("traditional_child_restart");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("traditional-child-restart-key"));
+        let (base_url, requests) =
+            scripted_direct_responses(&["parent acknowledged interrupted child"]);
+        seed_direct_session_with_base_url(&root, "direct", base_url);
+        let store_path = root.join("store.db");
+
+        let first_manager = test_manager(&root);
+        let child_session_id = first_manager
+            .create_traditional_child_session("direct", "general", "survive server restart")
+            .await
+            .unwrap();
+        nac_core::store::begin_traditional_child_run(
+            &store_path,
+            &child_session_id,
+            "abandoned-child-run",
+            TraditionalChildExecutionMode::Background,
+        )
+        .unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                &child_session_id,
+                1,
+                &Message::User {
+                    content: "work interrupted by restart".to_string(),
+                },
+                "abandoned-child-run",
+            )
+            .unwrap();
+        drop(first_manager);
+
+        let rebuilt = test_manager(&root);
+        rebuilt.snapshot("direct").await.unwrap();
+        tokio::task::spawn_blocking(move || {
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let child = nac_core::store::load_traditional_child(&store_path, &child_session_id)
+                    .unwrap()
+                    .unwrap();
+                let inbox = nac_core::store::list_session_inbox(&store_path, "direct").unwrap();
+                if child.status == nac_core::store::TraditionalChildStatus::Interrupted
+                    && inbox
+                        .first()
+                        .is_some_and(|item| item.status == nac_core::store::InboxStatus::Delivered)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("restart reconciliation should interrupt the child and wake its parent");
+
+        rebuilt.snapshot("direct").await.unwrap();
+        let child = nac_core::store::load_traditional_child(&store_path, &child_session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            child.status,
+            nac_core::store::TraditionalChildStatus::Interrupted
+        );
+        assert!(child.failure.as_deref().is_some_and(|failure| {
+            failure.contains("interrupted when the nac process stopped")
+        }));
+        let inbox = nac_core::store::list_session_inbox(&store_path, "direct").unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(child.completion_inbox_id, Some(inbox[0].id));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deleting_parent_removes_its_traditional_child_sessions() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("traditional_child_delete");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("traditional-child-delete-key"));
+        seed_direct_session(&root, "direct");
+        let manager = test_manager(&root);
+        let child_session_id = manager
+            .create_traditional_child_session("direct", "general", "delete with parent")
+            .await
+            .unwrap();
+
+        manager.delete_session("direct").await.unwrap();
+
+        let store_path = root.join("store.db");
+        assert!(sessions::load_session(&store_path, "direct").is_err());
+        assert!(sessions::load_session(&store_path, &child_session_id).is_err());
+        assert!(
+            nac_core::store::load_traditional_child(&store_path, &child_session_id)
+                .unwrap()
+                .is_none()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

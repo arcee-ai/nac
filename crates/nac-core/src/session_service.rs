@@ -585,6 +585,13 @@ struct ActiveRunState {
     _operation_lease: Option<sessions::SessionOperationLease>,
 }
 
+#[derive(Default)]
+struct RunAdmissionKind {
+    inbox_item_id: Option<i64>,
+    goal_continuation: bool,
+    child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
+}
+
 struct FinishingRun {
     snapshot: ActiveRunSnapshot,
     duration_ms: u64,
@@ -1272,7 +1279,14 @@ impl SessionService {
             crate::store::next_pending_session_inbox_item(&self.metadata.store_path, session_id)?
         {
             return self
-                .try_submit_prompt_inner(None, item.content, Some(lease), Some(item.id), false)
+                .try_submit_prompt_inner(
+                    None,
+                    item.content,
+                    Some(lease),
+                    Some(item.id),
+                    false,
+                    None,
+                )
                 .map(Some)
                 .map_err(anyhow::Error::new);
         }
@@ -1287,6 +1301,7 @@ impl SessionService {
             Some(lease),
             None,
             true,
+            None,
         )
         .map(Some)
         .map_err(anyhow::Error::new)
@@ -2240,8 +2255,60 @@ impl SessionService {
                 Some(SessionRunId::from_stored(run_id.clone())),
                 None,
             );
+            self.settle_traditional_child_run(
+                &SessionRunId::from_stored(run_id.clone()),
+                crate::store::TraditionalChildStatus::Interrupted,
+                None,
+                Some(INTERRUPTED_RUN_WARNING.to_string()),
+            )
+            .await;
         }
         Ok(recovery)
+    }
+
+    /// Settle a child generation whose durable run-recovery row was already
+    /// reconciled while constructing this service after restart.
+    pub async fn reconcile_traditional_child_terminal(
+        &self,
+    ) -> Result<Option<crate::store::TraditionalChildRecord>> {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(None);
+        };
+        let Some(child) =
+            crate::store::load_traditional_child(&self.metadata.store_path, session_id)?
+        else {
+            return Ok(None);
+        };
+        if child.status != crate::store::TraditionalChildStatus::Running {
+            return Ok(Some(child));
+        }
+        let Some(recovery) =
+            crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
+        else {
+            return Ok(Some(child));
+        };
+        if recovery.run_id != child.run_id.as_deref().unwrap_or_default() {
+            return Ok(Some(child));
+        }
+        let (status, failure) = match recovery.status {
+            crate::store::RunRecoveryStatus::Active => return Ok(Some(child)),
+            crate::store::RunRecoveryStatus::Interrupted => (
+                crate::store::TraditionalChildStatus::Interrupted,
+                INTERRUPTED_RUN_WARNING.to_string(),
+            ),
+            crate::store::RunRecoveryStatus::Failed => (
+                crate::store::TraditionalChildStatus::Failed,
+                FAILED_RUN_WARNING.to_string(),
+            ),
+        };
+        self.settle_traditional_child_run(
+            &SessionRunId::from_stored(recovery.run_id),
+            status,
+            None,
+            Some(failure),
+        )
+        .await;
+        crate::store::load_traditional_child(&self.metadata.store_path, session_id)
     }
 
     /// Pages the merged store transcript without cloning or decoding
@@ -2404,7 +2471,7 @@ impl SessionService {
         &self,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(None, expanded_prompt, None, None, false)
+        self.try_submit_prompt_inner(None, expanded_prompt, None, None, false, None)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2413,7 +2480,7 @@ impl SessionService {
         client_id: SessionClientId,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None, None, false)
+        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None, None, false, None)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2423,7 +2490,30 @@ impl SessionService {
         expanded_prompt: String,
         lease: sessions::SessionOperationLease,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease), None, false)
+        self.try_submit_prompt_inner(
+            Some(client_id),
+            expanded_prompt,
+            Some(lease),
+            None,
+            false,
+            None,
+        )
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn try_submit_traditional_child_prompt(
+        &self,
+        expanded_prompt: String,
+        execution_mode: crate::store::TraditionalChildExecutionMode,
+    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        self.try_submit_prompt_inner(
+            None,
+            expanded_prompt,
+            None,
+            None,
+            false,
+            Some(execution_mode),
+        )
     }
 
     pub async fn request_cancel(
@@ -2545,6 +2635,13 @@ impl SessionService {
             .await;
             self.capture_workspace_revision(&cancelling_run.snapshot)
                 .await;
+            self.settle_traditional_child_run(
+                &cancelling_run.snapshot.run_id,
+                crate::store::TraditionalChildStatus::Cancelled,
+                None,
+                Some("parent or user cancelled the child run".to_string()),
+            )
+            .await;
         }
         self.event_bus.emit_with_context(
             SessionEvent::RunCancelled,
@@ -2568,6 +2665,7 @@ impl SessionService {
         operation_lease: Option<sessions::SessionOperationLease>,
         inbox_item_id: Option<i64>,
         goal_continuation: bool,
+        child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         let active_run = self.try_begin_run_with_lease(
             client_id,
@@ -2575,6 +2673,7 @@ impl SessionService {
             operation_lease,
             inbox_item_id,
             goal_continuation,
+            child_execution_mode,
         )?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
@@ -2649,8 +2748,13 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        let active =
-            self.try_begin_run_inner(client_id, expanded_prompt, None, false, None, false)?;
+        let active = self.try_begin_run_inner(
+            client_id,
+            expanded_prompt,
+            None,
+            false,
+            RunAdmissionKind::default(),
+        )?;
         self.run_prompt_commit(&active.run_id)
             .expect("test run admission must own a prompt commit channel")
             .send_replace(RunPromptCommitStatus::Committed);
@@ -2665,14 +2769,18 @@ impl SessionService {
         supplied_lease: Option<sessions::SessionOperationLease>,
         inbox_item_id: Option<i64>,
         goal_continuation: bool,
+        child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         self.try_begin_run_inner(
             client_id,
             expanded_prompt,
             supplied_lease,
             true,
-            inbox_item_id,
-            goal_continuation,
+            RunAdmissionKind {
+                inbox_item_id,
+                goal_continuation,
+                child_execution_mode,
+            },
         )
     }
 
@@ -2683,9 +2791,13 @@ impl SessionService {
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
-        inbox_item_id: Option<i64>,
-        goal_continuation: bool,
+        admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
+        let RunAdmissionKind {
+            inbox_item_id,
+            goal_continuation,
+            child_execution_mode,
+        } = admission;
         let mut guard = self.lock_active_operation();
         match guard.as_ref() {
             Some(ActiveSessionOperation::Run(active_run)) => {
@@ -2812,21 +2924,43 @@ impl SessionService {
             watch::channel(RunPromptCommitStatus::Pending);
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
-                crate::store::bind_session_goal_run(
-                    &self.metadata.store_path,
-                    session_id,
-                    &crate::store::GoalRunBaseline {
-                        run_id: active_run.run_id.to_string(),
-                        billable_tokens: 0,
-                        started_at_epoch_ms: active_run.started_at_epoch_ms,
-                        continuation: goal_continuation,
-                    },
-                )
-                .map_err(|error| SessionSubmitError::Coordination {
-                    message: SessionCoordinationError::store(format!(
-                        "failed to bind goal accounting to run: {error:#}"
-                    )),
-                })?;
+                if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
+                    .map_err(|error| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to inspect traditional child relationship: {error:#}"
+                        )),
+                    })?
+                    .is_some()
+                {
+                    crate::store::begin_traditional_child_run(
+                        &self.metadata.store_path,
+                        session_id,
+                        active_run.run_id.as_str(),
+                        child_execution_mode
+                            .unwrap_or(crate::store::TraditionalChildExecutionMode::Background),
+                    )
+                    .map_err(|error| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to bind traditional child generation to run: {error:#}"
+                        )),
+                    })?;
+                } else {
+                    crate::store::bind_session_goal_run(
+                        &self.metadata.store_path,
+                        session_id,
+                        &crate::store::GoalRunBaseline {
+                            run_id: active_run.run_id.to_string(),
+                            billable_tokens: 0,
+                            started_at_epoch_ms: active_run.started_at_epoch_ms,
+                            continuation: goal_continuation,
+                        },
+                    )
+                    .map_err(|error| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to bind goal accounting to run: {error:#}"
+                        )),
+                    })?;
+                }
             }
         }
         *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
@@ -2908,6 +3042,21 @@ impl SessionService {
         self.capture_workspace_revision(&finishing_run.snapshot)
             .await;
 
+        let (child_status, child_report, child_failure) = match &outcome {
+            RunOutcome::Completed(response, _) => (
+                crate::store::TraditionalChildStatus::Completed,
+                Some(response.clone()),
+                None,
+            ),
+            RunOutcome::Failed(message, _) => (
+                crate::store::TraditionalChildStatus::Failed,
+                None,
+                Some(message.clone()),
+            ),
+        };
+        self.settle_traditional_child_run(run_id, child_status, child_report, child_failure)
+            .await;
+
         self.settle_direct_goal_run(run_id, goal_usage, goal_disposition)
             .await;
 
@@ -2963,6 +3112,78 @@ impl SessionService {
             }
         }
         self.agent.lock().await.end_goal_run(run_id);
+    }
+
+    async fn settle_traditional_child_run(
+        &self,
+        run_id: &SessionRunId,
+        status: crate::store::TraditionalChildStatus,
+        report: Option<String>,
+        failure: Option<String>,
+    ) {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return;
+        };
+        let child =
+            match crate::store::load_traditional_child(&self.metadata.store_path, session_id) {
+                Ok(Some(child)) => child,
+                Ok(None) => return,
+                Err(error) => {
+                    eprintln!("nac: failed to inspect traditional child settlement: {error:#}");
+                    return;
+                }
+            };
+        let revision = crate::store::workspace_revision_for_run(
+            &self.metadata.store_path,
+            session_id,
+            run_id.as_str(),
+        )
+        .unwrap_or_else(|error| {
+            eprintln!("nac: failed to read child workspace revision: {error:#}");
+            None
+        });
+        let change_summary = revision.map(|revision| {
+            format!(
+                "{} files changed, +{} -{}",
+                revision.changed_files, revision.additions, revision.deletions
+            )
+        });
+        let verification_summary = report
+            .as_deref()
+            .and_then(|report| extract_report_section(report, "verification"));
+        match crate::store::settle_traditional_child_run(
+            &self.metadata.store_path,
+            session_id,
+            run_id.as_str(),
+            crate::store::TraditionalChildTerminal {
+                status,
+                report,
+                failure,
+                change_summary,
+                verification_summary,
+            },
+        ) {
+            Ok(settlement)
+                if settlement.newly_settled && settlement.child.completion_inbox_id.is_some() =>
+            {
+                if let Ok(controller) =
+                    crate::traditional_children::controller_for(&self.metadata.store_path)
+                {
+                    let parent_session_id = child.parent_session_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(error) = controller.wake(&parent_session_id).await {
+                            eprintln!(
+                                "nac: failed to wake parent after child settlement: {error:#}"
+                            );
+                        }
+                    });
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("nac: failed to settle traditional child run {run_id}: {error:#}");
+            }
+        }
     }
 
     /// Freeze the checkout as it stands now, so the run can be revisited later.
@@ -3512,6 +3733,31 @@ fn prompt_preview(value: &str, max_chars: usize) -> String {
     }
     preview.push_str("...");
     preview
+}
+
+fn extract_report_section(report: &str, heading: &str) -> Option<String> {
+    let heading = heading.to_ascii_lowercase();
+    let mut collecting = false;
+    let mut lines = Vec::new();
+    for line in report.lines() {
+        let trimmed = line.trim();
+        let normalized = trimmed
+            .trim_start_matches('#')
+            .trim()
+            .trim_end_matches(':')
+            .to_ascii_lowercase();
+        if collecting && trimmed.starts_with('#') {
+            break;
+        }
+        if normalized == heading {
+            collecting = true;
+            continue;
+        }
+        if collecting && !trimmed.is_empty() {
+            lines.push(trimmed);
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn goal_continuation_prompt(goal: &crate::store::SessionGoalRecord) -> String {
@@ -8004,7 +8250,13 @@ pub(super) mod tests {
             test_active_service("cancel_prompt_barrier", "cancel-prompt-barrier");
         let active = parts
             .service
-            .try_begin_run_inner(None, "cancel prompt", None, false, None, false)
+            .try_begin_run_inner(
+                None,
+                "cancel prompt",
+                None,
+                false,
+                RunAdmissionKind::default(),
+            )
             .unwrap();
         let prompt_commit = parts.service.run_prompt_commit(&active.run_id).unwrap();
         let cancel_service = parts.service.clone();

@@ -143,6 +143,26 @@ pub fn latest_workspace_revision(
         .optional()?)
 }
 
+pub fn workspace_revision_for_run(
+    path: &Path,
+    session_id: &str,
+    run_id: &str,
+) -> Result<Option<WorkspaceRevisionRecord>> {
+    let conn = open_runtime_connection(path)?;
+    Ok(conn
+        .query_row(
+            "SELECT id, session_id, run_id, commit_sha, base_sha, branch, label,
+                    additions, deletions, changed_files, created_at, transcript_len
+             FROM workspace_revisions
+             WHERE session_id = ?1 AND run_id = ?2
+             ORDER BY id DESC
+             LIMIT 1",
+            params![session_id, run_id],
+            decode_row,
+        )
+        .optional()?)
+}
+
 /// The newest revision that describes a transcript no longer than
 /// `transcript_len` — the checkout as it stood at that point in the
 /// conversation. Rows without a recorded length predate the link and are

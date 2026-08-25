@@ -43,6 +43,98 @@ fn direct_prompt_keeps_model_goal_authority_narrow() {
 }
 
 #[test]
+fn traditional_child_construction_exposes_only_the_eight_coding_tools() {
+    let root =
+        std::env::temp_dir().join(format!("nac_child_tool_boundary_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let store_path = root.join("store.db");
+    for session_id in ["parent", "child"] {
+        let mut snapshot = crate::sessions::new_snapshot(
+            session_id.to_string(),
+            root.clone(),
+            "test-model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            crate::model::BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            std::collections::BTreeMap::new(),
+        );
+        snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+        crate::sessions::create_session(&store_path, &snapshot).unwrap();
+    }
+    crate::store::create_traditional_child_relationship(
+        &store_path,
+        "parent",
+        "child",
+        crate::store::GENERAL_CHILD_PROFILE,
+        "review the implementation",
+    )
+    .unwrap();
+
+    let build = |session_id: &str| {
+        Agent::with_config(
+            ModelClient::new_for_test(),
+            AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
+                mode: AgentMode::Direct,
+                store_path: store_path.clone(),
+                session_id: Some(session_id.to_string()),
+                orchestrator_compaction_threshold: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                dispatch_id: None,
+                event_sink: EventSink::none(),
+                workspace_cwd: root.clone(),
+                config_cwd: root.clone(),
+                working_directory: root.display().to_string(),
+                worker_executable: None,
+                sandbox: None,
+                ssh: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
+                permission_rules: Vec::new(),
+            },
+        )
+        .unwrap()
+    };
+
+    let parent = build("parent");
+    let child = build("child");
+    let names = |agent: &Agent| {
+        agent
+            .tool_definitions_for_test()
+            .iter()
+            .map(|definition| definition.function.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names(&parent),
+        crate::tools::DIRECT_TOOL_NAMES.map(str::to_string)
+    );
+    assert_eq!(
+        names(&child),
+        crate::tools::WORKER_TOOL_NAMES.map(str::to_string)
+    );
+    assert!(matches!(
+        child.messages.first(),
+        Some(Message::System { content })
+            if content.contains("traditional child coding agent")
+                && content.contains("review the implementation")
+    ));
+
+    drop(parent);
+    drop(child);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(

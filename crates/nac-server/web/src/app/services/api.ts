@@ -42,6 +42,8 @@ import type {
   PermissionReply,
   PermissionStateResponse,
   SessionGoalRecord,
+  StartTraditionalChildRequest,
+  TraditionalChildRecord,
   ProjectList,
   ProjectRecord,
   ProviderModelList,
@@ -469,6 +471,25 @@ export const api = {
     request<void>("DELETE", `${sessionPath(id)}/goal/${encodeURIComponent(goalId)}`, {
       body: { expected_version: expectedVersion },
     }),
+
+  listTraditionalChildren: (id: string, signal?: AbortSignal) =>
+    request<TraditionalChildRecord[]>("GET", `${sessionPath(id)}/children`, { signal }),
+
+  startTraditionalChild: (id: string, payload: StartTraditionalChildRequest) =>
+    request<TraditionalChildRecord>("POST", `${sessionPath(id)}/children`, { body: payload }),
+
+  getTraditionalChild: (id: string, childId: string, signal?: AbortSignal) =>
+    request<TraditionalChildRecord>(
+      "GET",
+      `${sessionPath(id)}/children/${encodeURIComponent(childId)}`,
+      { signal },
+    ),
+
+  cancelTraditionalChild: (id: string, childId: string) =>
+    request<TraditionalChildRecord>(
+      "POST",
+      `${sessionPath(id)}/children/${encodeURIComponent(childId)}/cancel`,
+    ),
 
   updateConfig: (id: string, payload: UpdateConfigRequest) =>
     request<void>("PATCH", `${sessionPath(id)}/config`, { body: payload }),

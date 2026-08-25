@@ -7,3 +7,4 @@ durable direct-session work.
 - [Skills](skills.md)
 - [Sandbox](sandbox.md)
 - [Durable direct goals](direct-goals.md)
+- [Traditional child sessions](traditional-children.md)
