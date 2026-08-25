@@ -34,7 +34,7 @@ pub(crate) const COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST: u32 = compaction::PR
 pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };
-use compaction::{CompactionState, PreparedProviderView};
+use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
 pub(crate) use preview::key_arg_preview;
 use preview::*;
 use tool_exec::execute_tools_parallel;
@@ -368,6 +368,11 @@ impl Agent {
                     config.store_path.clone(),
                     session_id,
                     config.orchestrator_compaction_threshold,
+                    match mode {
+                        AgentMode::Direct => CompactionPolicy::Direct,
+                        AgentMode::Orchestrator => CompactionPolicy::Orchestrator,
+                        AgentMode::Worker => unreachable!("workers do not own compaction state"),
+                    },
                 )
             })
         } else {

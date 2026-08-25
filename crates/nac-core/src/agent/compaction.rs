@@ -6,12 +6,17 @@ use uuid::Uuid;
 
 mod planning;
 
-#[cfg(test)]
-pub(crate) use planning::checkpoint_digests;
 use planning::*;
-pub(super) use planning::{CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX};
 #[cfg(test)]
-pub(super) use planning::{NAC_COMPACTION_PROMPT, PROMPT_POLICY_VERSION};
+pub(crate) use planning::{checkpoint_digests, checkpoint_digests_for_policy};
+pub(super) use planning::{
+    CompactionPolicy, CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX,
+};
+#[cfg(test)]
+pub(super) use planning::{
+    DIRECT_PROMPT_POLICY_VERSION, NAC_COMPACTION_PROMPT, NAC_DIRECT_COMPACTION_PROMPT,
+    PROMPT_POLICY_VERSION,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactionResult {

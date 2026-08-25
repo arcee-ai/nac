@@ -30,11 +30,29 @@ fn compaction_test_agent(
     threshold: Option<u64>,
     event_sink: EventSink,
 ) -> Agent {
+    compaction_test_agent_with_mode(
+        client,
+        store_path,
+        session_id,
+        threshold,
+        event_sink,
+        AgentMode::Orchestrator,
+    )
+}
+
+fn compaction_test_agent_with_mode(
+    client: ModelClient,
+    store_path: PathBuf,
+    session_id: Option<&str>,
+    threshold: Option<u64>,
+    event_sink: EventSink,
+    mode: AgentMode,
+) -> Agent {
     Agent::with_config(
         client,
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Orchestrator,
+            mode,
             store_path,
             session_id: session_id.map(str::to_string),
             orchestrator_compaction_threshold: threshold,

@@ -136,10 +136,11 @@ Non-negotiable invariants:
   direct prompt/tool policy in `agent`, exact capability and admission
   enforcement in `tools`/`agent`, direct terminal outcomes in
   `session_service.rs`, and explicit API behavior selection in `nac-server`.
-  The current slice adds schema-18 inbox persistence, atomic prompt/steer
-  delivery, service promotion/restart wakeup, and REST CRUD. Direct-specific
-  compaction policy text, retained-terminal transition/loss reporting, and UI
-  controls remain in progress.
+  The durable inbox slice added schema-18 persistence, atomic prompt/steer
+  delivery, service promotion/restart wakeup, and REST CRUD. The current slice
+  adds construction-selected direct compaction policy text and checkpoint
+  compatibility. Retained-terminal transition/loss reporting and UI controls
+  remain in progress.
 
 ## Verification
 
@@ -181,6 +182,11 @@ Non-negotiable invariants:
 - `make check` — passed after final inbox API response shaping.
 - `make lint` — passed after the durable inbox implementation; workspace
   Clippy and frontend lint report no warnings.
+- Direct-compaction policy tests — passed for approved prompt bytes, distinct
+  fail-closed direct/orchestrator checkpoint restoration, preserved
+  orchestrator compatibility, and the live direct auto-compaction request.
+- `cargo test -p nac-core compaction --locked` — 69 passed, 0 failed; `make
+  lint` and `make check` also passed for the direct compaction slice.
 - Recorded pre-goal baseline: `make check` and elevated `make ci` passed on
   2026-08-24.
 
@@ -189,6 +195,7 @@ Non-negotiable invariants:
 - `09261af feat(core): introduce native tool kernel`.
 - `3ae182a feat(core): persist session behavior`.
 - `edb14e4 feat(core): add persistent direct primary`.
+- `2fad41d feat(core): add durable direct inbox`.
 
 ## Known problems and blockers
 
@@ -197,6 +204,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Finish broad verification and checkpoint the durable direct-session inbox,
-then complete direct-specific compaction and retained-terminal lifecycle
-contracts before closing the persistent-direct milestone.
+Checkpoint the direct-specific compaction policy, then complete retained-
+terminal transition/loss reporting before closing the persistent-direct
+milestone.
