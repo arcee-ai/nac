@@ -35,10 +35,12 @@ Protected initial state verified on 2026-08-25:
    crash-window state, restart/exactly-once assertions, lifecycle exclusion,
    and a real peer-process lease test. It also closes the service-authorization
    half of NAC-REV-015; the read-only child web journey remains in milestone 4.
-3. **Pending — production-equivalent test foundation.** Preserve `make dev`;
-   add `make demo`, `make test-web`, scripted-model Playwright E2E, and a
-   deterministic durability target; wire frontend tests into declared CI.
-4. **Pending — settled web MVP journeys.** Resolve NAC-REV-010, 011, 015,
+3. **Completed — production-equivalent test foundation.** Commit `df9bf9d`
+   preserves `make dev`, adds the real embedded `make demo` path, puts all 139
+   frontend tests in `make ci`, and adds deterministic durability and
+   credential-free Playwright lanes with an isolated scripted Responses
+   provider, process cleanup, and failure artifacts. NAC-REV-024 is resolved.
+4. **In progress — settled web MVP journeys.** Resolve NAC-REV-010, 011, 015,
    020..023 through behavior-aware creation/navigation, active-run inbox UX,
    literal `/goal`, child ownership guards, documentation, and browser tests.
 5. **Pending — closure and integrated review.** Reproduce the permission-SSE
@@ -86,9 +88,11 @@ Protected initial state verified on 2026-08-25:
   gate deletion race, foreign-lease misclassification, terminal-settlement
   crash windows, agent-mutex goal stall, bind-after-launch ordering, mutable
   generation mode, and ownership disclosure that commit `a288849` addresses.
-- Web/E2E audit `b3e6db71-d220-4d33-9225-72c1f2736cb8` — active; covers
-  NAC-REV-010, 011, 015, 020..024, production launch/E2E architecture, and the
-  permission-SSE replay-gap risk.
+- Web/E2E audit `b3e6db71-d220-4d33-9225-72c1f2736cb8` — complete and clean;
+  confirmed NAC-REV-010, 011, 015, and 020..024, refined the direct-navigation,
+  child-goal, and goal-replacement journeys, identified the permission replay-
+  gap refetch defect, and supplied the production-embedded Playwright/scripted-
+  provider architecture implemented in `df9bf9d`.
 
 ### Current verification and next action
 
@@ -121,9 +125,22 @@ Protected initial state verified on 2026-08-25:
   `nac-core` passes with 1045 passed and 9 ignored; complete `nac-server` passes
   with 130 library and 21 binary tests; `make check`, `make lint`, and
   `make format-check` pass.
-- Next action: retrieve and verify the web/E2E NAC audit, then implement the
-  production-equivalent launch and scripted-model Playwright foundation for
-  milestone 3.
+- Milestone 3 implementation: `make demo` rebuilds the frontend before the real
+  embedded server is compiled/launched while `make dev` is unchanged;
+  `make test-web` participates in the declared local and release CI gates;
+  `make test-e2e` runs the production binary with isolated workspace/store/home,
+  a loopback scripted provider, bounded cleanup, redacted request recording,
+  and retained server/browser/database/process artifacts on failure; and
+  `make test-durability` names the deterministic milestone-2 regression lane.
+- Milestone 3 evidence: `make test-web` passes 139 tests; `make test-e2e` passes
+  production asset/cache, direct text, and real native-tool/result round trips;
+  `make test-durability`, `make test-assets`, `make format-check`, and `make
+  lint` pass. A `make demo` run on `127.0.0.1:43213` rebuilt/recompiled, served
+  healthy embedded HTML with `no-cache`, exited through Ctrl-C, and left no
+  listener. No committed asset drift or worktree-local Playwright artifact was
+  produced.
+- Next action: implement behavior-aware creation/navigation and the active-run
+  inbox journeys with component and real-browser contracts for milestone 4.
 
 ## Objective and invariants
 
