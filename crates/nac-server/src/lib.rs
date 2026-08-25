@@ -440,6 +440,10 @@ impl utoipa::ToSchema for HeadersRequest {
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct CreateSessionRequest {
+    /// Immutable execution behavior. Omission preserves the established
+    /// orchestrator default.
+    #[serde(default)]
+    pub behavior: sessions::SessionBehavior,
     /// Explicit project selection. Projects are never inferred from `cwd`.
     pub project_id: Option<String>,
     #[schema(value_type = Option<String>)]
@@ -1741,6 +1745,7 @@ impl SessionManager {
         mut request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
         self.sweep_idle_sessions(None).await;
+        let behavior = request.behavior;
         let project_context = request
             .project_id
             .as_deref()
@@ -1849,7 +1854,7 @@ impl SessionManager {
             model.api_base_url.as_deref(),
             &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
         )?;
-        let run_config = runtime::build_run_config_for_project(
+        let run_config = runtime::build_run_config_for_project_with_behavior(
             RunOptions {
                 workspace_cwd: location.workspace_cwd,
                 config_cwd: Some(location.config_cwd.clone()),
@@ -1864,6 +1869,7 @@ impl SessionManager {
             },
             &config,
             project_id,
+            behavior,
         )
         .await
         .map_err(|error| {
@@ -7536,6 +7542,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(with_host.ssh_host.as_deref(), Some("build-box"));
+        assert_eq!(with_host.behavior, sessions::SessionBehavior::Orchestrator);
         assert_eq!(
             with_host.backend,
             RequestField::Value("together-chat".to_string())
@@ -7562,6 +7569,14 @@ mod tests {
             serde_json::from_str(r#"{"cwd":"/tmp/project"}"#).unwrap();
         assert_eq!(without_host.ssh_host, None);
         assert_eq!(without_host.cwd, Some(PathBuf::from("/tmp/project")));
+
+        let direct: CreateSessionRequest =
+            serde_json::from_str(r#"{"behavior":"direct"}"#).unwrap();
+        assert_eq!(direct.behavior, sessions::SessionBehavior::Direct);
+        assert!(
+            serde_json::from_str::<CreateSessionRequest>(r#"{"behavior":"future-behavior"}"#)
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -7570,6 +7585,7 @@ mod tests {
         let manager = test_manager(&root);
 
         let request = CreateSessionRequest {
+            behavior: sessions::SessionBehavior::Orchestrator,
             project_id: None,
             cwd: None,
             model: RequestField::Omitted,
@@ -7607,6 +7623,7 @@ mod tests {
         for backend in ["arcee", "auto"] {
             let error = manager
                 .create_session(CreateSessionRequest {
+                    behavior: sessions::SessionBehavior::Orchestrator,
                     project_id: None,
                     cwd: None,
                     model: RequestField::Omitted,
@@ -9258,6 +9275,7 @@ threshold_tokens = 64000
         assert!(inherited.metadata.extra_headers.is_empty());
         let inherited_id = inherited.metadata.session_id.unwrap();
         let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
+        assert_eq!(stored.behavior, sessions::SessionBehavior::Orchestrator);
         assert_eq!(stored.backend, BackendKind::OpenAiResponses);
         assert_eq!(stored.model, "gpt-5.2");
         assert_eq!(stored.base_url, "https://api.openai.com/v1");
@@ -9284,6 +9302,36 @@ threshold_tokens = 64000
             .metadata
             .extra_headers
             .is_empty());
+
+        for behavior in [
+            sessions::SessionBehavior::Direct,
+            sessions::SessionBehavior::DirectWithOrchestrator,
+        ] {
+            let direct = manager
+                .create_session(CreateSessionRequest {
+                    behavior,
+                    ..CreateSessionRequest::default()
+                })
+                .await
+                .expect("an explicitly selected direct behavior should launch");
+            assert_eq!(direct.metadata.behavior, behavior);
+            let direct_id = direct.metadata.session_id.unwrap();
+            assert_eq!(
+                sessions::load_session(&root.join("store.db"), &direct_id)
+                    .unwrap()
+                    .behavior,
+                behavior
+            );
+            assert_eq!(
+                manager
+                    .attach_session(&direct_id)
+                    .await
+                    .unwrap()
+                    .metadata()
+                    .behavior,
+                behavior
+            );
+        }
 
         let cleared = manager
             .create_session(CreateSessionRequest {
@@ -10504,6 +10552,7 @@ model = "gpt-5.2"
 
         let create_error = manager
             .create_session(CreateSessionRequest {
+                behavior: sessions::SessionBehavior::Orchestrator,
                 project_id: None,
                 cwd: None,
                 model: RequestField::Omitted,
@@ -10627,6 +10676,7 @@ model = "gpt-5.2"
 
         let created = manager
             .create_session(CreateSessionRequest {
+                behavior: sessions::SessionBehavior::Orchestrator,
                 project_id: None,
                 cwd: None,
                 model: RequestField::Value("test-model".to_string()),

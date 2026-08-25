@@ -390,6 +390,13 @@ impl ToolSnapshot {
             .any(|entry| entry.descriptor().name() == name)
     }
 
+    pub fn admission(&self, name: &str) -> Option<ToolAdmission> {
+        self.entries
+            .iter()
+            .find(|entry| entry.descriptor().name() == name)
+            .map(|entry| entry.descriptor().admission)
+    }
+
     /// Decode and validate before permission policy is evaluated. Invocation
     /// remains a separate operation so authorization can happen immediately
     /// before side effects.

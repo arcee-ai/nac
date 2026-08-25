@@ -575,6 +575,7 @@ struct ActiveRunState {
     /// `None` until the task captures it — an early cancel then diffs
     /// against the run-end count, which is exact when nothing was appended.
     transcript_baseline: Option<usize>,
+    command_cancellation: crate::tools::ThreadCancellation,
     _operation_lease: Option<sessions::SessionOperationLease>,
 }
 
@@ -588,6 +589,7 @@ struct CancellingRun {
     snapshot: ActiveRunSnapshot,
     task: Option<JoinHandle<()>>,
     transcript_baseline: Option<usize>,
+    command_cancellation: crate::tools::ThreadCancellation,
 }
 
 enum RunOutcome {
@@ -663,6 +665,7 @@ impl SessionService {
     pub fn from_orchestrator_run_config(
         mut run_config: OrchestratorRunConfig,
     ) -> SessionServiceParts {
+        let behavior = run_config.session.behavior();
         let store_path = run_config.session.store_path();
         let session_id = run_config.session.session_id().map(str::to_string);
         let restored_messages = run_config.agent.messages.clone();
@@ -711,7 +714,7 @@ impl SessionService {
             model: run_config.client.model.clone(),
             backend: run_config.client.backend().as_str().to_string(),
             session_id,
-            behavior: sessions::SessionBehavior::Orchestrator,
+            behavior,
             project_id,
             sandbox_status: run_config.sandbox_status,
             agents_md_status: run_config.agents_md_status,
@@ -2154,6 +2157,10 @@ impl SessionService {
             });
         };
 
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            cancelling_run.command_cancellation.cancel();
+        }
+
         let steering_store = self
             .metadata
             .session_id
@@ -2164,9 +2171,17 @@ impl SessionService {
             Err(error) => eprintln!("nac: failed to expire cancelled worker steering: {error:#}"),
         }
 
-        if let Some(task) = cancelling_run.task {
-            task.abort();
-            let _ = task.await;
+        if let Some(mut task) = cancelling_run.task {
+            if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
+                task.abort();
+                let _ = task.await;
+            } else if tokio::time::timeout(Duration::from_secs(2), &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+                let _ = task.await;
+            }
         }
 
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
@@ -2219,6 +2234,10 @@ impl SessionService {
                 "nac: run {} remains cancelled despite snapshot persistence failure: {error}",
                 cancelling_run.snapshot.run_id
             );
+        }
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            self.capture_workspace_revision(&cancelling_run.snapshot)
+                .await;
         }
         self.event_bus.emit_with_context(
             SessionEvent::RunCancelled,
@@ -2419,6 +2438,21 @@ impl SessionService {
             });
         }
 
+        let command_cancellation =
+            if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
+                // Orchestrator cancellation continues through its established
+                // active-thread registry and must not add a new agent-lock
+                // admission requirement.
+                crate::tools::ThreadCancellation::default()
+            } else {
+                self.agent
+                    .try_lock()
+                    .map_err(|_| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::local_agent_busy(),
+                    })?
+                    .begin_run_cancellation()
+            };
+
         let run_id = SessionRunId::new();
         let submitted_at_epoch_ms = now_epoch_ms();
         let submitted_user_message = SubmittedUserMessageSnapshot {
@@ -2450,6 +2484,7 @@ impl SessionService {
             task: None,
             prompt_commit,
             transcript_baseline: None,
+            command_cancellation,
             _operation_lease: operation_lease,
         }));
         drop(guard);
@@ -2608,7 +2643,12 @@ impl SessionService {
     /// (log-first: those messages are in neither store).
     async fn normalize_failed_run_transcript(&self) {
         let mut agent = self.agent.lock().await;
-        if let Err(error) = agent.normalize_dangling_tail().await {
+        let result = if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
+            agent.normalize_dangling_tail().await
+        } else {
+            agent.normalize_failed_tail_preserving_partial().await
+        };
+        if let Err(error) = result {
             eprintln!("nac: failed to normalize transcript after run failure: {error:#}");
         }
     }
@@ -2680,6 +2720,7 @@ impl SessionService {
             snapshot: active_run.snapshot.clone(),
             task: active_run.task.take(),
             transcript_baseline: active_run.transcript_baseline,
+            command_cancellation: active_run.command_cancellation.clone(),
         })
     }
 
@@ -4611,6 +4652,7 @@ pub(super) mod tests {
                 task: None,
                 prompt_commit,
                 transcript_baseline: None,
+                command_cancellation: crate::tools::ThreadCancellation::default(),
                 _operation_lease: None,
             }));
         let inactive = service

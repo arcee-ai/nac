@@ -48,7 +48,7 @@ pub(crate) fn partition_tool_calls(
         let name = tool_call.function.name;
         let args_str = tool_call.function.arguments;
 
-        if name == "thread" {
+        if name == "thread" && runtime.allows_tool("thread") {
             let args: serde_json::Value = match serde_json::from_str(&args_str) {
                 Ok(value) => value,
                 Err(error) => {

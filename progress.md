@@ -41,8 +41,9 @@ Non-negotiable invariants:
 - Recorded inherited baseline: `make check` passes and an elevated `make ci`
   passed on 2026-08-24. Socket-binding `Operation not permitted` failures from
   a confined direct `make test` are environmental, not inherited regressions.
-- The native tool kernel is committed. The immutable session-behavior
-  persistence foundation is implemented and awaiting its checkpoint commit.
+- The native tool kernel and immutable behavior foundation are committed. The
+  first persistent direct-primary create/resume/API vertical is implemented and
+  awaiting its checkpoint commit.
 
 ## Ordered milestones
 
@@ -100,9 +101,28 @@ Non-negotiable invariants:
   Creation and legacy migration default to `orchestrator`; ordinary snapshot
   saves cannot mutate it; unknown values fail closed in both load and list.
 - Treat schema 17 as a deliberate downgrade barrier: older binaries reject the
-  store instead of silently reconstructing direct sessions as orchestrators.
-  Until direct construction is wired, orchestrator resume rejects either
-  direct behavior before runtime side effects.
+  store instead of silently reconstructing direct sessions as orchestrators;
+  resume now selects construction from the stored discriminator.
+- Use one new direct construction policy inside the existing lower `Agent`
+  model/tool loop, while retaining the worker-specific bounded dispatch prompt,
+  timeout/process wrapper, episodes, and handoff lifecycle. Both direct
+  behaviors share this base loop; orchestration control will be an additive
+  capability set.
+- Give direct primaries a construction-owned coding prompt, the exact eight-tool
+  bootstrap snapshot, persistent transcript/compaction state, and session-owned
+  process-local terminal manager. Omitted API behavior and outgoing MCP create
+  remain orchestrator.
+- Enforce the model-visible capability snapshot at execution as well as
+  exposure, so a hallucinated hidden `thread` or other tool cannot cross into a
+  topology the behavior was not given.
+- Consume kernel admission metadata in direct batches: consecutive discovery
+  calls can overlap; mutations, arbitrary shell, and unknown tools are
+  exclusive ordered barriers. Existing worker/orchestrator scheduling remains
+  unchanged.
+- Reset command cancellation per direct run, allow up to two seconds for
+  cooperative cleanup before abort, preserve failed streamed partial output
+  with an explicit marker, and capture direct cancellation revisions. Existing
+  orchestrator cancellation timing remains unchanged.
 
 ## Files and subsystems currently changing
 
@@ -110,10 +130,14 @@ Non-negotiable invariants:
   registration/dispatch in `tools/mod.rs`, typed `read` input/execution,
   colocated `write`/`edit` definitions, and call identity wiring in
   `agent/dag.rs`.
-- Milestone 2 now changes session snapshots/summaries, schema/migrations,
-  persistence queries, view/service metadata, and the orchestrator resume
-  guard. API creation still intentionally exposes only the established
-  orchestrator path until direct construction is ready.
+- Milestone 2 changes session snapshots/summaries, schema/migrations,
+  persistence queries, and view/service metadata. The current slice adds
+  direct construction/resume in `runtime.rs`,
+  direct prompt/tool policy in `agent`, exact capability and admission
+  enforcement in `tools`/`agent`, direct terminal outcomes in
+  `session_service.rs`, and explicit API behavior selection in `nac-server`.
+  Durable inbox, direct-specific compaction policy text, retained-terminal
+  transition/loss reporting, and UI controls remain in progress.
 
 ## Verification
 
@@ -135,12 +159,22 @@ Non-negotiable invariants:
 - `make ci` — passed after the behavior-persistence implementation: 967 core,
   111 server, and 21 CLI tests; frontend format, lint, typecheck, and production
   build all passed.
+- Direct-primary focused tests — passed for create/persist/resume, API default
+  and explicit behavior selection, exact capability enforcement, admission
+  grouping, and failed partial-output settlement.
+- `make check` — passed after the direct-primary implementation.
+- `cargo test -p nac-core --locked` — 970 passed, 9 ignored, 0 failed in
+  83.03s after fixing two compatibility regressions found by the first broad
+  run.
+- `cargo test -p nac-server --locked` — 111 server and 21 CLI tests passed in
+  83.24s.
 - Recorded pre-goal baseline: `make check` and elevated `make ci` passed on
   2026-08-24.
 
 ## Completed commits
 
 - `09261af feat(core): introduce native tool kernel`.
+- `3ae182a feat(core): persist session behavior`.
 
 ## Known problems and blockers
 
@@ -149,6 +183,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Checkpoint the persisted behavior foundation, then generalize top-level runtime
-construction and the agent loop for the smallest durable direct-session
-vertical without changing omitted/default orchestrator construction.
+Checkpoint the direct-primary vertical, then add the durable direct-session
+inbox with explicit steer/queue delivery, pending mutation/cancellation,
+model-boundary consumption, and race-safe one-at-a-time idle promotion.
