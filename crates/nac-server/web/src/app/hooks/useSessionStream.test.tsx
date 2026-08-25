@@ -257,6 +257,10 @@ describe("session stream request coordination", () => {
       queryKey: queryKeys.sessionSkills(SESSION_ID),
       exact: true,
     });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.sessionPermissions(SESSION_ID),
+      exact: true,
+    });
 
     await act(async () => {
       stream_source.emit("replay_boundary", { epoch_id: "three" });
@@ -279,6 +283,33 @@ describe("session stream request coordination", () => {
       await secondSnapshot.promise;
     });
     expect(stream.getPage).toHaveBeenCalledOnce();
+
+    await act(async () => renderer.unmount());
+  });
+
+  it("refreshes permission state when replay loss makes exact events unknowable", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), snapshot([user("old")]));
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const renderer = await mount(client);
+    const stream_source = source();
+
+    await act(async () => {
+      stream_source.emit("replay_gap", { missing_from_sequence_id: 4 });
+      stream_source.emit("lagged", { skipped: 3 });
+    });
+
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.sessionPermissions(SESSION_ID),
+      exact: true,
+    });
+    expect(invalidate).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.sessionPermissions(SESSION_ID),
+      exact: true,
+    });
 
     await act(async () => renderer.unmount());
   });

@@ -163,6 +163,21 @@ export function useSessionStream(sessionId: string | null): void {
       }, RELOAD_DEBOUNCE_MS);
     };
 
+    const refreshPermissions = () => {
+      // Permission state is intentionally infinitely fresh and normally
+      // follows its exact SSE events. Whenever replay continuity is lost, the
+      // only safe substitute is a canonical refetch of the active query.
+      void client.invalidateQueries({
+        queryKey: queryKeys.sessionPermissions(id),
+        exact: true,
+      });
+    };
+
+    const replaceAfterReplayLoss = () => {
+      scheduleSnapshot(true);
+      refreshPermissions();
+    };
+
     const dispose = subscribeToSessionEvents(id, {
       onEnvelope: (envelope) => {
         if (envelope.event.type === "agent" && envelope.event.event.type === "thread_finished") {
@@ -195,10 +210,7 @@ export function useSessionStream(sessionId: string | null): void {
           envelope.event.type === "permission_replied" ||
           envelope.event.type === "permission_dismissed"
         ) {
-          void client.invalidateQueries({
-            queryKey: queryKeys.sessionPermissions(id),
-            exact: true,
-          });
+          refreshPermissions();
         }
       },
       onAssistantDelta: applyAssistantDelta,
@@ -210,11 +222,12 @@ export function useSessionStream(sessionId: string | null): void {
             queryKey: queryKeys.sessionSkills(id),
             exact: true,
           });
+          refreshPermissions();
         }
         epochId = boundary.epoch_id;
       },
-      onReplayGap: () => scheduleSnapshot(true),
-      onLagged: () => scheduleSnapshot(true),
+      onReplayGap: replaceAfterReplayLoss,
+      onLagged: replaceAfterReplayLoss,
     });
 
     return () => {
