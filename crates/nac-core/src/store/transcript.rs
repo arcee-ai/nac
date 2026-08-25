@@ -388,6 +388,30 @@ fn append_messages_in_transaction(
     Ok(last_inserted_id)
 }
 
+fn mark_inbox_item_delivered(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    item_id: i64,
+    run_id: &str,
+    expected_content: &str,
+) -> Result<()> {
+    let now = now_utc();
+    let changed = transaction.execute(
+        "UPDATE session_inbox
+         SET status = 'delivered', delivered_run_id = ?1, delivered_at = ?2,
+             updated_at = ?2, version = version + 1
+         WHERE session_id = ?3 AND id = ?4 AND status = 'pending'
+           AND content = ?5",
+        params![run_id, now, session_id, item_id, expected_content],
+    )?;
+    if changed != 1 {
+        return Err(anyhow!(
+            "inbox item {item_id} was changed or delivered before its transcript commit"
+        ));
+    }
+    Ok(())
+}
+
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
@@ -437,9 +461,36 @@ impl TranscriptLogWriter {
         message: &Message,
         run_id: &str,
     ) -> Result<()> {
+        self.append_run_prompt_inner(session_id, idx, message, run_id, None)
+    }
+
+    /// Deliver one pending inbox item at the same commit point as the run's
+    /// canonical User prompt and recovery obligation.
+    pub fn append_inbox_run_prompt(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        inbox_item_id: i64,
+    ) -> Result<()> {
+        self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id))
+    }
+
+    fn append_run_prompt_inner(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        inbox_item_id: Option<i64>,
+    ) -> Result<()> {
         if !matches!(message, Message::User { .. }) {
             return Err(anyhow!("a run prompt must be a user transcript message"));
         }
+        let Message::User { content } = message else {
+            unreachable!()
+        };
         let _operation = self
             .operation
             .lock()
@@ -454,8 +505,69 @@ impl TranscriptLogWriter {
             std::slice::from_ref(message),
         )?;
         replace_with_active_run(&transaction, session_id, run_id, submitted_message_id)?;
+        if let Some(inbox_item_id) = inbox_item_id {
+            mark_inbox_item_delivered(&transaction, session_id, inbox_item_id, run_id, content)?;
+        }
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Consume every steer targeted at `run_id` that won admission before
+    /// this model boundary. Status transition and canonical transcript append
+    /// share one IMMEDIATE transaction; a later steer remains pending for the
+    /// next boundary or idle successor.
+    pub fn append_pending_inbox_steers(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        start_idx: u64,
+    ) -> Result<Vec<SessionInboxRecord>> {
+        let _operation = self
+            .operation
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut connection = open_runtime_connection(&self.store_path)?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let records = {
+            let mut statement = transaction.prepare(&format!(
+                "SELECT {INBOX_RECORD_COLUMNS} FROM session_inbox
+                 WHERE session_id = ?1 AND delivery = 'steer'
+                   AND status = 'pending' AND target_run_id = ?2
+                 ORDER BY id ASC"
+            ))?;
+            let records = statement
+                .query_map(params![session_id, run_id], row_to_inbox_record)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            records
+        };
+        if records.is_empty() {
+            transaction.commit()?;
+            return Ok(Vec::new());
+        }
+        let messages = records
+            .iter()
+            .map(|record| Message::User {
+                content: record.content.clone(),
+            })
+            .collect::<Vec<_>>();
+        append_messages_in_transaction(&transaction, session_id, start_idx, &messages)?;
+        for record in &records {
+            mark_inbox_item_delivered(
+                &transaction,
+                session_id,
+                record.id,
+                run_id,
+                &record.content,
+            )?;
+        }
+        transaction.commit()?;
+        records
+            .into_iter()
+            .map(|record| {
+                load_session_inbox_item_with_connection(&connection, session_id, record.id)
+            })
+            .collect()
     }
 
     /// Read the full log tail relative to a snapshot blob of `blob_len`
@@ -1162,6 +1274,104 @@ mod tests {
         assert_eq!(summary.visible_message_count, 2);
         assert_eq!(summary.last_user_prompt.as_deref(), Some("tail"));
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn inbox_delivery_and_transcript_commit_are_atomic_for_steers_and_prompts() {
+        let path = temp_store_path("inbox_atomic");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let steer = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Steer,
+            "steer now",
+            Some("run-a"),
+            None,
+        )
+        .unwrap();
+        let queued = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Queue,
+            "next prompt",
+            None,
+            None,
+        )
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+
+        let delivered = writer
+            .append_pending_inbox_steers("session", "run-a", 0)
+            .unwrap();
+        assert_eq!(
+            delivered.iter().map(|record| record.id).collect::<Vec<_>>(),
+            vec![steer.id]
+        );
+        assert!(writer
+            .append_pending_inbox_steers("session", "run-a", 1)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            load_session_inbox_item(&path, "session", steer.id)
+                .unwrap()
+                .status,
+            InboxStatus::Delivered
+        );
+        assert_eq!(
+            load_session_inbox_item(&path, "session", queued.id)
+                .unwrap()
+                .status,
+            InboxStatus::Pending
+        );
+
+        writer
+            .append_inbox_run_prompt(
+                "session",
+                1,
+                &Message::User {
+                    content: "next prompt".to_string(),
+                },
+                "run-b",
+                queued.id,
+            )
+            .unwrap();
+        let queued = load_session_inbox_item(&path, "session", queued.id).unwrap();
+        assert_eq!(queued.status, InboxStatus::Delivered);
+        assert_eq!(queued.delivered_run_id.as_deref(), Some("run-b"));
+        assert_eq!(
+            load_run_recovery(&path, "session").unwrap().unwrap().run_id,
+            "run-b"
+        );
+
+        let mismatch = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Queue,
+            "canonical",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(writer
+            .append_inbox_run_prompt(
+                "session",
+                2,
+                &Message::User {
+                    content: "different".to_string(),
+                },
+                "run-c",
+                mismatch.id,
+            )
+            .is_err());
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 2);
+        assert_eq!(
+            load_session_inbox_item(&path, "session", mismatch.id)
+                .unwrap()
+                .status,
+            InboxStatus::Pending
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
