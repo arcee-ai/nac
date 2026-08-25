@@ -42,12 +42,22 @@ use tool_exec::execute_tools_parallel;
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
 const WORKER_SYSTEM_PROMPT: &str = include_str!("prompts/nac_worker.md");
 const ORCHESTRATOR_SYSTEM_PROMPT: &str = include_str!("prompts/nac_orchestrator.md");
+const DIRECT_SYSTEM_PROMPT: &str = include_str!("prompts/nac_direct.md");
 pub(crate) const RUN_CANCELLED_MARKER: &str = "[run cancelled by user]";
+pub(crate) const RUN_FAILED_PARTIAL_MARKER: &str =
+    "[run failed after this partial assistant response]";
 
 fn render_worker_system_prompt(working_directory: &str) -> String {
     let (prefix, suffix) = WORKER_SYSTEM_PROMPT
         .split_once("{working_directory}")
         .expect("worker system prompt must contain {working_directory}");
+    format!("{prefix}{working_directory}{suffix}")
+}
+
+fn render_direct_system_prompt(working_directory: &str) -> String {
+    let (prefix, suffix) = DIRECT_SYSTEM_PROMPT
+        .split_once("{working_directory}")
+        .expect("direct system prompt must contain {working_directory}");
     format!("{prefix}{working_directory}{suffix}")
 }
 
@@ -153,6 +163,9 @@ fn duration_millis(duration: Duration) -> u64 {
 pub enum AgentMode {
     Worker,
     Orchestrator,
+    /// Persistent top-level coding loop. This shares the lower model/tool
+    /// engine with workers but not their bounded dispatch prompt or lifecycle.
+    Direct,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RunPromptCommitStatus {
@@ -205,14 +218,15 @@ pub struct Agent {
     client: ModelClient,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
+    admission_controlled_tools: bool,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
     steering_dispatch_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
-    /// Orchestrator transcript log sink (DB-direct transcript workset, see
-    /// store/transcript.rs). Present only for orchestrator agents with a
+    /// Top-level transcript log sink (DB-direct transcript workset, see
+    /// store/transcript.rs). Present for persistent primary agents with a
     /// session id — workers (separate `__worker` processes) never log.
     transcript_log: Option<TranscriptLogSink>,
     /// Exclusive upper bound of transcript log rows this process has
@@ -347,7 +361,7 @@ impl Agent {
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
         let mode = config.mode;
-        let compaction = if mode == AgentMode::Orchestrator {
+        let compaction = if matches!(mode, AgentMode::Orchestrator | AgentMode::Direct) {
             config.session_id.clone().map(|session_id| {
                 CompactionState::new(
                     config.store_path.clone(),
@@ -358,16 +372,18 @@ impl Agent {
         } else {
             None
         };
-        // Construction-time gate for the transcript log: orchestrator-only,
-        // and only with a session id (mirrors the compaction gate). Worker
-        // agents run in separate `__worker` processes and must never write
-        // `__orchestrator__` transcript rows.
+        // Construction-time gate for the transcript log: persistent primary
+        // agents only, and only with a session id (mirrors the compaction
+        // gate). Workers run in separate `__worker` processes and must never
+        // append top-level transcript rows.
         let transcript_log = match (mode, config.session_id.clone()) {
-            (AgentMode::Orchestrator, Some(session_id)) => Some(TranscriptLogSink {
-                writer: Arc::new(crate::store::TranscriptLogWriter::new(&config.store_path)?),
-                session_id,
-                store_path: config.store_path.clone(),
-            }),
+            (AgentMode::Orchestrator | AgentMode::Direct, Some(session_id)) => {
+                Some(TranscriptLogSink {
+                    writer: Arc::new(crate::store::TranscriptLogWriter::new(&config.store_path)?),
+                    session_id,
+                    store_path: config.store_path.clone(),
+                })
+            }
             _ => None,
         };
 
@@ -386,11 +402,17 @@ impl Agent {
                     config.light_client.as_deref(),
                 ),
             ),
+            AgentMode::Direct => (
+                render_direct_system_prompt(&cwd),
+                tools::worker_tool_definitions(client.supports_image_tool_results()),
+            ),
         };
-        if let Some(light) = config.light_client.as_deref() {
-            system_prompt.push_str(&light_model_prompt_guidance(light));
+        if config.mode == AgentMode::Orchestrator {
+            if let Some(light) = config.light_client.as_deref() {
+                system_prompt.push_str(&light_model_prompt_guidance(light));
+            }
         }
-        if config.mode == AgentMode::Worker {
+        if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
 
@@ -398,7 +420,7 @@ impl Agent {
             content: system_prompt,
         }];
         if let Some(agents_md_message) = config.agents_md_message {
-            if config.mode == AgentMode::Worker {
+            if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
                 append_to_initial_system_message(&mut messages, &agents_md_message);
             } else {
                 messages.push(Message::System {
@@ -430,8 +452,14 @@ impl Agent {
             AgentMode::Worker => crate::terminal::TerminalManager::for_worker_with_limits(
                 config.command_output_limits,
             )?,
-            AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
+            AgentMode::Orchestrator | AgentMode::Direct => crate::terminal::TerminalManager::new(),
         };
+        let allowed_tools = Arc::new(
+            tool_defs
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect(),
+        );
         // The initial messages are exactly the snapshot blob written at
         // session creation; the log tail starts at this length.
         let committed_log_len = messages.len() as u64;
@@ -439,6 +467,7 @@ impl Agent {
             client,
             messages,
             tool_defs,
+            admission_controlled_tools: mode == AgentMode::Direct,
             compaction,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
@@ -456,6 +485,7 @@ impl Agent {
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
                 light_client: config.light_client,
+                allowed_tools: Some(allowed_tools),
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -804,6 +834,7 @@ impl Agent {
                 self.client.clone(),
                 self.event_sink.clone(),
                 self.thread_name.clone(),
+                self.admission_controlled_tools,
             )
             .await;
             let repeated_identical_failure = match failed_tool_round(&tool_calls, &results) {
@@ -885,6 +916,15 @@ impl Agent {
 
     pub(crate) fn command_cancellation(&self) -> crate::tools::ThreadCancellation {
         self.tool_runtime.command_cancellation.clone()
+    }
+
+    /// Install a fresh cancellation scope for one top-level run. Persistent
+    /// direct sessions reuse the agent across turns, so a cancelled command
+    /// token must never poison the next run.
+    pub(crate) fn begin_run_cancellation(&mut self) -> crate::tools::ThreadCancellation {
+        let cancellation = crate::tools::ThreadCancellation::default();
+        self.tool_runtime.command_cancellation = cancellation.clone();
+        cancellation
     }
 
     #[cfg(test)]
@@ -1388,6 +1428,32 @@ impl Agent {
             })
             .collect::<Vec<_>>();
         self.append_cancellation_tail(missing_results).await
+    }
+
+    /// Preserve provider output that was streamed before a direct run failed.
+    /// Combining the partial text and terminal marker into one assistant
+    /// message keeps usage/timing aligned to one visible failed response.
+    pub async fn normalize_failed_tail_preserving_partial(&mut self) -> Result<()> {
+        self.normalize_dangling_tail().await?;
+        let partial = self.take_partial_stream();
+        if partial.is_empty() {
+            return Ok(());
+        }
+        let content = if partial.text.is_empty() {
+            Some(RUN_FAILED_PARTIAL_MARKER.to_string())
+        } else {
+            Some(format!("{}\n\n{}", partial.text, RUN_FAILED_PARTIAL_MARKER))
+        };
+        self.push_and_log(Message::Assistant {
+            content,
+            reasoning_text: (!partial.reasoning.is_empty()).then_some(partial.reasoning),
+            reasoning_details: None,
+            tool_calls: None,
+            duration_ms: None,
+            model_origin: Some(self.client.model_origin()),
+            reasoning_field: None,
+        })
+        .await
     }
 
     async fn append_cancellation_tail(&mut self, mut messages: Vec<Message>) -> Result<()> {

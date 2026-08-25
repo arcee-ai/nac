@@ -280,6 +280,7 @@ mod tests {
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
             light_client: None,
+            allowed_tools: None,
         }
     }
 

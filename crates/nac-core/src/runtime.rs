@@ -581,6 +581,13 @@ impl OrchestratorSession {
             Self::Picker { .. } => None,
         }
     }
+
+    pub fn behavior(&self) -> sessions::SessionBehavior {
+        match self {
+            Self::Active { snapshot, .. } => snapshot.behavior,
+            Self::Picker { .. } => sessions::SessionBehavior::Orchestrator,
+        }
+    }
 }
 
 pub struct OrchestratorRunConfig {
@@ -832,7 +839,13 @@ pub async fn build_run_config(
     options: RunOptions,
     config: &NacConfig,
 ) -> Result<OrchestratorRunConfig> {
-    build_run_config_inner(options, config, None).await
+    build_run_config_inner(
+        options,
+        config,
+        None,
+        sessions::SessionBehavior::Orchestrator,
+    )
+    .await
 }
 
 pub async fn build_run_config_for_project(
@@ -840,14 +853,39 @@ pub async fn build_run_config_for_project(
     config: &NacConfig,
     project_id: Option<String>,
 ) -> Result<OrchestratorRunConfig> {
-    build_run_config_inner(options, config, project_id).await
+    build_run_config_inner(
+        options,
+        config,
+        project_id,
+        sessions::SessionBehavior::Orchestrator,
+    )
+    .await
+}
+
+/// Build a persistent top-level session with an explicitly selected immutable
+/// behavior. Existing callers continue through the orchestrator-only wrappers
+/// above, so omission remains backward compatible.
+pub async fn build_run_config_for_project_with_behavior(
+    options: RunOptions,
+    config: &NacConfig,
+    project_id: Option<String>,
+    behavior: sessions::SessionBehavior,
+) -> Result<OrchestratorRunConfig> {
+    build_run_config_inner(options, config, project_id, behavior).await
 }
 
 async fn build_run_config_inner(
     options: RunOptions,
     config: &NacConfig,
     project_id: Option<String>,
+    behavior: sessions::SessionBehavior,
 ) -> Result<OrchestratorRunConfig> {
+    let agent_mode = match behavior {
+        sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
+        sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
+            AgentMode::Direct
+        }
+    };
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
@@ -891,7 +929,7 @@ async fn build_run_config_inner(
             client.clone(),
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
-                mode: AgentMode::Orchestrator,
+                mode: agent_mode,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
@@ -926,6 +964,7 @@ async fn build_run_config_inner(
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
+        session_snapshot.behavior = behavior;
         session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
@@ -985,7 +1024,7 @@ async fn build_run_config_inner(
         client.clone(),
         AgentConfig {
             command_output_limits: worker_command_output_limits(config)?,
-            mode: AgentMode::Orchestrator,
+            mode: agent_mode,
             store_path: store_path.clone(),
             session_id: Some(session_id.clone()),
             orchestrator_compaction_threshold,
@@ -1020,6 +1059,7 @@ async fn build_run_config_inner(
         settings.api_key_env.clone(),
         settings.extra_headers.clone(),
     );
+    session_snapshot.behavior = behavior;
     session_snapshot.project_id = project_id;
     session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
     session_snapshot.light_model = light_model;
@@ -1369,14 +1409,13 @@ async fn build_resume_config_from_snapshot(
     persist_recovery: bool,
     resolved_metadata: Option<ModelMetadata>,
 ) -> Result<OrchestratorRunConfig> {
-    if snapshot.behavior != sessions::SessionBehavior::Orchestrator {
-        anyhow::bail!(
-            "session '{}' uses '{}' behavior and cannot be resumed as an orchestrator",
-            snapshot.session_id,
-            snapshot.behavior
-        );
-    }
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
+    let agent_mode = match snapshot.behavior {
+        sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
+        sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
+            AgentMode::Direct
+        }
+    };
     // Resume reaches the host with the connection the session recorded, not with
     // whatever the local ssh config happens to say now.
     let ssh = snapshot.ssh.clone();
@@ -1495,10 +1534,10 @@ async fn build_resume_config_from_snapshot(
 
     store::initialize(&store_path)?;
 
-    let (skills, agents_md_status) = if ssh.is_some() {
+    let (skills, agents_md_status, agents_md_message) = if ssh.is_some() {
         let config_paths = PathContext::new(&config_cwd);
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
-        (skills, "off".to_string())
+        (skills, "off".to_string(), None)
     } else {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
@@ -1508,7 +1547,10 @@ async fn build_resume_config_from_snapshot(
             (workspace_dir.as_deref(), SkillPathVisibility::Visible)
         };
         let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
-        (skills, agents_md.status_text())
+        let message = (agent_mode == AgentMode::Direct)
+            .then(|| agents_md.system_message())
+            .flatten();
+        (skills, agents_md.status_text(), message)
     };
     let working_directory = sandbox
         .as_ref()
@@ -1534,7 +1576,7 @@ async fn build_resume_config_from_snapshot(
         client.clone(),
         AgentConfig {
             command_output_limits: worker_command_output_limits(config)?,
-            mode: AgentMode::Orchestrator,
+            mode: agent_mode,
             store_path: store_path.clone(),
             session_id: Some(snapshot.session_id.clone()),
             orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
@@ -1551,7 +1593,7 @@ async fn build_resume_config_from_snapshot(
             mcp: None,
             skills,
             extra_tool_defs: Vec::new(),
-            agents_md_message: None,
+            agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
             light_client,
         },
@@ -1868,45 +1910,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn orchestrator_resume_rejects_direct_behavior_before_side_effects() {
-        let root = temp_store_path("direct_resume_guard")
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        let store_path = root.join("must-not-exist.db");
-        let mut snapshot = sessions::new_snapshot(
-            "direct-session".to_string(),
-            root.clone(),
-            "model".to_string(),
-            "https://api.openai.com/v1".to_string(),
-            BackendKind::OpenAiResponses,
-            None,
-            None,
-            None,
-            Vec::new(),
-            None,
-            BTreeMap::new(),
-        );
-        snapshot.behavior = sessions::SessionBehavior::Direct;
+    async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_api_key = std::env::var_os("OPENAI_API_KEY");
+        unsafe { std::env::set_var("OPENAI_API_KEY", "test_dummy_key") };
+        let store_path = temp_store_path("direct_primary");
+        let root = store_path.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&root).unwrap();
 
-        let error = build_resume_config_from_snapshot(
-            snapshot,
+        let created = build_run_config_for_project_with_behavior(
+            RunOptions {
+                workspace_cwd: root.clone(),
+                config_cwd: Some(root.clone()),
+                worker_executable: None,
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                model: test_openai_model_options(),
+                orchestrator_compaction_threshold: Some(32_000),
+                sandbox: SandboxOptions::default(),
+                ssh: SshOptions::default(),
+            },
+            &NacConfig::default(),
+            None,
+            sessions::SessionBehavior::Direct,
+        )
+        .await
+        .unwrap();
+        let session_id = created.session.session_id().unwrap().to_string();
+        let tool_names = created
+            .agent
+            .tool_definitions_for_test()
+            .iter()
+            .map(|definition| definition.function.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(tool_names, crate::tools::WORKER_TOOL_NAMES);
+        assert!(matches!(
+            created.agent.messages.first(),
+            Some(Message::System { content })
+                if content.contains("persistent coding agent")
+                    && !content.contains("coding agent orchestrator")
+        ));
+        let stored = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(stored.behavior, sessions::SessionBehavior::Direct);
+        drop(created);
+
+        let resumed = build_resume_config_for_session(
             store_path.clone(),
+            &session_id,
             &NacConfig::default(),
             root.clone(),
             None,
-            None,
-            true,
-            None,
         )
         .await
-        .err()
-        .expect("direct session must not enter orchestrator construction");
-        assert!(error
-            .to_string()
-            .contains("uses 'direct' behavior and cannot be resumed as an orchestrator"));
-        assert!(!store_path.exists());
+        .unwrap();
+        assert_eq!(
+            resumed.session.behavior(),
+            sessions::SessionBehavior::Direct
+        );
+        assert_eq!(
+            resumed
+                .agent
+                .tool_definitions_for_test()
+                .iter()
+                .map(|definition| definition.function.name.as_str())
+                .collect::<Vec<_>>(),
+            crate::tools::WORKER_TOOL_NAMES
+        );
+
         let _ = std::fs::remove_dir_all(root);
+        restore_env("OPENAI_API_KEY", original_api_key);
     }
 
     /// A config whose `[model]` section resolves through the catalog:

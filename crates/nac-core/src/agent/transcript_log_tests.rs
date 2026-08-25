@@ -30,7 +30,7 @@ fn transcript_test_agent(
             initial_messages: Vec::new(),
             thread_name: match mode {
                 AgentMode::Worker => Some("impl/x".to_string()),
-                AgentMode::Orchestrator => None,
+                AgentMode::Orchestrator | AgentMode::Direct => None,
             },
             dispatch_id: None,
             event_sink: EventSink::none(),
@@ -800,6 +800,57 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     assert!(
         matches!(log[3].1, Message::Assistant { content: Some(ref text), .. } if text == "[run cancelled by user]")
     );
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn direct_failure_marks_streamed_partial_output_as_failed_in_the_log() {
+    let store_path = test_store_path("direct_failed_partial");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let mut agent = transcript_test_agent(
+        ModelClient::new_for_test(),
+        store_path.clone(),
+        Some("session"),
+        AgentMode::Direct,
+    );
+    let seeded = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+    ];
+    crate::store::TranscriptLogWriter::new(&store_path)
+        .unwrap()
+        .append_batch("session", 0, &seeded)
+        .unwrap();
+    agent.messages = seeded;
+    agent.committed_log_len = agent.messages.len() as u64;
+    *agent.partial_stream.lock().unwrap() = ModelStreamDelta {
+        text: "work in progress".to_string(),
+        reasoning: "private reasoning fragment".to_string(),
+    };
+
+    agent
+        .normalize_failed_tail_preserving_partial()
+        .await
+        .unwrap();
+
+    assert_eq!(agent.messages.len(), 3);
+    assert!(matches!(
+        &agent.messages[2],
+        Message::Assistant {
+            content: Some(content),
+            reasoning_text: Some(reasoning),
+            tool_calls,
+            ..
+        } if content == "work in progress\n\n[run failed after this partial assistant response]"
+            && reasoning == "private reasoning fragment"
+            && tool_calls.is_none()
+    ));
+    assert_eq!(read_log(&store_path, "session").len(), 3);
+    assert!(agent.partial_stream.lock().unwrap().is_empty());
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

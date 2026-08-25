@@ -380,6 +380,18 @@ pub struct ToolRuntime {
     pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
     /// Light worker model client; `None` keeps single-model dispatch.
     pub light_client: Option<Arc<crate::model::ModelClient>>,
+    /// Exact construction-time capability set exposed to this agent. `None`
+    /// is reserved for native/test callers that intentionally invoke the
+    /// global operation boundary without a model-visible snapshot.
+    pub allowed_tools: Option<Arc<std::collections::HashSet<String>>>,
+}
+
+impl ToolRuntime {
+    pub(crate) fn allows_tool(&self, name: &str) -> bool {
+        self.allowed_tools
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(name))
+    }
 }
 
 pub(crate) fn resolve_workspace_path(runtime: &ToolRuntime, path: impl AsRef<Path>) -> PathBuf {
@@ -450,7 +462,7 @@ impl kernel::NativeTool for ReadTool {
 
 struct LegacyDirectTool<const KIND: u8>;
 
-const WORKER_TOOL_NAMES: [&str; 8] = [
+pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
     "read",
     "write",
     "edit",
@@ -551,6 +563,14 @@ pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
         .definitions()
 }
 
+pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission> {
+    worker_tool_registry(false)
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot(WORKER_TOOL_NAMES)
+        .expect("built-in direct capability selection must be complete")
+        .admission(name)
+}
+
 pub fn orchestrator_tool_definitions(
     skills: Option<&SkillRegistry>,
     light: Option<&crate::model::ModelClient>,
@@ -626,6 +646,12 @@ pub async fn execute_tool_with_context(
     client: &crate::model::ModelClient,
     context: &kernel::ToolCallContext,
 ) -> ToolResult {
+    if !runtime.allows_tool(name) {
+        return ToolResult::text(
+            format!("Error: unknown tool '{name}' is not available to this agent"),
+            true,
+        );
+    }
     if name.starts_with("mcp__") {
         let Some(registry) = &runtime.mcp else {
             return ToolResult {
@@ -671,6 +697,8 @@ pub async fn execute_tool_with_context(
 #[cfg(test)]
 mod discovery_tool_definition_tests {
     use super::{kernel, worker_tool_definitions, worker_tool_registry, ReadTool};
+    use std::collections::HashSet;
+    use std::sync::Arc;
 
     #[test]
     fn every_worker_receives_complete_glob_and_grep_definitions_once() {
@@ -718,6 +746,25 @@ mod discovery_tool_definition_tests {
                 "missing grep property {property}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn model_execution_cannot_invoke_a_tool_outside_its_capability_snapshot() {
+        let mut runtime = super::test_runtime();
+        runtime.allowed_tools = Some(Arc::new(HashSet::from(["read".to_string()])));
+        let result = super::execute_tool(
+            "thread",
+            serde_json::json!({"name":"escape","action":"must not run"}),
+            &runtime,
+            &crate::model::ModelClient::new_for_test(),
+        )
+        .await;
+        assert!(result.is_error);
+        assert_eq!(
+            result.content.as_text(),
+            Some("Error: unknown tool 'thread' is not available to this agent")
+        );
+        assert!(runtime.active_threads.names().is_empty());
     }
 
     #[test]
@@ -832,5 +879,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         light_client: None,
+        allowed_tools: None,
     }
 }
