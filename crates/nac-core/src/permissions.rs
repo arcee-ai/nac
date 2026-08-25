@@ -4,7 +4,7 @@
 //! allow decision authorizes the prepared invocation through its already
 //! selected [`crate::sandbox::ExecutionBackend`]; it never changes backends.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -16,6 +16,7 @@ use crate::sandbox::ExecutionBackend;
 use crate::tools::kernel::PermissionResource;
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const APPROVAL_SUBSCRIBER_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -202,21 +203,22 @@ impl PermissionBroker {
             .ok_or_else(|| anyhow::anyhow!("permission request '{request_id}' was not found"))?;
 
         if reply == PermissionReply::Always {
-            let mut by_action = BTreeMap::<String, Vec<String>>::new();
-            for resource in &pending.request.resources {
-                if let Some(save) = &resource.save_resource {
-                    by_action
-                        .entry(resource.action.clone())
-                        .or_default()
-                        .push(save.clone());
-                }
-            }
-            for (action, resources) in by_action {
-                crate::store::insert_permission_grants(
+            let grants = pending
+                .request
+                .resources
+                .iter()
+                .filter_map(|resource| {
+                    resource
+                        .save_resource
+                        .as_ref()
+                        .map(|save| (resource.action.clone(), save.clone()))
+                })
+                .collect::<Vec<_>>();
+            if !grants.is_empty() {
+                crate::store::insert_permission_grant_set(
                     &self.store_path,
                     &self.session_id,
-                    &action,
-                    &resources,
+                    &grants,
                     self.backend,
                     self.session_config_version,
                 )?;
@@ -324,35 +326,86 @@ impl PermissionBroker {
             request: request.clone(),
         });
 
+        tokio::pin!(receiver);
         let result = tokio::select! {
-            reply = receiver => match reply {
-                Ok(PermissionReply::Once | PermissionReply::Always) => AuthorizationOutcome::Allowed,
-                Ok(PermissionReply::Reject) => AuthorizationOutcome::Denied("the user rejected this permission request".to_string()),
-                Err(_) => AuthorizationOutcome::Denied("the permission request ended before a reply".to_string()),
+            biased;
+            reply = &mut receiver => Self::reply_outcome(reply),
+            () = cancellation.cancelled() => {
+                let reason = "run was cancelled while awaiting approval".to_string();
+                if self.dismiss_pending(&request.id, reason.clone()) {
+                    AuthorizationOutcome::Denied(reason)
+                } else {
+                    Self::reply_outcome(receiver.await)
+                }
             },
-            () = cancellation.cancelled() => AuthorizationOutcome::Denied("run was cancelled while awaiting approval".to_string()),
-            () = tokio::time::sleep(APPROVAL_TIMEOUT) => AuthorizationOutcome::Denied("permission request timed out without a reply".to_string()),
+            () = self.interactive_subscriber_lost() => {
+                let reason = "the interactive session client disconnected while approval was pending".to_string();
+                if self.dismiss_pending(&request.id, reason.clone()) {
+                    AuthorizationOutcome::Denied(reason)
+                } else {
+                    Self::reply_outcome(receiver.await)
+                }
+            },
+            () = tokio::time::sleep(APPROVAL_TIMEOUT) => {
+                let reason = "permission request timed out without a reply".to_string();
+                if self.dismiss_pending(&request.id, reason.clone()) {
+                    AuthorizationOutcome::Denied(reason)
+                } else {
+                    Self::reply_outcome(receiver.await)
+                }
+            },
         };
+        // A reply owns the request by removing it before durable grants are
+        // written. If receiving the reply won the select, there is nothing to
+        // dismiss; if a signal won after that claim, the branch awaited the
+        // reply instead of racing cancellation against persisted authority.
+        result
+    }
+
+    fn reply_outcome(
+        reply: Result<PermissionReply, tokio::sync::oneshot::error::RecvError>,
+    ) -> AuthorizationOutcome {
+        match reply {
+            Ok(PermissionReply::Once | PermissionReply::Always) => AuthorizationOutcome::Allowed,
+            Ok(PermissionReply::Reject) => AuthorizationOutcome::Denied(
+                "the user rejected this permission request".to_string(),
+            ),
+            Err(_) => AuthorizationOutcome::Denied(
+                "the permission request ended before a reply".to_string(),
+            ),
+        }
+    }
+
+    fn dismiss_pending(&self, request_id: &str, reason: String) -> bool {
         let dismissed = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .pending
-            .remove(&request.id)
+            .remove(request_id)
             .is_some();
         if dismissed {
-            let reason = match &result {
-                AuthorizationOutcome::Denied(reason) => reason.clone(),
-                AuthorizationOutcome::Allowed => {
-                    "the permission request ended without a reply".to_string()
-                }
-            };
             self.emit(crate::events::SessionEvent::PermissionDismissed {
-                request_id: request.id,
+                request_id: request_id.to_string(),
                 reason,
             });
         }
-        result
+        dismissed
+    }
+
+    async fn interactive_subscriber_lost(&self) {
+        loop {
+            tokio::time::sleep(APPROVAL_SUBSCRIBER_POLL_INTERVAL).await;
+            let interactive = self
+                .event_bus
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
+            if !interactive {
+                return;
+            }
+        }
     }
 
     fn emit(&self, event: crate::events::SessionEvent) {
@@ -484,6 +537,8 @@ fn backend_defaults(backend: PermissionBackend) -> Vec<PermissionRule> {
     let mut rules = vec![
         PermissionRule::new("*", "*", Allow),
         PermissionRule::new("external_directory", "*", Ask),
+        PermissionRule::new("execute_opaque", "*", Ask),
+        PermissionRule::new("execute_broad", "*", Ask),
         PermissionRule::new("read", "*.env", Ask),
         PermissionRule::new("read", "*.env.*", Ask),
         PermissionRule::new("read", "*.env.example", Allow),
@@ -546,7 +601,15 @@ pub(crate) fn file_resources(
     store_path: &Path,
     mutating: bool,
 ) -> Vec<PermissionResource> {
-    let resolved_path = lexical_normalize(&resolved_path);
+    let resolved_path = match backend {
+        ExecutionBackend::Local { .. } => {
+            crate::tools::mutation::resolve_target_path(&resolved_path)
+                .unwrap_or_else(|_| lexical_normalize(&resolved_path))
+        }
+        ExecutionBackend::Sandbox(_) | ExecutionBackend::Ssh(_) => {
+            lexical_normalize(&resolved_path)
+        }
+    };
     let display = resolved_path.display().to_string();
     let mut resource = PermissionResource::new(action, display.clone())
         .with_display(display.clone())
@@ -563,7 +626,15 @@ pub(crate) fn file_resources(
         }
     }
 
-    let workspace = lexical_normalize(&backend.default_terminal_cwd());
+    let workspace = match backend {
+        ExecutionBackend::Local { .. } => {
+            crate::tools::mutation::resolve_target_path(&backend.default_terminal_cwd())
+                .unwrap_or_else(|_| lexical_normalize(&backend.default_terminal_cwd()))
+        }
+        ExecutionBackend::Sandbox(_) | ExecutionBackend::Ssh(_) => {
+            lexical_normalize(&backend.default_terminal_cwd())
+        }
+    };
     let mut resources = vec![resource];
     if !path_is_within(&resolved_path, &workspace) {
         resources.push(
@@ -573,6 +644,42 @@ pub(crate) fn file_resources(
         );
     }
     resources
+}
+
+/// Re-resolve every path-bearing resource immediately before authorization.
+/// This closes the lexical projection gap for SSH and sandbox paths while
+/// keeping prepared calls fully decoded and side-effect free.
+pub(crate) async fn canonicalize_authorization_resources(
+    resources: &[PermissionResource],
+    backend: &ExecutionBackend,
+    store_path: &Path,
+) -> anyhow::Result<Vec<PermissionResource>> {
+    let path_actions = ["read", "edit", "glob", "grep", "execute_path"];
+    let projected_paths = resources
+        .iter()
+        .filter(|resource| path_actions.contains(&resource.action.as_str()))
+        .map(|resource| resource.resource.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut canonical = Vec::new();
+    for resource in resources {
+        if path_actions.contains(&resource.action.as_str()) {
+            let path = backend
+                .canonicalize_permission_path(Path::new(&resource.resource))
+                .await?;
+            canonical.extend(file_resources(
+                &resource.action,
+                path,
+                backend,
+                store_path,
+                resource.action == "edit",
+            ));
+        } else if resource.action != "external_directory"
+            || !projected_paths.contains(resource.resource.as_str())
+        {
+            canonical.push(resource.clone());
+        }
+    }
+    Ok(canonical)
 }
 
 pub(crate) fn shell_resources(
@@ -598,19 +705,33 @@ pub(crate) fn shell_resources(
                 let canonical = canonical_command(&tokens);
                 let display = tokens.join(" ");
                 let mut resource = PermissionResource::new("execute", canonical)
-                    .with_display(display)
+                    .with_display(display.clone())
                     .with_save_resource(command_grant_candidate(&tokens));
                 if let Some(reason) = hard_shell_denial(&tokens, &cwd, backend) {
                     resource = resource.with_hard_denial(reason);
                 }
                 resources.push(resource);
+                if is_broad_command(&tokens) {
+                    resources.push(
+                        PermissionResource::new("execute_broad", canonical_command(&tokens))
+                            .with_display(format!("broad interpreter or shell: {display}")),
+                    );
+                }
+                resources.extend(shell_path_resources(&tokens, &cwd, backend));
             }
         }
         ParsedShell::Opaque => {
             let digest = Sha256::digest(command.as_bytes());
-            resources.push(
+            let mut resource =
                 PermissionResource::new("execute", format!("opaque:sha256:{digest:x}"))
-                    .with_display(command),
+                    .with_display(command);
+            if let Some(reason) = opaque_hard_shell_denial(command, &cwd, backend) {
+                resource = resource.with_hard_denial(reason);
+            }
+            resources.push(resource);
+            resources.push(
+                PermissionResource::new("execute_opaque", format!("opaque:sha256:{digest:x}"))
+                    .with_display("unsupported shell syntax requires explicit approval"),
             );
         }
     }
@@ -618,7 +739,8 @@ pub(crate) fn shell_resources(
 }
 
 fn is_store_path(path: &Path, store_path: &Path) -> bool {
-    let store = lexical_normalize(store_path);
+    let store = crate::tools::mutation::resolve_target_path(store_path)
+        .unwrap_or_else(|_| lexical_normalize(store_path));
     if path == store {
         return true;
     }
@@ -778,11 +900,11 @@ fn command_grant_candidate(tokens: &[String]) -> String {
         "bash", "bun", "dash", "deno", "env", "fish", "node", "nodejs", "npm", "perl", "php",
         "pnpm", "python", "python3", "rm", "ruby", "sh", "sudo", "yarn", "zsh",
     ];
-    let command = tokens
+    let command = effective_command_tokens(tokens)
         .first()
         .and_then(|command| command.rsplit('/').next())
         .unwrap_or_default();
-    if tokens.is_empty() || BANNED.contains(&command) {
+    if tokens.is_empty() || BANNED.contains(&command) || is_broad_command(tokens) {
         return canonical_command(tokens);
     }
     let width = tokens.len().min(2);
@@ -790,6 +912,7 @@ fn command_grant_candidate(tokens: &[String]) -> String {
 }
 
 fn hard_shell_denial(tokens: &[String], cwd: &Path, backend: &ExecutionBackend) -> Option<String> {
+    let tokens = effective_command_tokens(tokens);
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
     if matches!(
         command.as_str(),
@@ -808,7 +931,7 @@ fn hard_shell_denial(tokens: &[String], cwd: &Path, backend: &ExecutionBackend) 
             .skip(1)
             .any(|token| matches!(token.as_str(), "clean" | "reset" | "restore"));
         let checkout = tokens.iter().skip(1).any(|token| token == "checkout");
-        if destructive || checkout && tokens.iter().any(|token| token == "--") {
+        if destructive || checkout {
             return Some("destructive Git workspace rewrites are blocked".to_string());
         }
     }
@@ -818,6 +941,214 @@ fn hard_shell_denial(tokens: &[String], cwd: &Path, backend: &ExecutionBackend) 
         );
     }
     None
+}
+
+fn effective_command_tokens(tokens: &[String]) -> &[String] {
+    let mut index = 0;
+    loop {
+        while tokens
+            .get(index)
+            .is_some_and(|token| is_environment_assignment(token))
+        {
+            index += 1;
+        }
+        let Some(command) = tokens
+            .get(index)
+            .and_then(|command| command.rsplit('/').next())
+            .map(str::to_ascii_lowercase)
+        else {
+            return &tokens[index..];
+        };
+        match command.as_str() {
+            "command" | "builtin" | "nohup" => {
+                index += 1;
+                while tokens
+                    .get(index)
+                    .is_some_and(|token| token.starts_with('-'))
+                {
+                    index += 1;
+                }
+            }
+            "exec" => {
+                index += 1;
+                while let Some(option) = tokens.get(index) {
+                    if option == "--" {
+                        index += 1;
+                        break;
+                    }
+                    if option == "-a" {
+                        index = (index + 2).min(tokens.len());
+                    } else if option.starts_with('-') {
+                        index += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            "env" => {
+                index += 1;
+                while let Some(option) = tokens.get(index) {
+                    if option == "--" {
+                        index += 1;
+                        break;
+                    }
+                    if matches!(
+                        option.as_str(),
+                        "-u" | "--unset" | "-C" | "--chdir" | "-S" | "--split-string"
+                    ) {
+                        index = (index + 2).min(tokens.len());
+                    } else if option.starts_with('-') || is_environment_assignment(option) {
+                        index += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            "nice" => {
+                index += 1;
+                if tokens.get(index).is_some_and(|token| token == "-n") {
+                    index = (index + 2).min(tokens.len());
+                } else {
+                    while tokens
+                        .get(index)
+                        .is_some_and(|token| token.starts_with('-'))
+                    {
+                        index += 1;
+                    }
+                }
+            }
+            "time" => {
+                index += 1;
+                while tokens
+                    .get(index)
+                    .is_some_and(|token| token.starts_with('-'))
+                {
+                    index += 1;
+                }
+            }
+            "busybox" => index += 1,
+            _ => return &tokens[index..],
+        }
+    }
+}
+
+fn is_environment_assignment(token: &str) -> bool {
+    let Some((name, _)) = token.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.bytes().enumerate().all(|(index, byte)| {
+            byte == b'_' || byte.is_ascii_alphanumeric() && (index > 0 || !byte.is_ascii_digit())
+        })
+}
+
+fn is_broad_command(tokens: &[String]) -> bool {
+    const BROAD: &[&str] = &[
+        "bash", "bun", "dash", "deno", "fish", "node", "nodejs", "npm", "perl", "php", "pnpm",
+        "python", "python3", "ruby", "sh", "yarn", "zsh",
+    ];
+    effective_command_tokens(tokens)
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .is_some_and(|command| {
+            let command = command.to_ascii_lowercase();
+            BROAD.contains(&command.as_str())
+                || command.starts_with("python3.")
+                || command.starts_with("node-")
+        })
+}
+
+fn shell_path_resources(
+    tokens: &[String],
+    cwd: &Path,
+    backend: &ExecutionBackend,
+) -> Vec<PermissionResource> {
+    let mut paths = Vec::<PathBuf>::new();
+    for (index, token) in tokens.iter().enumerate().skip(1) {
+        let candidate = token
+            .split_once('=')
+            .filter(|(option, _)| option.starts_with('-'))
+            .map_or(token.as_str(), |(_, value)| value);
+        let previous_takes_path = index > 0
+            && matches!(
+                tokens[index - 1].as_str(),
+                "--manifest-path" | "--config" | "--output" | "-C" | "-f" | "--file"
+            );
+        if previous_takes_path || looks_like_shell_path(candidate) {
+            let requested = Path::new(candidate);
+            let path = if requested.is_absolute() {
+                requested.to_path_buf()
+            } else {
+                cwd.join(requested)
+            };
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+        .into_iter()
+        .flat_map(|path| file_resources("execute_path", path, backend, Path::new(""), false))
+        .collect()
+}
+
+fn looks_like_shell_path(value: &str) -> bool {
+    value.starts_with('/')
+        || value.starts_with("./")
+        || value.starts_with("../")
+        || value == ".env"
+        || value.starts_with(".env.")
+}
+
+fn opaque_hard_shell_denial(
+    command: &str,
+    cwd: &Path,
+    backend: &ExecutionBackend,
+) -> Option<String> {
+    let tokens = opaque_unquoted_tokens(command);
+    for index in 0..tokens.len() {
+        if let Some(reason) = hard_shell_denial(&tokens[index..], cwd, backend) {
+            return Some(reason);
+        }
+    }
+    None
+}
+
+fn opaque_unquoted_tokens(command: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for current in command.chars() {
+        if escaped {
+            if quote.is_none() {
+                word.push(current);
+            }
+            escaped = false;
+            continue;
+        }
+        if current == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(active) = quote {
+            if current == active {
+                quote = None;
+            }
+            continue;
+        }
+        if current == '\'' || current == '"' {
+            quote = Some(current);
+        } else if current.is_ascii_alphanumeric() || "_./~-".contains(current) {
+            word.push(current);
+        } else if !word.is_empty() {
+            tokens.push(std::mem::take(&mut word));
+        }
+    }
+    if !word.is_empty() {
+        tokens.push(word);
+    }
+    tokens
 }
 
 fn removes_protected_root(tokens: &[String], cwd: &Path, backend: &ExecutionBackend) -> bool {
@@ -955,6 +1286,15 @@ mod tests {
                 .effect,
             PermissionEffect::Allow
         );
+        for action in ["execute_opaque", "execute_broad"] {
+            assert_eq!(
+                PermissionPolicy::for_backend(PermissionBackend::Podman, [])
+                    .evaluate(&[PermissionResource::new(action, "command")], &[])
+                    .effect,
+                PermissionEffect::Ask,
+                "Podman confinement must not silently authorize {action}"
+            );
+        }
     }
 
     #[test]
@@ -990,6 +1330,65 @@ mod tests {
         assert!(store[0].hard_denial.is_some());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn local_file_projection_resolves_symlinks_and_nonexistent_final_targets() {
+        use std::os::unix::fs::symlink;
+
+        let base =
+            std::env::temp_dir().join(format!("nac-permission-links-{}", uuid::Uuid::new_v4()));
+        let workspace = base.join("workspace");
+        let external = base.join("external");
+        std::fs::create_dir_all(workspace.join(".git")).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(external.join("secret"), "secret").unwrap();
+        let store = external.join("store.db");
+        std::fs::write(&store, "store").unwrap();
+        symlink(&external, workspace.join("outside-link")).unwrap();
+        symlink(workspace.join(".git"), workspace.join("git-link")).unwrap();
+        symlink(&store, workspace.join("store-link")).unwrap();
+        let backend = local(&workspace);
+        let canonical_external = external.canonicalize().unwrap();
+
+        let outside = file_resources(
+            "read",
+            workspace.join("outside-link/secret"),
+            &backend,
+            &store,
+            false,
+        );
+        assert!(outside.iter().any(|resource| {
+            resource.action == "external_directory"
+                && resource.resource == canonical_external.join("secret").display().to_string()
+        }));
+
+        let nonexistent = file_resources(
+            "edit",
+            workspace.join("outside-link/new-file"),
+            &backend,
+            &store,
+            true,
+        );
+        assert!(nonexistent.iter().any(|resource| {
+            resource.action == "external_directory"
+                && resource.resource == canonical_external.join("new-file").display().to_string()
+        }));
+
+        let git = file_resources(
+            "edit",
+            workspace.join("git-link/config"),
+            &backend,
+            &store,
+            true,
+        );
+        assert!(git[0].hard_denial.is_some());
+        let active_store =
+            file_resources("edit", workspace.join("store-link"), &backend, &store, true);
+        assert!(active_store[0].hard_denial.is_some());
+
+        let _ = std::fs::remove_dir_all(base);
+    }
+
     #[test]
     fn shell_projection_tokenizes_segments_and_never_generalizes_opaque_or_banned_commands() {
         let backend = local(Path::new("/workspace"));
@@ -1008,6 +1407,7 @@ mod tests {
         let opaque = shell_resources("bash -c '$(dynamic)'", Path::new("/workspace"), &backend);
         assert!(opaque[0].resource.starts_with("opaque:sha256:"));
         assert!(opaque[0].save_resource.is_none());
+        assert_eq!(opaque[1].action, "execute_opaque");
         let removal = shell_resources("rm -rf target", Path::new("/workspace"), &backend);
         assert_eq!(
             removal[0].save_resource.as_deref(),
@@ -1056,6 +1456,61 @@ mod tests {
         )[0]
         .hard_denial
         .is_some());
+        for command in [
+            "command sudo make install",
+            "command -- sudo make install",
+            "env MODE=test sudo make install",
+            "env -u SAFE sudo make install",
+            "exec -a installer sudo make install",
+            "nice -n 1 sudo make install",
+            "busybox rm -rf /workspace",
+            "sudo make install > /tmp/result",
+            "git checkout .",
+        ] {
+            assert!(
+                shell_resources(command, Path::new("/workspace"), &backend)[0]
+                    .hard_denial
+                    .is_some(),
+                "wrapper or opaque syntax must not bypass hard denial: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn broad_commands_and_shell_path_arguments_project_independent_guards() {
+        let backend = local(Path::new("/workspace"));
+        let broad = shell_resources(
+            "env MODE=test bash -c true",
+            Path::new("/workspace"),
+            &backend,
+        );
+        assert!(broad
+            .iter()
+            .any(|resource| resource.action == "execute_broad"));
+        assert_eq!(
+            broad[0].save_resource.as_deref(),
+            Some(broad[0].resource.as_str())
+        );
+
+        for command in [
+            "rg needle /outside/.env",
+            "cargo test --manifest-path /outside/Cargo.toml",
+            "make -f /outside/Makefile",
+            "git diff --no-index /workspace/a /outside/b",
+            "git diff --output=/outside/diff.txt",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            assert!(resources
+                .iter()
+                .any(|resource| resource.action == "execute_path"));
+            assert!(
+                resources.iter().any(|resource| {
+                    resource.action == "external_directory"
+                        && resource.resource.starts_with("/outside")
+                }),
+                "external command path must be independently authorized: {command}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1150,6 +1605,110 @@ mod tests {
             crate::events::SessionEvent::PermissionDismissed { reason, .. }
                 if reason.contains("cancelled")
         ));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn losing_the_sole_interactive_subscriber_dismisses_approval_prompt() {
+        let (path, broker) = broker_fixture();
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let mut events = bus.subscribe();
+        let interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let authorize = {
+            let broker = Arc::clone(&broker);
+            tokio::spawn(async move {
+                broker
+                    .authorize(
+                        "exec_command",
+                        &[PermissionResource::new(
+                            "execute",
+                            "command:[curl][example.com]",
+                        )],
+                        &crate::tools::kernel::ToolCallContext::default(),
+                        &crate::tools::ThreadCancellation::default(),
+                    )
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(broker.pending().len(), 1);
+        drop(interactive);
+        let outcome = tokio::time::timeout(Duration::from_secs(1), authorize)
+            .await
+            .expect("disconnect must not leave a ten-minute waiter")
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            AuthorizationOutcome::Denied(reason) if reason.contains("disconnected")
+        ));
+        assert!(broker.pending().is_empty());
+        assert!(matches!(
+            events.recv().await.unwrap().event,
+            crate::events::SessionEvent::PermissionAsked { .. }
+        ));
+        assert!(matches!(
+            events.recv().await.unwrap().event,
+            crate::events::SessionEvent::PermissionDismissed { reason, .. }
+                if reason.contains("disconnected")
+        ));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn claimed_always_reply_wins_over_later_cancellation() {
+        let (path, broker) = broker_fixture();
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let cancellation = crate::tools::ThreadCancellation::default();
+        let resources = vec![
+            PermissionResource::new("execute", "command:[curl][example.com]")
+                .with_save_resource("command:[curl][example.com]*"),
+            PermissionResource::new("read", "/outside/Cargo.toml")
+                .with_save_resource("/outside/Cargo.toml"),
+        ];
+        let authorize = {
+            let broker = Arc::clone(&broker);
+            let cancellation = cancellation.clone();
+            let resources = resources.clone();
+            tokio::spawn(async move {
+                broker
+                    .authorize(
+                        "exec_command",
+                        &resources,
+                        &crate::tools::kernel::ToolCallContext::default(),
+                        &cancellation,
+                    )
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        let request = broker.pending().pop().expect("pending approval");
+
+        let lock = rusqlite::Connection::open(&path).unwrap();
+        lock.busy_timeout(Duration::from_secs(5)).unwrap();
+        lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let reply = {
+            let broker = Arc::clone(&broker);
+            tokio::task::spawn_blocking(move || broker.reply(&request.id, PermissionReply::Always))
+        };
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !broker.pending().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("reply must claim the pending request before persistence");
+        cancellation.cancel();
+        lock.execute_batch("ROLLBACK").unwrap();
+        reply.await.unwrap().unwrap();
+
+        assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
+        let grants = broker.grants().unwrap();
+        assert_eq!(grants.len(), 2);
+        assert!(grants.iter().any(|grant| grant.action == "execute"));
+        assert!(grants.iter().any(|grant| grant.action == "read"));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

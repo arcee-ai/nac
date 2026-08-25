@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -34,11 +34,19 @@ const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    completed_sessions: Arc<Mutex<VecDeque<(String, CompletedTerminal)>>>,
     max_sessions: usize,
     isolate_process_groups: bool,
     output_registry: OutputRegistry,
     preserve_retained_on_settlement: bool,
     instance_id: Arc<str>,
+}
+
+#[derive(Clone)]
+struct CompletedTerminal {
+    output_id: String,
+    preview_cursor: u64,
+    exit_code: Option<i32>,
 }
 
 impl TerminalManager {
@@ -68,6 +76,7 @@ impl TerminalManager {
     ) -> Result<Self> {
         Ok(Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            completed_sessions: Arc::new(Mutex::new(VecDeque::new())),
             max_sessions: 16,
             isolate_process_groups,
             output_registry: OutputRegistry::new(limits)?,
@@ -100,11 +109,16 @@ impl TerminalManager {
     pub async fn create(
         &self,
         name: String,
+        command: &str,
         cwd: Option<PathBuf>,
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
     ) -> Result<TerminalInfo> {
+        self.completed_sessions
+            .lock()
+            .await
+            .retain(|(session_name, _)| session_name != &name);
         let old = {
             let mut sessions = self.sessions.lock().await;
             sessions.remove(&name)
@@ -116,6 +130,24 @@ impl TerminalManager {
                     old.name
                 );
             }
+        }
+
+        let exited: Vec<TerminalSession> = {
+            let mut sessions = self.sessions.lock().await;
+            let names = sessions
+                .iter_mut()
+                .filter_map(|(name, session)| {
+                    session.refresh_status();
+                    (!session.is_alive()).then(|| name.clone())
+                })
+                .collect::<Vec<_>>();
+            names
+                .into_iter()
+                .filter_map(|name| sessions.remove(&name))
+                .collect()
+        };
+        for mut session in exited {
+            self.remember_completed(&mut session).await;
         }
 
         let evicted: Vec<TerminalSession> = {
@@ -151,6 +183,7 @@ impl TerminalManager {
 
         let session = TerminalSession::spawn(
             name.clone(),
+            command,
             cwd,
             cols,
             rows,
@@ -176,6 +209,45 @@ impl TerminalManager {
             return Err(anyhow!("terminal command cancelled"));
         }
         let bytes = parse_keys(input);
+        let completed = {
+            let completed = self.completed_sessions.lock().await;
+            completed
+                .iter()
+                .find(|(session_name, _)| session_name == name)
+                .map(|(_, terminal)| terminal.clone())
+        };
+        if let Some(completed) = completed {
+            if !bytes.is_empty() {
+                return Err(anyhow!("terminal session '{name}' has already exited"));
+            }
+            let preview = self.output_registry.preview_since(
+                &completed.output_id,
+                OutputStream::Combined,
+                completed.preview_cursor,
+                max_output,
+            )?;
+            if let Some((_, terminal)) = self
+                .completed_sessions
+                .lock()
+                .await
+                .iter_mut()
+                .find(|(session_name, _)| session_name == name)
+            {
+                terminal.preview_cursor = preview.end_offset;
+            }
+            return Ok(TerminalOutput {
+                session_name: None,
+                retained: false,
+                output_id: completed.output_id,
+                start_cursor: preview.start_offset,
+                end_cursor: preview.end_offset,
+                content_preview: preview.content,
+                truncated: preview.truncated,
+                overflowed: preview.overflowed,
+                exit_code: completed.exit_code,
+                wall_time_ms: start.elapsed().as_millis() as u64,
+            });
+        }
         let (output_id, start_cursor, notify) = {
             let mut sessions = self.sessions.lock().await;
             let session = sessions
@@ -245,13 +317,8 @@ impl TerminalManager {
         };
 
         let (session_name, exit_code) = if let Some(mut session) = ended_session {
-            (
-                None,
-                session
-                    .wait_for_exit_code()
-                    .await
-                    .or_else(|| session.exit_code()),
-            )
+            let exit_code = self.remember_completed(&mut session).await;
+            (None, exit_code)
         } else {
             (Some(name.to_string()), None)
         };
@@ -556,6 +623,7 @@ impl TerminalManager {
                 );
             }
         }
+        self.completed_sessions.lock().await.clear();
         self.output_registry.clear();
     }
 
@@ -602,12 +670,18 @@ impl TerminalManager {
     pub fn has_retained(&self) -> bool {
         self.sessions
             .try_lock()
-            .map(|sessions| sessions.values().any(TerminalSession::is_retained))
+            .map(|mut sessions| {
+                sessions.values_mut().any(|session| {
+                    session.refresh_status();
+                    session.is_retained() && session.is_alive()
+                })
+            })
             // A concurrent terminal operation is not a safe eviction point.
             .unwrap_or(true)
     }
 
-    pub async fn get(&self, name: &str) -> Option<TerminalInfo> {
+    #[cfg(test)]
+    pub(crate) async fn get(&self, name: &str) -> Option<TerminalInfo> {
         let mut sessions = self.sessions.lock().await;
         sessions.get_mut(name).map(|session| {
             session.refresh_status();
@@ -626,6 +700,25 @@ impl TerminalManager {
             idle_ms: session.idle_duration().as_millis() as u64,
             pid: session.pid(),
         }
+    }
+
+    async fn remember_completed(&self, session: &mut TerminalSession) -> Option<i32> {
+        let exit_code = session
+            .wait_for_exit_code()
+            .await
+            .or_else(|| session.exit_code());
+        let completed = CompletedTerminal {
+            output_id: session.output_id().to_string(),
+            preview_cursor: session.preview_cursor(),
+            exit_code,
+        };
+        let mut tombstones = self.completed_sessions.lock().await;
+        tombstones.retain(|(name, _)| name != &session.name);
+        tombstones.push_back((session.name.clone(), completed));
+        while tombstones.len() > self.max_sessions {
+            tombstones.pop_front();
+        }
+        exit_code
     }
 
     async fn wait_for_pty_output(
@@ -1169,7 +1262,7 @@ mod tests {
         let manager = TerminalManager::new();
         let backend = backend();
         manager
-            .create("pty-cancel".to_string(), None, 120, 40, &backend)
+            .create("pty-cancel".to_string(), "bash", None, 120, 40, &backend)
             .await
             .unwrap();
         let cancellation = ThreadCancellation::default();
@@ -1204,11 +1297,11 @@ mod tests {
         let foreground = manager.next_session_name();
         let retained = manager.next_session_name();
         manager
-            .create(foreground.clone(), None, 120, 40, &backend)
+            .create(foreground.clone(), "bash", None, 120, 40, &backend)
             .await
             .unwrap();
         manager
-            .create(retained.clone(), None, 120, 40, &backend)
+            .create(retained.clone(), "bash", None, 120, 40, &backend)
             .await
             .unwrap();
         let info = manager.retain(&retained).await.unwrap();
@@ -1221,17 +1314,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exited_retained_terminals_do_not_exhaust_live_capacity() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let marker =
+            std::env::temp_dir().join(format!("nac-retained-capacity-{}", uuid::Uuid::new_v4()));
+        let command = format!("while [ ! -e {} ]; do sleep 0.01; done", marker.display());
+        let mut names = Vec::new();
+        for _ in 0..manager.max_sessions {
+            let name = manager.next_session_name();
+            manager
+                .create(name.clone(), &command, None, 120, 40, &backend)
+                .await
+                .unwrap();
+            manager.retain(&name).await.unwrap();
+            names.push(name);
+        }
+        std::fs::write(&marker, b"done").unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let mut all_exited = true;
+                for name in &names {
+                    all_exited &= manager.get(name).await.is_some_and(|info| !info.alive);
+                }
+                if all_exited {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("retained commands did not exit");
+
+        let replacement = manager.next_session_name();
+        manager
+            .create(replacement.clone(), "sleep 30", None, 120, 40, &backend)
+            .await
+            .expect("exited retained handles must be reaped before capacity is checked");
+        assert!(manager.get(&replacement).await.is_some());
+        let completed = manager
+            .write_stdin(&names[0], "", 0, 8_000, None)
+            .await
+            .expect("reaped retained status remains observable through a bounded tombstone");
+        assert_eq!(completed.exit_code, Some(0));
+        assert!(completed.session_name.is_none());
+        manager.remove_all().await;
+        let _ = std::fs::remove_file(marker);
+    }
+
+    #[tokio::test]
     async fn direct_cancellation_stops_foreground_and_preserves_retained_terminal() {
         let manager = TerminalManager::for_direct();
         let backend = backend();
         let foreground = manager.next_session_name();
         let retained = manager.next_session_name();
         manager
-            .create(foreground.clone(), None, 120, 40, &backend)
+            .create(foreground.clone(), "bash", None, 120, 40, &backend)
             .await
             .unwrap();
         manager
-            .create(retained.clone(), None, 120, 40, &backend)
+            .create(retained.clone(), "bash", None, 120, 40, &backend)
             .await
             .unwrap();
         manager.retain(&retained).await.unwrap();
@@ -1268,7 +1410,7 @@ mod tests {
         let manager = TerminalManager::new();
         let backend = backend();
         manager
-            .create("pty-recovery".to_string(), None, 120, 40, &backend)
+            .create("pty-recovery".to_string(), "bash", None, 120, 40, &backend)
             .await
             .unwrap();
         let output = manager

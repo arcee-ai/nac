@@ -1,6 +1,109 @@
 # Expanded NAC harness progress
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
+
+## Active post-review repair phase
+
+Status: **in progress**. The earlier implementation milestones remain useful
+history, but their completion claim predates the post-implementation review in
+`demo_review.md`. The current goal is to resolve NAC-REV-001 through
+NAC-REV-024 with evidence and bring the web-first MVP to production-equivalent
+launch, browser-E2E, and deterministic durability coverage.
+
+Protected initial state verified on 2026-08-25:
+
+- HEAD is `d3e3fc0` on `allison-demo`; the reviewed implementation range is
+  `61b1709..d3e3fc0` and contains the eleven recorded milestone commits.
+- `.gitignore` is modified, `AGENTS.md` and `demo_review.md` are untracked, and
+  `demo_decisions.md` is intentionally ignored. These are user-owned/local and
+  must not be staged or committed.
+- The configured NAC model/backend/effort is available. Sandboxed NAC creation
+  was rejected because Podman is not installed, so read-only audits run with
+  the same model/backend/effort in separate detached clean worktrees at
+  `d3e3fc0`; their Git state must be checked and any mutation attempt cancelled.
+
+### Repair milestones
+
+0. **Completed — re-baseline and acceptance map.** Inspected history and
+   surrounding contracts, run baseline checks, map every review finding, and
+   obtain three independent read-only NAC audits before settling code changes.
+1. **Completed — terminal and authorization safety.** NAC-REV-001..005, 012,
+   013, and 018 are implemented with escape-boundary regression tests; focused
+   and complete `nac-core` gates pass.
+2. **In progress — durability and lifecycle correctness.** Resolve NAC-REV-006..009,
+   016, 017, and 019 with deterministic barriers/failpoints and multi-process
+   assertions; incorporate NAC-REV-014 at its service-lock seam.
+3. **Pending — production-equivalent test foundation.** Preserve `make dev`;
+   add `make demo`, `make test-web`, scripted-model Playwright E2E, and a
+   deterministic durability target; wire frontend tests into declared CI.
+4. **Pending — settled web MVP journeys.** Resolve NAC-REV-010, 011, 015,
+   020..023 through behavior-aware creation/navigation, active-run inbox UX,
+   literal `/goal`, child ownership guards, documentation, and browser tests.
+5. **Pending — closure and integrated review.** Reproduce the permission-SSE
+   lag risk, close all remaining findings, run final NAC adversarial review,
+   production browser smoke, all required gates, and final state audit.
+
+### Finding map
+
+| Finding | Subsystem | Reproduction / contract seam | Focused test seam | Depends on |
+| --- | --- | --- | --- | --- |
+| NAC-REV-001 | terminal launch, permissions | TTY must spawn the exact authorized command; stdin continues that process only | local/SSH/Podman PTY argv, handle authority, input-vs-poll authorization | terminal process contract |
+| NAC-REV-002 | canonical path policy | workspace symlink reaches protected/external target | existing/nonexistent read and mutation symlink targets | canonical resource resolver |
+| NAC-REV-003 | shell hard policy | opaque syntax or wrappers conceal dangerous operation | redirects/substitution/parentheses and wrapper corpus | parser-independent hard classification |
+| NAC-REV-004 | shell argument policy | default-safe command carries external/sensitive path or executable manifest | `rg` external `.env`, Cargo manifest/config/path options | canonical shell argument projection |
+| NAC-REV-005 | cancellation/terminal | cancel while foreground PTY exists and model is between tool polls | deterministic run barrier plus process-tree liveness | terminal ownership/settlement |
+| NAC-REV-006 | inbox/transcript | cancellation races delivered-steer transcript commit | commit barrier, restart, exactly-one successor/canonical message | inbox settlement transaction |
+| NAC-REV-007 | deletion/lifecycle | child creation races parent deletion; SSE retains deleted service/terminal | lifecycle gate barrier and retained-reference cleanup | relationship creation/deletion boundary |
+| NAC-REV-008 | leases/managed monitor | peer process observes active foreign-owned orchestrator | two-process lease owner/observer | durable ownership status |
+| NAC-REV-009 | run recovery/relationships | crash after run terminal persistence but before relationship settlement | failpoints at both terminal crash windows, restart exactly-once | atomic/recoverable settlement |
+| NAC-REV-010 | web creation | both creation flows omit behavior | component plus real-browser selector/default assertions | behavior API already present |
+| NAC-REV-011 | web inbox | active direct composer disables send and exposes no pending controls | component/API/browser steer, edit, cancel, queue | durable inbox API already present |
+| NAC-REV-012 | tool decoding | malformed legacy call asks/persists before full validation | invalid non-projected argument with broker spy | typed/prepared decode seam |
+| NAC-REV-013 | approval broker/SSE | sole subscriber disconnects after ask is created | subscriber lifetime barrier and waiter cancellation | event subscriber ownership |
+| NAC-REV-014 | goal/service locking | live run goal creation cannot bind current baseline | barrier during model run and stale-run settlement | narrower service/agent lock scope |
+| NAC-REV-015 | child ownership/goals | child stored as direct reaches REST/UI goal controls | service REST denial and read-only child browser transcript | ownership-aware capability guard |
+| NAC-REV-016 | managed launch | executable prompt starts before durable relationship binding | pre-submit failpoint and restart | bind-first launch transaction |
+| NAC-REV-017 | relationship generations | continuation rewrites foreground/background mode | concurrent continuation and exactly-once delivery assertions | immutable generation fields |
+| NAC-REV-018 | terminal capacity | exited retained handles fill limit until polled | many short retained commands without manual poll | liveness refresh/eviction |
+| NAC-REV-019 | HTTP ownership mapping | wrong parent receives 500/existence signal | child/orchestrator opaque not-found routes | structured domain error mapping |
+| NAC-REV-020 | commands/web goal UX | literal `/goal` grammar absent | parser/service/component/browser lifecycle cases | goal REST controls |
+| NAC-REV-021 | behavior-aware navigation | direct shows empty Threads/Worksets and weak lineage | component/browser topology and Back-to-Parent journeys | child/orchestrator list APIs |
+| NAC-REV-022 | goal replacement UX | completed goal requires indirect clear/create | component/browser replacement action | `/goal`/panel command model |
+| NAC-REV-023 | documentation | launch docs omit behavior/default/immutability and usage index | documentation assertions/manual review | settled UI/API wording |
+| NAC-REV-024 | Make/CI | Vitest passes outside declared gates | `make test-web`, CI/release invocation, asset freshness | test target wiring |
+
+### NAC read-only audit ledger
+
+- Safety audit `529265ea-b683-4985-a42e-1c1873cc4809` — complete and clean;
+  independently confirmed NAC-REV-001..005, 012, 013, and 018, identified the
+  approval-claim/cancellation race and non-atomic multi-action grant write, and
+  recommended deferring automatic completion until exit identity/settlement
+  has an honest durable design.
+- Durability audit `18a259e0-5dc3-474b-afae-9f70a5d96cbe` — active; covers
+  NAC-REV-006..009, 014, 016, 017, and 019.
+- Web/E2E audit `b3e6db71-d220-4d33-9225-72c1f2736cb8` — active; covers
+  NAC-REV-010, 011, 015, 020..024, production launch/E2E architecture, and the
+  permission-SSE replay-gap risk.
+
+### Current verification and next action
+
+- Initial Git state/history inspection: complete.
+- Required repository/notebook/review/objective reading: complete.
+- Baseline `make check`: passed.
+- Milestone 1 implementation: exact-command PTYs on Local/Podman/SSH; canonical
+  local and remote authorization targets; opaque/broad/wrapper and path-bearing
+  shell guards; complete legacy adapter decoding before approval; independent
+  terminal observe/input policy and safe telemetry; direct foreground-terminal
+  cancellation; approval dismissal on sole interactive disconnect; atomic
+  multi-action grants with reply-claim ordering; live-capacity pruning with
+  bounded process-local exit tombstones; and parent-cancellation propagation to
+  foreground managed orchestrators.
+- Milestone 1 evidence: focused regression groups pass; `make check` passes;
+  `make lint` passes; complete `make crate-test CRATE=nac-core` passes with
+  1035 passed and 9 environment-dependent ignored tests.
+- Next action: begin deterministic durability repairs from the active
+  durability audit, preserving the committed safety boundary as the new
+  baseline.
 
 ## Objective and invariants
 

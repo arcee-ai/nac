@@ -601,8 +601,7 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
     }
 
     fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
-        // These adapters preserve the existing tool-specific validation and
-        // result wording. They can migrate to typed inputs independently.
+        validate_legacy_direct_input(KIND, &input)?;
         Ok(input)
     }
 
@@ -635,6 +634,234 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
             }
         })
     }
+}
+
+fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResult> {
+    fn invalid(message: impl Into<String>) -> ToolResult {
+        ToolResult::text(format!("Error: {}", message.into()), true)
+    }
+    fn object(input: &Value) -> Result<&serde_json::Map<String, Value>, ToolResult> {
+        input
+            .as_object()
+            .ok_or_else(|| invalid("tool arguments must be an object"))
+    }
+    fn required_string<'a>(
+        object: &'a serde_json::Map<String, Value>,
+        key: &str,
+    ) -> Result<&'a str, ToolResult> {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid(format!("'{key}' argument must be a string")))
+    }
+    fn optional_string(
+        object: &serde_json::Map<String, Value>,
+        key: &str,
+    ) -> Result<(), ToolResult> {
+        if object.get(key).is_some_and(|value| !value.is_string()) {
+            return Err(invalid(format!("'{key}' argument must be a string")));
+        }
+        Ok(())
+    }
+    fn optional_bool(object: &serde_json::Map<String, Value>, key: &str) -> Result<(), ToolResult> {
+        if object.get(key).is_some_and(|value| !value.is_boolean()) {
+            return Err(invalid(format!("'{key}' argument must be a boolean")));
+        }
+        Ok(())
+    }
+    fn optional_u64(
+        object: &serde_json::Map<String, Value>,
+        key: &str,
+        minimum: u64,
+        maximum: u64,
+    ) -> Result<(), ToolResult> {
+        let Some(value) = object.get(key) else {
+            return Ok(());
+        };
+        if value
+            .as_u64()
+            .is_none_or(|value| value < minimum || value > maximum)
+        {
+            return Err(invalid(format!(
+                "'{key}' argument must be an integer between {minimum} and {maximum}"
+            )));
+        }
+        Ok(())
+    }
+    fn reject_unknown(
+        object: &serde_json::Map<String, Value>,
+        allowed: &[&str],
+    ) -> Result<(), ToolResult> {
+        if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+            return Err(invalid(format!("unknown '{key}' argument")));
+        }
+        Ok(())
+    }
+    fn bounded_string(
+        object: &serde_json::Map<String, Value>,
+        key: &str,
+        required: bool,
+        minimum: usize,
+        maximum: usize,
+    ) -> Result<(), ToolResult> {
+        let value = match object.get(key) {
+            Some(Value::String(value)) => value,
+            None if !required => return Ok(()),
+            _ => return Err(invalid(format!("'{key}' argument must be a string"))),
+        };
+        if value.len() < minimum || value.len() > maximum {
+            return Err(invalid(format!(
+                "'{key}' argument must contain between {minimum} and {maximum} bytes"
+            )));
+        }
+        Ok(())
+    }
+    fn string_array(
+        object: &serde_json::Map<String, Value>,
+        key: &str,
+        minimum: usize,
+        maximum: usize,
+        item_maximum: usize,
+    ) -> Result<(), ToolResult> {
+        let Some(value) = object.get(key) else {
+            return Ok(());
+        };
+        let values = value
+            .as_array()
+            .ok_or_else(|| invalid(format!("'{key}' argument must be an array of strings")))?;
+        if values.len() < minimum || values.len() > maximum {
+            return Err(invalid(format!(
+                "'{key}' must contain between {minimum} and {maximum} strings"
+            )));
+        }
+        if values.iter().any(|value| {
+            value
+                .as_str()
+                .is_none_or(|value| value.len() > item_maximum)
+        }) {
+            return Err(invalid(format!(
+                "'{key}' must contain only strings of at most {item_maximum} bytes"
+            )));
+        }
+        Ok(())
+    }
+
+    let object = object(input)?;
+    match kind {
+        1 => {
+            reject_unknown(object, &["path", "content", "expected_revision"])?;
+            required_string(object, "path")?;
+            required_string(object, "content")?;
+            match object.get("expected_revision") {
+                Some(Value::String(_)) | Some(Value::Null) => {}
+                _ => {
+                    return Err(invalid(
+                        "'expected_revision' must be a revision string or null",
+                    ));
+                }
+            }
+        }
+        2 => {
+            reject_unknown(object, &["path", "expected_revision", "edits"])?;
+            required_string(object, "path")?;
+            required_string(object, "expected_revision")?;
+            let edits = object
+                .get("edits")
+                .and_then(Value::as_array)
+                .filter(|edits| !edits.is_empty())
+                .ok_or_else(|| invalid("'edits' must contain at least one replacement"))?;
+            for edit in edits {
+                let edit = edit
+                    .as_object()
+                    .ok_or_else(|| invalid("each edit must be an object"))?;
+                reject_unknown(edit, &["old_text", "new_text"])?;
+                if required_string(edit, "old_text")?.is_empty() {
+                    return Err(invalid("'old_text' must not be empty"));
+                }
+                required_string(edit, "new_text")?;
+            }
+        }
+        3 => {
+            reject_unknown(
+                object,
+                &["pattern", "root", "gitignore", "hidden", "limit", "cursor"],
+            )?;
+            bounded_string(object, "pattern", true, 1, 1024)?;
+            bounded_string(object, "root", false, 0, 1024)?;
+            optional_bool(object, "gitignore")?;
+            optional_bool(object, "hidden")?;
+            optional_u64(object, "limit", 1, 1_000)?;
+            bounded_string(object, "cursor", false, 0, 4_096)?;
+        }
+        4 => {
+            reject_unknown(
+                object,
+                &[
+                    "pattern",
+                    "roots",
+                    "regex",
+                    "case",
+                    "globs",
+                    "context",
+                    "multiline",
+                    "gitignore",
+                    "hidden",
+                    "limit",
+                    "cursor",
+                ],
+            )?;
+            bounded_string(object, "pattern", true, 1, 65_536)?;
+            string_array(object, "roots", 1, 32, 1_024)?;
+            string_array(object, "globs", 0, 128, 1_024)?;
+            optional_bool(object, "regex")?;
+            optional_bool(object, "multiline")?;
+            optional_bool(object, "gitignore")?;
+            optional_bool(object, "hidden")?;
+            optional_u64(object, "context", 0, 100)?;
+            optional_u64(object, "limit", 1, 1_000)?;
+            bounded_string(object, "cursor", false, 0, 4_096)?;
+            if let Some(case) = object.get("case") {
+                if !matches!(case.as_str(), Some("smart" | "sensitive" | "insensitive")) {
+                    return Err(invalid(
+                        "'case' argument must be smart, sensitive, or insensitive",
+                    ));
+                }
+            }
+        }
+        5 => {
+            required_string(object, "cmd")?;
+            optional_string(object, "workdir")?;
+            optional_bool(object, "tty")?;
+            optional_u64(object, "yield_time_ms", 0, 3_600_000)?;
+            optional_u64(object, "max_output_chars", 0, usize::MAX as u64)?;
+        }
+        6 => {
+            required_string(object, "session_id")?;
+            optional_string(object, "chars")?;
+            optional_bool(object, "retain")?;
+            optional_u64(object, "yield_time_ms", 0, 3_600_000)?;
+            optional_u64(object, "max_output_chars", 0, usize::MAX as u64)?;
+        }
+        7 => {
+            required_string(object, "output_id")?;
+            optional_u64(object, "offset", 0, u64::MAX)?;
+            optional_u64(
+                object,
+                "limit",
+                1,
+                crate::terminal::MAX_OUTPUT_PAGE_BYTES as u64,
+            )?;
+            if let Some(stream) = object.get("stream") {
+                if !matches!(stream.as_str(), Some("combined" | "stdout" | "stderr")) {
+                    return Err(invalid(
+                        "'stream' argument must be combined, stdout, or stderr",
+                    ));
+                }
+            }
+        }
+        _ => unreachable!("unknown built-in direct tool kind"),
+    }
+    Ok(())
 }
 
 async fn execute_legacy_direct(kind: u8, input: Value, runtime: &ToolRuntime) -> ToolResult {
@@ -732,10 +959,25 @@ fn legacy_permission_resources(
                 runtime.backend.as_ref(),
             ))
         }
-        6 => Ok(vec![kernel::PermissionResource::new(
-            "terminal",
-            string(input, "session_id")?,
-        )]),
+        6 => {
+            let session_id = string(input, "session_id")?;
+            let chars = match input.get("chars") {
+                None => "",
+                Some(Value::String(chars)) => chars,
+                Some(_) => return Err(invalid("'chars' argument must be a string")),
+            };
+            let retain = match input.get("retain") {
+                None => false,
+                Some(Value::Bool(retain)) => *retain,
+                Some(_) => return Err(invalid("'retain' argument must be a boolean")),
+            };
+            let action = if chars.is_empty() && !retain {
+                "terminal_observe"
+            } else {
+                "terminal_input"
+            };
+            Ok(vec![kernel::PermissionResource::new(action, session_id)])
+        }
         7 => Ok(vec![kernel::PermissionResource::new(
             "command_output",
             string(input, "output_id")?,
@@ -1101,13 +1343,13 @@ mod discovery_tool_definition_tests {
             .unwrap()
             .prepare("read", serde_json::json!({"path":"fixture.txt"}), services)
             .unwrap();
+        let canonical_fixture = directory.canonicalize().unwrap().join("fixture.txt");
         assert_eq!(
             prepared.permission_resources(),
-            &[kernel::PermissionResource::new(
-                "read",
-                directory.join("fixture.txt").display().to_string()
-            )
-            .with_save_resource(directory.join("fixture.txt").display().to_string())]
+            &[
+                kernel::PermissionResource::new("read", canonical_fixture.display().to_string())
+                    .with_save_resource(canonical_fixture.display().to_string())
+            ]
         );
         let dynamic = prepared.invoke(services, &context).await;
         assert!(!dynamic.is_error, "{}", dynamic.content);
@@ -1174,6 +1416,56 @@ mod discovery_tool_definition_tests {
             .err()
             .expect("invalid permission-relevant root must fail before authorization");
         assert!(invalid.is_error);
+        for (tool, input) in [
+            (
+                "write",
+                serde_json::json!({"path":"file", "expected_revision":null}),
+            ),
+            (
+                "edit",
+                serde_json::json!({"path":"file", "expected_revision":"rev", "edits":[]}),
+            ),
+            ("glob", serde_json::json!({"pattern":"", "root":"."})),
+            (
+                "grep",
+                serde_json::json!({"pattern":"needle", "roots":[], "context":101}),
+            ),
+            (
+                "exec_command",
+                serde_json::json!({"cmd":"git status", "tty":"yes"}),
+            ),
+            (
+                "write_stdin",
+                serde_json::json!({"session_id":"shell-test", "retain":"yes"}),
+            ),
+            (
+                "read_command_output",
+                serde_json::json!({"output_id":"output", "limit":0}),
+            ),
+        ] {
+            let error = snapshot
+                .prepare(tool, input, services)
+                .err()
+                .unwrap_or_else(|| panic!("{tool} must fully decode before authorization"));
+            assert!(error.is_error, "{tool}: {}", error.content);
+        }
+
+        let observe = snapshot
+            .prepare(
+                "write_stdin",
+                serde_json::json!({"session_id":"shell-test", "chars":""}),
+                services,
+            )
+            .unwrap();
+        assert_eq!(observe.permission_resources()[0].action, "terminal_observe");
+        let input = snapshot
+            .prepare(
+                "write_stdin",
+                serde_json::json!({"session_id":"shell-test", "chars":"help<RET>"}),
+                services,
+            )
+            .unwrap();
+        assert_eq!(input.permission_resources()[0].action, "terminal_input");
         let _ = std::fs::remove_dir_all(directory);
     }
 }

@@ -106,9 +106,9 @@ status=$?
 rm -f "$pidfile"
 exit "$status""#;
 
-pub(crate) const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$1
+pub(crate) const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$2
 printf '%s' "$$" > "$pidfile"
-bash -i
+bash -c "$1"
 status=$?
 rm -f "$pidfile"
 exit "$status""#;
@@ -357,6 +357,7 @@ impl PodmanSession {
 
     pub(crate) fn terminal_pty_command(
         &self,
+        cmd_str: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, String) {
@@ -365,6 +366,7 @@ impl PodmanSession {
             "-lc".to_string(),
             SANDBOX_PTY_WRAPPER.to_string(),
             "nac-pty".to_string(),
+            cmd_str.to_string(),
             pidfile.clone(),
         ];
         let mut cmd = PtyCommandBuilder::new("podman");
@@ -987,7 +989,8 @@ mod tests {
             "exec wrapper: {SANDBOX_EXEC_WRAPPER}"
         );
         assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidfile\""));
-        assert!(SANDBOX_PTY_WRAPPER.contains("bash -i"));
+        assert!(SANDBOX_PTY_WRAPPER.contains("bash -c \"$1\""));
+        assert!(!SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));

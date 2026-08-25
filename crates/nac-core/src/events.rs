@@ -1033,7 +1033,22 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
                 "write" => "write",
                 "edit" => "edit",
                 "exec_command" => "execute",
-                "write_stdin" => "terminal_input",
+                "write_stdin" => {
+                    let object = parsed.as_ref().and_then(serde_json::Value::as_object);
+                    let has_input = object
+                        .and_then(|object| object.get("chars"))
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|chars| !chars.is_empty());
+                    let retains = object
+                        .and_then(|object| object.get("retain"))
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                    if has_input || retains {
+                        "terminal_input"
+                    } else {
+                        "terminal_observe"
+                    }
+                }
                 "read_command_output" => "read_command_output",
                 "thread" => "dispatch",
                 "threads" => "list_threads",
@@ -1067,8 +1082,10 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
             copy_safe_u64(object, &mut safe, "max_output_chars");
         }
         "write_stdin" => {
+            copy_safe_string(object, &mut safe, "session_id");
             copy_string_length(object, &mut safe, "chars", "input_chars");
             copy_safe_u64(object, &mut safe, "input_chars");
+            copy_safe_bool(object, &mut safe, "retain");
             copy_safe_u64(object, &mut safe, "yield_time_ms");
             copy_safe_u64(object, &mut safe, "max_output_chars");
         }
