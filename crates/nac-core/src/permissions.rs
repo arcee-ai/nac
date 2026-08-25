@@ -1504,12 +1504,13 @@ mod tests {
             Path::new("/workspace"),
             &backend,
         );
-        assert_eq!(resources.len(), 2);
+        assert_eq!(resources.len(), 3);
         assert_eq!(resources[0].resource, "command:[git][status][--short]");
         assert_eq!(
             resources[0].save_resource.as_deref(),
             Some("command:[git][status]*")
         );
+        assert_eq!(resources[2].action, "execute_cwd");
 
         let opaque = shell_resources("bash -c '$(dynamic)'", Path::new("/workspace"), &backend);
         assert!(opaque[0].resource.starts_with("opaque:sha256:"));
