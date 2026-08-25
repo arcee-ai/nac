@@ -539,6 +539,9 @@ pub struct SessionService {
     /// lost. The server's idle-session eviction uses this to leave sandboxed
     /// sessions cached.
     has_sandbox: bool,
+    /// Serializes process-local idle wake attempts. The cross-process
+    /// operation lease remains the authoritative run admission boundary.
+    inbox_wake: Arc<Mutex<()>>,
     #[cfg(test)]
     frontend_snapshot_after_workspace_gate: Option<Arc<FrontendSnapshotAfterWorkspaceGate>>,
 }
@@ -576,6 +579,7 @@ struct ActiveRunState {
     /// against the run-end count, which is exact when nothing was appended.
     transcript_baseline: Option<usize>,
     command_cancellation: crate::tools::ThreadCancellation,
+    inbox_item_id: Option<i64>,
     _operation_lease: Option<sessions::SessionOperationLease>,
 }
 
@@ -754,6 +758,7 @@ impl SessionService {
             active_threads,
             skills,
             has_sandbox,
+            inbox_wake: Arc::new(Mutex::new(())),
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
         };
@@ -987,6 +992,155 @@ impl SessionService {
             .as_deref()
             .map(SkillRegistry::catalog_entries)
             .unwrap_or_default()
+    }
+
+    fn require_direct_behavior(&self) -> Result<()> {
+        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
+            return Err(anyhow::anyhow!(
+                "the durable session inbox is available only for direct behaviors"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn list_direct_inbox(&self) -> Result<Vec<crate::store::SessionInboxRecord>> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        crate::store::list_session_inbox(&self.metadata.store_path, session_id)
+    }
+
+    pub async fn enqueue_direct_input(
+        &self,
+        delivery: crate::store::InboxDelivery,
+        content: &str,
+        client_id: Option<&SessionClientId>,
+    ) -> Result<crate::store::SessionInboxRecord> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let (record, target_run_id) = {
+            let active = self.lock_active_operation();
+            let target_run_id = match (delivery, active.as_ref()) {
+                (crate::store::InboxDelivery::Steer, Some(ActiveSessionOperation::Run(run)))
+                    if !run.finishing =>
+                {
+                    Some(run.snapshot.run_id.to_string())
+                }
+                _ => None,
+            };
+            let record = crate::store::create_session_inbox_item(
+                &self.metadata.store_path,
+                session_id,
+                delivery,
+                content,
+                target_run_id.as_deref(),
+                client_id.map(SessionClientId::as_str),
+            )?;
+            (record, target_run_id)
+        };
+        if target_run_id.is_none() {
+            self.start_next_direct_inbox_item().await?;
+        }
+        Ok(record)
+    }
+
+    pub async fn update_direct_inbox_item(
+        &self,
+        item_id: i64,
+        expected_version: i64,
+        delivery: crate::store::InboxDelivery,
+    ) -> Result<crate::store::SessionInboxRecord> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let (record, target_run_id) = {
+            let active = self.lock_active_operation();
+            let target_run_id = match (delivery, active.as_ref()) {
+                (crate::store::InboxDelivery::Steer, Some(ActiveSessionOperation::Run(run)))
+                    if !run.finishing =>
+                {
+                    Some(run.snapshot.run_id.to_string())
+                }
+                _ => None,
+            };
+            let record = crate::store::update_pending_session_inbox_item(
+                &self.metadata.store_path,
+                session_id,
+                item_id,
+                expected_version,
+                delivery,
+                target_run_id.as_deref(),
+            )?;
+            (record, target_run_id)
+        };
+        if target_run_id.is_none() {
+            self.start_next_direct_inbox_item().await?;
+        }
+        Ok(record)
+    }
+
+    pub fn cancel_direct_inbox_item(
+        &self,
+        item_id: i64,
+        expected_version: i64,
+    ) -> Result<crate::store::SessionInboxRecord> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        crate::store::cancel_pending_session_inbox_item(
+            &self.metadata.store_path,
+            session_id,
+            item_id,
+            expected_version,
+        )
+    }
+
+    /// Idempotently promote the oldest pending item when this direct session
+    /// is idle. The operation lease is acquired before selection, preventing
+    /// two server processes from promoting the same durable item.
+    pub async fn start_next_direct_inbox_item(&self) -> Result<Option<SessionRunHandle>> {
+        self.require_direct_behavior()?;
+        let _wake = self.inbox_wake.lock().await;
+        if self.has_active_operation() {
+            return Ok(None);
+        }
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let lease = match sessions::SessionOperationLease::try_acquire(
+            &self.metadata.store_path,
+            session_id,
+        ) {
+            Ok(lease) => lease,
+            Err(sessions::SessionOperationLeaseError::Busy(_)) => return Ok(None),
+            Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
+        };
+        if self.has_active_operation() {
+            return Ok(None);
+        }
+        let Some(item) =
+            crate::store::next_pending_session_inbox_item(&self.metadata.store_path, session_id)?
+        else {
+            return Ok(None);
+        };
+        self.try_submit_prompt_inner(None, item.content, Some(lease), Some(item.id))
+            .map(Some)
+            .map_err(anyhow::Error::new)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2101,7 +2255,7 @@ impl SessionService {
         &self,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(None, expanded_prompt, None)
+        self.try_submit_prompt_inner(None, expanded_prompt, None, None)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2110,7 +2264,7 @@ impl SessionService {
         client_id: SessionClientId,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None)
+        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None, None)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2120,7 +2274,7 @@ impl SessionService {
         expanded_prompt: String,
         lease: sessions::SessionOperationLease,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease))
+        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease), None)
     }
 
     pub async fn request_cancel(
@@ -2172,13 +2326,11 @@ impl SessionService {
         }
 
         if let Some(mut task) = cancelling_run.task {
-            if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-                task.abort();
-                let _ = task.await;
-            } else if tokio::time::timeout(Duration::from_secs(2), &mut task)
-                .await
-                .is_err()
-            {
+            let abort = self.metadata.behavior == sessions::SessionBehavior::Orchestrator
+                || tokio::time::timeout(Duration::from_secs(2), &mut task)
+                    .await
+                    .is_err();
+            if abort {
                 task.abort();
                 let _ = task.await;
             }
@@ -2245,6 +2397,11 @@ impl SessionService {
             cancelling_run.snapshot.client_id.clone(),
         );
         self.clear_finished_run(&cancelling_run.snapshot.run_id);
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            if let Err(error) = self.start_next_direct_inbox_item().await {
+                eprintln!("nac: failed to promote direct inbox after cancellation: {error:#}");
+            }
+        }
         Ok(())
     }
 
@@ -2254,15 +2411,21 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
+        inbox_item_id: Option<i64>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        let active_run =
-            self.try_begin_run_with_lease(client_id, &expanded_prompt, operation_lease)?;
+        let active_run = self.try_begin_run_with_lease(
+            client_id,
+            &expanded_prompt,
+            operation_lease,
+            inbox_item_id,
+        )?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
         let prompt_commit = self
             .run_prompt_commit(&run_id)
             .expect("newly admitted run must own its prompt commit channel");
+        let inbox_item_id = self.run_inbox_item_id(&run_id);
         let event_bus = self.event_bus.clone();
         let service = self.clone();
         let task = tokio::spawn(async move {
@@ -2288,7 +2451,7 @@ impl SessionService {
                 ));
                 agent.set_steering_dispatch_id(Some(task_run_id.to_string()));
                 let result = agent
-                    .send_session_run(&expanded_prompt, &task_run_id, prompt_commit)
+                    .send_session_run(&expanded_prompt, &task_run_id, prompt_commit, inbox_item_id)
                     .await
                     .map_err(|error| error.to_string());
                 agent.set_event_sink(EventSink::bus(event_bus));
@@ -2329,7 +2492,7 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        let active = self.try_begin_run_inner(client_id, expanded_prompt, None, false)?;
+        let active = self.try_begin_run_inner(client_id, expanded_prompt, None, false, None)?;
         self.run_prompt_commit(&active.run_id)
             .expect("test run admission must own a prompt commit channel")
             .send_replace(RunPromptCommitStatus::Committed);
@@ -2342,8 +2505,15 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
+        inbox_item_id: Option<i64>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true)
+        self.try_begin_run_inner(
+            client_id,
+            expanded_prompt,
+            supplied_lease,
+            true,
+            inbox_item_id,
+        )
     }
 
     #[allow(clippy::result_large_err)]
@@ -2353,6 +2523,7 @@ impl SessionService {
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
+        inbox_item_id: Option<i64>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let mut guard = self.lock_active_operation();
         match guard.as_ref() {
@@ -2485,6 +2656,7 @@ impl SessionService {
             prompt_commit,
             transcript_baseline: None,
             command_cancellation,
+            inbox_item_id,
             _operation_lease: operation_lease,
         }));
         drop(guard);
@@ -2569,6 +2741,11 @@ impl SessionService {
         self.event_bus
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
         self.clear_finished_run(&run_id);
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            if let Err(error) = self.start_next_direct_inbox_item().await {
+                eprintln!("nac: failed to promote direct inbox after run settlement: {error:#}");
+            }
+        }
         true
     }
 
@@ -2733,6 +2910,16 @@ impl SessionService {
             return None;
         };
         (&active_run.snapshot.run_id == run_id).then(|| active_run.prompt_commit.clone())
+    }
+
+    fn run_inbox_item_id(&self, run_id: &SessionRunId) -> Option<i64> {
+        let guard = self.lock_active_operation();
+        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_ref() else {
+            return None;
+        };
+        (&active_run.snapshot.run_id == run_id)
+            .then_some(active_run.inbox_item_id)
+            .flatten()
     }
 
     fn set_run_task(&self, run_id: &SessionRunId, task: JoinHandle<()>) {
@@ -3451,7 +3638,14 @@ pub(super) mod tests {
         store_path: PathBuf,
         session_id: Option<String>,
     ) -> Agent {
-        build_test_agent(client, store_path, session_id, None, None)
+        build_test_agent(
+            client,
+            store_path,
+            session_id,
+            AgentMode::Orchestrator,
+            None,
+            None,
+        )
     }
 
     pub(super) fn test_agent_with_compaction_threshold(
@@ -3464,6 +3658,7 @@ pub(super) mod tests {
             client,
             store_path,
             session_id,
+            AgentMode::Orchestrator,
             orchestrator_compaction_threshold,
             None,
         )
@@ -3475,13 +3670,21 @@ pub(super) mod tests {
         session_id: Option<String>,
         skills: Option<Arc<SkillRegistry>>,
     ) -> Agent {
-        build_test_agent(client, store_path, session_id, None, skills)
+        build_test_agent(
+            client,
+            store_path,
+            session_id,
+            AgentMode::Orchestrator,
+            None,
+            skills,
+        )
     }
 
     fn build_test_agent(
         client: ModelClient,
         store_path: PathBuf,
         session_id: Option<String>,
+        mode: AgentMode,
         orchestrator_compaction_threshold: Option<u64>,
         skills: Option<Arc<SkillRegistry>>,
     ) -> Agent {
@@ -3489,7 +3692,7 @@ pub(super) mod tests {
             client,
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode: AgentMode::Orchestrator,
+                mode,
                 store_path,
                 session_id,
                 orchestrator_compaction_threshold,
@@ -3535,6 +3738,52 @@ pub(super) mod tests {
         session_id: &str,
     ) -> (SessionServiceParts, PathBuf) {
         test_active_service_with_skills(label, session_id, ModelClient::new_for_test(), None)
+    }
+
+    fn test_direct_active_service(
+        label: &str,
+        session_id: &str,
+        client: ModelClient,
+    ) -> (SessionServiceParts, PathBuf) {
+        let store_path = test_store_path(label);
+        let agent = build_test_agent(
+            client.clone(),
+            store_path.clone(),
+            Some(session_id.to_string()),
+            AgentMode::Direct,
+            None,
+            None,
+        );
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            PathBuf::from("/repo"),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.behavior = sessions::SessionBehavior::Direct;
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: session_id.to_string(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "off".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: "/repo".to_string(),
+            workspace_git: None,
+            resume_base_cwd: PathBuf::from("/repo"),
+        });
+        (parts, store_path)
     }
 
     /// Active-session service whose agent carries a skill registry. The
@@ -4624,6 +4873,265 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn direct_inbox_promotes_queued_prompts_one_at_a_time() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let server = ScriptedServer::start(vec![
+            ScriptedResponse::json(
+                "200 OK",
+                serde_json::json!({
+                    "status": "completed",
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": "first done"}]}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                })
+                .to_string(),
+            ),
+            ScriptedResponse::json(
+                "200 OK",
+                serde_json::json!({
+                    "status": "completed",
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": "second done"}]}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                })
+                .to_string(),
+            ),
+        ]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "session-direct-inbox";
+        let (parts, store_path) = test_direct_active_service("direct_inbox", session_id, client);
+        let service = parts.service;
+        let first = crate::store::create_session_inbox_item(
+            &store_path,
+            session_id,
+            crate::store::InboxDelivery::Queue,
+            "first prompt",
+            None,
+            None,
+        )
+        .unwrap();
+        let second = crate::store::create_session_inbox_item(
+            &store_path,
+            session_id,
+            crate::store::InboxDelivery::Queue,
+            "second prompt",
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(service
+            .start_next_direct_inbox_item()
+            .await
+            .unwrap()
+            .is_some());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let inbox = service.list_direct_inbox().unwrap();
+                if !service.has_active_operation()
+                    && inbox
+                        .iter()
+                        .all(|item| item.status == crate::store::InboxStatus::Delivered)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("both queued prompts should complete");
+
+        let inbox = service.list_direct_inbox().unwrap();
+        assert_eq!(
+            inbox.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![first.id, second.id]
+        );
+        assert!(inbox
+            .iter()
+            .all(|item| item.delivered_run_id.as_deref().is_some()));
+        assert_ne!(inbox[0].delivered_run_id, inbox[1].delivered_run_id);
+        let page = service
+            .messages_page(MessagePageRequest {
+                before: None,
+                limit: 20,
+                include_system: false,
+            })
+            .await
+            .unwrap();
+        let visible_text = page
+            .messages
+            .iter()
+            .map(|message| match message {
+                Message::User { content } => ("user", content.as_str()),
+                Message::Assistant { content, .. } => {
+                    ("assistant", content.as_deref().unwrap_or_default())
+                }
+                other => panic!("unexpected visible message: {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible_text,
+            vec![
+                ("user", "first prompt"),
+                ("assistant", "first done"),
+                ("user", "second prompt"),
+                ("assistant", "second done"),
+            ]
+        );
+        assert_eq!(server.finish().len(), 2);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn direct_inbox_pending_items_are_versioned_editable_and_cancellable() {
+        let session_id = "session-direct-inbox-edit";
+        let (parts, store_path) = test_direct_active_service(
+            "direct_inbox_edit",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        let service = parts.service;
+        let active = service.try_begin_run(None, "active prompt").unwrap();
+        let queued = service
+            .enqueue_direct_input(crate::store::InboxDelivery::Queue, "later", None)
+            .await
+            .unwrap();
+        assert_eq!(queued.target_run_id, None);
+
+        let steered = service
+            .update_direct_inbox_item(
+                queued.id,
+                queued.version,
+                crate::store::InboxDelivery::Steer,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            steered.target_run_id.as_deref(),
+            Some(active.run_id.as_str())
+        );
+        assert_eq!(steered.version, queued.version + 1);
+        let cancelled = service
+            .cancel_direct_inbox_item(steered.id, steered.version)
+            .unwrap();
+        assert_eq!(cancelled.status, crate::store::InboxStatus::Cancelled);
+        assert!(service
+            .cancel_direct_inbox_item(cancelled.id, steered.version)
+            .unwrap_err()
+            .to_string()
+            .contains("no longer pending"));
+
+        service.clear_finished_run(&active.run_id);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn direct_inbox_steer_is_consumed_at_the_next_model_boundary() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let (request_started_tx, request_started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = ScriptedServer::start_observed(
+            vec![
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "unknown_alpha",
+                            "arguments": "{}"
+                        }],
+                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                    })
+                    .to_string(),
+                ),
+                ScriptedResponse::json(
+                    "200 OK",
+                    serde_json::json!({
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "steered done"}]}],
+                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                    })
+                    .to_string(),
+                ),
+            ],
+            move |index, _request| {
+                if index == 0 {
+                    request_started_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+            },
+        );
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "session-direct-steer";
+        let (parts, store_path) =
+            test_direct_active_service("direct_steer_boundary", session_id, client);
+        let service = parts.service;
+        service
+            .enqueue_direct_input(crate::store::InboxDelivery::Queue, "initial prompt", None)
+            .await
+            .unwrap();
+        tokio::task::spawn_blocking(move || {
+            request_started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        let steer = service
+            .enqueue_direct_input(
+                crate::store::InboxDelivery::Steer,
+                "change course at the boundary",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(steer.target_run_id.is_some());
+        release_tx.send(()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while service.has_active_operation()
+                || service
+                    .list_direct_inbox()
+                    .unwrap()
+                    .iter()
+                    .any(|item| item.status != crate::store::InboxStatus::Delivered)
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("steered run should finish");
+        let requests = server.finish();
+        assert_eq!(requests.len(), 2);
+        let first_body = String::from_utf8_lossy(&requests[0].body);
+        let second_body = String::from_utf8_lossy(&requests[1].body);
+        assert!(!first_body.contains("change course at the boundary"));
+        assert!(second_body.contains("change course at the boundary"));
+
+        let inbox = service.list_direct_inbox().unwrap();
+        assert_eq!(inbox.len(), 2);
+        assert_eq!(inbox[0].delivered_run_id, inbox[1].delivered_run_id);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn orchestrator_sessions_reject_the_direct_inbox() {
+        let (parts, store_path) =
+            test_active_service("orchestrator_inbox_rejected", "orchestrator-inbox");
+        let error = parts
+            .service
+            .enqueue_direct_input(crate::store::InboxDelivery::Queue, "not allowed", None)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("only for direct behaviors"));
+        assert!(parts.service.list_direct_inbox().is_err());
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
     async fn steering_requires_an_active_run_and_active_target_thread() {
         let (parts, store_path) = test_active_service("steering", "session-steering");
         let service = parts.service;
@@ -4653,6 +5161,7 @@ pub(super) mod tests {
                 prompt_commit,
                 transcript_baseline: None,
                 command_cancellation: crate::tools::ThreadCancellation::default(),
+                inbox_item_id: None,
                 _operation_lease: None,
             }));
         let inactive = service
@@ -7175,7 +7684,7 @@ pub(super) mod tests {
             test_active_service("cancel_prompt_barrier", "cancel-prompt-barrier");
         let active = parts
             .service
-            .try_begin_run_inner(None, "cancel prompt", None, false)
+            .try_begin_run_inner(None, "cancel prompt", None, false, None)
             .unwrap();
         let prompt_commit = parts.service.run_prompt_commit(&active.run_id).unwrap();
         let cancel_service = parts.service.clone();

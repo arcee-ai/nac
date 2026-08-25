@@ -77,6 +77,7 @@ use nac_core::{
     },
     sessions,
     ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
+    store::{InboxDelivery, SessionInboxRecord},
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
@@ -930,6 +931,60 @@ pub struct ReorderSessionsResponse {
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct SubmitPromptRequest {
     pub prompt: String,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct CreateInboxItemRequest {
+    pub delivery: InboxDelivery,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct UpdateInboxItemRequest {
+    pub expected_version: i64,
+    pub delivery: InboxDelivery,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct CancelInboxItemRequest {
+    pub expected_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct InboxItemResponse {
+    pub id: i64,
+    pub session_id: String,
+    pub delivery: InboxDelivery,
+    pub status: nac_core::store::InboxStatus,
+    pub prompt: String,
+    pub target_run_id: Option<String>,
+    pub client_id: Option<String>,
+    pub delivered_run_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub delivered_at: Option<String>,
+    pub cancelled_at: Option<String>,
+    pub version: i64,
+}
+
+impl From<SessionInboxRecord> for InboxItemResponse {
+    fn from(record: SessionInboxRecord) -> Self {
+        Self {
+            id: record.id,
+            session_id: record.session_id,
+            delivery: record.delivery,
+            status: record.status,
+            prompt: nac_core::commands::display_prompt_from_message(&record.content),
+            target_run_id: record.target_run_id,
+            client_id: record.client_id,
+            delivered_run_id: record.delivered_run_id,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+            delivered_at: record.delivered_at,
+            cancelled_at: record.cancelled_at,
+            version: record.version,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
@@ -1933,6 +1988,7 @@ impl SessionManager {
                 if service.config_version() == Some(version) {
                     let has_recovery = service.has_unreconciled_durable_run_recovery()?;
                     if !has_recovery || service.has_active_operation() {
+                        self.wake_direct_inbox(&service).await?;
                         return Ok(service);
                     }
                     match sessions::SessionOperationLease::try_acquire(
@@ -1941,6 +1997,8 @@ impl SessionManager {
                     ) {
                         Ok(lease) => {
                             service.reconcile_durable_run_recovery(&lease).await?;
+                            drop(lease);
+                            self.wake_direct_inbox(&service).await?;
                             return Ok(service);
                         }
                         Err(sessions::SessionOperationLeaseError::Busy(_)) => {
@@ -1958,8 +2016,9 @@ impl SessionManager {
                 }
             }
 
-            let (service, cacheable, _operation_lease) =
+            let (service, cacheable, operation_lease) =
                 self.resume_session_attachment(session_id).await?;
+            drop(operation_lease);
             let service = Arc::new(service);
             if !cacheable {
                 return Ok(service);
@@ -1973,12 +2032,20 @@ impl SessionManager {
                 .write()
                 .await
                 .insert(session_id.to_string(), Arc::clone(&service));
+            self.wake_direct_inbox(&service).await?;
             return Ok(service);
         }
         Err(anyhow!(
             "session '{}' configuration kept changing during attachment",
             session_id
         ))
+    }
+
+    async fn wake_direct_inbox(&self, service: &SessionService) -> Result<()> {
+        if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
+            service.start_next_direct_inbox_item().await?;
+        }
+        Ok(())
     }
 
     /// Attaches while the caller holds this session's lifecycle gate. Keeping
@@ -2099,6 +2166,55 @@ impl SessionManager {
             .await?
             .messages_page(request)
             .await
+    }
+
+    pub async fn list_direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
+        self.attach_session(session_id).await?.list_direct_inbox()
+    }
+
+    pub async fn create_direct_inbox_item(
+        &self,
+        session_id: &str,
+        request: CreateInboxItemRequest,
+    ) -> Result<SessionInboxRecord> {
+        let service = self.attach_session(session_id).await?;
+        let prompt = match service.prepare_user_input(&request.prompt) {
+            PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
+            PreparedUserInput::InvalidSlashCommand { message } => return Err(anyhow!(message)),
+            PreparedUserInput::FrontendCommand(command) => {
+                return Err(anyhow!(
+                    "frontend command '{}' is not supported by the server API",
+                    frontend_command_name(command)
+                ));
+            }
+            PreparedUserInput::SubmitPrompt(prompt) => prompt,
+        };
+        service
+            .enqueue_direct_input(request.delivery, &prompt.agent_prompt, None)
+            .await
+    }
+
+    pub async fn update_direct_inbox_item(
+        &self,
+        session_id: &str,
+        item_id: i64,
+        request: UpdateInboxItemRequest,
+    ) -> Result<SessionInboxRecord> {
+        self.attach_session(session_id)
+            .await?
+            .update_direct_inbox_item(item_id, request.expected_version, request.delivery)
+            .await
+    }
+
+    pub async fn cancel_direct_inbox_item(
+        &self,
+        session_id: &str,
+        item_id: i64,
+        request: CancelInboxItemRequest,
+    ) -> Result<SessionInboxRecord> {
+        self.attach_session(session_id)
+            .await?
+            .cancel_direct_inbox_item(item_id, request.expected_version)
     }
 
     pub async fn thread_events(
@@ -3065,6 +3181,8 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(reorder_sessions_handler))
         .routes(routes!(update_session_presentation_handler))
         .routes(routes!(session_messages))
+        .routes(routes!(list_direct_inbox, create_direct_inbox_item))
+        .routes(routes!(update_direct_inbox_item, cancel_direct_inbox_item))
         .routes(routes!(thread_events))
         .routes(routes!(workspace_diff))
         .routes(routes!(workspace_files))
@@ -4476,6 +4594,100 @@ async fn session_messages(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/inbox",
+    operation_id = "get_sessions_session_id_inbox",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = Vec<InboxItemResponse>, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn list_direct_inbox(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Vec<InboxItemResponse>>, ApiError> {
+    Ok(Json(
+        manager
+            .list_direct_inbox(&session_id)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/inbox",
+    operation_id = "post_sessions_session_id_inbox",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = CreateInboxItemRequest, content_type = "application/json"),
+    responses((status = 202, description = "Accepted", body = InboxItemResponse, content_type = "application/json"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn create_direct_inbox_item(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<CreateInboxItemRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<InboxItemResponse>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(
+            manager
+                .create_direct_inbox_item(&session_id, request)
+                .await?
+                .into(),
+        ),
+    ))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/sessions/{session_id}/inbox/{item_id}",
+    operation_id = "patch_sessions_session_id_inbox_item_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("item_id" = i64, Path)),
+    request_body(content = UpdateInboxItemRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = InboxItemResponse, content_type = "application/json"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn update_direct_inbox_item(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, item_id)): AxumPath<(String, i64)>,
+    payload: std::result::Result<Json<UpdateInboxItemRequest>, JsonRejection>,
+) -> std::result::Result<Json<InboxItemResponse>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .update_direct_inbox_item(&session_id, item_id, request)
+            .await?
+            .into(),
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/sessions/{session_id}/inbox/{item_id}",
+    operation_id = "delete_sessions_session_id_inbox_item_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("item_id" = i64, Path)),
+    request_body(content = CancelInboxItemRequest, content_type = "application/json"),
+    responses((status = 200, description = "Cancelled", body = InboxItemResponse, content_type = "application/json"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn cancel_direct_inbox_item(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, item_id)): AxumPath<(String, i64)>,
+    payload: std::result::Result<Json<CancelInboxItemRequest>, JsonRejection>,
+) -> std::result::Result<Json<InboxItemResponse>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .cancel_direct_inbox_item(&session_id, item_id, request)
+            .await?
+            .into(),
+    ))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/threads/{thread_name}/events",
     operation_id = "get_sessions_session_id_threads_thread_name_events",
     tag = "conversation",
@@ -5528,6 +5740,8 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("no active run")
             || message.contains("not active")
             || message.contains("active run is finishing")
+            || message.contains("version conflict")
+            || message.contains("no longer pending")
         {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
@@ -5537,6 +5751,7 @@ impl From<anyhow::Error> for ApiError {
         } else if message.contains("invalid")
             || message.contains("prompt is empty")
             || message.contains("frontend command")
+            || message.contains("only for direct behaviors")
         {
             StatusCode::BAD_REQUEST
         } else {
@@ -5578,6 +5793,7 @@ mod tests {
         ("DELETE", "/model-configs/{config_id}"),
         ("DELETE", "/projects/{project_id}"),
         ("DELETE", "/sessions/{session_id}"),
+        ("DELETE", "/sessions/{session_id}/inbox/{item_id}"),
         ("DELETE", "/ssh-configs/{config_id}"),
         ("GET", "/auth"),
         ("GET", "/auth/{provider}/login/{login_id}"),
@@ -5598,6 +5814,7 @@ mod tests {
         ("GET", "/sessions/{session_id}/skills"),
         ("GET", "/sessions/{session_id}/events"),
         ("GET", "/sessions/{session_id}/events/stream"),
+        ("GET", "/sessions/{session_id}/inbox"),
         ("GET", "/sessions/{session_id}/messages"),
         ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
         ("GET", "/sessions/{session_id}/workspace/branches"),
@@ -5615,6 +5832,7 @@ mod tests {
         ("PATCH", "/model-configs/{config_id}"),
         ("PATCH", "/projects/{project_id}"),
         ("PATCH", "/sessions/{session_id}/config"),
+        ("PATCH", "/sessions/{session_id}/inbox/{item_id}"),
         ("PATCH", "/ssh-configs/{config_id}"),
         ("POST", "/auth/{provider}/login"),
         ("POST", "/credentials"),
@@ -5630,6 +5848,7 @@ mod tests {
         ("POST", "/sessions/launch-defaults"),
         ("POST", "/sessions/{session_id}/cancel-active-run"),
         ("POST", "/sessions/{session_id}/compact"),
+        ("POST", "/sessions/{session_id}/inbox"),
         ("POST", "/sessions/{session_id}/regenerate"),
         ("POST", "/sessions/{session_id}/revert"),
         ("POST", "/sessions/{session_id}/runs"),
@@ -7895,6 +8114,234 @@ mod tests {
         snapshot.created_at = "2026-01-01 00:00:00.000000000".to_string();
         snapshot.updated_at = snapshot.created_at.clone();
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
+    }
+
+    fn seed_direct_session(root: &std::path::Path, session_id: &str) {
+        seed_direct_session_with_base_url(
+            root,
+            session_id,
+            "https://api.openai.com/v1".to_string(),
+        );
+    }
+
+    fn seed_direct_session_with_base_url(
+        root: &std::path::Path,
+        session_id: &str,
+        base_url: String,
+    ) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            base_url,
+            BackendKind::OpenAiResponses,
+            Some(ReasoningEffort::Medium),
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        snapshot.behavior = sessions::SessionBehavior::Direct;
+        sessions::create_session(&root.join("store.db"), &snapshot).expect("seed direct session");
+    }
+
+    fn scripted_direct_response() -> (String, std::sync::mpsc::Receiver<()>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind direct model");
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept direct model request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match socket.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => request.extend_from_slice(&buffer[..read]),
+                }
+            }
+            let body = serde_json::json!({
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "resumed"}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).unwrap();
+            socket.flush().unwrap();
+            sender.send(()).unwrap();
+        });
+        (base_url, receiver)
+    }
+
+    #[tokio::test]
+    async fn attaching_direct_session_wakes_oldest_persisted_inbox_item() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("direct_inbox_reattach");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-reattach-test-key"));
+        let (base_url, request_finished) = scripted_direct_response();
+        seed_direct_session_with_base_url(&root, "direct", base_url);
+        let store_path = root.join("store.db");
+        let pending = nac_core::store::create_session_inbox_item(
+            &store_path,
+            "direct",
+            InboxDelivery::Queue,
+            "survive restart",
+            None,
+            None,
+        )
+        .unwrap();
+
+        let manager = test_manager(&root);
+        let service = manager.attach_session("direct").await.unwrap();
+        tokio::task::spawn_blocking(move || {
+            request_finished
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while service.has_active_operation() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("reattached direct run should finish");
+
+        let delivered =
+            nac_core::store::load_session_inbox_item(&store_path, "direct", pending.id).unwrap();
+        assert_eq!(delivered.status, nac_core::store::InboxStatus::Delivered);
+        assert!(delivered.delivered_run_id.is_some());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn direct_inbox_http_api_lists_edits_and_cancels_pending_input() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("direct_inbox_http");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-inbox-test-key"));
+        seed_direct_session(&root, "direct");
+        seed_editable_session(&root, "orchestrator");
+        let store_path = root.join("store.db");
+        let _lease = sessions::SessionOperationLease::try_acquire(&store_path, "direct").unwrap();
+        let app = router(test_manager(&root));
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/direct/inbox")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"delivery":"queue","prompt":"do this later"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let create_status = create.status();
+        let create_body = response_body(create).await;
+        assert_eq!(
+            create_status,
+            StatusCode::ACCEPTED,
+            "{}",
+            String::from_utf8_lossy(&create_body)
+        );
+        let created: InboxItemResponse = serde_json::from_slice(&create_body).unwrap();
+        assert_eq!(created.status, nac_core::store::InboxStatus::Pending);
+        assert_eq!(created.prompt, "do this later");
+
+        let list = get_response(app.clone(), "/sessions/direct/inbox", None).await;
+        assert_eq!(list.status(), StatusCode::OK);
+        let listed: Vec<InboxItemResponse> =
+            serde_json::from_slice(&response_body(list).await).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, created.id);
+
+        let update = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/sessions/direct/inbox/{}", created.id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"expected_version":{},"delivery":"steer"}}"#,
+                        created.version
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(update.status(), StatusCode::OK);
+        let updated: InboxItemResponse =
+            serde_json::from_slice(&response_body(update).await).unwrap();
+        assert_eq!(updated.delivery, InboxDelivery::Steer);
+        assert_eq!(updated.target_run_id, None);
+
+        let stale = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/sessions/direct/inbox/{}", created.id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"expected_version":{},"delivery":"queue"}}"#,
+                        created.version
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::CONFLICT);
+
+        let cancel = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/sessions/direct/inbox/{}", created.id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"expected_version":{}}}"#,
+                        updated.version
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancel.status(), StatusCode::OK);
+        let cancelled: InboxItemResponse =
+            serde_json::from_slice(&response_body(cancel).await).unwrap();
+        assert_eq!(cancelled.status, nac_core::store::InboxStatus::Cancelled);
+
+        let rejected = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/orchestrator/inbox")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"delivery":"queue","prompt":"not here"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

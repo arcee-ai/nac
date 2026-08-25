@@ -219,6 +219,7 @@ pub struct Agent {
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
+    direct_primary: bool,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
@@ -468,6 +469,7 @@ impl Agent {
             messages,
             tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
+            direct_primary: mode == AgentMode::Direct,
             compaction,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
@@ -564,14 +566,20 @@ impl Agent {
         prompt: &str,
         run_id: &SessionRunId,
         prompt_commit: watch::Sender<RunPromptCommitStatus>,
+        inbox_item_id: Option<i64>,
     ) -> Result<String> {
-        self.send_inner(prompt, Some((run_id, prompt_commit))).await
+        self.send_inner(prompt, Some((run_id, prompt_commit, inbox_item_id)))
+            .await
     }
 
     async fn send_inner(
         &mut self,
         prompt: &str,
-        session_run: Option<(&SessionRunId, watch::Sender<RunPromptCommitStatus>)>,
+        session_run: Option<(
+            &SessionRunId,
+            watch::Sender<RunPromptCommitStatus>,
+            Option<i64>,
+        )>,
     ) -> Result<String> {
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
@@ -587,10 +595,13 @@ impl Agent {
             content: prompt.to_string(),
         };
         let prompt_result = match session_run.as_ref() {
-            Some((run_id, _)) => self.push_and_log_run_prompt(prompt_message, run_id).await,
+            Some((run_id, _, inbox_item_id)) => {
+                self.push_and_log_run_prompt(prompt_message, run_id, *inbox_item_id)
+                    .await
+            }
             None => self.push_and_log(prompt_message).await,
         };
-        if let Some((_, prompt_commit)) = session_run {
+        if let Some((_, prompt_commit, _)) = session_run {
             prompt_commit.send_replace(if prompt_result.is_ok() {
                 RunPromptCommitStatus::Committed
             } else {
@@ -622,7 +633,7 @@ impl Agent {
         let mut repeated_failures = 0usize;
         let mut accumulated_usage = TokenUsage::default();
         loop {
-            self.append_pending_steering_checked().await?;
+            self.append_pending_guidance_checked().await?;
             let needs_compaction_view = self
                 .compaction
                 .as_mut()
@@ -771,7 +782,7 @@ impl Agent {
             }
 
             if !has_tool_calls {
-                if self.append_pending_steering_checked().await? > 0 {
+                if self.append_pending_guidance_checked().await? > 0 {
                     continue;
                 }
                 let answer = response
@@ -993,7 +1004,7 @@ impl Agent {
         message: Message,
         run_id: &SessionRunId,
     ) -> Result<()> {
-        self.push_and_log_run_prompt(message, run_id).await
+        self.push_and_log_run_prompt(message, run_id, None).await
     }
 
     /// Restore a stored transcript while keeping the current system prompt.
@@ -1590,6 +1601,7 @@ impl Agent {
         &mut self,
         message: Message,
         run_id: &SessionRunId,
+        inbox_item_id: Option<i64>,
     ) -> Result<()> {
         let idx = self.messages.len() as u64;
         if let Some(sink) = &self.transcript_log {
@@ -1597,8 +1609,15 @@ impl Agent {
             let session_id = sink.session_id.clone();
             let stored_message = message.clone();
             let run_id = run_id.to_string();
-            tokio::task::spawn_blocking(move || {
-                writer.append_run_prompt(&session_id, idx, &stored_message, &run_id)
+            tokio::task::spawn_blocking(move || match inbox_item_id {
+                Some(inbox_item_id) => writer.append_inbox_run_prompt(
+                    &session_id,
+                    idx,
+                    &stored_message,
+                    &run_id,
+                    inbox_item_id,
+                ),
+                None => writer.append_run_prompt(&session_id, idx, &stored_message, &run_id),
             })
             .await
             .map_err(|error| anyhow!("run prompt append task failed: {error}"))??;
@@ -1756,6 +1775,66 @@ impl Agent {
                 self.tool_runtime.terminal_manager.remove_all().await;
                 Err(error)
             }
+        }
+    }
+
+    async fn append_pending_direct_inbox(&mut self) -> Result<usize> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(0);
+        };
+        let run_id = self
+            .steering_dispatch_id
+            .clone()
+            .ok_or_else(|| anyhow!("direct inbox delivery requires an active run id"))?;
+        let writer = sink.writer.clone();
+        let session_id = sink.session_id.clone();
+        let start_idx = self.messages.len() as u64;
+        let pre_submission_committed = self.committed_log_len;
+        // Claim the possible append before spawn_blocking for the same reason
+        // as ordinary transcript appends: cancellation must recognize a row
+        // that commits after the async task is aborted as this process's row.
+        self.committed_log_len = self.committed_log_len.max(start_idx + 1);
+        let records = tokio::task::spawn_blocking(move || {
+            writer.append_pending_inbox_steers(&session_id, &run_id, start_idx)
+        })
+        .await
+        .map_err(|error| anyhow!("direct inbox append task failed: {error}"))?;
+        let records = match records {
+            Ok(records) => records,
+            Err(error) => {
+                self.committed_log_len = pre_submission_committed;
+                return Err(error);
+            }
+        };
+        if records.is_empty() {
+            self.committed_log_len = pre_submission_committed;
+            return Ok(0);
+        }
+        self.messages
+            .extend(records.iter().map(|record| Message::User {
+                content: record.content.clone(),
+            }));
+        self.committed_log_len = self.messages.len() as u64;
+        self.event_sink
+            .emit_transcript_appended(self.messages.len() as u64);
+        Ok(records.len())
+    }
+
+    async fn append_pending_guidance_checked(&mut self) -> Result<usize> {
+        if self.direct_primary {
+            match self.append_pending_direct_inbox().await {
+                Ok(count) => Ok(count),
+                Err(error) => {
+                    self.emit(AgentEvent::Error {
+                        thread_name: self.thread_name.clone(),
+                        message: error.to_string(),
+                    });
+                    self.tool_runtime.terminal_manager.remove_all().await;
+                    Err(error)
+                }
+            }
+        } else {
+            self.append_pending_steering_checked().await
         }
     }
 

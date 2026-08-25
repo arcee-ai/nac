@@ -3,7 +3,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 17 adds the immutable session behavior discriminator and is also the
+// 18 adds the durable direct-session inbox. 17 added the immutable session
+// behavior discriminator and is also the
 // downgrade barrier: older binaries reject the future schema instead of
 // reconstructing a direct session as an orchestrator. 16 added project
 // presentation columns (pin, order, version). 15 added projects
@@ -13,7 +14,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 17;
+const STORE_SCHEMA_VERSION: i64 = 18;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -370,8 +371,8 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | STORE_SCHEMA_VERSION => {
-        }
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
+        | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -456,6 +457,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     create_projects_tables(&transaction)?;
     create_ssh_configurations_table(&transaction)?;
     create_session_run_recovery_table(&transaction)?;
+    create_session_inbox_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -979,6 +981,42 @@ fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Durable user/child input for persistent direct sessions. Pending rows are
+/// editable; delivery wins only in the same transaction that appends their
+/// canonical User message to the transcript.
+fn create_session_inbox_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_inbox (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             delivery TEXT NOT NULL CHECK (delivery IN ('steer', 'queue')),
+             status TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'delivered', 'cancelled')),
+             content TEXT NOT NULL CHECK (length(trim(content)) > 0),
+             target_run_id TEXT,
+             client_id TEXT,
+             delivered_run_id TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             delivered_at TEXT,
+             cancelled_at TEXT,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (delivery = 'steer' OR target_run_id IS NULL),
+             CHECK (
+                 (status = 'pending' AND delivered_run_id IS NULL AND delivered_at IS NULL AND cancelled_at IS NULL)
+                 OR (status = 'delivered' AND delivered_run_id IS NOT NULL AND delivered_at IS NOT NULL AND cancelled_at IS NULL)
+                 OR (status = 'cancelled' AND delivered_run_id IS NULL AND delivered_at IS NULL AND cancelled_at IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_inbox_pending
+             ON session_inbox(session_id, status, id);
+         CREATE INDEX IF NOT EXISTS idx_session_inbox_target
+             ON session_inbox(session_id, target_run_id, status, id);",
+    )?;
+    Ok(())
+}
+
 /// Same bound the per-session column enforces, so a saved default can never
 /// describe a session the sessions table would refuse.
 fn model_configuration_threshold_check() -> String {
@@ -1092,6 +1130,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
         "session_run_recovery",
+        "session_inbox",
         "projects",
         "session_projects",
     ] {

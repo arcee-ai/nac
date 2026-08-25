@@ -41,9 +41,9 @@ Non-negotiable invariants:
 - Recorded inherited baseline: `make check` passes and an elevated `make ci`
   passed on 2026-08-24. Socket-binding `Operation not permitted` failures from
   a confined direct `make test` are environmental, not inherited regressions.
-- The native tool kernel and immutable behavior foundation are committed. The
-  first persistent direct-primary create/resume/API vertical is implemented and
-  awaiting its checkpoint commit.
+- The native tool kernel, immutable behavior foundation, and first persistent
+  direct-primary create/resume/API vertical are committed. The durable direct
+  inbox implementation is in verification before its checkpoint commit.
 
 ## Ordered milestones
 
@@ -136,8 +136,10 @@ Non-negotiable invariants:
   direct prompt/tool policy in `agent`, exact capability and admission
   enforcement in `tools`/`agent`, direct terminal outcomes in
   `session_service.rs`, and explicit API behavior selection in `nac-server`.
-  Durable inbox, direct-specific compaction policy text, retained-terminal
-  transition/loss reporting, and UI controls remain in progress.
+  The current slice adds schema-18 inbox persistence, atomic prompt/steer
+  delivery, service promotion/restart wakeup, and REST CRUD. Direct-specific
+  compaction policy text, retained-terminal transition/loss reporting, and UI
+  controls remain in progress.
 
 ## Verification
 
@@ -168,6 +170,17 @@ Non-negotiable invariants:
   run.
 - `cargo test -p nac-server --locked` — 111 server and 21 CLI tests passed in
   83.24s.
+- Durable-inbox focused tests — passed for schema-17 migration, atomic
+  transcript/delivery commits, FIFO one-at-a-time promotion, model-boundary
+  steer consumption, versioned mutation/cancellation, orchestrator rejection,
+  REST CRUD/OpenAPI registration, and restart attachment wakeup.
+- `cargo test -p nac-core --locked` — 977 passed, 9 ignored, 0 failed in
+  83.36s with the durable inbox implementation.
+- `cargo test -p nac-server --locked` — 113 server and 21 CLI tests passed in
+  81.88s with the durable inbox implementation.
+- `make check` — passed after final inbox API response shaping.
+- `make lint` — passed after the durable inbox implementation; workspace
+  Clippy and frontend lint report no warnings.
 - Recorded pre-goal baseline: `make check` and elevated `make ci` passed on
   2026-08-24.
 
@@ -175,6 +188,7 @@ Non-negotiable invariants:
 
 - `09261af feat(core): introduce native tool kernel`.
 - `3ae182a feat(core): persist session behavior`.
+- `edb14e4 feat(core): add persistent direct primary`.
 
 ## Known problems and blockers
 
@@ -183,6 +197,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Checkpoint the direct-primary vertical, then add the durable direct-session
-inbox with explicit steer/queue delivery, pending mutation/cancellation,
-model-boundary consumption, and race-safe one-at-a-time idle promotion.
+Finish broad verification and checkpoint the durable direct-session inbox,
+then complete direct-specific compaction and retained-terminal lifecycle
+contracts before closing the persistent-direct milestone.
