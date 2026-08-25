@@ -78,7 +78,10 @@ use nac_core::{
     },
     sessions,
     ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
-    store::{InboxDelivery, PermissionGrantRecord, SessionInboxRecord},
+    store::{
+        GoalStatus, InboxDelivery, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
+        UserGoalUpdate,
+    },
     types::Message,
     view::{self, SessionSummarySnapshot},
     workspace::{self, GitTarget},
@@ -948,6 +951,26 @@ pub struct UpdateInboxItemRequest {
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct CancelInboxItemRequest {
+    pub expected_version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct CreateGoalRequest {
+    pub objective: String,
+    pub token_budget: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct UpdateGoalRequest {
+    pub expected_version: i64,
+    pub objective: Option<String>,
+    #[serde(default)]
+    pub token_budget: RequestField<u64>,
+    pub status: Option<GoalStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct ClearGoalRequest {
     pub expected_version: i64,
 }
 
@@ -2239,6 +2262,52 @@ impl SessionManager {
         })
     }
 
+    pub async fn direct_goal(&self, session_id: &str) -> Result<Option<SessionGoalRecord>> {
+        self.attach_session(session_id).await?.direct_goal()
+    }
+
+    pub async fn create_direct_goal(
+        &self,
+        session_id: &str,
+        request: CreateGoalRequest,
+    ) -> Result<SessionGoalRecord> {
+        self.attach_session(session_id)
+            .await?
+            .create_direct_goal(&request.objective, request.token_budget)
+            .await
+    }
+
+    pub async fn update_direct_goal(
+        &self,
+        session_id: &str,
+        goal_id: &str,
+        request: UpdateGoalRequest,
+    ) -> Result<SessionGoalRecord> {
+        self.attach_session(session_id)
+            .await?
+            .update_direct_goal(
+                goal_id,
+                request.expected_version,
+                UserGoalUpdate {
+                    objective: request.objective,
+                    token_budget: request_field_patch(request.token_budget),
+                    status: request.status,
+                },
+            )
+            .await
+    }
+
+    pub async fn clear_direct_goal(
+        &self,
+        session_id: &str,
+        goal_id: &str,
+        expected_version: i64,
+    ) -> Result<()> {
+        self.attach_session(session_id)
+            .await?
+            .clear_direct_goal(goal_id, expected_version)
+    }
+
     pub async fn reply_permission_request(
         &self,
         session_id: &str,
@@ -3222,6 +3291,8 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(session_messages))
         .routes(routes!(list_direct_inbox, create_direct_inbox_item))
         .routes(routes!(update_direct_inbox_item, cancel_direct_inbox_item))
+        .routes(routes!(get_direct_goal, create_direct_goal))
+        .routes(routes!(update_direct_goal, clear_direct_goal))
         .routes(routes!(permission_state))
         .routes(routes!(reply_permission_request))
         .routes(routes!(delete_permission_grant))
@@ -4730,6 +4801,85 @@ async fn cancel_direct_inbox_item(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/goal",
+    operation_id = "get_sessions_session_id_goal",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Current goal or null", body = Option<SessionGoalRecord>, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn get_direct_goal(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Option<SessionGoalRecord>>, ApiError> {
+    Ok(Json(manager.direct_goal(&session_id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/goal",
+    operation_id = "post_sessions_session_id_goal",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = CreateGoalRequest, content_type = "application/json"),
+    responses((status = 201, description = "Goal created", body = SessionGoalRecord, content_type = "application/json"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn create_direct_goal(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<CreateGoalRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<SessionGoalRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(manager.create_direct_goal(&session_id, request).await?),
+    ))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/sessions/{session_id}/goal/{goal_id}",
+    operation_id = "patch_sessions_session_id_goal_goal_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("goal_id" = String, Path)),
+    request_body(content = UpdateGoalRequest, content_type = "application/json"),
+    responses((status = 200, description = "Goal updated", body = SessionGoalRecord, content_type = "application/json"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn update_direct_goal(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, goal_id)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<UpdateGoalRequest>, JsonRejection>,
+) -> std::result::Result<Json<SessionGoalRecord>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .update_direct_goal(&session_id, &goal_id, request)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/sessions/{session_id}/goal/{goal_id}",
+    operation_id = "delete_sessions_session_id_goal_goal_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("goal_id" = String, Path)),
+    request_body(content = ClearGoalRequest, content_type = "application/json"),
+    responses((status = 204, description = "Goal cleared"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn clear_direct_goal(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, goal_id)): AxumPath<(String, String)>,
+    payload: std::result::Result<Json<ClearGoalRequest>, JsonRejection>,
+) -> std::result::Result<StatusCode, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    manager
+        .clear_direct_goal(&session_id, &goal_id, request.expected_version)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/permissions",
     operation_id = "get_sessions_session_id_permissions",
     tag = "permissions",
@@ -5828,6 +5978,7 @@ impl From<anyhow::Error> for ApiError {
             StatusCode::BAD_REQUEST
         } else if message.contains("was not found")
             || message.contains("not found")
+            || message.contains("has no goal")
             || message.contains("unknown host")
         {
             StatusCode::NOT_FOUND
@@ -5838,6 +5989,9 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("active run is finishing")
             || message.contains("version conflict")
             || message.contains("no longer pending")
+            || message.contains("no longer current")
+            || message.contains("unfinished goal")
+            || message.contains("goal clear conflict")
         {
             StatusCode::CONFLICT
         } else if message.contains("not supported")
@@ -5846,6 +6000,8 @@ impl From<anyhow::Error> for ApiError {
             StatusCode::NOT_IMPLEMENTED
         } else if message.contains("invalid")
             || message.contains("prompt is empty")
+            || message.contains("goal objective is empty")
+            || message.contains("goal token budget")
             || message.contains("frontend command")
             || message.contains("only for direct behaviors")
         {
@@ -5889,6 +6045,7 @@ mod tests {
         ("DELETE", "/model-configs/{config_id}"),
         ("DELETE", "/projects/{project_id}"),
         ("DELETE", "/sessions/{session_id}"),
+        ("DELETE", "/sessions/{session_id}/goal/{goal_id}"),
         ("DELETE", "/sessions/{session_id}/inbox/{item_id}"),
         (
             "DELETE",
@@ -5914,6 +6071,7 @@ mod tests {
         ("GET", "/sessions/{session_id}/skills"),
         ("GET", "/sessions/{session_id}/events"),
         ("GET", "/sessions/{session_id}/events/stream"),
+        ("GET", "/sessions/{session_id}/goal"),
         ("GET", "/sessions/{session_id}/inbox"),
         ("GET", "/sessions/{session_id}/messages"),
         ("GET", "/sessions/{session_id}/permissions"),
@@ -5933,6 +6091,7 @@ mod tests {
         ("PATCH", "/model-configs/{config_id}"),
         ("PATCH", "/projects/{project_id}"),
         ("PATCH", "/sessions/{session_id}/config"),
+        ("PATCH", "/sessions/{session_id}/goal/{goal_id}"),
         ("PATCH", "/sessions/{session_id}/inbox/{item_id}"),
         ("PATCH", "/ssh-configs/{config_id}"),
         ("POST", "/auth/{provider}/login"),
@@ -5949,6 +6108,7 @@ mod tests {
         ("POST", "/sessions/launch-defaults"),
         ("POST", "/sessions/{session_id}/cancel-active-run"),
         ("POST", "/sessions/{session_id}/compact"),
+        ("POST", "/sessions/{session_id}/goal"),
         ("POST", "/sessions/{session_id}/inbox"),
         ("POST", "/sessions/{session_id}/permissions/{request_id}"),
         ("POST", "/sessions/{session_id}/regenerate"),
@@ -6010,6 +6170,7 @@ mod tests {
             .replace("{server_name}", "missing-server")
             .replace("{config_id}", "missing-config")
             .replace("{session_id}", "missing-session")
+            .replace("{goal_id}", "missing-goal")
             .replace("{request_id}", "missing-request")
             .replace("{grant_id}", "missing-grant")
             .replace("{thread_name}", "missing-thread")
@@ -8329,6 +8490,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attaching_direct_session_reconciles_one_stale_goal_claim_without_duplicate_start() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("direct_goal_reattach");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-goal-reattach-key"));
+        let (base_url, request_finished) = scripted_direct_response();
+        seed_direct_session_with_base_url(&root, "direct", base_url);
+        let store_path = root.join("store.db");
+        nac_core::store::create_session_goal(
+            &store_path,
+            "direct",
+            "resume exactly once",
+            Some(15),
+            None,
+        )
+        .unwrap();
+        nac_core::store::bind_session_goal_run(
+            &store_path,
+            "direct",
+            &nac_core::store::GoalRunBaseline {
+                run_id: "stale-run".to_string(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 1,
+                continuation: true,
+            },
+        )
+        .unwrap();
+
+        let manager = test_manager(&root);
+        let service = manager.attach_session("direct").await.unwrap();
+        tokio::task::spawn_blocking(move || {
+            request_finished
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let goal = service.direct_goal().unwrap().unwrap();
+                if !service.has_active_operation() && goal.status == GoalStatus::BudgetLimited {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("one recovered continuation should settle at its budget");
+        let goal = service.direct_goal().unwrap().unwrap();
+        assert_eq!(goal.tokens_used, 15);
+        assert!(goal.continuation_run_id.is_none());
+        assert_ne!(goal.accounting_run_id.as_deref(), Some("stale-run"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn direct_inbox_http_api_lists_edits_and_cancels_pending_input() {
         let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("direct_inbox_http");
@@ -8510,6 +8729,107 @@ mod tests {
         assert!(state.grants.is_empty());
 
         let rejected = get_response(app, "/sessions/orchestrator/permissions", None).await;
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn direct_goal_http_api_creates_edits_pauses_resumes_and_clears() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("direct_goal_http");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-goal-test-key"));
+        seed_direct_session(&root, "direct");
+        seed_editable_session(&root, "orchestrator");
+        let store_path = root.join("store.db");
+        let _lease = sessions::SessionOperationLease::try_acquire(&store_path, "direct").unwrap();
+        let app = router(test_manager(&root));
+
+        let empty = get_response(app.clone(), "/sessions/direct/goal", None).await;
+        assert_eq!(empty.status(), StatusCode::OK);
+        assert_eq!(response_body(empty).await.as_ref(), b"null");
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/direct/goal")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"objective":"ship the feature","token_budget":500}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::CREATED);
+        let created: SessionGoalRecord =
+            serde_json::from_slice(&response_body(create).await).unwrap();
+        assert_eq!(created.status, GoalStatus::Active);
+        assert_eq!(created.token_budget, Some(500));
+
+        let pause = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/sessions/direct/goal/{}", created.goal_id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"expected_version":{},"objective":"ship safely","token_budget":null,"status":"paused"}}"#,
+                        created.version
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pause.status(), StatusCode::OK);
+        let paused: SessionGoalRecord =
+            serde_json::from_slice(&response_body(pause).await).unwrap();
+        assert_eq!(paused.objective, "ship safely");
+        assert_eq!(paused.token_budget, None);
+        assert_eq!(paused.status, GoalStatus::Paused);
+
+        let resume = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/sessions/direct/goal/{}", paused.goal_id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"expected_version":{},"status":"active"}}"#,
+                        paused.version
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resume.status(), StatusCode::OK);
+        let resumed: SessionGoalRecord =
+            serde_json::from_slice(&response_body(resume).await).unwrap();
+        assert_eq!(resumed.status, GoalStatus::Active);
+
+        let clear = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/sessions/direct/goal/{}", resumed.goal_id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"expected_version":{}}}"#,
+                        resumed.version
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(clear.status(), StatusCode::NO_CONTENT);
+
+        let rejected = get_response(app, "/sessions/orchestrator/goal", None).await;
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
         let _ = std::fs::remove_dir_all(root);
     }

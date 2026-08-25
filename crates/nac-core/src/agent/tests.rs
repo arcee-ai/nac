@@ -30,6 +30,19 @@ fn direct_prompt_treats_permission_denial_as_no_execution() {
 }
 
 #[test]
+fn direct_prompt_keeps_model_goal_authority_narrow() {
+    let prompt = render_direct_system_prompt("/workspace")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(prompt.contains("create_goal only when the user explicitly asks"));
+    assert!(prompt.contains("complete only when the objective is genuinely achieved"));
+    assert!(prompt.contains("Use blocked only at a genuine impasse"));
+    assert!(prompt.contains("cannot pause, resume, clear"));
+    assert!(prompt.contains("Explicit user cancellation pauses it"));
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(

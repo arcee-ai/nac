@@ -114,6 +114,12 @@ export function displayPromptFromMessageText(content: string | null | undefined)
   const collapsed = invokedSkillsDisplayPrompt(text);
   if (collapsed != null) return collapsed;
   const normalized = text.replaceAll("\r\n", "\n");
+  if (
+    normalized.startsWith('<nac_goal_continuation goal_id="') &&
+    normalized.endsWith("\n</nac_goal_continuation>")
+  ) {
+    return "[durable goal continuation]";
+  }
   const header = normalized.split("\n", 1)[0] ?? "";
   const match = /^# \/(plan|run)\s*:/.exec(header);
   if (!match) return text;

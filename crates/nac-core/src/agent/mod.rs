@@ -412,7 +412,7 @@ impl Agent {
             ),
             AgentMode::Direct => (
                 render_direct_system_prompt(&cwd),
-                tools::worker_tool_definitions(client.supports_image_tool_results()),
+                tools::direct_tool_definitions(client.supports_image_tool_results()),
             ),
         };
         if config.mode == AgentMode::Orchestrator {
@@ -469,6 +469,12 @@ impl Agent {
                 .map(|definition| definition.function.name.clone())
                 .collect(),
         );
+        let goal_runtime = match (mode, config.session_id.as_ref()) {
+            (AgentMode::Direct, Some(session_id)) => Some(Arc::new(
+                crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
+            )),
+            _ => None,
+        };
         // The initial messages are exactly the snapshot blob written at
         // session creation; the log tail starts at this length.
         let committed_log_len = messages.len() as u64;
@@ -497,6 +503,7 @@ impl Agent {
                 light_client: config.light_client,
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
+                goal_runtime,
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -583,6 +590,9 @@ impl Agent {
         prompt_commit: watch::Sender<RunPromptCommitStatus>,
         inbox_item_id: Option<i64>,
     ) -> Result<String> {
+        if let Some(goals) = &self.tool_runtime.goal_runtime {
+            goals.begin_run(run_id.as_str());
+        }
         self.send_inner(prompt, Some((run_id, prompt_commit, inbox_item_id)))
             .await
     }
@@ -730,6 +740,9 @@ impl Agent {
                 usage.replace_context(context);
                 accumulated_usage.replace_context(context);
                 self.last_usage = Some(accumulated_usage.clone());
+                if let Some(goals) = &self.tool_runtime.goal_runtime {
+                    goals.update_usage(&accumulated_usage);
+                }
                 self.emit(AgentEvent::TokenUsageUpdated {
                     thread_name: self.thread_name.clone(),
                     usage,
@@ -908,6 +921,9 @@ impl Agent {
             }
 
             self.last_usage = Some(accumulated_usage.clone());
+            if let Some(goals) = &self.tool_runtime.goal_runtime {
+                goals.update_usage(&accumulated_usage);
+            }
 
             // Transcript commit point (tool results): the complete parallel
             // batch is logged atomically before any of it enters the
@@ -937,6 +953,12 @@ impl Agent {
                 self.tool_runtime.terminal_manager.settle_run().await;
                 return Err(error);
             }
+        }
+    }
+
+    pub(crate) fn end_goal_run(&self, run_id: &SessionRunId) {
+        if let Some(goals) = &self.tool_runtime.goal_runtime {
+            goals.end_run(run_id.as_str());
         }
     }
 

@@ -6,6 +6,7 @@ mod agents_md;
 pub mod browser;
 pub mod commands;
 pub mod events;
+mod goals;
 pub mod light_model;
 mod mcp;
 pub mod model;

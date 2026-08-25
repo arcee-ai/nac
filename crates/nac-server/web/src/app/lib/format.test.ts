@@ -129,6 +129,17 @@ describe("displayPromptFromMessageText", () => {
     expect(displayPromptFromMessageText(expandedRun)).toBe("/run auth-refresh");
   });
 
+  it("hides durable goal continuation control text", () => {
+    expect(
+      displayPromptFromMessageText(
+        '<nac_goal_continuation goal_id="goal-1">\nContinue work\n</nac_goal_continuation>',
+      ),
+    ).toBe("[durable goal continuation]");
+    expect(displayPromptFromMessageText('mention <nac_goal_continuation goal_id="x">')).toBe(
+      'mention <nac_goal_continuation goal_id="x">',
+    );
+  });
+
   it("returns empty for nullish content and leaves plain text unchanged", () => {
     expect(displayPromptFromMessageText(null)).toBe("");
     expect(displayPromptFromMessageText(undefined)).toBe("");

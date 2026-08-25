@@ -1150,6 +1150,98 @@ impl SessionService {
         )
     }
 
+    pub fn direct_goal(&self) -> Result<Option<crate::store::SessionGoalRecord>> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        crate::store::load_session_goal(&self.metadata.store_path, session_id)
+    }
+
+    pub async fn create_direct_goal(
+        &self,
+        objective: &str,
+        token_budget: Option<u64>,
+    ) -> Result<crate::store::SessionGoalRecord> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let active = self.active_run();
+        let baseline = if let Some(active) = &active {
+            let usage = self
+                .agent
+                .lock()
+                .await
+                .last_usage
+                .clone()
+                .unwrap_or_default();
+            Some(crate::store::GoalRunBaseline {
+                run_id: active.run_id.to_string(),
+                billable_tokens: usage.billable_tokens(),
+                started_at_epoch_ms: now_epoch_ms(),
+                continuation: false,
+            })
+        } else {
+            None
+        };
+        let goal = crate::store::create_session_goal(
+            &self.metadata.store_path,
+            session_id,
+            objective,
+            token_budget,
+            baseline.as_ref(),
+        )?;
+        if active.is_none() {
+            self.start_next_direct_inbox_item().await?;
+        }
+        Ok(goal)
+    }
+
+    pub async fn update_direct_goal(
+        &self,
+        goal_id: &str,
+        expected_version: i64,
+        update: crate::store::UserGoalUpdate,
+    ) -> Result<crate::store::SessionGoalRecord> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let goal = crate::store::update_session_goal_by_user(
+            &self.metadata.store_path,
+            session_id,
+            goal_id,
+            expected_version,
+            update,
+        )?;
+        if goal.status == crate::store::GoalStatus::Active {
+            self.start_next_direct_inbox_item().await?;
+        }
+        Ok(goal)
+    }
+
+    pub fn clear_direct_goal(&self, goal_id: &str, expected_version: i64) -> Result<()> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        crate::store::clear_session_goal(
+            &self.metadata.store_path,
+            session_id,
+            goal_id,
+            expected_version,
+        )
+    }
+
     /// Idempotently promote the oldest pending item when this direct session
     /// is idle. The operation lease is acquired before selection, preventing
     /// two server processes from promoting the same durable item.
@@ -1175,14 +1267,29 @@ impl SessionService {
         if self.has_active_operation() {
             return Ok(None);
         }
-        let Some(item) =
+        crate::store::reconcile_session_goal_run(&self.metadata.store_path, session_id)?;
+        if let Some(item) =
             crate::store::next_pending_session_inbox_item(&self.metadata.store_path, session_id)?
+        {
+            return self
+                .try_submit_prompt_inner(None, item.content, Some(lease), Some(item.id), false)
+                .map(Some)
+                .map_err(anyhow::Error::new);
+        }
+        let Some(goal) = crate::store::load_session_goal(&self.metadata.store_path, session_id)?
+            .filter(|goal| goal.status == crate::store::GoalStatus::Active)
         else {
             return Ok(None);
         };
-        self.try_submit_prompt_inner(None, item.content, Some(lease), Some(item.id))
-            .map(Some)
-            .map_err(anyhow::Error::new)
+        self.try_submit_prompt_inner(
+            None,
+            goal_continuation_prompt(&goal),
+            Some(lease),
+            None,
+            true,
+        )
+        .map(Some)
+        .map_err(anyhow::Error::new)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2297,7 +2404,7 @@ impl SessionService {
         &self,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(None, expanded_prompt, None, None)
+        self.try_submit_prompt_inner(None, expanded_prompt, None, None, false)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2306,7 +2413,7 @@ impl SessionService {
         client_id: SessionClientId,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None, None)
+        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None, None, false)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2316,7 +2423,7 @@ impl SessionService {
         expanded_prompt: String,
         lease: sessions::SessionOperationLease,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease), None)
+        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, Some(lease), None, false)
     }
 
     pub async fn request_cancel(
@@ -2405,7 +2512,7 @@ impl SessionService {
                 &cancelling_run.snapshot,
                 transcript_baseline,
                 None,
-                cancel_usage,
+                cancel_usage.clone(),
                 DurableRunTerminal::Canonical,
             )
             .await
@@ -2430,6 +2537,12 @@ impl SessionService {
             );
         }
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            self.settle_direct_goal_run(
+                &cancelling_run.snapshot.run_id,
+                cancel_usage,
+                crate::store::GoalRunDisposition::Cancelled,
+            )
+            .await;
             self.capture_workspace_revision(&cancelling_run.snapshot)
                 .await;
         }
@@ -2454,12 +2567,14 @@ impl SessionService {
         expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
         inbox_item_id: Option<i64>,
+        goal_continuation: bool,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         let active_run = self.try_begin_run_with_lease(
             client_id,
             &expanded_prompt,
             operation_lease,
             inbox_item_id,
+            goal_continuation,
         )?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
@@ -2534,7 +2649,8 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        let active = self.try_begin_run_inner(client_id, expanded_prompt, None, false, None)?;
+        let active =
+            self.try_begin_run_inner(client_id, expanded_prompt, None, false, None, false)?;
         self.run_prompt_commit(&active.run_id)
             .expect("test run admission must own a prompt commit channel")
             .send_replace(RunPromptCommitStatus::Committed);
@@ -2548,6 +2664,7 @@ impl SessionService {
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
         inbox_item_id: Option<i64>,
+        goal_continuation: bool,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         self.try_begin_run_inner(
             client_id,
@@ -2555,6 +2672,7 @@ impl SessionService {
             supplied_lease,
             true,
             inbox_item_id,
+            goal_continuation,
         )
     }
 
@@ -2566,6 +2684,7 @@ impl SessionService {
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
         inbox_item_id: Option<i64>,
+        goal_continuation: bool,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let mut guard = self.lock_active_operation();
         match guard.as_ref() {
@@ -2668,12 +2787,12 @@ impl SessionService {
 
         let run_id = SessionRunId::new();
         let submitted_at_epoch_ms = now_epoch_ms();
-        let submitted_user_message = SubmittedUserMessageSnapshot {
+        let submitted_user_message = (!goal_continuation).then(|| SubmittedUserMessageSnapshot {
             run_id: run_id.clone(),
             client_id: client_id.clone(),
             content: expanded_prompt.to_string(),
             submitted_at_epoch_ms,
-        };
+        });
         let active_run = ActiveRunSnapshot {
             run_id,
             client_id,
@@ -2681,15 +2800,35 @@ impl SessionService {
             // text feeds the events feed, history subtitles, and revision
             // labels, where `<invoked_skills>`/skill-body fragments would
             // leak.
-            prompt_preview: prompt_preview(
-                &commands::display_prompt_from_message(expanded_prompt),
-                160,
-            ),
-            submitted_user_message: Some(submitted_user_message),
+            prompt_preview: if goal_continuation {
+                "Durable goal continuation".to_string()
+            } else {
+                prompt_preview(&commands::display_prompt_from_message(expanded_prompt), 160)
+            },
+            submitted_user_message,
             started_at_epoch_ms: submitted_at_epoch_ms,
         };
         let (prompt_commit, _prompt_commit_receiver) =
             watch::channel(RunPromptCommitStatus::Pending);
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            if let Some(session_id) = self.metadata.session_id.as_deref() {
+                crate::store::bind_session_goal_run(
+                    &self.metadata.store_path,
+                    session_id,
+                    &crate::store::GoalRunBaseline {
+                        run_id: active_run.run_id.to_string(),
+                        billable_tokens: 0,
+                        started_at_epoch_ms: active_run.started_at_epoch_ms,
+                        continuation: goal_continuation,
+                    },
+                )
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to bind goal accounting to run: {error:#}"
+                    )),
+                })?;
+            }
+        }
         *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
             snapshot: active_run.clone(),
             started_at: Instant::now(),
@@ -2740,6 +2879,12 @@ impl SessionService {
         } else {
             DurableRunTerminal::Canonical
         };
+        let goal_usage = completed_usage.clone();
+        let goal_disposition = if matches!(outcome, RunOutcome::Failed(..)) {
+            crate::store::GoalRunDisposition::Failed
+        } else {
+            crate::store::GoalRunDisposition::Completed
+        };
         let persistence_error = match self
             .persist_run_snapshot(
                 &finishing_run.snapshot,
@@ -2761,6 +2906,9 @@ impl SessionService {
         };
 
         self.capture_workspace_revision(&finishing_run.snapshot)
+            .await;
+
+        self.settle_direct_goal_run(run_id, goal_usage, goal_disposition)
             .await;
 
         let run_id = finishing_run.snapshot.run_id.clone();
@@ -2789,6 +2937,32 @@ impl SessionService {
             }
         }
         true
+    }
+
+    async fn settle_direct_goal_run(
+        &self,
+        run_id: &SessionRunId,
+        usage: Option<crate::model::TokenUsage>,
+        disposition: crate::store::GoalRunDisposition,
+    ) {
+        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
+            return;
+        }
+        if let Some(session_id) = self.metadata.session_id.as_deref() {
+            if let Err(error) = crate::store::settle_session_goal_run(
+                &self.metadata.store_path,
+                session_id,
+                run_id.as_str(),
+                usage
+                    .as_ref()
+                    .map_or(0, crate::model::TokenUsage::billable_tokens),
+                now_epoch_ms(),
+                disposition,
+            ) {
+                eprintln!("nac: failed to settle durable goal for run {run_id}: {error:#}");
+            }
+        }
+        self.agent.lock().await.end_goal_run(run_id);
     }
 
     /// Freeze the checkout as it stands now, so the run can be revisited later.
@@ -3338,6 +3512,23 @@ fn prompt_preview(value: &str, max_chars: usize) -> String {
     }
     preview.push_str("...");
     preview
+}
+
+fn goal_continuation_prompt(goal: &crate::store::SessionGoalRecord) -> String {
+    let budget = goal.token_budget.map_or_else(
+        || "No token budget was set.".to_string(),
+        |budget| {
+            format!(
+                "Token budget: {budget}; used: {}; remaining: {}.",
+                goal.tokens_used,
+                budget.saturating_sub(goal.tokens_used)
+            )
+        },
+    );
+    format!(
+        "<nac_goal_continuation goal_id=\"{}\">\nContinue autonomously pursuing this durable goal:\n{}\n{}\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>",
+        goal.goal_id, goal.objective, budget
+    )
 }
 
 fn duration_ms(duration: Duration) -> u64 {
@@ -5022,6 +5213,91 @@ pub(super) mod tests {
             ]
         );
         assert_eq!(server.finish().len(), 2);
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn direct_goal_continues_until_budget_limited_and_accounts_each_run() {
+        use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+        let response = |text: &str| {
+            ScriptedResponse::json(
+                "200 OK",
+                serde_json::json!({
+                    "status": "completed",
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                })
+                .to_string(),
+            )
+        };
+        let server =
+            ScriptedServer::start(vec![response("progress one"), response("progress two")]);
+        let client = ModelClient::new_for_test_server(server.base_url.clone());
+        let session_id = "session-direct-goal-budget";
+        let (parts, store_path) =
+            test_direct_active_service("direct_goal_budget", session_id, client);
+        let service = parts.service;
+
+        let created = service
+            .create_direct_goal("finish the bounded task", Some(30))
+            .await
+            .unwrap();
+        assert_eq!(created.status, crate::store::GoalStatus::Active);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let goal = service.direct_goal().unwrap().unwrap();
+                if !service.has_active_operation()
+                    && goal.status == crate::store::GoalStatus::BudgetLimited
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("goal should stop at its optional budget");
+
+        let goal = service.direct_goal().unwrap().unwrap();
+        assert_eq!(goal.goal_id, created.goal_id);
+        assert_eq!(goal.tokens_used, 30);
+        assert_eq!(goal.remaining_tokens(), Some(0));
+        assert_eq!(goal.status, crate::store::GoalStatus::BudgetLimited);
+        assert!(goal.accounting_run_id.is_none());
+        let requests = server.finish();
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(
+            |request| String::from_utf8_lossy(&request.body).contains("nac_goal_continuation")
+        ));
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn explicit_cancel_pauses_goal_instead_of_restarting_it() {
+        let session_id = "session-direct-goal-cancel";
+        let (parts, store_path) = test_direct_active_service(
+            "direct_goal_cancel",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        let service = parts.service;
+        let active = service.try_begin_run(None, "ordinary user work").unwrap();
+        let goal = service
+            .create_direct_goal("keep working", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            goal.accounting_run_id.as_deref(),
+            Some(active.run_id.as_str())
+        );
+
+        service.request_cancel(&active.run_id).await.unwrap();
+        let paused = service.direct_goal().unwrap().unwrap();
+        assert_eq!(paused.status, crate::store::GoalStatus::Paused);
+        assert!(paused.accounting_run_id.is_none());
+        assert!(!service.has_active_operation());
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
@@ -7728,7 +8004,7 @@ pub(super) mod tests {
             test_active_service("cancel_prompt_barrier", "cancel-prompt-barrier");
         let active = parts
             .service
-            .try_begin_run_inner(None, "cancel prompt", None, false, None)
+            .try_begin_run_inner(None, "cancel prompt", None, false, None, false)
             .unwrap();
         let prompt_commit = parts.service.run_prompt_commit(&active.run_id).unwrap();
         let cancel_service = parts.service.clone();

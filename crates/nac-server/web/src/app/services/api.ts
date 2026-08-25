@@ -13,6 +13,7 @@ import type {
   CommitWorkspaceRequest,
   CompactSessionResponse,
   CreateModelConfigurationRequest,
+  CreateGoalRequest,
   CreateProjectRequest,
   CreateSessionRequest,
   DeleteProjectResponse,
@@ -40,6 +41,7 @@ import type {
   OrchestratorSteeringResponse,
   PermissionReply,
   PermissionStateResponse,
+  SessionGoalRecord,
   ProjectList,
   ProjectRecord,
   ProviderModelList,
@@ -72,6 +74,7 @@ import type {
   ThreadEventPage,
   ThreadSteeringResponse,
   UpdateConfigRequest,
+  UpdateGoalRequest,
   UpdateModelConfigurationRequest,
   UpdateProjectRequest,
   UpdateSessionPresentationRequest,
@@ -450,6 +453,22 @@ export const api = {
 
   deletePermissionGrant: (id: string, grantId: string) =>
     request<void>("DELETE", `${sessionPath(id)}/permissions/grants/${encodeURIComponent(grantId)}`),
+
+  getGoal: (id: string, signal?: AbortSignal) =>
+    request<SessionGoalRecord | null>("GET", `${sessionPath(id)}/goal`, { signal }),
+
+  createGoal: (id: string, payload: CreateGoalRequest) =>
+    request<SessionGoalRecord>("POST", `${sessionPath(id)}/goal`, { body: payload }),
+
+  updateGoal: (id: string, goalId: string, payload: UpdateGoalRequest) =>
+    request<SessionGoalRecord>("PATCH", `${sessionPath(id)}/goal/${encodeURIComponent(goalId)}`, {
+      body: payload,
+    }),
+
+  clearGoal: (id: string, goalId: string, expectedVersion: number) =>
+    request<void>("DELETE", `${sessionPath(id)}/goal/${encodeURIComponent(goalId)}`, {
+      body: { expected_version: expectedVersion },
+    }),
 
   updateConfig: (id: string, payload: UpdateConfigRequest) =>
     request<void>("PATCH", `${sessionPath(id)}/config`, { body: payload }),

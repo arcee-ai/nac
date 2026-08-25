@@ -281,6 +281,7 @@ mod tests {
             light_client: None,
             allowed_tools: None,
             permission_broker: None,
+            goal_runtime: None,
         }
     }
 
