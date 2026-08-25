@@ -47,12 +47,14 @@ import type {
   CreateSessionRequest,
   DeleteProjectSessions,
   ManagedSessionSummary,
+  ManagedOrchestratorRecord,
   ModelCatalog,
   ModelConfigurationList,
   PermissionReply,
   PermissionStateResponse,
   SessionGoalRecord,
   StartTraditionalChildRequest,
+  StartManagedOrchestratorRequest,
   TraditionalChildRecord,
   ProjectList,
   ProjectRecord,
@@ -145,6 +147,7 @@ export const queryKeys = {
   sessionPermissions: (id: string) => ["session", id, "permissions"] as const,
   sessionGoal: (id: string) => ["session", id, "goal"] as const,
   traditionalChildren: (id: string) => ["session", id, "children"] as const,
+  managedOrchestrators: (id: string) => ["session", id, "orchestrators"] as const,
   workspaceDiff: (
     id: string,
     path: string,
@@ -309,6 +312,60 @@ export function useCancelTraditionalChild() {
         (children = []) =>
           children.map((candidate) =>
             candidate.child_session_id === child.child_session_id ? child : candidate,
+          ),
+      );
+    },
+  });
+}
+
+export function useManagedOrchestrators(sessionId: string, enabled: boolean) {
+  return useQuery<ManagedOrchestratorRecord[]>({
+    queryKey: queryKeys.managedOrchestrators(sessionId),
+    queryFn: ({ signal }) => api.listManagedOrchestrators(sessionId, signal),
+    enabled,
+    refetchInterval: enabled ? 1_000 : false,
+    retry: false,
+  });
+}
+
+export function useStartManagedOrchestrator() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      payload,
+    }: {
+      sessionId: string;
+      payload: StartManagedOrchestratorRequest;
+    }) => api.startManagedOrchestrator(sessionId, payload),
+    onSuccess: (orchestrator, variables) => {
+      client.setQueryData<ManagedOrchestratorRecord[]>(
+        queryKeys.managedOrchestrators(variables.sessionId),
+        (orchestrators = []) => {
+          const without = orchestrators.filter(
+            (candidate) =>
+              candidate.orchestrator_session_id !== orchestrator.orchestrator_session_id,
+          );
+          return [...without, orchestrator];
+        },
+      );
+    },
+  });
+}
+
+export function useCancelManagedOrchestrator() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, orchestratorId }: { sessionId: string; orchestratorId: string }) =>
+      api.cancelManagedOrchestrator(sessionId, orchestratorId),
+    onSuccess: (orchestrator, variables) => {
+      client.setQueryData<ManagedOrchestratorRecord[]>(
+        queryKeys.managedOrchestrators(variables.sessionId),
+        (orchestrators = []) =>
+          orchestrators.map((candidate) =>
+            candidate.orchestrator_session_id === orchestrator.orchestrator_session_id
+              ? orchestrator
+              : candidate,
           ),
       );
     },

@@ -10,6 +10,7 @@ mod goals;
 pub mod light_model;
 mod mcp;
 pub mod model;
+pub mod orchestration_control;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a
 /// backend, model and base URL every time.

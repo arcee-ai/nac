@@ -4,6 +4,7 @@ mod light_model;
 mod managed_auth;
 mod mcp;
 mod mcp_api;
+mod orchestration;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -51,7 +52,7 @@ use nac_core::{
         slash_command_definitions, PreparedUserInput, SlashCommand, SlashCommandDefinition,
     },
     events::{
-        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEventBoundary,
+        AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEvent, SessionEventBoundary,
         SessionEventEnvelope, SessionReplayGap,
     },
     light_model::{LightModelError, LightModelSettings},
@@ -79,7 +80,8 @@ use nac_core::{
     sessions,
     ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
     store::{
-        GoalStatus, InboxDelivery, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
+        GoalStatus, InboxDelivery, ManagedOrchestratorExecutionMode, ManagedOrchestratorRecord,
+        ManagedOrchestratorStatus, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
         TraditionalChildExecutionMode, TraditionalChildRecord, UserGoalUpdate,
     },
     types::Message,
@@ -145,6 +147,19 @@ struct SessionManagerInner {
 
 struct ServerTraditionalChildController {
     manager: Weak<SessionManagerInner>,
+}
+
+struct ServerOrchestrationController {
+    manager: Weak<SessionManagerInner>,
+}
+
+impl ServerOrchestrationController {
+    fn manager(&self) -> Result<SessionManager> {
+        self.manager
+            .upgrade()
+            .map(|inner| SessionManager { inner })
+            .ok_or_else(|| anyhow!("session manager is no longer available"))
+    }
 }
 
 impl ServerTraditionalChildController {
@@ -998,6 +1013,15 @@ pub struct StartTraditionalChildRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct StartManagedOrchestratorRequest {
+    pub description: String,
+    pub prompt: String,
+    pub orchestrator_session_id: Option<String>,
+    #[serde(default)]
+    pub background: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ReplyPermissionRequest {
     pub reply: PermissionReply,
 }
@@ -1270,8 +1294,14 @@ impl SessionManager {
             }),
         };
         nac_core::traditional_children::register_controller(
-            store_path,
+            store_path.clone(),
             Arc::new(ServerTraditionalChildController {
+                manager: Arc::downgrade(&manager.inner),
+            }),
+        );
+        nac_core::orchestration_control::register_controller(
+            store_path,
+            Arc::new(ServerOrchestrationController {
                 manager: Arc::downgrade(&manager.inner),
             }),
         );
@@ -2130,6 +2160,20 @@ impl SessionManager {
                 // need to re-enter the parent's lifecycle gate.
                 Box::pin(self.attach_session(&child_session_id)).await?;
             }
+            if metadata.behavior == sessions::SessionBehavior::DirectWithOrchestrator {
+                for orchestrator in nac_core::store::list_managed_orchestrators(
+                    &self.inner.store_path,
+                    parent_session_id,
+                )?
+                .into_iter()
+                .filter(|orchestrator| orchestrator.status == ManagedOrchestratorStatus::Running)
+                {
+                    self.spawn_managed_orchestrator_monitor(
+                        orchestrator.orchestrator_session_id,
+                        orchestrator.generation,
+                    );
+                }
+            }
         }
         if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
             service.start_next_direct_inbox_item().await?;
@@ -2438,6 +2482,84 @@ impl SessionManager {
     ) -> Result<TraditionalChildRecord> {
         let controller = nac_core::traditional_children::controller_for(&self.inner.store_path)?;
         controller.cancel(parent_session_id, child_session_id).await
+    }
+
+    pub async fn list_managed_orchestrators(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<Vec<ManagedOrchestratorRecord>> {
+        let service = self.attach_session(parent_session_id).await?;
+        if service.metadata().behavior != sessions::SessionBehavior::DirectWithOrchestrator {
+            return Err(anyhow!(
+                "managed orchestrators require direct-with-orchestrator behavior"
+            ));
+        }
+        nac_core::store::list_managed_orchestrators(&self.inner.store_path, parent_session_id)
+    }
+
+    pub fn managed_orchestrator(
+        &self,
+        parent_session_id: &str,
+        orchestrator_session_id: &str,
+    ) -> Result<ManagedOrchestratorRecord> {
+        let orchestrator = nac_core::store::load_managed_orchestrator(
+            &self.inner.store_path,
+            orchestrator_session_id,
+        )?
+        .ok_or_else(|| {
+            anyhow!("managed orchestrator session '{orchestrator_session_id}' was not found")
+        })?;
+        if orchestrator.parent_session_id != parent_session_id {
+            return Err(anyhow!(
+                "session '{orchestrator_session_id}' is not managed by parent '{parent_session_id}'"
+            ));
+        }
+        Ok(orchestrator)
+    }
+
+    pub async fn start_managed_orchestrator(
+        &self,
+        parent_session_id: &str,
+        request: StartManagedOrchestratorRequest,
+    ) -> Result<ManagedOrchestratorRecord> {
+        self.attach_session(parent_session_id).await?;
+        let controller = nac_core::orchestration_control::controller_for(&self.inner.store_path)?;
+        let background = request.background;
+        let orchestrator = controller
+            .start(
+                nac_core::orchestration_control::ManagedOrchestratorStartRequest {
+                    parent_session_id: parent_session_id.to_string(),
+                    orchestrator_session_id: request.orchestrator_session_id,
+                    description: request.description,
+                    prompt: request.prompt,
+                    execution_mode: if background {
+                        ManagedOrchestratorExecutionMode::Background
+                    } else {
+                        ManagedOrchestratorExecutionMode::Foreground
+                    },
+                },
+            )
+            .await?;
+        if background {
+            Ok(orchestrator)
+        } else {
+            controller
+                .wait(
+                    &orchestrator.orchestrator_session_id,
+                    orchestrator.generation,
+                )
+                .await
+        }
+    }
+
+    pub async fn cancel_managed_orchestrator(
+        &self,
+        parent_session_id: &str,
+        orchestrator_session_id: &str,
+    ) -> Result<ManagedOrchestratorRecord> {
+        nac_core::orchestration_control::controller_for(&self.inner.store_path)?
+            .cancel(parent_session_id, orchestrator_session_id)
+            .await
     }
 
     pub async fn reply_permission_request(
@@ -2821,6 +2943,18 @@ impl SessionManager {
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
+        let orchestrators =
+            nac_core::store::list_managed_orchestrators(&self.inner.store_path, session_id)?;
+        for orchestrator in orchestrators {
+            if orchestrator.status == ManagedOrchestratorStatus::Running {
+                nac_core::store::set_managed_orchestrator_execution_mode(
+                    &self.inner.store_path,
+                    &orchestrator.orchestrator_session_id,
+                    ManagedOrchestratorExecutionMode::Foreground,
+                )?;
+            }
+            Box::pin(self.delete_session(&orchestrator.orchestrator_session_id)).await?;
+        }
         let children =
             nac_core::store::list_traditional_children(&self.inner.store_path, session_id)?;
         for child in children {
@@ -3141,6 +3275,220 @@ impl SessionManager {
         ))
     }
 
+    async fn create_managed_orchestrator_session(
+        &self,
+        parent_session_id: &str,
+        description: &str,
+    ) -> Result<String> {
+        let parent_service = self.attach_session(parent_session_id).await?;
+        if parent_service.metadata().behavior != sessions::SessionBehavior::DirectWithOrchestrator {
+            return Err(anyhow!(
+                "managed orchestrators require direct-with-orchestrator behavior"
+            ));
+        }
+        if nac_core::store::load_managed_orchestrator(&self.inner.store_path, parent_session_id)?
+            .is_some()
+        {
+            return Err(anyhow!(
+                "managed orchestrator sessions cannot launch orchestrators"
+            ));
+        }
+        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
+        let orchestrator_session_id = uuid::Uuid::new_v4().to_string();
+        let mut orchestrator = sessions::new_snapshot(
+            orchestrator_session_id.clone(),
+            parent.cwd,
+            parent.model,
+            parent.base_url,
+            parent.backend,
+            parent.reasoning_effort,
+            parent.sandbox_spec,
+            parent.ssh,
+            Vec::new(),
+            parent.api_key_env,
+            parent.extra_headers,
+        );
+        orchestrator.behavior = sessions::SessionBehavior::Orchestrator;
+        orchestrator.project_id = parent.project_id;
+        orchestrator.light_model = parent.light_model;
+        orchestrator.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
+        sessions::create_session(&self.inner.store_path, &orchestrator)?;
+        if let Err(error) = nac_core::store::create_managed_orchestrator_relationship(
+            &self.inner.store_path,
+            parent_session_id,
+            &orchestrator_session_id,
+            description,
+        ) {
+            if let Err(cleanup) =
+                sessions::delete_session(&self.inner.store_path, &orchestrator_session_id)
+            {
+                eprintln!(
+                    "nac: failed to remove unowned orchestrator session {orchestrator_session_id}: {cleanup:#}"
+                );
+            }
+            return Err(error);
+        }
+        Ok(orchestrator_session_id)
+    }
+
+    async fn monitor_managed_orchestrator(
+        &self,
+        orchestrator_session_id: &str,
+        generation: u64,
+    ) -> Result<ManagedOrchestratorRecord> {
+        loop {
+            let record = nac_core::store::load_managed_orchestrator(
+                &self.inner.store_path,
+                orchestrator_session_id,
+            )?
+            .ok_or_else(|| {
+                anyhow!("managed orchestrator session '{orchestrator_session_id}' was not found")
+            })?;
+            if record.generation != generation {
+                return Err(anyhow!(
+                    "managed orchestrator generation {generation} was superseded by {}",
+                    record.generation
+                ));
+            }
+            if record.status.is_terminal() {
+                return Ok(record);
+            }
+            let run_id = record
+                .run_id
+                .as_deref()
+                .ok_or_else(|| anyhow!("running managed orchestrator has no run id"))?;
+            let service = self.attach_session(orchestrator_session_id).await?;
+            if service
+                .active_run()
+                .is_some_and(|active| active.run_id.to_string() == run_id)
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+
+            let (_, events) = service.recent_events(None, DEFAULT_REPLAY_LIMIT);
+            let terminal = nac_core::store::load_run_recovery(
+                &self.inner.store_path,
+                orchestrator_session_id,
+            )?
+            .filter(|recovery| recovery.run_id == run_id)
+            .and_then(|recovery| match recovery.status {
+                nac_core::store::RunRecoveryStatus::Interrupted => {
+                    Some(nac_core::store::ManagedOrchestratorTerminal {
+                        status: ManagedOrchestratorStatus::Interrupted,
+                        report: None,
+                        failure: Some("run interrupted by process restart".to_string()),
+                    })
+                }
+                nac_core::store::RunRecoveryStatus::Failed => {
+                    Some(nac_core::store::ManagedOrchestratorTerminal {
+                        status: ManagedOrchestratorStatus::Failed,
+                        report: None,
+                        failure: Some("managed orchestrator run failed".to_string()),
+                    })
+                }
+                nac_core::store::RunRecoveryStatus::Active => None,
+            })
+            .or_else(|| {
+                events.iter().rev().find_map(|envelope| {
+                    (envelope.run_id.as_ref().map(ToString::to_string).as_deref() == Some(run_id))
+                        .then_some(&envelope.event)
+                        .and_then(|event| match event {
+                            SessionEvent::RunCompleted { response, .. } => {
+                                Some(nac_core::store::ManagedOrchestratorTerminal {
+                                    status: ManagedOrchestratorStatus::Completed,
+                                    report: Some(response.clone()),
+                                    failure: None,
+                                })
+                            }
+                            SessionEvent::RunFailed { message } => {
+                                Some(nac_core::store::ManagedOrchestratorTerminal {
+                                    status: if message.contains("interrupted") {
+                                        ManagedOrchestratorStatus::Interrupted
+                                    } else {
+                                        ManagedOrchestratorStatus::Failed
+                                    },
+                                    report: None,
+                                    failure: Some(message.clone()),
+                                })
+                            }
+                            SessionEvent::RunCancelled => {
+                                Some(nac_core::store::ManagedOrchestratorTerminal {
+                                    status: ManagedOrchestratorStatus::Cancelled,
+                                    report: None,
+                                    failure: None,
+                                })
+                            }
+                            _ => None,
+                        })
+                })
+            });
+            let terminal = match terminal {
+                Some(terminal) => terminal,
+                None => {
+                    let report = service
+                        .messages_page(MessagePageRequest {
+                            before: None,
+                            limit: 24,
+                            include_system: false,
+                        })
+                        .await
+                        .ok()
+                        .and_then(|page| {
+                            page.messages
+                                .into_iter()
+                                .rev()
+                                .find_map(|message| match message {
+                                    Message::Assistant { content, .. } => content,
+                                    _ => None,
+                                })
+                        });
+                    nac_core::store::ManagedOrchestratorTerminal {
+                        status: ManagedOrchestratorStatus::Interrupted,
+                        report,
+                        failure: Some(
+                            "managed orchestrator stopped without a retained terminal event"
+                                .to_string(),
+                        ),
+                    }
+                }
+            };
+            let settlement = nac_core::store::settle_managed_orchestrator_run(
+                &self.inner.store_path,
+                orchestrator_session_id,
+                run_id,
+                terminal,
+            )?;
+            if settlement.newly_settled && settlement.orchestrator.completion_inbox_id.is_some() {
+                let parent_session_id = settlement.orchestrator.parent_session_id.clone();
+                let cached = {
+                    let active = self.inner.active_sessions.read().await;
+                    active.get(&parent_session_id).cloned()
+                };
+                let parent = match cached {
+                    Some(service) => service,
+                    None => self.attach_session(&parent_session_id).await?,
+                };
+                parent.start_next_direct_inbox_item().await?;
+            }
+            return Ok(settlement.orchestrator);
+        }
+    }
+
+    fn spawn_managed_orchestrator_monitor(&self, orchestrator_session_id: String, generation: u64) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = manager
+                .monitor_managed_orchestrator(&orchestrator_session_id, generation)
+                .await
+            {
+                eprintln!(
+                    "nac: managed orchestrator monitor failed for {orchestrator_session_id}: {error:#}"
+                );
+            }
+        });
+    }
+
     async fn create_traditional_child_session(
         &self,
         parent_session_id: &str,
@@ -3390,6 +3738,211 @@ impl nac_core::traditional_children::TraditionalChildController
             if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
                 service.start_next_direct_inbox_item().await?;
             }
+            Ok(())
+        })
+    }
+}
+
+impl nac_core::orchestration_control::OrchestrationController for ServerOrchestrationController {
+    fn start<'a>(
+        &'a self,
+        request: nac_core::orchestration_control::ManagedOrchestratorStartRequest,
+    ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            let operations = orchestration::OrchestrationOperations::new(manager.clone());
+            if request.prompt.trim().is_empty() {
+                return Err(anyhow!("managed orchestrator prompt is empty"));
+            }
+            let orchestrator_session_id = match request.orchestrator_session_id {
+                Some(session_id) => session_id,
+                None => {
+                    manager
+                        .create_managed_orchestrator_session(
+                            &request.parent_session_id,
+                            &request.description,
+                        )
+                        .await?
+                }
+            };
+            let mut relation = manager
+                .managed_orchestrator(&request.parent_session_id, &orchestrator_session_id)?;
+            if relation.description != request.description.trim() {
+                return Err(anyhow!(
+                    "managed orchestrator description is immutable (expected '{}')",
+                    relation.description
+                ));
+            }
+            let service = manager.attach_session(&orchestrator_session_id).await?;
+            if relation.status == ManagedOrchestratorStatus::Running {
+                if service.active_run().is_some() {
+                    relation = nac_core::store::set_managed_orchestrator_execution_mode(
+                        &manager.inner.store_path,
+                        &orchestrator_session_id,
+                        request.execution_mode,
+                    )?;
+                    operations
+                        .steer(&orchestrator_session_id, request.prompt, None)
+                        .await?;
+                    return Ok(relation);
+                }
+                relation = manager
+                    .monitor_managed_orchestrator(&orchestrator_session_id, relation.generation)
+                    .await?;
+            }
+            if relation.status == ManagedOrchestratorStatus::Running {
+                return Err(anyhow!("managed orchestrator is still running"));
+            }
+            let submitted = operations
+                .submit_prompt(
+                    &orchestrator_session_id,
+                    SubmitPromptRequest {
+                        prompt: request.prompt,
+                    },
+                )
+                .await?;
+            let relation = match nac_core::store::begin_managed_orchestrator_run(
+                &manager.inner.store_path,
+                &orchestrator_session_id,
+                &submitted.run_id,
+                request.execution_mode,
+            ) {
+                Ok(relation) => relation,
+                Err(error) => {
+                    if let Err(cancel_error) =
+                        manager.cancel_active_run(&orchestrator_session_id).await
+                    {
+                        eprintln!(
+                            "nac: failed to cancel unadmitted orchestrator run {}: {cancel_error:#}",
+                            submitted.run_id
+                        );
+                    }
+                    return Err(error);
+                }
+            };
+            manager
+                .spawn_managed_orchestrator_monitor(orchestrator_session_id, relation.generation);
+            Ok(relation)
+        })
+    }
+
+    fn wait<'a>(
+        &'a self,
+        orchestrator_session_id: &'a str,
+        generation: u64,
+    ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
+        Box::pin(async move {
+            self.manager()?
+                .monitor_managed_orchestrator(orchestrator_session_id, generation)
+                .await
+        })
+    }
+
+    fn steer<'a>(
+        &'a self,
+        parent_session_id: &'a str,
+        orchestrator_session_id: &'a str,
+        instruction: &'a str,
+        thread_name: Option<&'a str>,
+    ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            let operations = orchestration::OrchestrationOperations::new(manager.clone());
+            let relation =
+                manager.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+            if relation.status != ManagedOrchestratorStatus::Running {
+                return Err(anyhow!("managed orchestrator is not running"));
+            }
+            if let Some(thread_name) = thread_name {
+                operations
+                    .steer(
+                        orchestrator_session_id,
+                        instruction.to_string(),
+                        Some(thread_name.to_string()),
+                    )
+                    .await?;
+            } else {
+                operations
+                    .steer(orchestrator_session_id, instruction.to_string(), None)
+                    .await?;
+            }
+            manager.managed_orchestrator(parent_session_id, orchestrator_session_id)
+        })
+    }
+
+    fn read<'a>(
+        &'a self,
+        parent_session_id: &'a str,
+        orchestrator_session_id: &'a str,
+        kind: nac_core::orchestration_control::ManagedOrchestratorReadKind,
+        limit: usize,
+    ) -> nac_core::orchestration_control::OrchestrationFuture<'a, serde_json::Value> {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            let operations = orchestration::OrchestrationOperations::new(manager.clone());
+            manager.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+            match kind {
+                nac_core::orchestration_control::ManagedOrchestratorReadKind::Messages => {
+                    let page = operations
+                        .messages_page(
+                            orchestrator_session_id,
+                            MessagePageRequest {
+                                before: None,
+                                limit,
+                                include_system: false,
+                            },
+                        )
+                        .await?;
+                    Ok(serde_json::to_value(page)?)
+                }
+                nac_core::orchestration_control::ManagedOrchestratorReadKind::Episodes => {
+                    operations
+                        .thread_episodes(orchestrator_session_id, None)
+                        .await
+                }
+                nac_core::orchestration_control::ManagedOrchestratorReadKind::Events => {
+                    operations
+                        .thread_events(orchestrator_session_id, None, None, limit)
+                        .await
+                }
+            }
+        })
+    }
+
+    fn cancel<'a>(
+        &'a self,
+        parent_session_id: &'a str,
+        orchestrator_session_id: &'a str,
+    ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            let relation =
+                manager.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+            if relation.status != ManagedOrchestratorStatus::Running {
+                return Ok(relation);
+            }
+            manager.cancel_active_run(orchestrator_session_id).await?;
+            manager
+                .monitor_managed_orchestrator(orchestrator_session_id, relation.generation)
+                .await
+        })
+    }
+
+    fn wake<'a>(
+        &'a self,
+        session_id: &'a str,
+    ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ()> {
+        Box::pin(async move {
+            let manager = self.manager()?;
+            let cached = {
+                let active = manager.inner.active_sessions.read().await;
+                active.get(session_id).cloned()
+            };
+            let service = match cached {
+                Some(service) => service,
+                None => manager.attach_session(session_id).await?,
+            };
+            service.start_next_direct_inbox_item().await?;
             Ok(())
         })
     }
@@ -3696,6 +4249,12 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(list_traditional_children, start_traditional_child))
         .routes(routes!(get_traditional_child))
         .routes(routes!(cancel_traditional_child))
+        .routes(routes!(
+            list_managed_orchestrators,
+            start_managed_orchestrator
+        ))
+        .routes(routes!(get_managed_orchestrator))
+        .routes(routes!(cancel_managed_orchestrator))
         .routes(routes!(permission_state))
         .routes(routes!(reply_permission_request))
         .routes(routes!(delete_permission_grant))
@@ -5359,6 +5918,83 @@ async fn cancel_traditional_child(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/orchestrators",
+    operation_id = "get_sessions_session_id_orchestrators",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Managed orchestrators", body = Vec<ManagedOrchestratorRecord>, content_type = "application/json"), (status = 400, description = "Direct-with-orchestrator behavior required", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn list_managed_orchestrators(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Vec<ManagedOrchestratorRecord>>, ApiError> {
+    Ok(Json(manager.list_managed_orchestrators(&session_id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/orchestrators",
+    operation_id = "post_sessions_session_id_orchestrators",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = StartManagedOrchestratorRequest, content_type = "application/json"),
+    responses((status = 201, description = "Orchestrator created, continued, or steered", body = ManagedOrchestratorRecord, content_type = "application/json"), (status = 400, description = "Invalid orchestrator request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Orchestrator concurrency or run conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn start_managed_orchestrator(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<StartManagedOrchestratorRequest>, JsonRejection>,
+) -> std::result::Result<(StatusCode, Json<ManagedOrchestratorRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            manager
+                .start_managed_orchestrator(&session_id, request)
+                .await?,
+        ),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/orchestrators/{orchestrator_session_id}",
+    operation_id = "get_sessions_session_id_orchestrators_orchestrator_session_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("orchestrator_session_id" = String, Path)),
+    responses((status = 200, description = "Managed orchestrator status", body = ManagedOrchestratorRecord, content_type = "application/json"), (status = 404, description = "Orchestrator not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn get_managed_orchestrator(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, orchestrator_session_id)): AxumPath<(String, String)>,
+) -> std::result::Result<Json<ManagedOrchestratorRecord>, ApiError> {
+    Ok(Json(manager.managed_orchestrator(
+        &session_id,
+        &orchestrator_session_id,
+    )?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel",
+    operation_id = "post_sessions_session_id_orchestrators_orchestrator_session_id_cancel",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("orchestrator_session_id" = String, Path)),
+    responses((status = 200, description = "Managed orchestrator cancelled", body = ManagedOrchestratorRecord, content_type = "application/json"), (status = 404, description = "Orchestrator not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Orchestrator run unavailable", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn cancel_managed_orchestrator(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, orchestrator_session_id)): AxumPath<(String, String)>,
+) -> std::result::Result<Json<ManagedOrchestratorRecord>, ApiError> {
+    Ok(Json(
+        manager
+            .cancel_managed_orchestrator(&session_id, &orchestrator_session_id)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/permissions",
     operation_id = "get_sessions_session_id_permissions",
     tag = "permissions",
@@ -6472,7 +7108,9 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("unfinished goal")
             || message.contains("goal clear conflict")
             || message.contains("child concurrency limit")
+            || message.contains("managed orchestrator concurrency limit")
             || message.contains("already has running generation")
+            || message.contains("already has a running generation")
             || message.contains("running in another process")
         {
             StatusCode::CONFLICT
@@ -6487,6 +7125,10 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("traditional child prompt is empty")
             || message.contains("traditional child profile")
             || message.contains("traditional child nesting limit")
+            || message.contains("managed orchestrator prompt is empty")
+            || message.contains("managed orchestrators require direct-with-orchestrator")
+            || message.contains("managed orchestrator description")
+            || message.contains("managed orchestrator sessions cannot launch")
             || message.contains("host-backed shared workspace")
             || message.contains("frontend command")
             || message.contains("only for direct behaviors")
@@ -6562,6 +7204,11 @@ mod tests {
         ("GET", "/sessions/{session_id}/goal"),
         ("GET", "/sessions/{session_id}/inbox"),
         ("GET", "/sessions/{session_id}/messages"),
+        ("GET", "/sessions/{session_id}/orchestrators"),
+        (
+            "GET",
+            "/sessions/{session_id}/orchestrators/{orchestrator_session_id}",
+        ),
         ("GET", "/sessions/{session_id}/permissions"),
         ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
         ("GET", "/sessions/{session_id}/workspace/branches"),
@@ -6603,6 +7250,11 @@ mod tests {
         ),
         ("POST", "/sessions/{session_id}/goal"),
         ("POST", "/sessions/{session_id}/inbox"),
+        ("POST", "/sessions/{session_id}/orchestrators"),
+        (
+            "POST",
+            "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel",
+        ),
         ("POST", "/sessions/{session_id}/permissions/{request_id}"),
         ("POST", "/sessions/{session_id}/regenerate"),
         ("POST", "/sessions/{session_id}/revert"),
@@ -8904,6 +9556,29 @@ mod tests {
         sessions::create_session(&root.join("store.db"), &snapshot).expect("seed direct session");
     }
 
+    fn seed_direct_with_orchestrator_session_with_base_url(
+        root: &std::path::Path,
+        session_id: &str,
+        base_url: String,
+    ) {
+        let mut snapshot = sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "model-a".to_string(),
+            base_url,
+            BackendKind::OpenAiResponses,
+            Some(ReasoningEffort::Medium),
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        snapshot.behavior = sessions::SessionBehavior::DirectWithOrchestrator;
+        sessions::create_session(&root.join("store.db"), &snapshot)
+            .expect("seed direct-with-orchestrator session");
+    }
+
     fn scripted_direct_response() -> (String, std::sync::mpsc::Receiver<()>) {
         use std::io::{Read, Write};
 
@@ -9404,6 +10079,295 @@ mod tests {
 
         let rejected = get_response(app, "/sessions/orchestrator/goal", None).await;
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn managed_orchestrator_http_api_runs_foreground_then_delivers_background_completion() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_orchestrator_http");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-orchestrator-test-key"));
+        let (base_url, requests) = scripted_direct_responses(&[
+            "foreground orchestrator done",
+            "background orchestrator done",
+            "parent received orchestrator completion",
+        ]);
+        seed_direct_with_orchestrator_session_with_base_url(&root, "delegating", base_url);
+        seed_direct_session(&root, "ordinary-direct");
+        seed_editable_session(&root, "orchestrator");
+        let manager = test_manager(&root);
+        let app = router(manager.clone());
+
+        let foreground = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/delegating/orchestrators")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"description":"implement durable control","prompt":"complete the first pass","background":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(foreground.status(), StatusCode::CREATED);
+        let foreground: ManagedOrchestratorRecord =
+            serde_json::from_slice(&response_body(foreground).await).unwrap();
+        assert_eq!(foreground.status, ManagedOrchestratorStatus::Completed);
+        assert_eq!(foreground.generation, 1);
+        assert_eq!(
+            foreground.report.as_deref(),
+            Some("foreground orchestrator done")
+        );
+        assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        let child_snapshot =
+            sessions::load_session(&root.join("store.db"), &foreground.orchestrator_session_id)
+                .unwrap();
+        assert_eq!(
+            child_snapshot.behavior,
+            sessions::SessionBehavior::Orchestrator
+        );
+
+        let background = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/delegating/orchestrators")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"description":"implement durable control","prompt":"complete the second pass","orchestrator_session_id":"{}","background":true}}"#,
+                        foreground.orchestrator_session_id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(background.status(), StatusCode::CREATED);
+        let background: ManagedOrchestratorRecord =
+            serde_json::from_slice(&response_body(background).await).unwrap();
+        assert_eq!(background.status, ManagedOrchestratorStatus::Running);
+        assert_eq!(background.generation, 2);
+        assert_eq!(
+            background.execution_mode,
+            Some(ManagedOrchestratorExecutionMode::Background)
+        );
+        tokio::task::spawn_blocking(move || {
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 1);
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 2);
+        })
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let orchestrator = manager
+                    .managed_orchestrator("delegating", &foreground.orchestrator_session_id)
+                    .unwrap();
+                if orchestrator.status == ManagedOrchestratorStatus::Completed {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background orchestrator should settle");
+        let completed = manager
+            .managed_orchestrator("delegating", &foreground.orchestrator_session_id)
+            .unwrap();
+        assert_eq!(completed.generation, 2);
+        assert_eq!(
+            completed.report.as_deref(),
+            Some("background orchestrator done")
+        );
+        assert!(completed.completion_inbox_id.is_some());
+        let inbox =
+            nac_core::store::list_session_inbox(&root.join("store.db"), "delegating").unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].status, nac_core::store::InboxStatus::Delivered);
+        assert!(inbox[0]
+            .content
+            .contains(&foreground.orchestrator_session_id));
+
+        assert_eq!(
+            get_response(app.clone(), "/sessions/ordinary-direct/orchestrators", None)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            get_response(app, "/sessions/orchestrator/orchestrators", None)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn managed_orchestrator_cancel_propagates_and_delivers_once() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_orchestrator_cancel");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-orchestrator-cancel-key"));
+        let (base_url, requests, release) = stalled_then_scripted_direct_response();
+        seed_direct_with_orchestrator_session_with_base_url(&root, "delegating", base_url);
+        let manager = test_manager(&root);
+        let app = router(manager.clone());
+
+        let started = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/delegating/orchestrators")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"description":"cancel flow","prompt":"wait until cancelled","background":true}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(started.status(), StatusCode::CREATED);
+        let running: ManagedOrchestratorRecord =
+            serde_json::from_slice(&response_body(started).await).unwrap();
+        tokio::task::spawn_blocking(move || {
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        })
+        .await
+        .unwrap();
+
+        let cancelled = tokio::time::timeout(
+            Duration::from_secs(10),
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/sessions/delegating/orchestrators/{}/cancel",
+                        running.orchestrator_session_id
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            ),
+        )
+        .await
+        .expect("managed orchestrator cancellation should not hang")
+        .unwrap();
+        assert_eq!(cancelled.status(), StatusCode::OK);
+        let cancelled: ManagedOrchestratorRecord =
+            serde_json::from_slice(&response_body(cancelled).await).unwrap();
+        assert_eq!(cancelled.status, ManagedOrchestratorStatus::Cancelled);
+        release.send(()).unwrap();
+
+        let inbox =
+            nac_core::store::list_session_inbox(&root.join("store.db"), "delegating").unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert!(inbox[0].content.contains("cancelled"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn parent_attachment_reconciles_abandoned_managed_orchestrator_once() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_orchestrator_restart");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-orchestrator-restart-key"));
+        let (base_url, requests) =
+            scripted_direct_responses(&["parent acknowledged interrupted orchestrator"]);
+        seed_direct_with_orchestrator_session_with_base_url(&root, "delegating", base_url);
+        let store_path = root.join("store.db");
+
+        let first = test_manager(&root);
+        let child_session_id = first
+            .create_managed_orchestrator_session("delegating", "survive restart")
+            .await
+            .unwrap();
+        nac_core::store::begin_managed_orchestrator_run(
+            &store_path,
+            &child_session_id,
+            "abandoned-orchestrator-run",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                &child_session_id,
+                0,
+                &Message::User {
+                    content: "work interrupted by restart".to_string(),
+                },
+                "abandoned-orchestrator-run",
+            )
+            .unwrap();
+        drop(first);
+
+        let rebuilt = test_manager(&root);
+        rebuilt.snapshot("delegating").await.unwrap();
+        tokio::task::spawn_blocking(move || {
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let relation =
+                    nac_core::store::load_managed_orchestrator(&store_path, &child_session_id)
+                        .unwrap()
+                        .unwrap();
+                let inbox = nac_core::store::list_session_inbox(&store_path, "delegating").unwrap();
+                if relation.status.is_terminal()
+                    && inbox
+                        .first()
+                        .is_some_and(|item| item.status == nac_core::store::InboxStatus::Delivered)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("restart reconciliation should interrupt and deliver");
+        rebuilt.snapshot("delegating").await.unwrap();
+        let relation = nac_core::store::load_managed_orchestrator(&store_path, &child_session_id)
+            .unwrap()
+            .unwrap();
+        let inbox = nac_core::store::list_session_inbox(&store_path, "delegating").unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(relation.status, ManagedOrchestratorStatus::Interrupted);
+        assert_eq!(relation.completion_inbox_id, Some(inbox[0].id));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deleting_parent_removes_managed_orchestrator_sessions() {
+        let root = temp_root("managed_orchestrator_delete");
+        seed_direct_with_orchestrator_session_with_base_url(
+            &root,
+            "delegating",
+            "https://api.openai.com/v1".to_string(),
+        );
+        let manager = test_manager(&root);
+        let child_session_id = manager
+            .create_managed_orchestrator_session("delegating", "delete with parent")
+            .await
+            .unwrap();
+        manager.delete_session("delegating").await.unwrap();
+        let store_path = root.join("store.db");
+        assert!(sessions::load_session(&store_path, "delegating").is_err());
+        assert!(sessions::load_session(&store_path, &child_session_id).is_err());
+        assert!(
+            nac_core::store::load_managed_orchestrator(&store_path, &child_session_id)
+                .unwrap()
+                .is_none()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

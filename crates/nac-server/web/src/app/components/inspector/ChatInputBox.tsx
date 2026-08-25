@@ -20,6 +20,7 @@ import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
 import { ChildControls } from "@/app/components/inspector/ChildControls";
+import { OrchestratorControls } from "@/app/components/inspector/OrchestratorControls";
 import { SshBadge } from "@/app/components/SshBadge";
 import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
@@ -984,6 +985,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           <PermissionControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
           <GoalControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
           <ChildControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
+          <OrchestratorControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
 
           {/* The model name is the first thing a narrow column gives up; the
               same switch lives in the session settings the gear opens. */}

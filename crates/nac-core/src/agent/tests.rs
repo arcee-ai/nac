@@ -43,12 +43,12 @@ fn direct_prompt_keeps_model_goal_authority_narrow() {
 }
 
 #[test]
-fn traditional_child_construction_exposes_only_the_eight_coding_tools() {
+fn direct_topologies_expose_exact_capability_boundaries() {
     let root =
         std::env::temp_dir().join(format!("nac_child_tool_boundary_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let store_path = root.join("store.db");
-    for session_id in ["parent", "child"] {
+    for session_id in ["parent", "child", "delegating"] {
         let mut snapshot = crate::sessions::new_snapshot(
             session_id.to_string(),
             root.clone(),
@@ -62,7 +62,11 @@ fn traditional_child_construction_exposes_only_the_eight_coding_tools() {
             Some("OPENAI_API_KEY".to_string()),
             std::collections::BTreeMap::new(),
         );
-        snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+        snapshot.behavior = if session_id == "delegating" {
+            crate::sessions::SessionBehavior::DirectWithOrchestrator
+        } else {
+            crate::sessions::SessionBehavior::Direct
+        };
         crate::sessions::create_session(&store_path, &snapshot).unwrap();
     }
     crate::store::create_traditional_child_relationship(
@@ -107,6 +111,7 @@ fn traditional_child_construction_exposes_only_the_eight_coding_tools() {
 
     let parent = build("parent");
     let child = build("child");
+    let delegating = build("delegating");
     let names = |agent: &Agent| {
         agent
             .tool_definitions_for_test()
@@ -122,15 +127,26 @@ fn traditional_child_construction_exposes_only_the_eight_coding_tools() {
         names(&child),
         crate::tools::WORKER_TOOL_NAMES.map(str::to_string)
     );
+    assert_eq!(
+        names(&delegating),
+        crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.map(str::to_string)
+    );
     assert!(matches!(
         child.messages.first(),
         Some(Message::System { content })
             if content.contains("traditional child coding agent")
                 && content.contains("review the implementation")
     ));
+    assert!(matches!(
+        delegating.messages.first(),
+        Some(Message::System { content })
+            if content.contains("Managed orchestration")
+                && content.contains("separate durable NAC orchestrator sessions")
+    ));
 
     drop(parent);
     drop(child);
+    drop(delegating);
     let _ = std::fs::remove_dir_all(root);
 }
 

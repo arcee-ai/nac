@@ -8,6 +8,7 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [Sandbox](usage/sandbox.md)
   - [Durable direct goals](usage/direct-goals.md)
   - [Traditional child sessions](usage/traditional-children.md)
+  - [Managed orchestrator sessions](usage/managed-orchestrators.md)
 - [Configuration](configuration/README.md)
   - [Example config](configuration/example.md)
   - [Model configuration](configuration/model.md)

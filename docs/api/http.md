@@ -107,6 +107,26 @@ ownership, changes to a child's profile or description, sandboxed sessions
 without a host-backed shared workspace, and more than four simultaneously
 running children per root parent.
 
+## Managed orchestrator sessions
+
+`GET /sessions/{session_id}/orchestrators` lists orchestrator sessions owned by
+a `direct-with-orchestrator` parent. `POST` on the same path launches a new
+session or continues the optional `orchestrator_session_id`. The request has an
+immutable short `description`, a complete `prompt`, and optional `background`
+(default false). Foreground waits for settlement; background returns the
+running relationship immediately and later delivers one durable parent inbox
+item.
+
+`GET /sessions/{session_id}/orchestrators/{orchestrator_session_id}` reads one
+owned relationship. `POST .../cancel` propagates cancellation to the active
+generation. Responses include status, generation, run and execution mode,
+terminal report or failure, completion inbox ID, timestamps, and version.
+
+The endpoints reject every parent behavior except `direct-with-orchestrator`,
+mismatched ownership, recursive control, changed descriptions, and more than
+four simultaneously running managed orchestrators. Managed sessions always use
+the existing `orchestrator` behavior and its worker topology.
+
 ## Remote access
 
 Remote access delegates the authority of the local user to every client that

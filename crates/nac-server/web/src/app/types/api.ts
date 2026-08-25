@@ -685,6 +685,33 @@ export interface StartTraditionalChildRequest {
   background?: boolean;
 }
 
+export type ManagedOrchestratorStatus = TraditionalChildStatus;
+export type ManagedOrchestratorExecutionMode = TraditionalChildExecutionMode;
+
+export interface ManagedOrchestratorRecord {
+  orchestrator_session_id: string;
+  parent_session_id: string;
+  root_session_id: string;
+  description: string;
+  status: ManagedOrchestratorStatus;
+  generation: number;
+  run_id: string | null;
+  execution_mode: ManagedOrchestratorExecutionMode | null;
+  report: string | null;
+  failure: string | null;
+  completion_inbox_id: number | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+export interface StartManagedOrchestratorRequest {
+  description: string;
+  prompt: string;
+  orchestrator_session_id?: string;
+  background?: boolean;
+}
+
 export interface SessionEventBoundary {
   epoch_id: string;
   sequence_id: number;

@@ -3,10 +3,10 @@
 //! Exposes nac session management as 11 MCP tools served over the
 //! streamable-http transport at `/mcp`.
 
+use crate::orchestration::OrchestrationOperations;
 use crate::{
-    CreateSessionRequest, HeadersRequest, OrchestratorSteeringRequest, RequestField,
-    SandboxRequest, SessionManager, SubmitPromptRequest, ThreadSteeringRequest,
-    UpdateConfigRequest,
+    CreateSessionRequest, HeadersRequest, RequestField, SandboxRequest, SessionManager,
+    SubmitPromptRequest, UpdateConfigRequest,
 };
 
 use rmcp::handler::server::wrapper::Parameters;
@@ -30,7 +30,7 @@ use serde_json::json;
 
 #[derive(Clone)]
 pub struct NacMcpService {
-    manager: SessionManager,
+    operations: OrchestrationOperations,
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ impl NacMcpService {
                 ..Default::default()
             },
         };
-        match self.manager.create_session(request).await {
+        match self.operations.create_session(request).await {
             Ok(snapshot) => {
                 let session_id = snapshot.metadata.session_id.clone();
                 let model = snapshot.metadata.model.clone();
@@ -244,7 +244,7 @@ impl NacMcpService {
         Parameters(params): Parameters<ListSessionsParams>,
     ) -> Result<CallToolResult, ErrorData> {
         match self
-            .manager
+            .operations
             .list_sessions(params.include_workspace_stats.unwrap_or(false))
             .await
         {
@@ -280,7 +280,7 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<GetSessionStatusParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        match self.manager.snapshot(&params.session_id).await {
+        match self.operations.snapshot(&params.session_id).await {
             Ok(snapshot) => {
                 let active_run = snapshot.active_run.as_ref().map(|r| {
                     json!({
@@ -326,7 +326,7 @@ impl NacMcpService {
         Parameters(params): Parameters<SendMessageParams>,
     ) -> Result<CallToolResult, ErrorData> {
         match self
-            .manager
+            .operations
             .submit_prompt(
                 &params.session_id,
                 SubmitPromptRequest {
@@ -360,36 +360,13 @@ impl NacMcpService {
         Parameters(params): Parameters<SteerParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let result = if let Some(thread_name) = params.thread_name {
-            self.manager
-                .queue_thread_steering(
-                    &params.session_id,
-                    &thread_name,
-                    ThreadSteeringRequest {
-                        instruction: params.instruction,
-                    },
-                )
+            self.operations
+                .steer(&params.session_id, params.instruction, Some(thread_name))
                 .await
-                .map(|r| {
-                    json!({
-                        "steering_id": r.steering_id,
-                        "status": r.status,
-                    })
-                })
         } else {
-            self.manager
-                .queue_orchestrator_steering(
-                    &params.session_id,
-                    OrchestratorSteeringRequest {
-                        instruction: params.instruction,
-                    },
-                )
+            self.operations
+                .steer(&params.session_id, params.instruction, None)
                 .await
-                .map(|r| {
-                    json!({
-                        "steering_id": r.steering_id,
-                        "status": r.status,
-                    })
-                })
         };
         match result {
             Ok(value) => Ok(CallToolResult::success(vec![Content::text(
@@ -413,7 +390,7 @@ impl NacMcpService {
         use nac_core::session_service::MessagePageRequest;
         let include_system = params.include_system.unwrap_or(true);
         match self
-            .manager
+            .operations
             .messages_page(
                 &params.session_id,
                 MessagePageRequest {
@@ -467,64 +444,15 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<GetThreadEpisodesParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let store_path = self.manager.store_info().store_path;
-        let session_id = params.session_id;
-        let thread_name = params.thread_name;
-        let result = tokio::task::spawn_blocking(move || {
-            if let Some(thread_name) = thread_name {
-                nac_core::store::thread_read(&store_path, &session_id, &thread_name).map(
-                    |episodes| {
-                        let entries: Vec<_> = episodes
-                            .iter()
-                            .map(|e| {
-                                json!({
-                                    "id": e.id,
-                                    "thread_name": e.thread_name,
-                                    "action": e.action,
-                                    "content": e.content,
-                                    "status": e.status,
-                                    "created_at": e.created_at,
-                                })
-                            })
-                            .collect();
-                        json!({ "episodes": entries })
-                    },
-                )
-            } else {
-                let grouped =
-                    nac_core::store::load_all_retained_episodes(&store_path, &session_id)?;
-                let mut all: Vec<_> = Vec::new();
-                for episodes in grouped.values() {
-                    for e in episodes {
-                        all.push(json!({
-                            "id": e.id,
-                            "thread_name": e.thread_name,
-                            "action": e.action,
-                            "content": e.content,
-                            "status": e.status,
-                            "created_at": e.created_at,
-                        }));
-                    }
-                }
-                all.sort_by(|a, b| {
-                    let thread_a = a["thread_name"].as_str().unwrap_or("");
-                    let thread_b = b["thread_name"].as_str().unwrap_or("");
-                    let id_a = a["id"].as_i64().unwrap_or(0);
-                    let id_b = b["id"].as_i64().unwrap_or(0);
-                    thread_a.cmp(thread_b).then(id_a.cmp(&id_b))
-                });
-                Ok(json!({ "episodes": all }))
-            }
-        })
-        .await;
-        match result {
-            Ok(Ok(value)) => Ok(CallToolResult::success(vec![Content::text(
+        match self
+            .operations
+            .thread_episodes(&params.session_id, params.thread_name)
+            .await
+        {
+            Ok(value) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&value)
                     .unwrap_or_else(|e| format!("Error serializing: {e}")),
             )])),
-            Ok(Err(e)) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Error: {e}"
             ))])),
@@ -539,43 +467,15 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<GetThreadEventsParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = if let Some(thread_name) = params.thread_name {
-            self.manager
-                .thread_events(
-                    &params.session_id,
-                    &thread_name,
-                    params.before_id,
-                    params.limit.unwrap_or(24),
-                )
-                .await
-                .map(|page| {
-                    let events: Vec<_> = page
-                        .events
-                        .iter()
-                        .map(|item| {
-                            json!({
-                                "id": item.id,
-                                "created_at": item.created_at,
-                                "event": item.event,
-                            })
-                        })
-                        .collect();
-                    json!({
-                        "events": events,
-                        "has_older": page.has_older,
-                        "next_before_id": page.next_before_id,
-                    })
-                })
-        } else {
-            self.manager
-                .snapshot(&params.session_id)
-                .await
-                .map(|snapshot| {
-                    json!({
-                        "thread_events": snapshot.thread_events,
-                    })
-                })
-        };
+        let result = self
+            .operations
+            .thread_events(
+                &params.session_id,
+                params.thread_name,
+                params.before_id,
+                params.limit.unwrap_or(24),
+            )
+            .await;
         match result {
             Ok(value) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&value)
@@ -595,43 +495,10 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<SessionActionParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = match params.action.as_str() {
-            "compact" => self
-                .manager
-                .compact_session(&params.session_id)
-                .await
-                .map(|r| serde_json::to_value(&r).unwrap_or(json!({"status": "done"})))
-                .map_err(|e| anyhow::anyhow!("{e}")),
-            "cancel" => self
-                .manager
-                .cancel_active_run(&params.session_id)
-                .await
-                .map(|_| json!({"status": "cancelled"}))
-                .map_err(|e| anyhow::anyhow!("{e}")),
-            "delete" => self
-                .manager
-                .delete_session(&params.session_id)
-                .await
-                .map(|_| json!({"status": "deleted"}))
-                .map_err(|e| anyhow::anyhow!("{e}")),
-            "revert" => {
-                let message_idx = params
-                    .message_idx
-                    .ok_or_else(|| anyhow::anyhow!("message_idx is required for revert action"));
-                match message_idx {
-                    Ok(idx) => self
-                        .manager
-                        .revert_session(&params.session_id, idx)
-                        .await
-                        .map(|r| serde_json::to_value(&r).unwrap_or(json!({"status": "reverted"})))
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    Err(e) => Err(e),
-                }
-            }
-            other => Err(anyhow::anyhow!(
-                "unknown action '{other}': expected compact, cancel, delete, or revert"
-            )),
-        };
+        let result = self
+            .operations
+            .session_action(&params.session_id, &params.action, params.message_idx)
+            .await;
         match result {
             Ok(value) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&value)
@@ -662,8 +529,8 @@ impl NacMcpService {
             light_model: RequestField::Omitted,
         };
         match self
-            .manager
-            .update_session_config(&params.session_id, request)
+            .operations
+            .update_session(&params.session_id, request)
             .await
         {
             Ok(()) => Ok(CallToolResult::success(vec![Content::text(
@@ -681,36 +548,7 @@ impl NacMcpService {
         description = "List available model providers and their models. Each model includes supported reasoning efforts and context window. Use the model id when calling create_session — the backend is auto-detected."
     )]
     async fn list_models(&self) -> Result<CallToolResult, ErrorData> {
-        let listing = nac_core::model::api_listing();
-        let providers: Vec<_> = listing
-            .providers
-            .iter()
-            .map(|p| {
-                let models: Vec<_> = p
-                    .models
-                    .iter()
-                    .map(|m| {
-                        let efforts: Vec<_> = m
-                            .supported_efforts
-                            .iter()
-                            .map(|e| e.as_str().to_string())
-                            .collect();
-                        json!({
-                            "id": m.id,
-                            "display_name": m.display_name,
-                            "context_window": m.context_window,
-                            "reasoning": m.reasoning,
-                            "supported_efforts": efforts,
-                        })
-                    })
-                    .collect();
-                json!({
-                    "provider": p.id.as_str(),
-                    "models": models,
-                })
-            })
-            .collect();
-        let result = json!(providers);
+        let result = OrchestrationOperations::model_listing();
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string_pretty(&result)
                 .unwrap_or_else(|e| format!("Error serializing: {e}")),
@@ -733,7 +571,7 @@ pub fn streamable_http_service(
     StreamableHttpService::new(
         move || {
             Ok(NacMcpService {
-                manager: manager.clone(),
+                operations: OrchestrationOperations::new(manager.clone()),
             })
         },
         LocalSessionManager::default().into(),

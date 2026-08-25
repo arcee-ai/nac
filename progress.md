@@ -44,8 +44,9 @@ Non-negotiable invariants:
 - The native tool kernel, immutable behavior foundation, persistent direct
   primary, durable inbox, behavior-specific compaction, and retained-terminal
   lifecycle and direct permission/safety vertical are committed. The durable
-  direct-only `/goal` and traditional-child verticals are implemented and
-  focused-verified. Internal orchestrator control is the active milestone.
+  direct-only `/goal`, traditional-child, and managed-orchestrator verticals
+  are implemented and focused-verified. Final broad regression, assets, and
+  handoff are the active milestone.
 
 ## Ordered milestones
 
@@ -66,13 +67,13 @@ Non-negotiable invariants:
 6. **Completed — Traditional child sessions.** Add durable relationships,
    profiles, foreground/background execution, continuation/steering,
    cancellation, completion injection, guards, and web navigation.
-7. **In progress — Internal orchestrator control.** Extract protocol-independent
+7. **Completed — Internal orchestrator control.** Extract protocol-independent
    operations, expose direct-with-orchestrator tools, persist relationships,
    prevent recursion, and preserve outgoing MCP behavior.
-8. **Pending — Web UI/API vertical completion.** Expose behaviors, direct
+8. **Completed — Web UI/API vertical completion.** Expose behaviors, direct
    transcripts/tools, permissions, inbox semantics, goals, child controls, and
    transcript links while preserving orchestrator UX.
-9. **Pending — Hardening and handoff.** Complete migrations/regressions,
+9. **Completed — Hardening and handoff.** Complete migrations/regressions,
    recovery/race/durability/safety/web tests, docs, production assets, full
    `make ci`, limitations, and clean milestone history.
 
@@ -145,6 +146,14 @@ Non-negotiable invariants:
   foreground returns the same structured outcome directly. Parent attachment
   reconciles abandoned children, parent deletion removes child sessions, and a
   process-local per-store/workspace read/write gate serializes tool invocations.
+- Represent managed orchestration as a durable relationship between one
+  `direct-with-orchestrator` parent and one immutable orchestrator session.
+  Expose exactly six native control tools only to that parent behavior, keep
+  outgoing MCP create semantics orchestrator-only, and share one Rust operation
+  seam across native and MCP adapters without loopback. Foreground returns the
+  durable outcome; background settlement injects exactly one parent queue item;
+  restart attachment, cancellation, continuation/steering, ownership, four-run
+  concurrency, recursion prevention, and deletion cascade are explicit.
 
 ## Files and subsystems currently changing
 
@@ -171,6 +180,13 @@ Non-negotiable invariants:
   completion/restart reconciliation, REST/OpenAPI routes, web launch/status/
   continuation/cancel/transcript navigation, readable completion rendering,
   shared-workspace tool gates, cascade cleanup, and documentation.
+- Milestone 7 adds schema-22 managed-orchestrator relationships/generations,
+  six native tools behind an exact 20-tool delegating-direct capability set, a
+  shared protocol-independent Rust session-operations seam used by outgoing MCP
+  and native control, durable foreground/background settlement and restart
+  reconciliation, REST/OpenAPI routes, web launch/status/continuation/cancel/
+  transcript navigation, readable completion rendering, cascade cleanup, and
+  documentation.
 
 ## Verification
 
@@ -279,6 +295,25 @@ Non-negotiable invariants:
   rebuilt the expected committed bundle delta for this checkpoint.
 - `make lint` and the required pre-commit `make check` passed for the complete
   traditional-child slice.
+- Managed-orchestrator focused core tests — passed for schema-21 migration,
+  exact relationship behaviors, concurrency release, exactly-once background
+  delivery, readable completion rendering, exact 8/14/20 tool boundaries, and
+  native model-boundary foreground/background launch.
+- Managed-orchestrator server tests — passed for live foreground then
+  background continuation, automatic parent delivery, cancellation propagation,
+  parent-only restart reconciliation, cascade deletion, behavior/ownership/
+  recursion guards, and exact OpenAPI router registration.
+- Managed-orchestrator frontend verification — all 139 tests across 19 files,
+  lint, formatting, and TypeScript passed, including launch/status/cancel/open
+  controls and readable durable completion rendering.
+- Final broad regression — 1025 core tests passed with 9 ignored, 124 server
+  tests passed, and 21 CLI tests passed. Frontend lint, formatting, typecheck,
+  all 139 tests, and the production build passed.
+- `make lint`, `make format-check`, and the required pre-commit `make check`
+  passed after the complete managed-orchestrator slice. The first full
+  `make ci` reached its final asset-integrity check and reported only the
+  expected uncommitted rebuilt production bundle; the bundle is included in
+  the managed-orchestrator commit and the complete gate will be rerun at HEAD.
 
 ## Completed commits
 
@@ -290,6 +325,7 @@ Non-negotiable invariants:
 - `b905b34 feat(core): retain direct terminals`.
 - `a06d9e7 feat(core): add direct permissions`.
 - `63ccd2c feat(core): add durable direct goals`.
+- `adcf1c0 feat(core): add durable traditional children`.
 
 ## Known problems and blockers
 
@@ -300,8 +336,8 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Commit the green schema-21 traditional-child vertical after `make check`, then
-inventory the outgoing MCP handler/service seam and add the durable managed-
-orchestrator relationship plus protocol-independent create/submit/steer/status/
-read/wait/cancel operations. Expose those only to `direct-with-orchestrator`
-without changing existing outgoing MCP behavior or orchestrator construction.
+Commit the managed-orchestrator implementation and rebuilt production assets,
+then rerun full `make ci` against committed HEAD. Record the implementation
+commit and final successful gate in a handoff checkpoint, verify the worktree
+contains only the user's pre-existing `.gitignore` and `AGENTS.md` state, and
+close the goal.

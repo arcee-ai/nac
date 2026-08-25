@@ -27,6 +27,7 @@ import type {
   ManagedAuthStatus,
   GeneratedCredential,
   ManagedSessionSummary,
+  ManagedOrchestratorRecord,
   McpLibraryResponse,
   McpServerList,
   McpServerView,
@@ -43,6 +44,7 @@ import type {
   PermissionStateResponse,
   SessionGoalRecord,
   StartTraditionalChildRequest,
+  StartManagedOrchestratorRequest,
   TraditionalChildRecord,
   ProjectList,
   ProjectRecord,
@@ -489,6 +491,27 @@ export const api = {
     request<TraditionalChildRecord>(
       "POST",
       `${sessionPath(id)}/children/${encodeURIComponent(childId)}/cancel`,
+    ),
+
+  listManagedOrchestrators: (id: string, signal?: AbortSignal) =>
+    request<ManagedOrchestratorRecord[]>("GET", `${sessionPath(id)}/orchestrators`, { signal }),
+
+  startManagedOrchestrator: (id: string, payload: StartManagedOrchestratorRequest) =>
+    request<ManagedOrchestratorRecord>("POST", `${sessionPath(id)}/orchestrators`, {
+      body: payload,
+    }),
+
+  getManagedOrchestrator: (id: string, orchestratorId: string, signal?: AbortSignal) =>
+    request<ManagedOrchestratorRecord>(
+      "GET",
+      `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}`,
+      { signal },
+    ),
+
+  cancelManagedOrchestrator: (id: string, orchestratorId: string) =>
+    request<ManagedOrchestratorRecord>(
+      "POST",
+      `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}/cancel`,
     ),
 
   updateConfig: (id: string, payload: UpdateConfigRequest) =>
