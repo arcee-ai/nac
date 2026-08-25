@@ -70,4 +70,15 @@ describe("project redirect", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fakes.newChat).not.toHaveBeenCalled();
   });
+
+  it("does not create a chat when the project ownership query fails", async () => {
+    fakes.projects.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+    mount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.newChat).not.toHaveBeenCalled();
+  });
 });

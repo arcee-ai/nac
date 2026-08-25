@@ -7,7 +7,7 @@ import { NewChatModal } from "@/app/components/modals/NewChatModal";
 import { DeleteProjectModal } from "@/app/components/modals/DeleteProjectModal";
 import { RenameProjectModal } from "@/app/components/modals/RenameProjectModal";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
-import { projectForSessionLocation } from "@/app/lib/projects";
+import { primarySessions, projectForSessionLocation } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
@@ -161,7 +161,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     if (
       targetProjectId &&
       projectIdFromPath(pathname) === targetProjectId &&
-      !sessions.some((entry) => entry.summary.project_id === targetProjectId)
+      !primarySessions(sessions).some((entry) => entry.summary.project_id === targetProjectId)
     ) {
       navigate(routes.list(), { replace: true });
     }
