@@ -3750,9 +3750,13 @@ impl SessionManager {
                 "traditional child nesting limit reached (1): child sessions cannot launch children"
             ));
         }
+        let parent_prompt_cwd = nac_core::traditional_children::parent_prompt_working_directory(
+            &parent.cwd,
+            parent.sandbox_spec.as_ref(),
+        );
         let messages = nac_core::traditional_children::fresh_general_child_messages(
             &parent.messages,
-            &parent.cwd.to_string_lossy(),
+            &parent_prompt_cwd,
             description,
         )?;
         let child_session_id = uuid::Uuid::new_v4().to_string();

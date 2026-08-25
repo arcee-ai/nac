@@ -914,6 +914,7 @@ fn parse_shell(command: &str) -> ParsedShell {
     let mut segments = Vec::new();
     let mut segment = Vec::new();
     let mut word = String::new();
+    let mut word_started = false;
     let mut quote = None;
     let mut escaped = false;
     let chars = command.chars().collect::<Vec<_>>();
@@ -921,7 +922,10 @@ fn parse_shell(command: &str) -> ParsedShell {
     while index < chars.len() {
         let current = chars[index];
         if escaped {
-            word.push(current);
+            if current != '\n' {
+                word.push(current);
+                word_started = true;
+            }
             escaped = false;
             index += 1;
             continue;
@@ -942,11 +946,12 @@ fn parse_shell(command: &str) -> ParsedShell {
         }
         if current == '\'' || current == '"' {
             quote = Some(current);
+            word_started = true;
             index += 1;
             continue;
         }
         if current.is_whitespace() {
-            push_word(&mut segment, &mut word);
+            push_word(&mut segment, &mut word, &mut word_started);
             index += 1;
             continue;
         }
@@ -957,7 +962,7 @@ fn parse_shell(command: &str) -> ParsedShell {
             _ => 0,
         };
         if boundary > 0 {
-            push_word(&mut segment, &mut word);
+            push_word(&mut segment, &mut word, &mut word_started);
             if !segment.is_empty() {
                 segments.push(std::mem::take(&mut segment));
             }
@@ -965,12 +970,13 @@ fn parse_shell(command: &str) -> ParsedShell {
             continue;
         }
         word.push(current);
+        word_started = true;
         index += 1;
     }
     if escaped || quote.is_some() {
         return ParsedShell::Opaque;
     }
-    push_word(&mut segment, &mut word);
+    push_word(&mut segment, &mut word, &mut word_started);
     if !segment.is_empty() {
         segments.push(segment);
     }
@@ -981,9 +987,10 @@ fn parse_shell(command: &str) -> ParsedShell {
     }
 }
 
-fn push_word(segment: &mut Vec<String>, word: &mut String) {
-    if !word.is_empty() {
+fn push_word(segment: &mut Vec<String>, word: &mut String, word_started: &mut bool) {
+    if *word_started {
         segment.push(std::mem::take(word));
+        *word_started = false;
     }
 }
 
@@ -1029,6 +1036,19 @@ fn hard_shell_denial_inner(
     backend: &ExecutionBackend,
     depth: usize,
 ) -> Option<String> {
+    if depth < 8 {
+        if let Some(body) = literal_env_split_string(tokens) {
+            let denial = match parse_shell(body) {
+                ParsedShell::Supported(segments) => segments
+                    .into_iter()
+                    .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
+                ParsedShell::Opaque => opaque_hard_shell_denial(body, cwd, backend),
+            };
+            if denial.is_some() {
+                return denial;
+            }
+        }
+    }
     let tokens = effective_command_tokens(tokens);
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
     if matches!(
@@ -1082,12 +1102,38 @@ fn literal_shell_command_body(tokens: &[String]) -> Option<&str> {
         .enumerate()
         .skip(1)
         .find_map(|(index, token)| {
-            token
-                .strip_prefix('-')
-                .is_some_and(|flags| flags.contains('c'))
+            (token.starts_with('-') && !token.starts_with("--") && token[1..].contains('c'))
                 .then_some(index)
         })?;
     tokens.get(option_index + 1).map(String::as_str)
+}
+
+fn literal_env_split_string(tokens: &[String]) -> Option<&str> {
+    let mut index = 0;
+    while tokens
+        .get(index)
+        .is_some_and(|token| is_environment_assignment(token))
+    {
+        index += 1;
+    }
+    let command = tokens.get(index)?.rsplit('/').next()?.to_ascii_lowercase();
+    if command != "env" {
+        return None;
+    }
+    index += 1;
+    while let Some(option) = tokens.get(index) {
+        if matches!(option.as_str(), "-S" | "--split-string") {
+            return tokens.get(index + 1).map(String::as_str);
+        }
+        if matches!(option.as_str(), "-u" | "--unset" | "-C" | "--chdir") {
+            index += 2;
+        } else if option.starts_with('-') || is_environment_assignment(option) {
+            index += 1;
+        } else {
+            break;
+        }
+    }
+    None
 }
 
 fn effective_command_tokens(tokens: &[String]) -> &[String] {
@@ -1210,22 +1256,30 @@ fn shell_path_resources(
     cwd: &Path,
     backend: &ExecutionBackend,
 ) -> Vec<PermissionResource> {
-    let mut paths = Vec::<PathBuf>::new();
-    for index in 1..tokens.len() {
+    let mut paths = Vec::<(PathBuf, bool)>::new();
+    for index in 0..tokens.len() {
         if let Some((_, requested)) = shell_path_candidate(tokens, index) {
             let path = if requested.is_absolute() {
                 requested.to_path_buf()
             } else {
                 cwd.join(requested)
             };
-            if !paths.contains(&path) {
-                paths.push(path);
+            let mutating = shell_path_is_mutating(tokens, index);
+            if let Some((_, existing_mutating)) =
+                paths.iter_mut().find(|(existing, _)| existing == &path)
+            {
+                *existing_mutating |= mutating;
+            } else {
+                paths.push((path, mutating));
             }
         }
     }
     paths
         .into_iter()
-        .flat_map(|path| file_resources("execute_path", path, backend, Path::new(""), false))
+        .flat_map(|(path, mutating)| {
+            let action = if mutating { "edit" } else { "execute_path" };
+            file_resources(action, path, backend, Path::new(""), mutating)
+        })
         .collect()
 }
 
@@ -1233,6 +1287,8 @@ fn looks_like_shell_path(value: &str) -> bool {
     value.starts_with('/')
         || value.starts_with("./")
         || value.starts_with("../")
+        || value == ".git"
+        || value.starts_with(".git/")
         || value == ".env"
         || value.starts_with(".env.")
 }
@@ -1248,11 +1304,20 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
     let previous_takes_path = index > 0
         && matches!(
             tokens[index - 1].as_str(),
-            "--manifest-path" | "--config" | "--output" | "-C" | "-f" | "--file"
+            "--manifest-path" | "--config" | "--output" | "-o" | "-C" | "-f" | "--file"
         );
-    let known_bare_path = candidate.contains('/') && bare_relative_path_position(tokens, index);
+    let known_bare_path = bare_relative_path_position(tokens, index);
     (previous_takes_path || looks_like_shell_path(candidate) || known_bare_path)
         .then(|| (option, Path::new(candidate)))
+}
+
+fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
+    let option = tokens[index]
+        .split_once('=')
+        .filter(|(option, _)| option.starts_with('-'))
+        .map(|(option, _)| option);
+    option == Some("--output")
+        || index > 0 && matches!(tokens[index - 1].as_str(), "--output" | "-o")
 }
 
 fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
@@ -1262,34 +1327,122 @@ fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
         .first()
         .and_then(|command| command.rsplit('/').next())
         .unwrap_or_default();
-    if command != "rg" || index <= command_index {
+    if index <= command_index {
         return false;
     }
-    let token = &tokens[index];
-    let option = token
-        .split_once('=')
-        .filter(|(option, _)| option.starts_with('-'))
-        .map(|(option, _)| option);
-    let previous = index.checked_sub(1).and_then(|index| tokens.get(index));
-    const NON_PATH_RG_OPTIONS: &[&str] = &[
-        "-e",
-        "--regexp",
+    match command {
+        "rg" => rg_bare_relative_path_position(tokens, command_index, index),
+        "git" => git_bare_relative_path_position(tokens, command_index, index),
+        _ => false,
+    }
+}
+
+fn rg_bare_relative_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    const VALUE_OPTIONS: &[&str] = &[
+        "-A",
+        "--after-context",
+        "-B",
+        "--before-context",
+        "-C",
+        "--context",
+        "--color",
+        "--colors",
+        "--context-separator",
+        "-E",
+        "--encoding",
+        "--engine",
         "-g",
         "--glob",
         "--iglob",
+        "-M",
+        "--max-columns",
+        "-m",
+        "--max-count",
+        "--max-depth",
+        "--max-filesize",
+        "--path-separator",
+        "--pre",
+        "--pre-glob",
+        "-r",
+        "--replace",
+        "--sort",
+        "--sortr",
         "-t",
         "--type",
         "--type-add",
         "--type-clear",
-        "-r",
-        "--replace",
+        "--type-not",
+        "-j",
+        "--threads",
     ];
-    if option.is_some_and(|option| NON_PATH_RG_OPTIONS.contains(&option))
-        || previous.is_some_and(|option| NON_PATH_RG_OPTIONS.contains(&option.as_str()))
+    const PATTERN_OPTIONS: &[&str] = &["-e", "--regexp"];
+    const PATH_OPTIONS: &[&str] = &["-f", "--file", "--ignore-file"];
+
+    let mut options = true;
+    let mut skip_value = false;
+    let mut explicit_pattern = false;
+    let files_mode = tokens[command_index + 1..]
+        .iter()
+        .any(|token| token == "--files");
+    let mut positional = Vec::new();
+    for (cursor, token) in tokens.iter().enumerate().skip(command_index + 1) {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if options && token == "--" {
+            options = false;
+            continue;
+        }
+        if options && token.starts_with('-') {
+            let option = token
+                .split_once('=')
+                .map_or(token.as_str(), |(name, _)| name);
+            if PATTERN_OPTIONS.contains(&option) {
+                explicit_pattern = true;
+                skip_value = !token.contains('=');
+            } else if PATH_OPTIONS.contains(&option) || VALUE_OPTIONS.contains(&option) {
+                skip_value = !token.contains('=');
+            }
+            continue;
+        }
+        positional.push(cursor);
+    }
+    let Some(position) = positional.iter().position(|candidate| *candidate == index) else {
+        return false;
+    };
+    files_mode || explicit_pattern || position > 0
+}
+
+fn git_bare_relative_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    let Some(subcommand) = tokens.get(command_index + 1).map(String::as_str) else {
+        return false;
+    };
+    if !matches!(subcommand, "diff" | "log" | "show" | "status") {
+        return false;
+    }
+    if let Some(separator) = tokens[command_index + 2..]
+        .iter()
+        .position(|token| token == "--")
+        .map(|offset| command_index + 2 + offset)
+    {
+        return index > separator;
+    }
+    if subcommand != "diff"
+        || !tokens[command_index + 2..]
+            .iter()
+            .any(|token| token == "--no-index")
     {
         return false;
     }
-    effective.iter().any(|token| token == "--files") || index > command_index + 1
+    let operands = (command_index + 2..tokens.len())
+        .filter(|candidate| !tokens[*candidate].starts_with('-'))
+        .collect::<Vec<_>>();
+    operands
+        .iter()
+        .rev()
+        .take(2)
+        .any(|candidate| *candidate == index)
 }
 
 pub(crate) fn bind_authorized_shell_command(
@@ -1315,13 +1468,13 @@ pub(crate) fn bind_authorized_shell_command(
 
     let mut authorized_paths = resources
         .iter()
-        .filter(|resource| resource.action == "execute_path")
+        .filter(|resource| matches!(resource.action.as_str(), "execute_path" | "edit"))
         .map(|resource| resource.resource.as_str());
     let cwd = lexical_normalize(cwd);
     let mut replacements = Vec::<(usize, usize, String)>::new();
     for (tokens, spans) in segments.iter().zip(spans) {
         let mut canonical_by_requested = Vec::<(PathBuf, String)>::new();
-        for (index, span) in spans.iter().enumerate().skip(1) {
+        for (index, span) in spans.iter().enumerate() {
             let Some((option, requested)) = shell_path_candidate(tokens, index) else {
                 continue;
             };
@@ -1376,14 +1529,15 @@ fn supported_shell_word_spans(command: &str) -> Option<Vec<Vec<ShellWordSpan>>> 
     let mut value = String::new();
     let mut quote = None;
     let mut escaped = false;
+    let mut escape_start = 0;
     let mut chars = command.char_indices().peekable();
     let push = |segment: &mut Vec<ShellWordSpan>,
                 start: &mut Option<usize>,
                 value: &mut String,
                 end: usize| {
-        if !value.is_empty() {
+        if start.is_some() {
             segment.push(ShellWordSpan {
-                start: start.take().expect("non-empty shell word has a start"),
+                start: start.take().expect("started shell word has a start"),
                 end,
                 value: std::mem::take(value),
             });
@@ -1393,12 +1547,15 @@ fn supported_shell_word_spans(command: &str) -> Option<Vec<Vec<ShellWordSpan>>> 
     };
     while let Some((index, current)) = chars.next() {
         if escaped {
-            value.push(current);
+            if current != '\n' {
+                start.get_or_insert(escape_start);
+                value.push(current);
+            }
             escaped = false;
             continue;
         }
         if current == '\\' && quote != Some('\'') {
-            start.get_or_insert(index);
+            escape_start = index;
             escaped = true;
             continue;
         }
@@ -1475,7 +1632,9 @@ fn opaque_literal_tokens(command: &str) -> Vec<String> {
     let mut escaped = false;
     for current in command.chars() {
         if escaped {
-            word.push(current);
+            if current != '\n' {
+                word.push(current);
+            }
             escaped = false;
             continue;
         }
@@ -1823,6 +1982,9 @@ mod tests {
             "git checkout .",
             "sh -c 'git reset --hard'",
             "bash -lc 'sudo make install'",
+            "bash --rcfile /dev/null -c 'sudo make install'",
+            "env -S 'sudo make install'",
+            "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
             "bash -lc 'sudo make install' > /tmp/result",
         ] {
@@ -1879,6 +2041,8 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(outside.join("secret"), "needle").unwrap();
+        std::fs::write(outside.join("tool"), "#!/bin/sh\n").unwrap();
+        std::fs::write(workspace.join("local"), "needle").unwrap();
         symlink(&outside, workspace.join("outside-link")).unwrap();
         let backend = local(&workspace);
         let projected = shell_resources("rg needle outside-link/secret", &workspace, &backend);
@@ -1903,6 +2067,87 @@ mod tests {
         .unwrap();
         assert_eq!(bound, format!("rg needle {}", canonical_secret.display()));
         assert!(!bound.contains("outside-link"));
+
+        let empty_pattern_projected =
+            shell_resources("rg '' outside-link/secret", &workspace, &backend);
+        let empty_pattern_canonical =
+            canonicalize_authorization_resources(&empty_pattern_projected, &backend, Path::new(""))
+                .await
+                .unwrap();
+        assert!(empty_pattern_canonical.iter().any(|resource| {
+            resource.action == "execute_path"
+                && resource.resource == canonical_secret.display().to_string()
+        }));
+        assert_eq!(
+            bind_authorized_shell_command(
+                "rg '' outside-link/secret",
+                &workspace.canonicalize().unwrap(),
+                &empty_pattern_canonical,
+            )
+            .unwrap(),
+            format!("rg '' {}", canonical_secret.display())
+        );
+
+        let directory_projected =
+            shell_resources("rg -L needle outside-link", &workspace, &backend);
+        let directory_canonical =
+            canonicalize_authorization_resources(&directory_projected, &backend, Path::new(""))
+                .await
+                .unwrap();
+        let canonical_outside = outside.canonicalize().unwrap();
+        assert!(directory_canonical.iter().any(|resource| {
+            resource.action == "execute_path"
+                && resource.resource == canonical_outside.display().to_string()
+        }));
+        assert_eq!(
+            bind_authorized_shell_command(
+                "rg -L needle outside-link",
+                &workspace.canonicalize().unwrap(),
+                &directory_canonical,
+            )
+            .unwrap(),
+            format!("rg -L needle {}", canonical_outside.display())
+        );
+
+        let git_projected = shell_resources(
+            "git diff --no-index local outside-link/secret",
+            &workspace,
+            &backend,
+        );
+        let git_canonical =
+            canonicalize_authorization_resources(&git_projected, &backend, Path::new(""))
+                .await
+                .unwrap();
+        let canonical_local = workspace.canonicalize().unwrap().join("local");
+        assert_eq!(
+            bind_authorized_shell_command(
+                "git diff --no-index local outside-link/secret",
+                &workspace.canonicalize().unwrap(),
+                &git_canonical,
+            )
+            .unwrap(),
+            format!(
+                "git diff --no-index {} {}",
+                canonical_local.display(),
+                canonical_secret.display()
+            )
+        );
+
+        let executable_projected = shell_resources("./outside-link/tool", &workspace, &backend);
+        let executable_canonical =
+            canonicalize_authorization_resources(&executable_projected, &backend, Path::new(""))
+                .await
+                .unwrap();
+        let canonical_tool = canonical_outside.join("tool");
+        assert_eq!(
+            bind_authorized_shell_command(
+                "./outside-link/tool",
+                &workspace.canonicalize().unwrap(),
+                &executable_canonical,
+            )
+            .unwrap(),
+            canonical_tool.display().to_string()
+        );
         let _ = std::fs::remove_dir_all(base);
     }
 
@@ -1932,7 +2177,7 @@ mod tests {
             let resources = shell_resources(command, Path::new("/workspace"), &backend);
             assert!(resources
                 .iter()
-                .any(|resource| resource.action == "execute_path"));
+                .any(|resource| { matches!(resource.action.as_str(), "execute_path" | "edit") }));
             assert!(
                 resources.iter().any(|resource| {
                     resource.action == "external_directory"
@@ -1941,6 +2186,29 @@ mod tests {
                 "external command path must be independently authorized: {command}"
             );
         }
+
+        let protected_output = shell_resources(
+            "git diff --no-index --output=.git/config README.md Cargo.toml",
+            Path::new("/workspace"),
+            &backend,
+        );
+        assert!(protected_output
+            .iter()
+            .any(|resource| resource.action == "edit" && resource.hard_denial.is_some()));
+
+        let formatting = "rg -n --field-match-separator=a/b needle .";
+        let formatting_resources = shell_resources(formatting, Path::new("/workspace"), &backend);
+        assert!(!formatting_resources.iter().any(|resource| {
+            resource.action == "execute_path" && resource.resource.ends_with("/a/b")
+        }));
+        let formatting_bound = bind_authorized_shell_command(
+            formatting,
+            Path::new("/workspace"),
+            &formatting_resources,
+        )
+        .unwrap();
+        assert!(formatting_bound.contains("--field-match-separator=a/b"));
+        assert!(!formatting_bound.contains("--field-match-separator=/workspace/a/b"));
     }
 
     #[tokio::test]

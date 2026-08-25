@@ -163,17 +163,24 @@ fn insert_permission_grant_set_inner(
     if waiter_guard.as_deref().is_some_and(|live| !*live) {
         return Ok(None);
     }
+    let effective = {
+        let mut statement = transaction.prepare(&format!(
+            "SELECT {COLUMNS} FROM permission_grants
+             WHERE session_id = ?1 AND backend = ?2 AND session_config_version = ?3
+             ORDER BY created_at ASC, id ASC"
+        ))?;
+        let rows = statement.query_map(
+            params![session_id, backend, session_config_version],
+            row_to_record,
+        )?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
     // Holding the waiter lock through commit gives grant persistence one clear
     // linearization point with authorization-task teardown. If teardown wins,
     // the transaction rolls back; if commit wins, the reply had a live waiter.
     transaction.commit()?;
     drop(waiter_guard);
-    Ok(Some(list_effective_permission_grants(
-        path,
-        session_id,
-        backend,
-        session_config_version,
-    )?))
+    Ok(Some(effective))
 }
 
 pub fn delete_permission_grant(path: &Path, session_id: &str, grant_id: &str) -> Result<()> {
@@ -273,6 +280,32 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("must not be empty"));
         assert_eq!(list_permission_grants(&path, "session-a").unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn grant_commit_and_result_use_one_connection() {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "nac-permission-grant-single-connection-{}",
+                uuid::Uuid::new_v4()
+            ))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session-a");
+        crate::store::track_connection_opens(&path);
+
+        let effective = insert_permission_grant_set(
+            &path,
+            "session-a",
+            &[("execute".to_string(), "command:[cargo][test]*".to_string())],
+            "local",
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(effective.len(), 1);
+        assert_eq!(crate::store::tracked_connection_opens(&path), 1);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
