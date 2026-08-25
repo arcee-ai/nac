@@ -1,18 +1,18 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { runStartupStepWithCleanup, terminateProcessGroup } from "./harness";
 
-const spawnedGroups: number[] = [];
+const spawnedGroups: ChildProcess[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   if (process.platform === "win32") return;
-  for (const pid of spawnedGroups.splice(0)) {
+  for (const child of spawnedGroups.splice(0)) {
     try {
-      process.kill(-pid, "SIGKILL");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      await terminateProcessGroup(child, { graceMs: 25, killMs: 1_000, pollMs: 10 });
+    } catch {
+      // Best-effort fallback for a test that has already failed.
     }
   }
 });
@@ -41,35 +41,31 @@ describe("E2E harness cleanup", () => {
     async () => {
       const leader = spawnLeaderWithSignalResistantDescendant();
       if (leader.pid == null) throw new Error("leader did not receive a pid");
-      spawnedGroups.push(leader.pid);
+      spawnedGroups.push(leader);
       const descendantPid = await readPid(leader);
-      if (leader.exitCode == null && leader.signalCode == null) {
-        await new Promise<void>((resolve, reject) => {
-          leader.once("error", reject);
-          leader.once("exit", () => resolve());
-        });
-      }
-
       expect(processExists(descendantPid)).toBe(true);
+      expect(processGroupId(descendantPid)).toBe(descendantPid);
       await terminateProcessGroup(leader, { graceMs: 100, killMs: 1_000, pollMs: 10 });
       expect(processExists(descendantPid)).toBe(false);
-      spawnedGroups.splice(spawnedGroups.indexOf(leader.pid), 1);
+      spawnedGroups.splice(spawnedGroups.indexOf(leader), 1);
     },
   );
 });
 
 function spawnLeaderWithSignalResistantDescendant(): ChildProcess {
-  const script = `
-    const { spawn } = require("node:child_process");
-    const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], {
-      stdio: "ignore",
-    });
-    process.stdout.write(String(descendant.pid) + "\\n");
-    setTimeout(() => process.exit(0), 25);
+  const descendantScript = `
+    process.on("SIGTERM", () => {});
+    process.stdout.write(String(process.pid) + "\\n");
+    setInterval(() => {}, 1000);
   `;
-  return spawn(process.execPath, ["-e", script], {
+  return spawn("/bin/bash", ["-c", 'set -m; "$NAC_TEST_NODE" -e "$NAC_TEST_SCRIPT" & wait'], {
     detached: true,
     stdio: ["ignore", "pipe", "ignore"],
+    env: {
+      ...process.env,
+      NAC_TEST_NODE: process.execPath,
+      NAC_TEST_SCRIPT: descendantScript,
+    },
   });
 }
 
@@ -98,4 +94,13 @@ function processExists(pid: number): boolean {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
     throw error;
   }
+}
+
+function processGroupId(pid: number): number {
+  const result = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(`ps failed for descendant ${pid}: ${result.stderr}`);
+  const pgid = Number.parseInt(result.stdout.trim(), 10);
+  if (!Number.isInteger(pgid))
+    throw new Error(`invalid process group for ${pid}: ${result.stdout}`);
+  return pgid;
 }

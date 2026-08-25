@@ -47,45 +47,63 @@ export const test = base.extend<Fixtures>({
     }
     const serverLog = path.join(running.runRoot, "nac-web.log");
     const providerLog = path.join(running.runRoot, "provider-requests.json");
-    await fs.writeFile(serverLog, running.output.join(""));
-    await fs.writeFile(
-      providerLog,
-      JSON.stringify(
-        running.provider.requests.map((entry) => ({
-          ...entry,
-          headers: redactHeaders(entry.headers),
-        })),
-        null,
-        2,
+    const diagnosticFailures: unknown[] = [];
+    const writes = await Promise.allSettled([
+      fs.writeFile(serverLog, running.output.join("")),
+      fs.writeFile(
+        providerLog,
+        JSON.stringify(
+          running.provider.requests.map((entry) => ({
+            ...entry,
+            headers: redactHeaders(entry.headers),
+          })),
+          null,
+          2,
+        ),
       ),
+    ]);
+    diagnosticFailures.push(
+      ...writes
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason),
     );
     const failed = testInfo.status !== testInfo.expectedStatus || useError !== undefined;
     if (failed) {
-      await testInfo.attach("nac-web log", { path: serverLog, contentType: "text/plain" });
-      await testInfo.attach("scripted provider journal", {
-        path: providerLog,
-        contentType: "application/json",
-      });
-      await attachIfPresent(
-        testInfo,
-        "isolated SQLite store",
-        path.join(running.runRoot, "store.db"),
-        "application/vnd.sqlite3",
-      );
-      await attachIfPresent(
-        testInfo,
-        "process status",
-        path.join(running.runRoot, "process.json"),
-        "application/json",
+      const attachments = await Promise.allSettled([
+        attachIfPresent(testInfo, "nac-web log", serverLog, "text/plain"),
+        attachIfPresent(testInfo, "scripted provider journal", providerLog, "application/json"),
+        attachIfPresent(
+          testInfo,
+          "isolated SQLite store",
+          path.join(running.runRoot, "store.db"),
+          "application/vnd.sqlite3",
+        ),
+        attachIfPresent(
+          testInfo,
+          "process status",
+          path.join(running.runRoot, "process.json"),
+          "application/json",
+        ),
+      ]);
+      diagnosticFailures.push(
+        ...attachments
+          .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+          .map((result) => result.reason),
       );
     } else if (process.env.KEEP_E2E !== "1") {
-      await fs.rm(running.runRoot, { recursive: true, force: true });
+      try {
+        await fs.rm(running.runRoot, { recursive: true, force: true });
+      } catch (error) {
+        diagnosticFailures.push(error);
+      }
     }
-    if (useError !== undefined && cleanupError !== undefined) {
-      throw new AggregateError([useError, cleanupError], "E2E test and cleanup failed");
+    const failures = [useError, cleanupError, ...diagnosticFailures].filter(
+      (error) => error !== undefined,
+    );
+    if (failures.length > 1) {
+      throw new AggregateError(failures, "E2E test, cleanup, or diagnostics failed");
     }
-    if (useError !== undefined) throw useError;
-    if (cleanupError !== undefined) throw cleanupError;
+    if (failures.length === 1) throw failures[0];
   },
   browserDiagnostics: [
     async ({ harness, page }, use, testInfo) => {
@@ -313,15 +331,25 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
   } catch (error) {
     const cleanup = await Promise.allSettled([terminateProcessGroup(server), provider.stop()]);
     const startupLog = path.join(runRoot, "nac-web.log");
-    await fs.writeFile(startupLog, output.join(""));
-    await testInfo.attach("nac-web startup log", { path: startupLog, contentType: "text/plain" });
-    const cleanupFailures = cleanup.filter(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    if (cleanupFailures.length > 0) {
+    const diagnosticFailures: unknown[] = [];
+    try {
+      await fs.writeFile(startupLog, output.join(""));
+    } catch (diagnosticError) {
+      diagnosticFailures.push(diagnosticError);
+    }
+    try {
+      await attachIfPresent(testInfo, "nac-web startup log", startupLog, "text/plain");
+    } catch (diagnosticError) {
+      diagnosticFailures.push(diagnosticError);
+    }
+    const failures = cleanup
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason)
+      .concat(diagnosticFailures);
+    if (failures.length > 0) {
       throw new AggregateError(
-        [error, ...cleanupFailures.map((result) => result.reason)],
-        "nac-web startup and cleanup failed",
+        [error, ...failures],
+        "nac-web startup, cleanup, or diagnostics failed",
         { cause: error },
       );
     }
@@ -440,6 +468,7 @@ export async function terminateProcessGroup(
   const graceMs = timing.graceMs ?? 3_000;
   const killMs = timing.killMs ?? 3_000;
   const pollMs = timing.pollMs ?? 25;
+  const tracked = new Set<number>([pid, ...(await processDescendants(pid))]);
   const signalGroup = (name: NodeJS.Signals): void => {
     try {
       process.kill(-pid, name);
@@ -448,13 +477,26 @@ export async function terminateProcessGroup(
     }
   };
 
-  if (!processGroupExists(pid)) return;
-  signalGroup("SIGTERM");
+  if (!processGroupExists(pid) && ![...tracked].some(processExists)) return;
+  signalTrackedProcesses(tracked, "SIGTERM", signalGroup);
   try {
-    await waitForProcessGroupExit(pid, graceMs, pollMs, "nac-web process-group termination");
+    await waitForTrackedProcessExit(
+      pid,
+      tracked,
+      graceMs,
+      pollMs,
+      "nac-web process-tree termination",
+    );
   } catch {
-    signalGroup("SIGKILL");
-    await waitForProcessGroupExit(pid, killMs, pollMs, "nac-web forced process-group termination");
+    await refreshTrackedDescendants(tracked);
+    signalTrackedProcesses(tracked, "SIGKILL", signalGroup);
+    await waitForTrackedProcessExit(
+      pid,
+      tracked,
+      killMs,
+      pollMs,
+      "nac-web forced process-tree termination",
+    );
   }
 }
 
@@ -491,16 +533,101 @@ function processGroupExists(pid: number): boolean {
   }
 }
 
-async function waitForProcessGroupExit(
+function signalTrackedProcesses(
+  tracked: Set<number>,
+  signal: NodeJS.Signals,
+  signalLeaderGroup: (signal: NodeJS.Signals) => void,
+): void {
+  signalLeaderGroup(signal);
+  for (const pid of tracked) {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+}
+
+async function processTable(): Promise<Array<{ pid: number; ppid: number }>> {
+  const ps = spawn("ps", ["-axo", "pid=,ppid="], { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  ps.stdout?.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString("utf8");
+  });
+  ps.stderr?.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
+  });
+  const code = await new Promise<number | null>((resolve, reject) => {
+    ps.once("error", reject);
+    ps.once("exit", resolve);
+  });
+  if (code !== 0) throw new Error(`ps failed while inspecting E2E process tree: ${stderr.trim()}`);
+  return stdout
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid))
+    .map(([pid, ppid]) => ({ pid, ppid }));
+}
+
+async function processDescendants(rootPid: number): Promise<number[]> {
+  const table = await processTable();
+  const descendants = new Set<number>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const process of table) {
+      if (
+        process.pid !== rootPid &&
+        (process.ppid === rootPid || descendants.has(process.ppid)) &&
+        !descendants.has(process.pid)
+      ) {
+        descendants.add(process.pid);
+        changed = true;
+      }
+    }
+  }
+  return [...descendants];
+}
+
+async function refreshTrackedDescendants(tracked: Set<number>): Promise<void> {
+  const table = await processTable();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const process of table) {
+      if (tracked.has(process.ppid) && !tracked.has(process.pid)) {
+        tracked.add(process.pid);
+        changed = true;
+      }
+    }
+  }
+}
+
+async function waitForTrackedProcessExit(
   pid: number,
+  tracked: Set<number>,
   timeoutMs: number,
   pollMs: number,
   label: string,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (processGroupExists(pid)) {
+  while (processGroupExists(pid) || [...tracked].some(processExists)) {
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
     await new Promise((resolve) => setTimeout(resolve, pollMs));
+    await refreshTrackedDescendants(tracked);
+  }
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    throw error;
   }
 }
 

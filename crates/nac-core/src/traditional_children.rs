@@ -98,6 +98,17 @@ pub fn fresh_general_child_messages(
     Ok(vec![Message::System { content: child }])
 }
 
+pub fn parent_prompt_working_directory(
+    parent_cwd: &Path,
+    sandbox_spec: Option<&crate::sandbox::SandboxSpec>,
+) -> String {
+    sandbox_spec
+        .map(|spec| spec.workdir.as_path())
+        .unwrap_or(parent_cwd)
+        .display()
+        .to_string()
+}
+
 pub fn validate_general_profile(profile: &str) -> Result<()> {
     if profile == GENERAL_CHILD_PROFILE {
         Ok(())
@@ -128,6 +139,31 @@ mod tests {
         };
         assert!(content.contains("Project instruction: preserve compatibility."));
         assert!(!content.contains("orchestrator_*"));
+        assert!(!content.contains("## Managed orchestration"));
+    }
+
+    #[test]
+    fn sandboxed_parent_uses_the_guest_prompt_path_when_preserving_instructions() {
+        let sandbox = crate::sandbox::SandboxSpec {
+            workdir: PathBuf::from("/workspace"),
+            ..Default::default()
+        };
+        let prompt_cwd =
+            parent_prompt_working_directory(Path::new("/host/project"), Some(&sandbox));
+        let parent = format!(
+            "{}\n\nProject instruction: preserve the captured suffix.",
+            crate::agent::render_direct_with_orchestrator_system_prompt(&prompt_cwd)
+        );
+        let messages = fresh_general_child_messages(
+            &[Message::System { content: parent }],
+            &prompt_cwd,
+            "review one subsystem",
+        )
+        .unwrap();
+        let Message::System { content } = &messages[0] else {
+            panic!("child must start with a system message");
+        };
+        assert!(content.contains("Project instruction: preserve the captured suffix."));
         assert!(!content.contains("## Managed orchestration"));
     }
 }
