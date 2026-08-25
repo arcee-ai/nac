@@ -324,7 +324,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -443,7 +443,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              ORDER BY s.updated_at DESC, s.created_at DESC
@@ -514,6 +514,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         ssh_identity_file: row.get(20)?,
         light_model_json: row.get(21)?,
         project_id: row.get(22)?,
+        behavior: row.get(23)?,
     })
 }
 
@@ -755,7 +756,7 @@ SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
        p.title, COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0),
        COALESCE(p.version, 0), s.visible_message_count, s.last_user_prompt,
        s.token_usages_json, COALESCE(s.run_count, 0), s.ssh_port, s.ssh_identity_file,
-       sp.project_id
+       sp.project_id, s.behavior
 FROM sessions s
 LEFT JOIN session_presentations p ON p.session_id = s.session_id
 LEFT JOIN session_projects sp ON sp.session_id = s.session_id
@@ -829,6 +830,7 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         ssh_port: row.get(18)?,
         ssh_identity_file: row.get(19)?,
         project_id: row.get(20)?,
+        behavior: row.get(21)?,
     })
 }
 
@@ -854,6 +856,7 @@ struct SessionSummaryRow {
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
     project_id: Option<String>,
+    behavior: String,
 }
 
 impl SessionSummaryRow {
@@ -889,6 +892,7 @@ impl SessionSummaryRow {
         let total_cost_micros = aggregated.as_ref().map(|usage| usage.cost.total);
         Ok(SessionSummary {
             session_id: self.session_id,
+            behavior: self.behavior.parse()?,
             project_id: self.project_id,
             cwd,
             workspace_host_path,
@@ -968,10 +972,10 @@ fn insert_or_replace_session(
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
              orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
-             light_model_json
+             light_model_json, behavior
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -1016,6 +1020,7 @@ fn insert_or_replace_session(
             stored_ssh_port(snapshot.ssh.as_ref()),
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
             light_model_json,
+            snapshot.behavior.as_str(),
         ],
     )?;
     Ok(())
@@ -1045,6 +1050,7 @@ struct SessionRow {
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
     light_model_json: Option<String>,
+    behavior: String,
 }
 
 impl SessionRow {
@@ -1065,6 +1071,7 @@ impl SessionRow {
             deserialize_token_accounting(self.token_usages_json.as_deref())?;
         Ok(SessionSnapshot {
             session_id: self.session_id,
+            behavior: self.behavior.parse()?,
             project_id: self.project_id,
             cwd: PathBuf::from(self.cwd),
             model: self.model,

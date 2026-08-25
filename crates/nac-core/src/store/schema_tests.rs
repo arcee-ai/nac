@@ -151,6 +151,7 @@ fn assert_session_cascade(conn: &Connection, table: &str) {
 fn assert_current_schema(conn: &Connection) {
     let session_columns = table_columns(conn, "sessions");
     for expected in [
+        "behavior",
         "orchestrator_compaction_threshold",
         "visible_message_count",
         "last_user_prompt",
@@ -329,6 +330,40 @@ fn assert_current_schema(conn: &Connection) {
         })
         .unwrap();
     assert_eq!(violation_count, 0);
+}
+
+#[test]
+fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
+    let path = temp_store_path("v16_behavior");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    insert_legacy_session(&legacy, "legacy-session");
+    legacy
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN behavior;
+             PRAGMA user_version = 16;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+
+    let migrated = Connection::open(&path).unwrap();
+    let behavior: String = migrated
+        .query_row(
+            "SELECT behavior FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(behavior, "orchestrator");
+    let version: i64 = migrated
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORE_SCHEMA_VERSION);
+    assert_eq!(STORE_SCHEMA_VERSION, 17);
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]

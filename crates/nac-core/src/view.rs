@@ -29,6 +29,8 @@ pub type NumstatSummary = (NumstatPairs, u64, u64);
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionSummarySnapshot {
     pub session_id: String,
+    #[serde(default)]
+    pub behavior: sessions::SessionBehavior,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
@@ -205,6 +207,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
     fn from(summary: sessions::SessionSummary) -> Self {
         Self {
             session_id: summary.session_id,
+            behavior: summary.behavior,
             project_id: summary.project_id,
             cwd: summary.cwd,
             workspace_host_path: summary.workspace_host_path,
@@ -910,6 +913,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(snapshot.title, None);
+        assert_eq!(snapshot.behavior, sessions::SessionBehavior::Orchestrator);
         assert!(!snapshot.pinned);
         assert_eq!(snapshot.sort_order, 0);
         assert_eq!(snapshot.presentation_version, 0);

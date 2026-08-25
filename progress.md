@@ -41,7 +41,8 @@ Non-negotiable invariants:
 - Recorded inherited baseline: `make check` passes and an elevated `make ci`
   passed on 2026-08-24. Socket-binding `Operation not permitted` failures from
   a confined direct `make test` are environmental, not inherited regressions.
-- No expanded-harness implementation has been made in this goal yet.
+- The native tool kernel is committed. The immutable session-behavior
+  persistence foundation is implemented and awaiting its checkpoint commit.
 
 ## Ordered milestones
 
@@ -95,6 +96,13 @@ Non-negotiable invariants:
   the fully typed native proof and explicit value adapters for the other seven.
   Preserve the existing worker scheduler; direct sessions will consume the new
   `Parallel`/`Exclusive` admission metadata.
+- Persist behavior as a constrained text discriminator in schema version 17.
+  Creation and legacy migration default to `orchestrator`; ordinary snapshot
+  saves cannot mutate it; unknown values fail closed in both load and list.
+- Treat schema 17 as a deliberate downgrade barrier: older binaries reject the
+  store instead of silently reconstructing direct sessions as orchestrators.
+  Until direct construction is wired, orchestrator resume rejects either
+  direct behavior before runtime side effects.
 
 ## Files and subsystems currently changing
 
@@ -102,9 +110,10 @@ Non-negotiable invariants:
   registration/dispatch in `tools/mod.rs`, typed `read` input/execution,
   colocated `write`/`edit` definitions, and call identity wiring in
   `agent/dag.rs`.
-- Milestone 2 investigation is moving to session persistence, migrations,
-  runtime construction, and compatibility tests; no Milestone 2 code is yet
-  changed.
+- Milestone 2 now changes session snapshots/summaries, schema/migrations,
+  persistence queries, view/service metadata, and the orchestrator resume
+  guard. API creation still intentionally exposes only the established
+  orchestrator path until direct construction is ready.
 
 ## Verification
 
@@ -119,12 +128,19 @@ Non-negotiable invariants:
   affected focused tests passed again after that refinement.
 - `make format-check` — passed.
 - `make lint` — passed, including workspace Clippy with warnings denied.
+- Behavior persistence focused tests — passed, covering all values, list/load,
+  creation immutability, unknown-value failure, v16 migration, and the
+  pre-side-effect orchestrator resume guard.
+- `make check` — passed after the behavior-persistence implementation.
+- `make ci` — passed after the behavior-persistence implementation: 967 core,
+  111 server, and 21 CLI tests; frontend format, lint, typecheck, and production
+  build all passed.
 - Recorded pre-goal baseline: `make check` and elevated `make ci` passed on
   2026-08-24.
 
 ## Completed commits
 
-- Planned Milestone 1 subject: `feat(core): introduce native tool kernel`.
+- `09261af feat(core): introduce native tool kernel`.
 
 ## Known problems and blockers
 
@@ -133,7 +149,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Trace session schema/migrations, create/load snapshots, runtime construction,
-and orchestrator regression tests; then introduce the fail-closed persisted
-behavior discriminator and the smallest persistent direct-session vertical
-without changing omitted/default orchestrator construction.
+Checkpoint the persisted behavior foundation, then generalize top-level runtime
+construction and the agent loop for the smallest durable direct-session
+vertical without changing omitted/default orchestrator construction.
