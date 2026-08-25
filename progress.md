@@ -30,9 +30,11 @@ Protected initial state verified on 2026-08-25:
 1. **Completed — terminal and authorization safety.** NAC-REV-001..005, 012,
    013, and 018 are implemented with escape-boundary regression tests; focused
    and complete `nac-core` gates pass.
-2. **In progress — durability and lifecycle correctness.** Resolve NAC-REV-006..009,
-   016, 017, and 019 with deterministic barriers/failpoints and multi-process
-   assertions; incorporate NAC-REV-014 at its service-lock seam.
+2. **Completed — durability and lifecycle correctness.** Commit `a288849`
+   resolves NAC-REV-006..009, 014, 016, 017, and 019 with deterministic
+   crash-window state, restart/exactly-once assertions, lifecycle exclusion,
+   and a real peer-process lease test. It also closes the service-authorization
+   half of NAC-REV-015; the read-only child web journey remains in milestone 4.
 3. **Pending — production-equivalent test foundation.** Preserve `make dev`;
    add `make demo`, `make test-web`, scripted-model Playwright E2E, and a
    deterministic durability target; wire frontend tests into declared CI.
@@ -79,8 +81,11 @@ Protected initial state verified on 2026-08-25:
   approval-claim/cancellation race and non-atomic multi-action grant write, and
   recommended deferring automatic completion until exit identity/settlement
   has an honest durable design.
-- Durability audit `18a259e0-5dc3-474b-afae-9f70a5d96cbe` — active; covers
-  NAC-REV-006..009, 014, 016, 017, and 019.
+- Durability audit `18a259e0-5dc3-474b-afae-9f70a5d96cbe` — complete and clean;
+  independently identified the single-steer post-commit abort, enumerate-before-
+  gate deletion race, foreign-lease misclassification, terminal-settlement
+  crash windows, agent-mutex goal stall, bind-after-launch ordering, mutable
+  generation mode, and ownership disclosure that commit `a288849` addresses.
 - Web/E2E audit `b3e6db71-d220-4d33-9225-72c1f2736cb8` — active; covers
   NAC-REV-010, 011, 015, 020..024, production launch/E2E architecture, and the
   permission-SSE replay-gap risk.
@@ -101,9 +106,24 @@ Protected initial state verified on 2026-08-25:
 - Milestone 1 evidence: focused regression groups pass; `make check` passes;
   `make lint` passes; complete `make crate-test CRATE=nac-core` passes with
   1035 passed and 9 environment-dependent ignored tests.
-- Next action: begin deterministic durability repairs from the active
-  durability audit, preserving the committed safety boundary as the new
-  baseline.
+- Milestone 2 implementation: abort-safe adoption of atomically delivered
+  steers; cross-process relationship leases around creation/deletion; deletion
+  terminal teardown through retained service/client references; peer-owned
+  managed-run observation; schema-23 terminal settlement obligations and
+  immutable generation execution modes; bind-before-execute managed admission;
+  lock-free live goal baselines; child goal denial; and parent-scoped opaque
+  relationship reads/cancellation.
+- Milestone 2 evidence: deterministic completion/cancellation crash-window
+  simulations retain recovery until relationship settlement, recover reports,
+  and deliver background results exactly once after restart; a helper process
+  proves a peer lease stays live; binding failure proves no run or prompt is
+  admitted; maximum-length relationship lock names are covered. Complete
+  `nac-core` passes with 1045 passed and 9 ignored; complete `nac-server` passes
+  with 130 library and 21 binary tests; `make check`, `make lint`, and
+  `make format-check` pass.
+- Next action: retrieve and verify the web/E2E NAC audit, then implement the
+  production-equivalent launch and scripted-model Playwright foundation for
+  milestone 3.
 
 ## Objective and invariants
 
