@@ -1128,6 +1128,36 @@ impl SessionService {
         client_id: Option<&SessionClientId>,
     ) -> Result<crate::store::SessionInboxRecord> {
         self.require_direct_primary_behavior()?;
+        self.enqueue_direct_input_unchecked(delivery, content, client_id)
+            .await
+    }
+
+    /// Parent-owned child control path. Public direct-inbox APIs deliberately
+    /// reject the same session; only the validated child controller calls this.
+    pub async fn enqueue_traditional_child_input(
+        &self,
+        delivery: crate::store::InboxDelivery,
+        content: &str,
+    ) -> Result<crate::store::SessionInboxRecord> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        if crate::store::load_traditional_child(&self.metadata.store_path, session_id)?.is_none() {
+            return Err(anyhow::anyhow!("traditional child was not found"));
+        }
+        self.enqueue_direct_input_unchecked(delivery, content, None)
+            .await
+    }
+
+    async fn enqueue_direct_input_unchecked(
+        &self,
+        delivery: crate::store::InboxDelivery,
+        content: &str,
+        client_id: Option<&SessionClientId>,
+    ) -> Result<crate::store::SessionInboxRecord> {
         let session_id = self
             .metadata
             .session_id
