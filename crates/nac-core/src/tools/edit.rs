@@ -8,6 +8,40 @@ use crate::tools::mutation::{
     EditSpec,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::types::{FunctionDef, ToolDefinition};
+
+pub fn definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "edit".to_string(),
+            description: "Atomically apply one or more exact, non-overlapping replacements against one file revision. On stale_revision, read again and retry the complete batch."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "expected_revision": { "type": "string", "description": "Complete-file revision from read" },
+                    "edits": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_text": { "type": "string", "minLength": 1, "description": "Exact text from the original revision" },
+                                "new_text": { "type": "string", "description": "Replacement text" }
+                            },
+                            "required": ["old_text", "new_text"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["path", "expected_revision", "edits"],
+                "additionalProperties": false
+            }),
+        },
+    }
+}
 
 pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let path = match required_string(&args, "path") {

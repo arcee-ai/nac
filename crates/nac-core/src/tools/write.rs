@@ -7,6 +7,31 @@ use crate::tools::mutation::{
     argument_error, execute_remote, permission_error, required_string, write_local, write_mounted,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::types::{FunctionDef, ToolDefinition};
+
+pub fn definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "write".to_string(),
+            description: "Atomically create or replace a UTF-8 file. Use expected_revision null only to create a missing file; replacing requires the revision from read."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "content": { "type": "string", "description": "Complete content to write" },
+                    "expected_revision": {
+                        "type": ["string", "null"],
+                        "description": "Revision from read to replace an existing file, or null to create only"
+                    }
+                },
+                "required": ["path", "content", "expected_revision"],
+                "additionalProperties": false
+            }),
+        },
+    }
+}
 
 pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let path = match required_string(&args, "path") {

@@ -23,6 +23,7 @@ pub mod edit;
 pub mod exec_command;
 pub mod glob;
 pub mod grep;
+pub mod kernel;
 pub(crate) mod mutation;
 pub mod read;
 pub mod thread;
@@ -395,80 +396,159 @@ pub(crate) fn remote_file_lock_busy(output: &std::process::Output) -> bool {
         && String::from_utf8_lossy(&output.stdout).trim() == REMOTE_FILE_LOCK_BUSY_MARKER
 }
 
-pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    use serde_json::json;
+struct ReadTool {
+    image_read: bool,
+}
 
-    let mut tools = vec![
-        def(
+impl kernel::NativeTool for ReadTool {
+    type Input = read::ReadInput;
+
+    fn definition(&self) -> ToolDefinition {
+        read::definition(self.image_read)
+    }
+
+    fn admission(&self) -> kernel::ToolAdmission {
+        kernel::ToolAdmission::Parallel
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        read::decode(input)
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: kernel::ToolServices<'_>,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        let path = services
+            .runtime
+            .backend
+            .resolve_path(input.path())
+            .map_err(|error| {
+                ToolResult::text(format!("Error: invalid read path: {error}"), true)
+            })?;
+        Ok(vec![kernel::PermissionResource::new(
             "read",
-            if image_read {
-                "Read and view UTF-8 text or supported PNG, JPEG, WebP, and static GIF image files. Text results include complete-file revision metadata; pass next_offset to continue text files."
-            } else {
-                "Read UTF-8 file content and return JSON metadata including the complete-file revision. Pass next_offset to continue."
-            },
-            json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Path to file" },
-                    "offset": { "type": "integer", "minimum": 0, "description": "Zero-based line offset (optional; text files only)" },
-                    "limit": { "type": "integer", "minimum": 1, "description": "Maximum lines to read (optional, default 2000; text files only)" }
-                },
-                "required": ["path"],
-                "additionalProperties": false
-            }),
-        ),
-        def(
-            "write",
-            "Atomically create or replace a UTF-8 file. Use expected_revision null only to create a missing file; replacing requires the revision from read.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Path to file" },
-                    "content": { "type": "string", "description": "Complete content to write" },
-                    "expected_revision": {
-                        "type": ["string", "null"],
-                        "description": "Revision from read to replace an existing file, or null to create only"
-                    }
-                },
-                "required": ["path", "content", "expected_revision"],
-                "additionalProperties": false
-            }),
-        ),
-        def(
-            "edit",
-            "Atomically apply one or more exact, non-overlapping replacements against one file revision. On stale_revision, read again and retry the complete batch.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Path to file" },
-                    "expected_revision": { "type": "string", "description": "Complete-file revision from read" },
-                    "edits": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "old_text": { "type": "string", "minLength": 1, "description": "Exact text from the original revision" },
-                                "new_text": { "type": "string", "description": "Replacement text" }
-                            },
-                            "required": ["old_text", "new_text"],
-                            "additionalProperties": false
-                        }
-                    }
-                },
-                "required": ["path", "expected_revision", "edits"],
-                "additionalProperties": false
-            }),
-        ),
-    ];
-    tools.push(glob::definition());
-    tools.push(grep::definition());
+            path.display().to_string(),
+        )])
+    }
 
-    tools.push(exec_command::exec_command_definition());
-    tools.push(exec_command::write_stdin_definition());
-    tools.push(exec_command::read_command_output_definition());
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        services: kernel::ToolServices<'a>,
+        _context: &'a kernel::ToolCallContext,
+    ) -> futures_util::future::BoxFuture<'a, ToolResult> {
+        // Provider capabilities shape the registered definition; the captured
+        // tool setting remains authoritative for native callers.
+        let _provider_supports_images = services.client.supports_image_tool_results();
+        Box::pin(
+            async move { read::execute_native(input, services.runtime, self.image_read).await },
+        )
+    }
+}
 
-    tools
+struct LegacyDirectTool<const KIND: u8>;
+
+const WORKER_TOOL_NAMES: [&str; 8] = [
+    "read",
+    "write",
+    "edit",
+    "glob",
+    "grep",
+    "exec_command",
+    "write_stdin",
+    "read_command_output",
+];
+
+impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
+    type Input = Value;
+
+    fn definition(&self) -> ToolDefinition {
+        match KIND {
+            1 => write::definition(),
+            2 => edit::definition(),
+            3 => glob::definition(),
+            4 => grep::definition(),
+            5 => exec_command::exec_command_definition(),
+            6 => exec_command::write_stdin_definition(),
+            7 => exec_command::read_command_output_definition(),
+            _ => unreachable!("unknown built-in direct tool kind"),
+        }
+    }
+
+    fn admission(&self) -> kernel::ToolAdmission {
+        match KIND {
+            3 | 4 | 7 => kernel::ToolAdmission::Parallel,
+            _ => kernel::ToolAdmission::Exclusive,
+        }
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        // These adapters preserve the existing tool-specific validation and
+        // result wording. They can migrate to typed inputs independently.
+        Ok(input)
+    }
+
+    fn permission_resources(
+        &self,
+        _input: &Self::Input,
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        Ok(Vec::new())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        services: kernel::ToolServices<'a>,
+        _context: &'a kernel::ToolCallContext,
+    ) -> futures_util::future::BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            match KIND {
+                1 => write::execute(input, services.runtime).await,
+                2 => edit::execute(input, services.runtime).await,
+                3 => glob::execute(input, services.runtime).await,
+                4 => grep::execute(input, services.runtime).await,
+                5 => exec_command::execute_exec_command(&input, services.runtime).await,
+                6 => exec_command::execute_write_stdin(&input, services.runtime).await,
+                7 => exec_command::execute_read_command_output(&input, services.runtime),
+                _ => unreachable!("unknown built-in direct tool kind"),
+            }
+        })
+    }
+}
+
+fn worker_tool_registry(
+    image_read: bool,
+) -> Result<kernel::ToolRegistry, kernel::ToolRegistryError> {
+    let registry = kernel::ToolRegistry::builder()
+        .register(ReadTool { image_read })
+        .register(LegacyDirectTool::<1>)
+        .register(LegacyDirectTool::<2>)
+        .register(LegacyDirectTool::<3>)
+        .register(LegacyDirectTool::<4>)
+        .register(LegacyDirectTool::<5>)
+        .register(LegacyDirectTool::<6>)
+        .register(LegacyDirectTool::<7>)
+        .finish()?;
+    // Keep the native instance retrievable; direct Rust callers do not need a
+    // JSON round-trip to execute the same registered read operation.
+    let _read_handle = registry.native_handle::<ReadTool>()?;
+    Ok(registry)
+}
+
+pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
+    worker_tool_registry(image_read)
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot_where(|descriptor| {
+            !descriptor.name().is_empty()
+                && matches!(
+                    descriptor.admission,
+                    kernel::ToolAdmission::Parallel | kernel::ToolAdmission::Exclusive
+                )
+        })
+        .definitions()
 }
 
 pub fn orchestrator_tool_definitions(
@@ -484,17 +564,6 @@ pub fn orchestrator_tool_definitions(
         workset::read_definition(),
         workset::list_definition(),
     ]
-}
-
-fn def(name: &str, description: &str, parameters: Value) -> ToolDefinition {
-    ToolDefinition {
-        def_type: "function".to_string(),
-        function: crate::types::FunctionDef {
-            name: name.to_string(),
-            description: description.to_string(),
-            parameters,
-        },
-    }
 }
 
 pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
@@ -533,11 +602,29 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
     Ok(out)
 }
 
+#[cfg(test)]
 pub async fn execute_tool(
     name: &str,
     args: Value,
     runtime: &ToolRuntime,
     client: &crate::model::ModelClient,
+) -> ToolResult {
+    execute_tool_with_context(
+        name,
+        args,
+        runtime,
+        client,
+        &kernel::ToolCallContext::default(),
+    )
+    .await
+}
+
+pub async fn execute_tool_with_context(
+    name: &str,
+    args: Value,
+    runtime: &ToolRuntime,
+    client: &crate::model::ModelClient,
+    context: &kernel::ToolCallContext,
 ) -> ToolResult {
     if name.starts_with("mcp__") {
         let Some(registry) = &runtime.mcp else {
@@ -551,15 +638,22 @@ pub async fn execute_tool(
             .await;
     }
 
+    let direct = worker_tool_registry(client.supports_image_tool_results())
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot(WORKER_TOOL_NAMES)
+        .expect("built-in direct capability selection must be complete");
+    if direct.contains(name) {
+        return direct
+            .invoke(
+                name,
+                args,
+                kernel::ToolServices { runtime, client },
+                context,
+            )
+            .await;
+    }
+
     match name {
-        "read" => read::execute(args, runtime, client.supports_image_tool_results()).await,
-        "write" => write::execute(args, runtime).await,
-        "edit" => edit::execute(args, runtime).await,
-        "glob" => glob::execute(args, runtime).await,
-        "grep" => grep::execute(args, runtime).await,
-        "exec_command" => exec_command::execute_exec_command(&args, runtime).await,
-        "write_stdin" => exec_command::execute_write_stdin(&args, runtime).await,
-        "read_command_output" => exec_command::execute_read_command_output(&args, runtime),
         "thread" => thread::execute_dispatch(args, runtime, client).await,
         "threads" => thread::execute_threads(runtime).await,
         "thread_read" => thread::execute_thread_read(args, runtime).await,
@@ -576,7 +670,7 @@ pub async fn execute_tool(
 
 #[cfg(test)]
 mod discovery_tool_definition_tests {
-    use super::worker_tool_definitions;
+    use super::{kernel, worker_tool_definitions, worker_tool_registry, ReadTool};
 
     #[test]
     fn every_worker_receives_complete_glob_and_grep_definitions_once() {
@@ -638,6 +732,76 @@ mod discovery_tool_definition_tests {
         };
         assert!(description(true).contains("PNG"));
         assert!(!description(false).contains("image"));
+    }
+
+    #[test]
+    fn worker_registry_preserves_definition_order_and_declares_admission() {
+        let registry = worker_tool_registry(false).unwrap();
+        let snapshot = registry
+            .snapshot(super::WORKER_TOOL_NAMES)
+            .expect("complete worker capabilities");
+        assert_eq!(
+            snapshot
+                .definitions()
+                .into_iter()
+                .map(|definition| definition.function.name)
+                .collect::<Vec<_>>(),
+            super::WORKER_TOOL_NAMES
+        );
+        let admissions = snapshot
+            .descriptors_for_test()
+            .into_iter()
+            .map(|descriptor| (descriptor.definition.function.name, descriptor.admission))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(admissions["read"], kernel::ToolAdmission::Parallel);
+        assert_eq!(admissions["glob"], kernel::ToolAdmission::Parallel);
+        assert_eq!(admissions["write"], kernel::ToolAdmission::Exclusive);
+        assert_eq!(admissions["exec_command"], kernel::ToolAdmission::Exclusive);
+    }
+
+    #[tokio::test]
+    async fn registered_read_supports_native_and_model_boundary_calls() {
+        let directory = std::env::temp_dir().join(format!("nac-kernel-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("fixture.txt"), "native kernel\n").unwrap();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = directory.clone();
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &directory);
+        let client = crate::model::ModelClient::new_for_test();
+        let registry = worker_tool_registry(false).unwrap();
+        let handle = registry.native_handle::<ReadTool>().unwrap();
+        let context = kernel::ToolCallContext::default();
+        let services = kernel::ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+
+        let native = handle
+            .invoke(
+                crate::tools::read::ReadInput::new("fixture.txt"),
+                services,
+                &context,
+            )
+            .await;
+        assert!(!native.is_error, "{}", native.content);
+        assert!(native.content.contains("native kernel"));
+
+        let prepared = registry
+            .snapshot(["read"])
+            .unwrap()
+            .prepare("read", serde_json::json!({"path":"fixture.txt"}), services)
+            .unwrap();
+        assert_eq!(
+            prepared.permission_resources(),
+            &[kernel::PermissionResource::new(
+                "read",
+                directory.join("fixture.txt").display().to_string()
+            )]
+        );
+        let dynamic = prepared.invoke(services, &context).await;
+        assert!(!dynamic.is_error, "{}", dynamic.content);
+        assert!(dynamic.content.contains("native kernel"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 }
 

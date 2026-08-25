@@ -276,6 +276,10 @@ pub(crate) fn spawn_non_thread_into(
             key_arg_preview: None,
             args_detail: Some(tool_args_detail(&args_str)),
         });
+        let call_context = tools::kernel::ToolCallContext {
+            call_id: Some(tool_call_id.clone()),
+            thread_name: thread_name.clone(),
+        };
 
         join_set.spawn(async move {
             let parsed_args = match serde_json::from_str::<serde_json::Value>(&args_str) {
@@ -297,7 +301,14 @@ pub(crate) fn spawn_non_thread_into(
                     );
                 }
             };
-            let result = tools::execute_tool(&tool_name, parsed_args, &runtime, &client).await;
+            let result = tools::execute_tool_with_context(
+                &tool_name,
+                parsed_args,
+                &runtime,
+                &client,
+                &call_context,
+            )
+            .await;
             (index, None, tool_call_id, tool_name, result)
         });
     }

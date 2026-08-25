@@ -1,28 +1,113 @@
 use std::path::PathBuf;
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, execute_remote, read_error, read_mounted, read_opened_file, required_string,
+    argument_error, execute_remote, read_error, read_mounted, read_opened_file,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::types::{FunctionDef, ToolDefinition};
 
 const DEFAULT_LIMIT: usize = 2_000;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadInput {
+    path: String,
+    offset: usize,
+    limit: usize,
+}
+
+impl ReadInput {
+    #[allow(dead_code, reason = "native callers use this without model JSON")]
+    pub fn new(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            offset: 0,
+            limit: DEFAULT_LIMIT,
+        }
+    }
+
+    pub fn with_range(
+        path: impl Into<String>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Self, ToolResult> {
+        if limit == 0 {
+            return Err(argument_error("'limit' must be greater than zero"));
+        }
+        Ok(Self {
+            path: path.into(),
+            offset,
+            limit,
+        })
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadWireInput {
+    path: String,
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+}
+
+pub fn definition(image_read: bool) -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "read".to_string(),
+            description: if image_read {
+                "Read and view UTF-8 text or supported PNG, JPEG, WebP, and static GIF image files. Text results include complete-file revision metadata; pass next_offset to continue text files."
+            } else {
+                "Read UTF-8 file content and return JSON metadata including the complete-file revision. Pass next_offset to continue."
+            }
+            .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "offset": { "type": "integer", "minimum": 0, "description": "Zero-based line offset (optional; text files only)" },
+                    "limit": { "type": "integer", "minimum": 1, "description": "Maximum lines to read (optional, default 2000; text files only)" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        },
+    }
+}
+
+pub(crate) fn decode(input: Value) -> Result<ReadInput, ToolResult> {
+    let wire: ReadWireInput = serde_json::from_value(input)
+        .map_err(|error| argument_error(format!("invalid read arguments: {error}")))?;
+    ReadInput::with_range(wire.path, wire.offset, wire.limit.unwrap_or(DEFAULT_LIMIT))
+}
+
+#[cfg(test)]
 pub async fn execute(args: Value, runtime: &ToolRuntime, image_read: bool) -> ToolResult {
-    let path = match required_string(&args, "path") {
-        Ok(path) => path,
+    let input = match decode(args) {
+        Ok(input) => input,
         Err(error) => return error,
     };
-    let offset = match optional_usize(&args, "offset", 0, true) {
-        Ok(offset) => offset,
-        Err(error) => return error,
-    };
-    let limit = match optional_usize(&args, "limit", DEFAULT_LIMIT, false) {
-        Ok(limit) => limit,
-        Err(error) => return error,
-    };
+    execute_native(input, runtime, image_read).await
+}
+
+pub async fn execute_native(
+    input: ReadInput,
+    runtime: &ToolRuntime,
+    image_read: bool,
+) -> ToolResult {
+    let ReadInput {
+        path,
+        offset,
+        limit,
+    } = input;
 
     if runtime.backend.file_io() == FileIoMode::RemoteExec {
         let guest_path = match runtime.backend.resolve_path(&path) {
@@ -93,28 +178,6 @@ async fn read_local(
         Ok(Err(error)) => read_error(&path_display, error),
         Err(error) => argument_error(format!("file read task failed for {path_display}: {error}")),
     }
-}
-
-fn optional_usize(
-    args: &Value,
-    key: &str,
-    default: usize,
-    allow_zero: bool,
-) -> Result<usize, ToolResult> {
-    let Some(value) = args.get(key) else {
-        return Ok(default);
-    };
-    let Some(value) = value.as_u64() else {
-        return Err(argument_error(format!(
-            "'{key}' must be a non-negative integer"
-        )));
-    };
-    let value =
-        usize::try_from(value).map_err(|_| argument_error(format!("'{key}' is too large")))?;
-    if value == 0 && !allow_zero {
-        return Err(argument_error(format!("'{key}' must be greater than zero")));
-    }
-    Ok(value)
 }
 
 #[cfg(test)]
@@ -228,8 +291,10 @@ mod tests {
 
     #[test]
     fn offset_and_limit_validation_is_strict() {
-        assert!(optional_usize(&json!({"offset":-1}), "offset", 0, true).is_err());
-        assert!(optional_usize(&json!({"limit":0}), "limit", DEFAULT_LIMIT, false).is_err());
-        assert_eq!(optional_usize(&json!({}), "offset", 0, true).unwrap(), 0);
+        assert!(decode(json!({"path":"file", "offset":-1})).is_err());
+        assert!(decode(json!({"path":"file", "limit":0})).is_err());
+        let defaults = decode(json!({"path":"file"})).unwrap();
+        assert_eq!(defaults.offset, 0);
+        assert_eq!(defaults.limit, DEFAULT_LIMIT);
     }
 }
