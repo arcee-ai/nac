@@ -80,6 +80,16 @@ pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
 
+    insert_new_session_in_transaction(&tx, path, snapshot)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub(crate) fn insert_new_session_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    path: &Path,
+    snapshot: &SessionSnapshot,
+) -> Result<()> {
     let existing: Option<String> = tx
         .query_row(
             "SELECT session_id FROM sessions WHERE session_id = ?1",
@@ -95,14 +105,13 @@ pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
         ));
     }
 
-    insert_or_replace_session(&tx, path, snapshot)?;
+    insert_or_replace_session(tx, path, snapshot)?;
     if let Some(project_id) = snapshot.project_id.as_deref() {
         tx.execute(
             "INSERT INTO session_projects (session_id, project_id) VALUES (?1, ?2)",
             params![snapshot.session_id, project_id],
         )?;
     }
-    tx.commit()?;
     Ok(())
 }
 
@@ -916,7 +925,7 @@ impl SessionSummaryRow {
     }
 }
 
-fn insert_or_replace_session(
+pub(crate) fn insert_or_replace_session(
     tx: &rusqlite::Transaction<'_>,
     path: &Path,
     snapshot: &SessionSnapshot,

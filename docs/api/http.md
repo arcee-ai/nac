@@ -78,7 +78,7 @@ unfinished goal exists. `PATCH /sessions/{session_id}/goal/{goal_id}` uses
 `expected_version` for optimistic concurrency and can edit `objective`, set or
 clear `token_budget`, or set a user/system status. `DELETE` on the same path
 takes `expected_version` and clears the goal. These endpoints reject
-orchestrator sessions.
+orchestrator sessions and delegated traditional children.
 
 Goal responses include the generation ID, six-state status, accumulated
 `tokens_used` and `time_used_ms`, optional budget, current run/continuation

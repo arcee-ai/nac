@@ -6,6 +6,11 @@ import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { compareSortOrder } from "@/app/lib/sessionOrder";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
+/** Delegated descendants are reachable through their parent's hierarchy only. */
+export function primarySessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
+  return sessions.filter((entry) => entry.lineage == null);
+}
+
 /** A project together with the sessions that belong to it. */
 export interface ProjectEntry {
   project: ProjectRecord;
@@ -20,7 +25,7 @@ export interface ProjectEntry {
 
 function newestUpdate(sessions: ManagedSessionSummary[], fallback: string): string {
   let newest = fallback;
-  for (const entry of sessions) {
+  for (const entry of primarySessions(sessions)) {
     if (parseStoreTime(entry.summary.updated_at) > parseStoreTime(newest)) {
       newest = entry.summary.updated_at;
     }
@@ -41,7 +46,7 @@ export function projectEntries(
   sessions: ManagedSessionSummary[],
 ): ProjectEntry[] {
   const byProject = new Map<string, ManagedSessionSummary[]>();
-  for (const entry of sessions) {
+  for (const entry of primarySessions(sessions)) {
     const projectId = entry.summary.project_id;
     if (!projectId) continue;
     const bucket = byProject.get(projectId);
@@ -67,7 +72,7 @@ export function projectEntries(
 /** Sessions that predate projects, or whose project was deleted, in backend order. */
 export function orphanSessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
   return sessions
-    .filter((entry) => !entry.summary.project_id)
+    .filter((entry) => entry.lineage == null && !entry.summary.project_id)
     .sort((a, b) => compareSortOrder(a.summary, b.summary));
 }
 

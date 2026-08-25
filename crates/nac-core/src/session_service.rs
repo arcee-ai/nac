@@ -1054,6 +1054,21 @@ impl SessionService {
         Ok(())
     }
 
+    fn require_direct_primary_behavior(&self) -> Result<()> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        if crate::store::load_traditional_child(&self.metadata.store_path, session_id)?.is_some() {
+            return Err(anyhow::anyhow!(
+                "delegated sessions accept input only through their parent"
+            ));
+        }
+        Ok(())
+    }
+
     fn direct_permission_broker(&self) -> Result<&Arc<crate::permissions::PermissionBroker>> {
         self.require_direct_behavior()?;
         self.permission_broker
@@ -1097,7 +1112,7 @@ impl SessionService {
     }
 
     pub fn list_direct_inbox(&self) -> Result<Vec<crate::store::SessionInboxRecord>> {
-        self.require_direct_behavior()?;
+        self.require_direct_primary_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -1112,7 +1127,7 @@ impl SessionService {
         content: &str,
         client_id: Option<&SessionClientId>,
     ) -> Result<crate::store::SessionInboxRecord> {
-        self.require_direct_behavior()?;
+        self.require_direct_primary_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -1150,7 +1165,7 @@ impl SessionService {
         expected_version: i64,
         delivery: crate::store::InboxDelivery,
     ) -> Result<crate::store::SessionInboxRecord> {
-        self.require_direct_behavior()?;
+        self.require_direct_primary_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -1187,7 +1202,7 @@ impl SessionService {
         item_id: i64,
         expected_version: i64,
     ) -> Result<crate::store::SessionInboxRecord> {
-        self.require_direct_behavior()?;
+        self.require_direct_primary_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -2364,10 +2379,44 @@ impl SessionService {
         if child.status != crate::store::TraditionalChildStatus::Running {
             return Ok(Some(child));
         }
-        let Some(recovery) =
-            crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
-        else {
-            return Ok(Some(child));
+        let recovery = crate::store::load_run_recovery(&self.metadata.store_path, session_id)?;
+        let recovery = match recovery {
+            Some(recovery) => recovery,
+            None => {
+                if self.active_run().is_some() {
+                    return Ok(Some(child));
+                }
+                let _lease = match sessions::SessionOperationLease::try_acquire(
+                    &self.metadata.store_path,
+                    session_id,
+                ) {
+                    Ok(lease) => lease,
+                    Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                        return Ok(Some(child));
+                    }
+                    Err(error) => return Err(anyhow::Error::new(error)),
+                };
+                if crate::store::load_run_recovery(&self.metadata.store_path, session_id)?.is_some()
+                {
+                    return Ok(Some(child));
+                }
+                let Some(run_id) = child.run_id.as_deref() else {
+                    return Err(anyhow::anyhow!(
+                        "running traditional child has no bound run id"
+                    ));
+                };
+                self.settle_traditional_child_run(
+                    &SessionRunId::from_stored(run_id.to_string()),
+                    crate::store::TraditionalChildStatus::Interrupted,
+                    None,
+                    Some(
+                        "child run ended before its prompt and recovery obligation committed"
+                            .to_string(),
+                    ),
+                )
+                .await;
+                return crate::store::load_traditional_child(&self.metadata.store_path, session_id);
+            }
         };
         if recovery.run_id != child.run_id.as_deref().unwrap_or_default() {
             return Ok(Some(child));
@@ -4321,6 +4370,7 @@ pub(super) mod tests {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode,
+                session_behavior: None,
                 store_path,
                 session_id,
                 orchestrator_compaction_threshold,
@@ -4475,6 +4525,7 @@ pub(super) mod tests {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Orchestrator,
+                session_behavior: None,
                 store_path: store_path.clone(),
                 session_id: Some("has-sandbox-sandboxed".to_string()),
                 orchestrator_compaction_threshold: None,
@@ -5898,6 +5949,82 @@ pub(super) mod tests {
             .has_unreconciled_durable_run_recovery()
             .unwrap());
 
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn child_pre_prompt_crash_is_interrupted_and_delivered_once_after_restart() {
+        let session_id = "session-child-pre-prompt-crash";
+        let (parts, store_path) = test_direct_active_service(
+            "child_pre_prompt_crash",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        crate::store::insert_test_session(&store_path, "parent");
+        crate::store::open_runtime_connection(&store_path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'parent'",
+                [],
+            )
+            .unwrap();
+        crate::store::create_traditional_child_relationship(
+            &store_path,
+            "parent",
+            session_id,
+            crate::store::GENERAL_CHILD_PROFILE,
+            "crash before prompt commit",
+        )
+        .unwrap();
+        crate::store::begin_traditional_child_run(
+            &store_path,
+            session_id,
+            "run-pre-prompt",
+            crate::store::TraditionalChildExecutionMode::Background,
+        )
+        .unwrap();
+        assert!(crate::store::load_run_recovery(&store_path, session_id)
+            .unwrap()
+            .is_none());
+
+        let settled = parts
+            .service
+            .reconcile_traditional_child_terminal()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            settled.status,
+            crate::store::TraditionalChildStatus::Interrupted
+        );
+        assert!(settled
+            .failure
+            .as_deref()
+            .is_some_and(|failure| failure.contains("before its prompt")));
+        assert_eq!(
+            crate::store::list_session_inbox(&store_path, "parent")
+                .unwrap()
+                .len(),
+            1
+        );
+        let inbox_error = parts.service.list_direct_inbox().unwrap_err();
+        assert!(inbox_error
+            .to_string()
+            .contains("accept input only through their parent"));
+
+        let repeated = parts
+            .service
+            .reconcile_traditional_child_terminal()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(repeated.status, settled.status);
+        assert_eq!(
+            crate::store::list_session_inbox(&store_path, "parent")
+                .unwrap()
+                .len(),
+            1
+        );
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 

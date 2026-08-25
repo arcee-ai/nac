@@ -104,6 +104,18 @@ pub trait NativeTool: Send + Sync + 'static {
         services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult>;
 
+    /// Bind canonical targets approved by policy into the decoded invocation.
+    /// Path-bearing tools override this so execution cannot re-follow a
+    /// different symlink spelling after an approval wait.
+    fn bind_authorized_resources(
+        &self,
+        _input: &mut Self::Input,
+        _resources: &[PermissionResource],
+        _services: ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        Ok(())
+    }
+
     fn execute<'a>(
         &'a self,
         input: Self::Input,
@@ -126,6 +138,12 @@ impl ToolDescriptor {
 
 trait PreparedInvocation: Send {
     fn permission_resources(&self) -> &[PermissionResource];
+
+    fn bind_authorized_resources(
+        &mut self,
+        resources: &[PermissionResource],
+        services: ToolServices<'_>,
+    ) -> Result<(), ToolResult>;
 
     fn invoke<'a>(
         self: Box<Self>,
@@ -180,6 +198,15 @@ impl<T: NativeTool> PreparedInvocation for PreparedNative<T> {
         &self.resources
     }
 
+    fn bind_authorized_resources(
+        &mut self,
+        resources: &[PermissionResource],
+        services: ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        self.tool
+            .bind_authorized_resources(&mut self.input, resources, services)
+    }
+
     fn invoke<'a>(
         self: Box<Self>,
         services: ToolServices<'a>,
@@ -207,6 +234,15 @@ impl PreparedToolCall {
 
     pub fn permission_resources(&self) -> &[PermissionResource] {
         self.invocation.permission_resources()
+    }
+
+    pub fn bind_authorized_resources(
+        &mut self,
+        resources: &[PermissionResource],
+        services: ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        self.invocation
+            .bind_authorized_resources(resources, services)
     }
 
     pub fn invoke<'a>(
@@ -460,7 +496,7 @@ impl ToolSnapshot {
         context: &ToolCallContext,
     ) -> ToolResult {
         match self.prepare(name, input, services) {
-            Ok(prepared) => {
+            Ok(mut prepared) => {
                 let _admission = prepared.descriptor().admission;
                 if let Some(broker) = &services.runtime.permission_broker {
                     let resources = match crate::permissions::canonicalize_authorization_resources(
@@ -496,6 +532,34 @@ impl ToolSnapshot {
                                 true,
                             );
                         }
+                    }
+                    let current = match crate::permissions::canonicalize_authorization_resources(
+                        prepared.permission_resources(),
+                        services.runtime.backend.as_ref(),
+                        &services.runtime.store_path,
+                    )
+                    .await
+                    {
+                        Ok(current) => current,
+                        Err(error) => {
+                            return ToolResult::text(
+                                format!(
+                                    "Error: permission target revalidation failed for {name}: {error:#}"
+                                ),
+                                true,
+                            );
+                        }
+                    };
+                    if current != resources {
+                        return ToolResult::text(
+                            format!(
+                                "Error: permission target changed while {name} awaited authorization; retry the tool call"
+                            ),
+                            true,
+                        );
+                    }
+                    if let Err(error) = prepared.bind_authorized_resources(&resources, services) {
+                        return error;
                     }
                 }
                 prepared.invoke(services, context).await

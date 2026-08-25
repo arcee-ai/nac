@@ -29,6 +29,7 @@ import type {
 interface PermissionControlsProps {
   sessionId: string;
   behavior: SessionBehavior | null;
+  label?: string;
 }
 
 function requestIdentity(requests: PermissionRequest[]): string {
@@ -68,7 +69,11 @@ function GrantRow({
 }
 
 /** Direct-session permission prompt and remembered-grant manager. */
-export function PermissionControls({ sessionId, behavior }: PermissionControlsProps) {
+export function PermissionControls({
+  sessionId,
+  behavior,
+  label = "Permissions",
+}: PermissionControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const permissions = useSessionPermissions(sessionId, direct);
   const replyPermission = useReplyPermission();
@@ -132,12 +137,12 @@ export function PermissionControls({ sessionId, behavior }: PermissionControlsPr
 
   return (
     <>
-      <Tooltip title="Permissions" position={TooltipPosition.TopCenter}>
+      <Tooltip title={label} position={TooltipPosition.TopCenter}>
         <Button
           size={ButtonSize.Small}
           variant={requests.length ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
           content={ButtonContent.Icon}
-          aria-label={`Permissions${badge}`}
+          aria-label={`${label}${badge}`}
           onClick={() => setManuallyOpen(true)}
         >
           <Icon iconName={requests.length ? IconName.Important : IconName.Lock} size={16} />

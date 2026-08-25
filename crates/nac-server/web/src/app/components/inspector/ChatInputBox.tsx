@@ -281,7 +281,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const cancelInboxItem = useCancelInboxItem();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const readOnly = snapshot?.lineage != null;
+  const readOnly = entry?.lineage != null || snapshot?.lineage != null;
+  const ownershipKnown = entry !== null || snapshot !== null;
   const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);
   const goalQuery = useSessionGoal(sessionId, direct && !readOnly);
   const createGoal = useCreateGoal();
@@ -1062,10 +1063,22 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     </Popover>
   );
 
-  if (readOnly) {
+  if (!ownershipKnown) {
     return (
       <div className="rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-        This delegated transcript is read-only. Continue, steer, or cancel it from its parent chat.
+        Loading session controls…
+      </div>
+    );
+  }
+
+  if (readOnly) {
+    return (
+      <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
+        <span className="flex-1">
+          This delegated transcript is read-only. Continue, steer, or cancel it from its parent
+          chat.
+        </span>
+        <PermissionControls sessionId={sessionId} behavior={behavior} />
       </div>
     );
   }

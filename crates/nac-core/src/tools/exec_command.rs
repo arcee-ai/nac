@@ -89,6 +89,11 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> ToolRe
 }
 
 async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Result<(String, bool)> {
+    if runtime.command_cancellation.is_cancelled() {
+        return Err(anyhow!(
+            "run was cancelled before the command process could start"
+        ));
+    }
     let manager = &runtime.terminal_manager;
     let cmd = require_str(args, "cmd")?;
     let tty = args.get("tty").and_then(Value::as_bool).unwrap_or(false);
@@ -591,6 +596,33 @@ mod tests {
             .get("shell-unknown")
             .await
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn pre_cancelled_pty_never_spawns_the_requested_process() {
+        let mut runtime = test_runtime();
+        let root =
+            std::env::temp_dir().join(format!("nac-pre-cancelled-pty-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        runtime.workspace_cwd = root.clone();
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+        runtime.command_cancellation.cancel();
+        let marker = root.join("must-not-exist");
+        let result = execute_exec_command(
+            &json!({
+                "cmd": "touch must-not-exist",
+                "tty": true,
+                "yield_time_ms": 100
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(result.is_error);
+        assert!(
+            !marker.exists(),
+            "cancelled PTY command performed a side effect"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

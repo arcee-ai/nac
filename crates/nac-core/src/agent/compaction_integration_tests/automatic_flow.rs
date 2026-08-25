@@ -13,6 +13,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: PathBuf::from("unused.db"),
             session_id: None,
             orchestrator_compaction_threshold: Some(1),

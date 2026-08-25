@@ -33,3 +33,11 @@ durable `queue` item. Pending items show their delivery mode and can be changed
 or cancelled until delivery. If a steer reaches the run too late for its final
 model boundary, NAC durably promotes it into successor execution rather than
 dropping it.
+
+Direct-tool approval authorizes one prepared operation on the session's already
+selected execution backend; it is not a sandbox and never changes that backend.
+Literal nested shell command bodies receive the same non-overridable checks as
+top-level commands, but an approved general-purpose shell or interpreter still
+carries the authority of that process. Input sent later to a retained terminal
+continues inside that already-approved process, so use Podman confinement when
+commands must remain inside a non-bypassable filesystem or network boundary.

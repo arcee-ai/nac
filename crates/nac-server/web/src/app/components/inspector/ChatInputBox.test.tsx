@@ -109,15 +109,22 @@ let commandFixtures: SlashCommandDefinition[] | undefined;
 let skillFixtures: SkillCatalogEntry[] | undefined;
 let mobile = false;
 
-function composer({
-  behavior = null,
-  goalState = null,
-  inboxItems = [],
-}: {
-  behavior?: SessionBehavior | null;
-  goalState?: SessionGoalRecord | null;
-  inboxItems?: InboxItem[];
-} = {}) {
+function composer(
+  {
+    behavior = null,
+    goalState = null,
+    inboxItems = [],
+    lineage = null,
+    entryAvailable = true,
+  }: {
+    behavior?: SessionBehavior | null;
+    goalState?: SessionGoalRecord | null;
+    inboxItems?: InboxItem[];
+    lineage?: ManagedSessionSummary["lineage"];
+    entryAvailable?: boolean;
+  } = {},
+  expectInput = true,
+) {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity },
@@ -136,25 +143,25 @@ function composer({
     client.setQueryData(queryKeys.sessionInbox("session"), inboxItems);
     client.setQueryData(queryKeys.traditionalChildren("session"), []);
   }
-  const entry: ManagedSessionSummary | null = behavior
-    ? {
-        active: false,
-        summary: {
-          session_id: "session",
-          behavior,
-          cwd: "/tmp/project",
-          model: "gpt-5.6-sol",
-          backend: "openai-responses",
-          visible_message_count: 0,
-          last_user_prompt: null,
-          sandboxed: false,
-          ssh_host: null,
-          created_at: "2026-08-25T00:00:00Z",
-          updated_at: "2026-08-25T00:00:00Z",
-          run_count: 0,
-        },
-      }
-    : null;
+  const knownEntry: ManagedSessionSummary = {
+    active: false,
+    lineage,
+    summary: {
+      session_id: "session",
+      behavior: behavior ?? "orchestrator",
+      cwd: "/tmp/project",
+      model: "gpt-5.6-sol",
+      backend: "openai-responses",
+      visible_message_count: 0,
+      last_user_prompt: null,
+      sandboxed: false,
+      ssh_host: null,
+      created_at: "2026-08-25T00:00:00Z",
+      updated_at: "2026-08-25T00:00:00Z",
+      run_count: 0,
+    },
+  };
+  const entry = entryAvailable ? knownEntry : null;
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
@@ -166,6 +173,7 @@ function composer({
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  if (!expectInput) return null as never;
   const textarea = screen.getByRole("combobox", { name: "Message" });
   textarea.focus();
   // SAFETY: the composer renders a single textarea as its combobox input.
@@ -494,6 +502,29 @@ describe("slash-command suggestions", () => {
 });
 
 describe("direct inbox and goal journeys", () => {
+  it("fails closed until ownership is known and keeps delegated transcripts non-composable", () => {
+    composer({ entryAvailable: false }, false);
+    expect(screen.getByText("Loading session controls…")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull();
+    cleanup();
+
+    composer(
+      {
+        behavior: "direct",
+        lineage: {
+          kind: "traditional-child",
+          parent_session_id: "parent",
+          root_session_id: "parent",
+          description: "Review ownership",
+        },
+      },
+      false,
+    );
+    expect(screen.getByText(/delegated transcript is read-only/i)).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
+  });
+
   it("preserves a steer drafted while the initial run submission settles", async () => {
     const submitted = Promise.withResolvers<{
       run_id: string;

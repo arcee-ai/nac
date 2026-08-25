@@ -84,6 +84,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Direct,
+                session_behavior: None,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.to_string()),
                 orchestrator_compaction_threshold: None,
@@ -158,6 +159,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
+            session_behavior: None,
             store_path: crate::store::default_store_path(),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -353,6 +355,7 @@ fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode,
+                session_behavior: None,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,
@@ -461,6 +464,7 @@ async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("session".to_string()),
             orchestrator_compaction_threshold: None,
@@ -581,6 +585,7 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
+            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("session".to_string()),
             orchestrator_compaction_threshold: None,
@@ -717,6 +722,7 @@ async fn cancelled_image_result_still_emits_finished_event() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: root.join("store.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,

@@ -19,6 +19,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { routes } from "@/app/lib/routes";
+import { useDelegatedPermissionStream } from "@/app/hooks/useSessionStream";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
@@ -31,6 +32,7 @@ import type {
   TraditionalChildRecord,
   TraditionalChildStatus,
 } from "@/app/types/api";
+import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 
 interface ChildControlsProps {
   sessionId: string;
@@ -43,6 +45,19 @@ function statusLabel(status: TraditionalChildStatus): string {
 
 function outcome(child: TraditionalChildRecord): string | null {
   return child.failure ?? child.report ?? child.change_summary ?? child.verification_summary;
+}
+
+function ChildPermissionBridge({ child }: { child: TraditionalChildRecord }) {
+  const running = child.status === "running";
+  useDelegatedPermissionStream(child.child_session_id, running);
+  if (!running) return null;
+  return (
+    <PermissionControls
+      sessionId={child.child_session_id}
+      behavior="direct"
+      label={`Permissions for ${child.description}`}
+    />
+  );
 }
 
 /** Direct-primary controls for durable traditional child coding sessions. */
@@ -108,6 +123,9 @@ export function ChildControls({ sessionId, behavior }: ChildControlsProps) {
 
   return (
     <>
+      {children.map((child) => (
+        <ChildPermissionBridge key={child.child_session_id} child={child} />
+      ))}
       <Tooltip title="Child sessions" position={TooltipPosition.TopCenter}>
         <Button
           size={ButtonSize.Small}

@@ -33,47 +33,59 @@ export const test = base.extend<Fixtures>({
   harness: async ({ request }, use, testInfo) => {
     void request;
     const running = await startHarness(testInfo);
+    let useError: unknown;
     try {
       await use(running);
-    } finally {
-      await running.stop();
-      const serverLog = path.join(running.runRoot, "nac-web.log");
-      const providerLog = path.join(running.runRoot, "provider-requests.json");
-      await fs.writeFile(serverLog, running.output.join(""));
-      await fs.writeFile(
-        providerLog,
-        JSON.stringify(
-          running.provider.requests.map((entry) => ({
-            ...entry,
-            headers: redactHeaders(entry.headers),
-          })),
-          null,
-          2,
-        ),
-      );
-      const failed = testInfo.status !== testInfo.expectedStatus;
-      if (failed) {
-        await testInfo.attach("nac-web log", { path: serverLog, contentType: "text/plain" });
-        await testInfo.attach("scripted provider journal", {
-          path: providerLog,
-          contentType: "application/json",
-        });
-        await attachIfPresent(
-          testInfo,
-          "isolated SQLite store",
-          path.join(running.runRoot, "store.db"),
-          "application/vnd.sqlite3",
-        );
-        await attachIfPresent(
-          testInfo,
-          "process status",
-          path.join(running.runRoot, "process.json"),
-          "application/json",
-        );
-      } else if (process.env.KEEP_E2E !== "1") {
-        await fs.rm(running.runRoot, { recursive: true, force: true });
-      }
+    } catch (error) {
+      useError = error;
     }
+    let cleanupError: unknown;
+    try {
+      await running.stop();
+    } catch (error) {
+      cleanupError = error;
+    }
+    const serverLog = path.join(running.runRoot, "nac-web.log");
+    const providerLog = path.join(running.runRoot, "provider-requests.json");
+    await fs.writeFile(serverLog, running.output.join(""));
+    await fs.writeFile(
+      providerLog,
+      JSON.stringify(
+        running.provider.requests.map((entry) => ({
+          ...entry,
+          headers: redactHeaders(entry.headers),
+        })),
+        null,
+        2,
+      ),
+    );
+    const failed = testInfo.status !== testInfo.expectedStatus || useError !== undefined;
+    if (failed) {
+      await testInfo.attach("nac-web log", { path: serverLog, contentType: "text/plain" });
+      await testInfo.attach("scripted provider journal", {
+        path: providerLog,
+        contentType: "application/json",
+      });
+      await attachIfPresent(
+        testInfo,
+        "isolated SQLite store",
+        path.join(running.runRoot, "store.db"),
+        "application/vnd.sqlite3",
+      );
+      await attachIfPresent(
+        testInfo,
+        "process status",
+        path.join(running.runRoot, "process.json"),
+        "application/json",
+      );
+    } else if (process.env.KEEP_E2E !== "1") {
+      await fs.rm(running.runRoot, { recursive: true, force: true });
+    }
+    if (useError !== undefined && cleanupError !== undefined) {
+      throw new AggregateError([useError, cleanupError], "E2E test and cleanup failed");
+    }
+    if (useError !== undefined) throw useError;
+    if (cleanupError !== undefined) throw cleanupError;
   },
   browserDiagnostics: [
     async ({ harness, page }, use, testInfo) => {
@@ -221,12 +233,12 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
     ),
   );
 
-  const provider = new ScriptedProvider();
-  await provider.start();
   const binaryPath = path.resolve(
     process.env.NAC_E2E_BINARY ?? path.join(repoRoot, "target/debug/nac-web"),
   );
   await fs.access(binaryPath);
+  const provider = new ScriptedProvider();
+  await provider.start();
   const output: string[] = [];
   let resolveAddress!: (url: string) => void;
   let rejectAddress!: (error: Error) => void;
@@ -294,11 +306,20 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
     baseUrl = await withTimeout(address, 15_000, "nac-web readiness line");
     await waitForHealth(baseUrl);
   } catch (error) {
-    await terminateProcessGroup(server);
-    await provider.stop();
+    const cleanup = await Promise.allSettled([terminateProcessGroup(server), provider.stop()]);
     const startupLog = path.join(runRoot, "nac-web.log");
     await fs.writeFile(startupLog, output.join(""));
     await testInfo.attach("nac-web startup log", { path: startupLog, contentType: "text/plain" });
+    const cleanupFailures = cleanup.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupFailures.map((result) => result.reason)],
+        "nac-web startup and cleanup failed",
+        { cause: error },
+      );
+    }
     throw error;
   }
 
@@ -315,9 +336,8 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
     output,
     stop: async () => {
       const pid = server.pid;
-      await terminateProcessGroup(server);
-      await provider.stop();
-      await fs.writeFile(
+      const cleanup = await Promise.allSettled([terminateProcessGroup(server), provider.stop()]);
+      const processRecord = fs.writeFile(
         path.join(runRoot, "process.json"),
         JSON.stringify(
           {
@@ -332,6 +352,15 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
           2,
         ),
       );
+      const failures = cleanup
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason);
+      try {
+        await processRecord;
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length > 0) throw new AggregateError(failures, "E2E cleanup failed");
     },
   };
 }
@@ -378,7 +407,8 @@ async function attachIfPresent(
 }
 
 async function terminateProcessGroup(child: ChildProcess): Promise<void> {
-  if (child.exitCode != null || child.signalCode != null || child.pid == null) return;
+  if (child.pid == null) return;
+  const rootExited = child.exitCode != null || child.signalCode != null;
   const signal = (name: NodeJS.Signals): void => {
     try {
       if (process.platform === "win32") child.kill(name);
@@ -387,6 +417,12 @@ async function terminateProcessGroup(child: ChildProcess): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   };
+  if (rootExited) {
+    // The leader may exit while a detached descendant remains in the original
+    // group. POSIX can still address that group; ESRCH means it is already gone.
+    if (process.platform !== "win32") signal("SIGTERM");
+    return;
+  }
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   signal("SIGTERM");
   try {
