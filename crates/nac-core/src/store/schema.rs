@@ -3,14 +3,17 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 16 adds project presentation columns (pin, order, version). 15 added projects
+// 17 adds the immutable session behavior discriminator and is also the
+// downgrade barrier: older binaries reject the future schema instead of
+// reconstructing a direct session as an orchestrator. 16 added project
+// presentation columns (pin, order, version). 15 added projects
 // and their one-to-many session links. 14 added the bounded interrupted-run
 // recovery row. 13 added the light-model columns (`light_model_json` on both
 // `sessions` and `model_configurations`) — `open_runtime_connection` returns
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 16;
+const STORE_SCHEMA_VERSION: i64 = 17;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -367,7 +370,8 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | STORE_SCHEMA_VERSION => {}
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | STORE_SCHEMA_VERSION => {
+        }
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -419,6 +423,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     // Light worker model; NULL keeps single-model behavior, so legacy rows
     // load unchanged.
     ensure_column(&transaction, "sessions", "light_model_json", "TEXT")?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "behavior",
+        "TEXT NOT NULL DEFAULT 'orchestrator' CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))",
+    )?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -504,6 +514,8 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
          );
          CREATE TABLE IF NOT EXISTS sessions (
              session_id TEXT PRIMARY KEY,
+             behavior TEXT NOT NULL DEFAULT 'orchestrator'
+                 CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator')),
              cwd TEXT NOT NULL,
              store_path TEXT NOT NULL,
              model TEXT NOT NULL,

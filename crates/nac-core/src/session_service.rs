@@ -52,6 +52,8 @@ pub struct SessionMetadata {
     pub model: String,
     pub backend: String,
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub behavior: sessions::SessionBehavior,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub sandbox_status: String,
@@ -709,6 +711,7 @@ impl SessionService {
             model: run_config.client.model.clone(),
             backend: run_config.client.backend().as_str().to_string(),
             session_id,
+            behavior: sessions::SessionBehavior::Orchestrator,
             project_id,
             sandbox_status: run_config.sandbox_status,
             agents_md_status: run_config.agents_md_status,

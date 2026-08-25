@@ -1369,6 +1369,13 @@ async fn build_resume_config_from_snapshot(
     persist_recovery: bool,
     resolved_metadata: Option<ModelMetadata>,
 ) -> Result<OrchestratorRunConfig> {
+    if snapshot.behavior != sessions::SessionBehavior::Orchestrator {
+        anyhow::bail!(
+            "session '{}' uses '{}' behavior and cannot be resumed as an orchestrator",
+            snapshot.session_id,
+            snapshot.behavior
+        );
+    }
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     // Resume reaches the host with the connection the session recorded, not with
     // whatever the local ssh config happens to say now.
@@ -1858,6 +1865,48 @@ mod tests {
         .session
         .into_snapshot()
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn orchestrator_resume_rejects_direct_behavior_before_side_effects() {
+        let root = temp_store_path("direct_resume_guard")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let store_path = root.join("must-not-exist.db");
+        let mut snapshot = sessions::new_snapshot(
+            "direct-session".to_string(),
+            root.clone(),
+            "model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            None,
+            BTreeMap::new(),
+        );
+        snapshot.behavior = sessions::SessionBehavior::Direct;
+
+        let error = build_resume_config_from_snapshot(
+            snapshot,
+            store_path.clone(),
+            &NacConfig::default(),
+            root.clone(),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .err()
+        .expect("direct session must not enter orchestrator construction");
+        assert!(error
+            .to_string()
+            .contains("uses 'direct' behavior and cannot be resumed as an orchestrator"));
+        assert!(!store_path.exists());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// A config whose `[model]` section resolves through the catalog:

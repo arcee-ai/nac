@@ -50,6 +50,48 @@ pub(crate) async fn load_last_session_async(path: PathBuf) -> Result<SessionSnap
 use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
 
+/// Immutable execution behavior selected when a top-level session is created.
+/// Stored as text so future behaviors can fail closed instead of being
+/// misinterpreted as the orchestrator.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum SessionBehavior {
+    #[default]
+    Orchestrator,
+    Direct,
+    DirectWithOrchestrator,
+}
+
+impl SessionBehavior {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Orchestrator => "orchestrator",
+            Self::Direct => "direct",
+            Self::DirectWithOrchestrator => "direct-with-orchestrator",
+        }
+    }
+}
+
+impl fmt::Display for SessionBehavior {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SessionBehavior {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "orchestrator" => Ok(Self::Orchestrator),
+            "direct" => Ok(Self::Direct),
+            "direct-with-orchestrator" => Ok(Self::DirectWithOrchestrator),
+            _ => Err(anyhow!("unsupported stored session behavior '{value}'")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RawSessionConfig {
@@ -114,6 +156,7 @@ impl From<anyhow::Error> for SessionConfigUpdateError {
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub session_id: String,
+    pub behavior: SessionBehavior,
     /// Explicit project association, stored authoritatively in `session_projects`.
     pub project_id: Option<String>,
     pub cwd: PathBuf,
@@ -155,6 +198,7 @@ pub struct SessionSnapshot {
 #[derive(Debug, Clone)]
 pub struct SessionSummary {
     pub session_id: String,
+    pub behavior: SessionBehavior,
     pub project_id: Option<String>,
     pub cwd: PathBuf,
     pub workspace_host_path: Option<PathBuf>,
@@ -339,6 +383,7 @@ mod tests {
         create_session(&store_path, &snapshot).unwrap();
         let loaded = load_session(&store_path, "session-1").unwrap();
         assert_eq!(loaded.session_id, "session-1");
+        assert_eq!(loaded.behavior, SessionBehavior::Orchestrator);
         assert_eq!(loaded.cwd, PathBuf::from("/repo"));
         assert_eq!(loaded.messages.len(), 1);
         assert_eq!(loaded.orchestrator_compaction_threshold, Some(32_768));
@@ -360,6 +405,83 @@ mod tests {
             330
         );
 
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("behavior_round_trip");
+
+        for (session_id, behavior) in [
+            ("orchestrator", SessionBehavior::Orchestrator),
+            ("direct", SessionBehavior::Direct),
+            (
+                "direct-with-orchestrator",
+                SessionBehavior::DirectWithOrchestrator,
+            ),
+        ] {
+            let mut snapshot = test_snapshot(session_id, "created", "updated");
+            snapshot.behavior = behavior;
+            create_session(&store_path, &snapshot).unwrap();
+            assert_eq!(
+                load_session(&store_path, session_id).unwrap().behavior,
+                behavior
+            );
+        }
+
+        let summaries = list_sessions(&store_path).unwrap();
+        for (session_id, behavior) in [
+            ("orchestrator", SessionBehavior::Orchestrator),
+            ("direct", SessionBehavior::Direct),
+            (
+                "direct-with-orchestrator",
+                SessionBehavior::DirectWithOrchestrator,
+            ),
+        ] {
+            assert_eq!(
+                summaries
+                    .iter()
+                    .find(|summary| summary.session_id == session_id)
+                    .unwrap()
+                    .behavior,
+                behavior
+            );
+        }
+
+        let mut stale = load_session(&store_path, "direct").unwrap();
+        stale.behavior = SessionBehavior::Orchestrator;
+        save_session(&store_path, &stale).unwrap();
+        assert_eq!(
+            load_session(&store_path, "direct").unwrap().behavior,
+            SessionBehavior::Direct
+        );
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn unknown_stored_behavior_fails_closed_for_load_and_list() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let store_path = temp_store_path("unknown_behavior");
+        let snapshot = test_snapshot("session", "created", "updated");
+        create_session(&store_path, &snapshot).unwrap();
+
+        let conn = rusqlite::Connection::open(&store_path).unwrap();
+        conn.execute_batch(
+            "PRAGMA ignore_check_constraints = ON;
+             UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session';",
+        )
+        .unwrap();
+        drop(conn);
+
+        let load_error = load_session(&store_path, "session").unwrap_err();
+        assert!(load_error
+            .to_string()
+            .contains("unsupported stored session behavior 'future-behavior'"));
+        let list_error = list_sessions(&store_path).unwrap_err();
+        assert!(list_error
+            .to_string()
+            .contains("unsupported stored session behavior 'future-behavior'"));
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
