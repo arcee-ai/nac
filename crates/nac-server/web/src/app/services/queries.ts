@@ -46,6 +46,8 @@ import type {
   CreateProjectRequest,
   CreateSessionRequest,
   DeleteProjectSessions,
+  InboxDelivery,
+  InboxItem,
   ManagedSessionSummary,
   ManagedOrchestratorRecord,
   ModelCatalog,
@@ -146,6 +148,7 @@ export const queryKeys = {
   sessionConfig: (id: string) => ["session", id, "config"] as const,
   sessionPermissions: (id: string) => ["session", id, "permissions"] as const,
   sessionGoal: (id: string) => ["session", id, "goal"] as const,
+  sessionInbox: (id: string) => ["session", id, "inbox"] as const,
   traditionalChildren: (id: string) => ["session", id, "children"] as const,
   managedOrchestrators: (id: string) => ["session", id, "orchestrators"] as const,
   workspaceDiff: (
@@ -1412,6 +1415,79 @@ export function useSubmitRun() {
       setOptimisticUserPrompt(null);
     },
     onSuccess: (_data, { id }) => invalidate.session(id),
+  });
+}
+
+export function useSessionInbox(sessionId: string, enabled: boolean) {
+  return useQuery<InboxItem[]>({
+    queryKey: queryKeys.sessionInbox(sessionId),
+    queryFn: ({ signal }) => api.listInbox(sessionId, signal),
+    enabled,
+    refetchInterval: enabled ? 1000 : false,
+    retry: false,
+  });
+}
+
+export function useCreateInboxItem() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      delivery,
+      prompt,
+    }: {
+      sessionId: string;
+      delivery: InboxDelivery;
+      prompt: string;
+    }) => api.createInboxItem(sessionId, delivery, prompt),
+    onSuccess: (item, { sessionId }) => {
+      client.setQueryData<InboxItem[]>(queryKeys.sessionInbox(sessionId), (items = []) => [
+        ...items.filter((candidate) => candidate.id !== item.id),
+        item,
+      ]);
+    },
+  });
+}
+
+export function useUpdateInboxItem() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      itemId,
+      expectedVersion,
+      delivery,
+    }: {
+      sessionId: string;
+      itemId: number;
+      expectedVersion: number;
+      delivery: InboxDelivery;
+    }) => api.updateInboxItem(sessionId, itemId, expectedVersion, delivery),
+    onSuccess: (item, { sessionId }) => {
+      client.setQueryData<InboxItem[]>(queryKeys.sessionInbox(sessionId), (items = []) =>
+        items.map((candidate) => (candidate.id === item.id ? item : candidate)),
+      );
+    },
+  });
+}
+
+export function useCancelInboxItem() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      itemId,
+      expectedVersion,
+    }: {
+      sessionId: string;
+      itemId: number;
+      expectedVersion: number;
+    }) => api.cancelInboxItem(sessionId, itemId, expectedVersion),
+    onSuccess: (item, { sessionId }) => {
+      client.setQueryData<InboxItem[]>(queryKeys.sessionInbox(sessionId), (items = []) =>
+        items.map((candidate) => (candidate.id === item.id ? item : candidate)),
+      );
+    },
   });
 }
 

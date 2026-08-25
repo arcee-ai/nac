@@ -22,6 +22,8 @@ import type {
   DeviceLoginState,
   LaunchModelDefaults,
   LaunchModelDefaultsRequest,
+  InboxDelivery,
+  InboxItem,
   ManagedAuthList,
   ManagedAuthProvider,
   ManagedAuthStatus,
@@ -471,6 +473,24 @@ export const api = {
 
   clearGoal: (id: string, goalId: string, expectedVersion: number) =>
     request<void>("DELETE", `${sessionPath(id)}/goal/${encodeURIComponent(goalId)}`, {
+      body: { expected_version: expectedVersion },
+    }),
+
+  listInbox: (id: string, signal?: AbortSignal) =>
+    request<InboxItem[]>("GET", `${sessionPath(id)}/inbox`, { signal }),
+
+  createInboxItem: (id: string, delivery: InboxDelivery, prompt: string) =>
+    request<InboxItem>("POST", `${sessionPath(id)}/inbox`, {
+      body: { delivery, prompt },
+    }),
+
+  updateInboxItem: (id: string, itemId: number, expectedVersion: number, delivery: InboxDelivery) =>
+    request<InboxItem>("PATCH", `${sessionPath(id)}/inbox/${itemId}`, {
+      body: { expected_version: expectedVersion, delivery },
+    }),
+
+  cancelInboxItem: (id: string, itemId: number, expectedVersion: number) =>
+    request<InboxItem>("DELETE", `${sessionPath(id)}/inbox/${itemId}`, {
       body: { expected_version: expectedVersion },
     }),
 

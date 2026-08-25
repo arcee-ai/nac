@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -24,6 +24,7 @@ import type { GoalStatus, SessionBehavior, SessionGoalRecord } from "@/app/types
 interface GoalControlsProps {
   sessionId: string;
   behavior: SessionBehavior | null;
+  openRequest?: number;
 }
 
 function statusLabel(status: GoalStatus): string {
@@ -44,7 +45,7 @@ function parsedBudget(value: string): number | null | undefined {
 }
 
 /** Direct-only durable goal state and user controls. */
-export function GoalControls({ sessionId, behavior }: GoalControlsProps) {
+export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const goalQuery = useSessionGoal(sessionId, direct);
   const createGoal = useCreateGoal();
@@ -55,6 +56,15 @@ export function GoalControls({ sessionId, behavior }: GoalControlsProps) {
   const [open, setOpen] = useState(false);
   const [objective, setObjective] = useState("");
   const [budget, setBudget] = useState("");
+  const handledOpenRequest = useRef(0);
+
+  useEffect(() => {
+    if (openRequest === 0 || openRequest === handledOpenRequest.current) return;
+    handledOpenRequest.current = openRequest;
+    setObjective(goal?.objective ?? "");
+    setBudget(budgetValue(goal));
+    setOpen(true);
+  }, [goal, openRequest]);
 
   if (!direct) return null;
 
@@ -78,7 +88,7 @@ export function GoalControls({ sessionId, behavior }: GoalControlsProps) {
       return;
     }
     try {
-      if (goal) {
+      if (goal && goal.status !== "complete") {
         await updateGoal.mutateAsync({
           sessionId,
           goalId: goal.goal_id,
@@ -98,7 +108,10 @@ export function GoalControls({ sessionId, behavior }: GoalControlsProps) {
         });
       }
     } catch (error) {
-      fail(goal ? "Unable to update goal" : "Unable to create goal", error);
+      fail(
+        goal && goal.status !== "complete" ? "Unable to update goal" : "Unable to create goal",
+        error,
+      );
     }
   };
   const setStatus = async (status: GoalStatus) => {
@@ -148,7 +161,13 @@ export function GoalControls({ sessionId, behavior }: GoalControlsProps) {
         open={open}
         onClose={() => setOpen(false)}
         size={ModalSize.Wide}
-        title={goal ? "Durable goal" : "Create durable goal"}
+        title={
+          goal?.status === "complete"
+            ? "Replace durable goal"
+            : goal
+              ? "Durable goal"
+              : "Create durable goal"
+        }
         subheader="Direct-session work that continues across ordinary turns until completed, blocked, paused, or limited."
       >
         {goalQuery.isPending ? (
@@ -242,7 +261,11 @@ export function GoalControls({ sessionId, behavior }: GoalControlsProps) {
                 </>
               ) : null}
               <Button variant={ButtonVariant.Primary} loading={busy} onClick={() => void save()}>
-                {goal ? "Save" : "Create and start"}
+                {goal?.status === "complete"
+                  ? "Replace and start"
+                  : goal
+                    ? "Save"
+                    : "Create and start"}
               </Button>
             </div>
           </div>

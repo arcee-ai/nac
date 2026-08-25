@@ -114,6 +114,23 @@ describe("durable goal controls", () => {
     );
   });
 
+  it("replaces a completed goal through the create contract", async () => {
+    mount(goal("complete"));
+    fireEvent.click(screen.getByRole("button", { name: "Goal: complete" }));
+    fireEvent.change(screen.getAllByRole("textbox")[0], {
+      target: { value: "Ship the next milestone" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Replace and start" }));
+
+    await waitFor(() =>
+      expect(fakes.createGoal).toHaveBeenCalledWith(SESSION_ID, {
+        objective: "Ship the next milestone",
+        token_budget: 500,
+      }),
+    );
+    expect(fakes.updateGoal).not.toHaveBeenCalled();
+  });
+
   it("does not fetch or render for orchestrator sessions", () => {
     mount(null, "orchestrator");
     expect(screen.queryByRole("button", { name: "Create durable goal" })).toBeNull();

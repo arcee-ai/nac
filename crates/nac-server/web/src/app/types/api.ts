@@ -177,6 +177,7 @@ export interface SessionMetadata {
   model: string;
   backend: string;
   session_id: string | null;
+  behavior?: SessionBehavior;
   project_id?: string;
   sandbox_status: string;
   agents_md_status: string;
@@ -646,6 +647,25 @@ export interface UpdateGoalRequest {
   status?: GoalStatus;
 }
 
+export type InboxDelivery = "steer" | "queue";
+export type InboxStatus = "pending" | "delivered" | "cancelled";
+
+export interface InboxItem {
+  id: number;
+  session_id: string;
+  delivery: InboxDelivery;
+  status: InboxStatus;
+  prompt: string;
+  target_run_id: string | null;
+  client_id: string | null;
+  delivered_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+  delivered_at: string | null;
+  cancelled_at: string | null;
+  version: number;
+}
+
 export type TraditionalChildStatus =
   | "idle"
   | "running"
@@ -813,8 +833,16 @@ export interface SessionFrontendSnapshot {
 
 /** `GET /sessions/{id}` flattens the snapshot and adds paging metadata. */
 export interface SessionSnapshotResponse extends SessionFrontendSnapshot {
+  lineage?: SessionLineage;
   message_page?: MessagePageMetadata;
   message_cycle?: MessageCycleMetadata;
+}
+
+export interface SessionLineage {
+  kind: "traditional-child" | "managed-orchestrator";
+  parent_session_id: string;
+  root_session_id: string;
+  description: string;
 }
 
 export interface ManagedSessionSummary {

@@ -13,6 +13,12 @@ is `general`. It exposes exactly `read`, `write`, `edit`, `glob`, `grep`,
 `exec_command`, `write_stdin`, and `read_command_output`; it cannot create goals,
 launch another child, or control orchestrator sessions.
 
+The parent's Delegated work panel shows each child's description, coding-agent
+type, status, and generation. Opening a row shows the child's lineage and a
+**Back to Parent** action. That transcript is read-only in the web MVP;
+continue, steer, and cancel it from the parent's people control. Child goal
+ownership is rejected by the service as well as hidden by the UI.
+
 A foreground launch waits for the generation's structured outcome. A background
 launch returns its durable child ID immediately. When a background generation
 settles, NAC atomically queues one completion for the parent and wakes the

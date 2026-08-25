@@ -6,5 +6,7 @@ durable direct-session work.
 - [AGENTS.md Files](agents-md.md)
 - [Skills](skills.md)
 - [Sandbox](sandbox.md)
+- [Session behaviors](session-behaviors.md)
 - [Durable direct goals](direct-goals.md)
 - [Traditional child sessions](traditional-children.md)
+- [Managed orchestrator sessions](managed-orchestrators.md)

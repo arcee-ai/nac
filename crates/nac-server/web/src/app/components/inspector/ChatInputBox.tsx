@@ -47,11 +47,19 @@ import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
   useCompactSession,
+  useCancelInboxItem,
+  useClearGoal,
+  useCreateGoal,
+  useCreateInboxItem,
   useModelCatalog,
+  useSessionGoal,
+  useSessionInbox,
   useSshConnect,
   useSessionSkills,
   useSubmitRun,
   useSlashCommands,
+  useUpdateGoal,
+  useUpdateInboxItem,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
 import { pushLocalEvent, useRunUsage, useRunning } from "@/app/store/runtimeStore";
@@ -64,6 +72,7 @@ import {
 import type {
   SkillCatalogEntry,
   SlashCommandDefinition,
+  InboxDelivery,
   ManagedSessionSummary,
   SessionSnapshotResponse,
 } from "@/app/types/api";
@@ -239,6 +248,12 @@ function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
 export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
   perfRender("ChatInputBox");
   const [value, setValue] = useState("");
+  // Async submission must only clear the prompt it actually sent. A user can
+  // already be drafting a steer by the time the initial POST settles.
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   // Everything narrower than the desktop column drops what will not fit there:
@@ -261,6 +276,18 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
   const compactSession = useCompactSession();
+  const createInboxItem = useCreateInboxItem();
+  const updateInboxItem = useUpdateInboxItem();
+  const cancelInboxItem = useCancelInboxItem();
+  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
+  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const readOnly = snapshot?.lineage != null;
+  const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);
+  const goalQuery = useSessionGoal(sessionId, direct && !readOnly);
+  const createGoal = useCreateGoal();
+  const updateGoal = useUpdateGoal();
+  const clearGoal = useClearGoal();
+  const [goalOpenRequest, setGoalOpenRequest] = useState(0);
   const {
     data: commandDefinitions,
     isError: commandsFailed,
@@ -292,8 +319,37 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const connectSsh = useSshConnect();
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
-  const busy = submitRun.isPending || compactSession.isPending || running;
+  const runningDirect = running && direct && !readOnly;
+  const mutationPending =
+    submitRun.isPending ||
+    compactSession.isPending ||
+    createInboxItem.isPending ||
+    updateInboxItem.isPending ||
+    cancelInboxItem.isPending ||
+    createGoal.isPending ||
+    updateGoal.isPending ||
+    clearGoal.isPending;
+  const busy = mutationPending || (running && !runningDirect);
   const canSend = Boolean(value.trim()) && !busy;
+  const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  const changeInboxDelivery = async (
+    itemId: number,
+    expectedVersion: number,
+    delivery: InboxDelivery,
+  ) => {
+    try {
+      await updateInboxItem.mutateAsync({ sessionId, itemId, expectedVersion, delivery });
+    } catch (error) {
+      toast.error(`Unable to change pending message: ${errorMessage(toRunError(error))}`);
+    }
+  };
+  const cancelPendingInbox = async (itemId: number, expectedVersion: number) => {
+    try {
+      await cancelInboxItem.mutateAsync({ sessionId, itemId, expectedVersion });
+    } catch (error) {
+      toast.error(`Unable to cancel pending message: ${errorMessage(toRunError(error))}`);
+    }
+  };
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -528,18 +584,65 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     }
   }, [sshTarget, connectSsh, toast]);
 
+  const runGoalCommand = useCallback(
+    async (text: string) => {
+      if (!direct) throw new Error("Durable goals are available only in direct chats");
+      let goal = goalQuery.data;
+      if (goal === undefined) {
+        const result = await goalQuery.refetch();
+        if (result.error) throw result.error;
+        goal = result.data;
+      }
+
+      const argument = text.trim().slice("/goal".length).trim();
+      if (argument === "" || argument === "edit") {
+        setGoalOpenRequest((request) => request + 1);
+        return;
+      }
+      if (argument === "clear") {
+        if (!goal) throw new Error("There is no durable goal to clear");
+        await clearGoal.mutateAsync({
+          sessionId,
+          goalId: goal.goal_id,
+          expectedVersion: goal.version,
+        });
+        return;
+      }
+      if (argument === "pause" || argument === "resume") {
+        if (!goal) throw new Error(`There is no durable goal to ${argument}`);
+        await updateGoal.mutateAsync({
+          sessionId,
+          goalId: goal.goal_id,
+          payload: {
+            expected_version: goal.version,
+            status: argument === "pause" ? "paused" : "active",
+          },
+        });
+        return;
+      }
+      if (goal && goal.status !== "complete") {
+        throw new Error(
+          "An unfinished durable goal already exists; use /goal edit or /goal clear first",
+        );
+      }
+      await createGoal.mutateAsync({ sessionId, payload: { objective: argument } });
+    },
+    [clearGoal, createGoal, direct, goalQuery, sessionId, updateGoal],
+  );
+
   /**
    * Sends `text`, or whatever the field holds when called without one. A
    * starter prompt arrives as an argument and leaves the field alone, so an
    * unsent draft survives being overtaken by one.
    */
   const submit = useCallback(
-    async (text: string = value) => {
+    async (text: string = value, requestedDelivery?: InboxDelivery) => {
       const prompt = text.trim();
       if (!prompt || busy || submitInFlight.current) return;
       const fromField = text === value;
       const clearField = () => {
-        if (!fromField) return;
+        if (!fromField || valueRef.current !== text) return;
+        valueRef.current = "";
         setValue("");
         setSelection({ start: 0, end: 0 });
         resetHistory();
@@ -570,13 +673,28 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }
           return;
         }
+        if (command?.command === "goal") {
+          try {
+            await runGoalCommand(prompt);
+            clearField();
+          } catch (error) {
+            toast.error(`Goal command failed: ${humanErrorText(toRunError(error))}`);
+          }
+          return;
+        }
         if (command) {
           toast.error(`Unsupported slash command: /${command.name}`);
           return;
         }
         try {
-          await submitRun.mutateAsync({ id: sessionId, prompt });
-          pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
+          if (runningDirect || requestedDelivery) {
+            const delivery = requestedDelivery ?? "steer";
+            await createInboxItem.mutateAsync({ sessionId, delivery, prompt });
+            pushLocalEvent("steering", `▶ ${delivery}: ${prompt.slice(0, 80)}`);
+          } else {
+            await submitRun.mutateAsync({ id: sessionId, prompt });
+            pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
+          }
           clearField();
         } catch (error) {
           pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(error))}`, true);
@@ -598,6 +716,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       toast,
       rowPx,
       resetHistory,
+      createInboxItem,
+      runGoalCommand,
+      runningDirect,
     ],
   );
 
@@ -627,11 +748,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     </Tooltip>
   );
 
-  const sendIcon = <Icon iconName={running ? IconName.Stop : IconName.Plane} />;
-  const sendLabel = running ? "Stop run" : "Send";
-  const sendType = running ? "button" : "submit";
-  const sendDisabled = !running && !canSend;
-  const onSend = running ? () => void stop() : undefined;
+  const stoppingRun = running && !runningDirect;
+  const sendIcon = <Icon iconName={stoppingRun ? IconName.Stop : IconName.Plane} />;
+  const sendLabel = stoppingRun ? "Stop run" : runningDirect ? "Steer active run" : "Send";
+  const sendType = stoppingRun ? "button" : "submit";
+  const sendDisabled = !stoppingRun && !canSend;
+  const onSend = stoppingRun ? () => void stop() : undefined;
 
   const sendButton = isMobile ? (
     <StickyButton
@@ -940,6 +1062,14 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     </Popover>
   );
 
+  if (readOnly) {
+    return (
+      <div className="rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
+        This delegated transcript is read-only. Continue, steer, or cancel it from its parent chat.
+      </div>
+    );
+  }
+
   return (
     <form
       className={cn(
@@ -969,6 +1099,47 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         fieldWithSuggestions
       )}
 
+      {pendingInbox.length ? (
+        <div className="flex flex-col gap-2" aria-label="Pending messages">
+          <div className="tag-label uppercase text-basic-secondary">Pending messages</div>
+          {pendingInbox.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2"
+            >
+              <span className="tag-label text-accent-primary">{item.delivery}</span>
+              <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
+                {item.prompt}
+              </span>
+              <Button
+                type="button"
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Ghost}
+                disabled={mutationPending}
+                onClick={() =>
+                  void changeInboxDelivery(
+                    item.id,
+                    item.version,
+                    item.delivery === "steer" ? "queue" : "steer",
+                  )
+                }
+              >
+                Change to {item.delivery === "steer" ? "queue" : "steer"}
+              </Button>
+              <Button
+                type="button"
+                size={ButtonSize.Small}
+                variant={ButtonVariant.GhostDestructive}
+                disabled={mutationPending}
+                onClick={() => void cancelPendingInbox(item.id, item.version)}
+              >
+                Cancel
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* The status line wraps rather than letting its `shrink-0` chips run
           into each other once the chat column is narrow. */}
       <div
@@ -979,13 +1150,36 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         )}
       >
         <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
+          {runningDirect ? (
+            <>
+              <Button
+                type="button"
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Secondary}
+                disabled={!canSend}
+                onClick={() => void submit(value, "queue")}
+              >
+                Queue Next
+              </Button>
+              <Button
+                type="button"
+                size={ButtonSize.Small}
+                variant={ButtonVariant.GhostDestructive}
+                disabled={mutationPending}
+                onClick={() => void stop()}
+              >
+                Stop run
+              </Button>
+            </>
+          ) : null}
+
           {/* A phone's settings glyph lives in the pill instead. */}
           {isMobile ? null : settingsButton}
 
-          <PermissionControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
-          <GoalControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
-          <ChildControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
-          <OrchestratorControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
+          <PermissionControls sessionId={sessionId} behavior={behavior} />
+          <GoalControls sessionId={sessionId} behavior={behavior} openRequest={goalOpenRequest} />
+          <ChildControls sessionId={sessionId} behavior={behavior} />
+          <OrchestratorControls sessionId={sessionId} behavior={behavior} />
 
           {/* The model name is the first thing a narrow column gives up; the
               same switch lives in the session settings the gear opens. */}

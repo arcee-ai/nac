@@ -6,6 +6,8 @@ import { expect, test as base, type APIRequestContext, type TestInfo } from "@pl
 
 import { ScriptedProvider } from "./scripted-provider";
 
+type SessionBehavior = "orchestrator" | "direct" | "direct-with-orchestrator";
+
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webRoot, "../../../..");
 
@@ -113,18 +115,30 @@ export async function createDirectSession(
   request: APIRequestContext,
   harness: EmbeddedHarness,
 ): Promise<string> {
+  return createSession(request, harness, "direct");
+}
+
+export async function createSession(
+  request: APIRequestContext,
+  harness: EmbeddedHarness,
+  behavior: SessionBehavior,
+  projectId?: string,
+): Promise<string> {
   const response = await request.post(`${harness.baseUrl}/sessions`, {
-    data: {
-      behavior: "direct",
-      cwd: path.join(harness.runRoot, "workspace"),
-      backend: "openai-responses",
-      model: "gpt-5.6-sol",
-      base_url: harness.provider.baseUrl,
-      reasoning_effort: "high",
-      api_key_env: "NAC_E2E_API_KEY",
-      extra_headers: {},
-      orchestrator_compaction_threshold: 0,
-    },
+    data:
+      projectId == null
+        ? {
+            behavior,
+            cwd: path.join(harness.runRoot, "workspace"),
+            backend: "openai-responses",
+            model: "gpt-5.6-sol",
+            base_url: harness.provider.baseUrl,
+            reasoning_effort: "high",
+            api_key_env: "NAC_E2E_API_KEY",
+            extra_headers: {},
+            orchestrator_compaction_threshold: 0,
+          }
+        : { behavior, project_id: projectId },
   });
   if (!response.ok()) {
     throw new Error(`session creation failed (${response.status()}): ${await response.text()}`);
@@ -135,6 +149,45 @@ export async function createDirectSession(
     throw new Error(`session creation returned no id: ${JSON.stringify(body)}`);
   }
   return sessionId;
+}
+
+export async function createProject(
+  request: APIRequestContext,
+  harness: EmbeddedHarness,
+): Promise<string> {
+  const configuration = await request.post(`${harness.baseUrl}/model-configs`, {
+    data: {
+      name: "E2E scripted provider",
+      backend: "openai-responses",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      api_key: "nac-e2e-dummy-only",
+      reasoning_effort: "high",
+      extra_headers: {},
+      orchestrator_compaction_threshold: 0,
+    },
+  });
+  if (!configuration.ok()) {
+    throw new Error(
+      `model configuration creation failed (${configuration.status()}): ${await configuration.text()}`,
+    );
+  }
+  const configId = ((await configuration.json()) as { config_id?: string }).config_id;
+  if (!configId) throw new Error("model configuration creation returned no id");
+
+  const project = await request.post(`${harness.baseUrl}/projects`, {
+    data: {
+      name: "Embedded E2E project",
+      cwd: path.join(harness.runRoot, "workspace"),
+      default_model_config_id: configId,
+    },
+  });
+  if (!project.ok()) {
+    throw new Error(`project creation failed (${project.status()}): ${await project.text()}`);
+  }
+  const projectId = ((await project.json()) as { project_id?: string }).project_id;
+  if (!projectId) throw new Error("project creation returned no id");
+  return projectId;
 }
 
 export async function waitForRunIdle(

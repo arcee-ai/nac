@@ -6,6 +6,7 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [AGENTS.md Files](usage/agents-md.md)
   - [Skills](usage/skills.md)
   - [Sandbox](usage/sandbox.md)
+  - [Session behaviors](usage/session-behaviors.md)
   - [Durable direct goals](usage/direct-goals.md)
   - [Traditional child sessions](usage/traditional-children.md)
   - [Managed orchestrator sessions](usage/managed-orchestrators.md)

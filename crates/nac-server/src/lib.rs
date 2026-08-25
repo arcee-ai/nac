@@ -1176,9 +1176,26 @@ pub struct SessionSnapshotResponse {
     #[serde(flatten)]
     pub snapshot: SessionFrontendSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<SessionLineageSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message_page: Option<MessagePageMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_cycle: Option<MessageCycleMetadata>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionLineageKind {
+    TraditionalChild,
+    ManagedOrchestrator,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
+pub struct SessionLineageSnapshot {
+    pub kind: SessionLineageKind,
+    pub parent_session_id: String,
+    pub root_session_id: String,
+    pub description: String,
 }
 
 impl From<nac_core::session_service::MessagePageMetadata> for MessagePageMetadata {
@@ -2292,6 +2309,30 @@ impl SessionManager {
             .await?
             .frontend_snapshot_with_options(options)
             .await
+    }
+
+    pub fn session_lineage(&self, session_id: &str) -> Result<Option<SessionLineageSnapshot>> {
+        if let Some(child) =
+            nac_core::store::load_traditional_child(&self.inner.store_path, session_id)?
+        {
+            return Ok(Some(SessionLineageSnapshot {
+                kind: SessionLineageKind::TraditionalChild,
+                parent_session_id: child.parent_session_id,
+                root_session_id: child.root_session_id,
+                description: child.description,
+            }));
+        }
+        if let Some(orchestrator) =
+            nac_core::store::load_managed_orchestrator(&self.inner.store_path, session_id)?
+        {
+            return Ok(Some(SessionLineageSnapshot {
+                kind: SessionLineageKind::ManagedOrchestrator,
+                parent_session_id: orchestrator.parent_session_id,
+                root_session_id: orchestrator.root_session_id,
+                description: orchestrator.description,
+            }));
+        }
+        Ok(None)
     }
 
     pub async fn messages_page(
@@ -5757,8 +5798,10 @@ async fn session_snapshot(
     }
 
     let loaded = manager.snapshot_with_options(&session_id, options).await?;
+    let lineage = manager.session_lineage(&session_id)?;
     Ok(Json(SessionSnapshotResponse {
         snapshot: loaded.snapshot,
+        lineage,
         message_page: loaded.message_page.map(Into::into),
         message_cycle: loaded.message_cycle.map(Into::into),
     }))
@@ -10273,6 +10316,23 @@ mod tests {
             child_snapshot.behavior,
             sessions::SessionBehavior::Orchestrator
         );
+        let lineage_response = get_response(
+            app.clone(),
+            &format!(
+                "/sessions/{}?include_sessions=false",
+                foreground.orchestrator_session_id
+            ),
+            None,
+        )
+        .await;
+        assert_eq!(lineage_response.status(), StatusCode::OK);
+        let lineage_json = response_json(lineage_response).await;
+        assert_eq!(lineage_json["lineage"]["kind"], "managed-orchestrator");
+        assert_eq!(lineage_json["lineage"]["parent_session_id"], "delegating");
+        assert_eq!(
+            lineage_json["lineage"]["description"],
+            "implement durable control"
+        );
 
         let background = app
             .clone()
@@ -10817,6 +10877,20 @@ mod tests {
             child_snapshot.messages.first(),
             Some(Message::System { content }) if content.contains("traditional child coding agent")
         ));
+        let lineage_response = get_response(
+            app.clone(),
+            &format!(
+                "/sessions/{}?include_sessions=false",
+                foreground.child_session_id
+            ),
+            None,
+        )
+        .await;
+        assert_eq!(lineage_response.status(), StatusCode::OK);
+        let lineage_json = response_json(lineage_response).await;
+        assert_eq!(lineage_json["lineage"]["kind"], "traditional-child");
+        assert_eq!(lineage_json["lineage"]["parent_session_id"], "direct");
+        assert_eq!(lineage_json["lineage"]["description"], "inspect child flow");
 
         let rejected = get_response(app, "/sessions/orchestrator/children", None).await;
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
