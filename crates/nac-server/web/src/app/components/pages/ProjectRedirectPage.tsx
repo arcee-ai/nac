@@ -37,7 +37,9 @@ export default function ProjectRedirectPage() {
 
   const loading = projectsQuery.isLoading || sessionsQuery.isLoading;
   const unavailable = projectsQuery.isError || sessionsQuery.isError;
-  const needsFirstChat = !loading && !unavailable && project != null && newest == null;
+  const ownershipLoaded = projectsQuery.isSuccess && sessionsQuery.isSuccess;
+  const needsFirstChat =
+    !loading && !unavailable && ownershipLoaded && project != null && newest == null;
 
   const startChat = actions.newChat;
   useEffect(() => {

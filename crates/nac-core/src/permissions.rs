@@ -931,6 +931,16 @@ fn parse_shell(command: &str) -> ParsedShell {
             continue;
         }
         if current == '\\' && quote != Some('\'') {
+            if quote == Some('"')
+                && !chars
+                    .get(index + 1)
+                    .is_some_and(|next| matches!(next, '$' | '`' | '"' | '\\' | '\n'))
+            {
+                word.push(current);
+                word_started = true;
+                index += 1;
+                continue;
+            }
             escaped = true;
             index += 1;
             continue;
@@ -1035,9 +1045,10 @@ fn command_grant_candidate(tokens: &[String]) -> String {
     let effective = effective_command_tokens(tokens);
     let command_index = tokens.len().saturating_sub(effective.len());
     let width = if command == "git" {
-        git_subcommand_index(tokens, command_index)
-            .map(|index| index + 1)
-            .unwrap_or(tokens.len())
+        let Some(subcommand_index) = git_subcommand_index(tokens, command_index) else {
+            return canonical_command(tokens);
+        };
+        subcommand_index + 1
     } else {
         tokens.len().min(2)
     };
@@ -1054,7 +1065,7 @@ fn hard_shell_denial_inner(
     backend: &ExecutionBackend,
     depth: usize,
 ) -> Option<String> {
-    if let Some(body) = literal_env_split_string(tokens) {
+    if let Some((env_command, body, trailing)) = literal_env_split_string(tokens) {
         if depth >= 8 {
             return Some("nested env split-string depth exceeds the safety limit".to_string());
         }
@@ -1063,10 +1074,17 @@ fn hard_shell_denial_inner(
             Err(reason) => return Some(reason.to_string()),
         };
         let denial = match parse_shell(&body) {
-            ParsedShell::Supported(segments) => segments
-                .into_iter()
-                .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
-            ParsedShell::Opaque => opaque_hard_shell_denial(&body, cwd, backend),
+            ParsedShell::Supported(mut segments) if segments.len() == 1 => {
+                let mut expanded =
+                    Vec::with_capacity(1 + segments.first().map_or(0, Vec::len) + trailing.len());
+                expanded.push(env_command.to_string());
+                expanded.append(&mut segments[0]);
+                expanded.extend_from_slice(trailing);
+                hard_shell_denial_inner(&expanded, cwd, backend, depth + 1)
+            }
+            ParsedShell::Supported(_) | ParsedShell::Opaque => {
+                Some("unsupported env split-string syntax is blocked".to_string())
+            }
         };
         if denial.is_some() {
             return denial;
@@ -1131,7 +1149,7 @@ fn literal_shell_command_body(tokens: &[String]) -> Option<&str> {
     tokens.get(option_index + 1).map(String::as_str)
 }
 
-fn literal_env_split_string(tokens: &[String]) -> Option<&str> {
+fn literal_env_split_string(tokens: &[String]) -> Option<(&str, &str, &[String])> {
     let mut index = 0;
     while tokens
         .get(index)
@@ -1139,20 +1157,22 @@ fn literal_env_split_string(tokens: &[String]) -> Option<&str> {
     {
         index += 1;
     }
-    let command = tokens.get(index)?.rsplit('/').next()?.to_ascii_lowercase();
-    if command != "env" {
+    let env_command = tokens.get(index)?;
+    if !env_command.rsplit('/').next()?.eq_ignore_ascii_case("env") {
         return None;
     }
     index += 1;
     while let Some(option) = tokens.get(index) {
         if matches!(option.as_str(), "-S" | "--split-string") {
-            return tokens.get(index + 1).map(String::as_str);
+            return tokens
+                .get(index + 1)
+                .map(|body| (env_command.as_str(), body.as_str(), &tokens[index + 2..]));
         }
         if let Some(body) = option.strip_prefix("--split-string=") {
-            return Some(body);
+            return Some((env_command.as_str(), body, &tokens[index + 1..]));
         }
         if let Some(body) = option.strip_prefix("-S").filter(|body| !body.is_empty()) {
-            return Some(body);
+            return Some((env_command.as_str(), body, &tokens[index + 1..]));
         }
         if matches!(option.as_str(), "-u" | "--unset" | "-C" | "--chdir") {
             index += 2;
@@ -1795,6 +1815,15 @@ fn supported_shell_word_spans(command: &str) -> Option<Vec<Vec<ShellWordSpan>>> 
             continue;
         }
         if current == '\\' && quote != Some('\'') {
+            if quote == Some('"')
+                && !chars
+                    .peek()
+                    .is_some_and(|(_, next)| matches!(next, '$' | '`' | '"' | '\\' | '\n'))
+            {
+                start.get_or_insert(index);
+                value.push(current);
+                continue;
+            }
             escape_start = index;
             escaped = true;
             continue;
@@ -1857,6 +1886,9 @@ fn opaque_hard_shell_denial(
     backend: &ExecutionBackend,
 ) -> Option<String> {
     let tokens = opaque_literal_tokens(command);
+    if command.contains('$') && literal_env_split_string(&tokens).is_some() {
+        return Some("dynamic env split-string expansion is blocked".to_string());
+    }
     if tokens.iter().any(|token| {
         let path = Path::new(token);
         looks_like_shell_path(token)
@@ -2242,8 +2274,10 @@ mod tests {
             "bash --rcfile /dev/null -c 'sudo make install'",
             "env -S 'sudo make install'",
             "env -S'sudo make install'",
+            "env -Sgit reset --hard",
             "env --split-string='sudo make install'",
             "env --split-string='sudo\\_id'",
+            "env \"-Sgit\\_reset\\_--hard\"",
             "env --split-string='${PROTECTED_COMMAND} id'",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
@@ -2256,6 +2290,37 @@ mod tests {
                 "wrapper or opaque syntax must not bypass hard denial: {command}"
             );
         }
+
+        let harmless = shell_resources(
+            "env '-Sgit_reset_--hard'",
+            Path::new("/workspace"),
+            &backend,
+        );
+        let escaped = shell_resources(
+            "env \"-Sgit\\_reset\\_--hard\"",
+            Path::new("/workspace"),
+            &backend,
+        );
+        assert_ne!(harmless[0].resource, escaped[0].resource);
+        assert!(harmless[0].hard_denial.is_none());
+        assert!(escaped[0].hard_denial.is_some());
+
+        assert!(shell_resources(
+            "env --split-string='printf\\qok'",
+            Path::new("/workspace"),
+            &backend,
+        )[0]
+        .hard_denial
+        .is_some());
+        let mut nested = "true".to_string();
+        for _ in 0..9 {
+            nested = format!("env -S {}", shell_quote(&nested));
+        }
+        assert!(
+            shell_resources(&nested, Path::new("/workspace"), &backend)[0]
+                .hard_denial
+                .is_some()
+        );
     }
 
     #[cfg(unix)]
@@ -2613,6 +2678,11 @@ mod tests {
                 "pwned".to_string(),
             ])
         ));
+        let incomplete_git = shell_resources("git -C repo", Path::new("/workspace"), &backend);
+        assert_eq!(
+            incomplete_git[0].save_resource.as_deref(),
+            Some(incomplete_git[0].resource.as_str())
+        );
 
         let formatting = "rg -n --field-match-separator=a/b needle .";
         let formatting_resources = shell_resources(formatting, Path::new("/workspace"), &backend);

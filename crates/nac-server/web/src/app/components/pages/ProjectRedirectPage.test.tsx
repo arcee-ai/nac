@@ -43,11 +43,13 @@ beforeEach(() => {
     data: { projects: [{ project_id: "project-1" }] },
     isLoading: false,
     isError: false,
+    isSuccess: true,
   });
   fakes.sessions.mockReset().mockReturnValue({
     data: [],
     isLoading: false,
     isError: false,
+    isSuccess: true,
   });
 });
 
@@ -65,6 +67,7 @@ describe("project redirect", () => {
       data: undefined,
       isLoading: false,
       isError: true,
+      isSuccess: false,
     });
     mount();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -76,6 +79,19 @@ describe("project redirect", () => {
       data: undefined,
       isLoading: false,
       isError: true,
+      isSuccess: false,
+    });
+    mount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.newChat).not.toHaveBeenCalled();
+  });
+
+  it("does not create a chat while ownership queries are paused before success", async () => {
+    fakes.sessions.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      isSuccess: false,
     });
     mount();
     await new Promise((resolve) => setTimeout(resolve, 0));
