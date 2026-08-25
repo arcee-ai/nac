@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::types::Message;
+use rusqlite::TransactionBehavior;
 use serde_json::value::RawValue;
 
 #[derive(serde::Deserialize)]
@@ -35,6 +36,29 @@ pub enum RunRecoveryStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTerminalDisposition {
+    Completed,
+    Cancelled,
+}
+
+impl RunTerminalDisposition {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "completed" => Ok(Self::Completed),
+            "cancelled" => Ok(Self::Cancelled),
+            other => Err(anyhow!("unsupported run terminal disposition '{other}'")),
+        }
+    }
+}
+
 impl RunRecoveryStatus {
     fn as_str(self) -> &'static str {
         match self {
@@ -59,6 +83,7 @@ pub struct RunRecoveryRecord {
     pub run_id: String,
     pub submitted_message_id: i64,
     pub status: RunRecoveryStatus,
+    pub terminal_disposition: Option<RunTerminalDisposition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +106,8 @@ pub(crate) fn replace_with_active_run(
          ON CONFLICT(session_id) DO UPDATE SET
              run_id = excluded.run_id,
              submitted_message_id = excluded.submitted_message_id,
-             status = 'active'
+             status = 'active',
+             terminal_disposition = NULL
          WHERE session_run_recovery.status IN ('interrupted', 'failed')",
         params![session_id, run_id, submitted_message_id],
     )?;
@@ -98,11 +124,70 @@ pub(crate) fn clear_active_run(
     session_id: &str,
     run_id: &str,
 ) -> Result<()> {
-    transaction.execute(
-        "DELETE FROM session_run_recovery
-         WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
+    let Some(record) = load_run_recovery_with_connection(transaction, session_id)? else {
+        return Ok(());
+    };
+    if record.run_id != run_id || record.status != RunRecoveryStatus::Active {
+        return Ok(());
+    }
+    let disposition = canonical_terminal_disposition(transaction, session_id, &record)?
+        .unwrap_or(RunTerminalDisposition::Completed);
+    retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition)?;
+    Ok(())
+}
+
+fn has_running_relationship(
+    connection: &Connection,
+    session_id: &str,
+    run_id: &str,
+) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM traditional_children
+             WHERE child_session_id = ?1 AND run_id = ?2 AND status = 'running'
+             UNION ALL
+             SELECT 1 FROM managed_orchestrators
+             WHERE orchestrator_session_id = ?1 AND run_id = ?2 AND status = 'running'
+         )",
         params![session_id, run_id],
-    )?;
+        |row| row.get(0),
+    )?)
+}
+
+fn retain_or_clear_terminal_obligation(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    run_id: &str,
+    disposition: RunTerminalDisposition,
+) -> Result<()> {
+    if has_running_relationship(transaction, session_id, run_id)? {
+        transaction.execute(
+            "UPDATE session_run_recovery
+             SET terminal_disposition = ?3
+             WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
+            params![session_id, run_id, disposition.as_str()],
+        )?;
+    } else {
+        transaction.execute(
+            "DELETE FROM session_run_recovery
+             WHERE session_id = ?1 AND run_id = ?2",
+            params![session_id, run_id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn clear_settled_run_recovery(path: &Path, session_id: &str, run_id: &str) -> Result<()> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if !has_running_relationship(&transaction, session_id, run_id)? {
+        transaction.execute(
+            "DELETE FROM session_run_recovery
+             WHERE session_id = ?1 AND run_id = ?2 AND terminal_disposition IS NOT NULL",
+            params![session_id, run_id],
+        )?;
+    }
+    transaction.commit()?;
     Ok(())
 }
 
@@ -135,7 +220,7 @@ pub(crate) fn load_run_recovery_with_connection(
 ) -> Result<Option<RunRecoveryRecord>> {
     connection
         .query_row(
-            "SELECT run_id, submitted_message_id, status
+            "SELECT run_id, submitted_message_id, status, terminal_disposition
              FROM session_run_recovery
              WHERE session_id = ?1",
             params![session_id],
@@ -144,17 +229,23 @@ pub(crate) fn load_run_recovery_with_connection(
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             },
         )
         .optional()?
-        .map(|(run_id, submitted_message_id, status)| {
-            Ok(RunRecoveryRecord {
-                run_id,
-                submitted_message_id,
-                status: RunRecoveryStatus::parse(&status)?,
-            })
-        })
+        .map(
+            |(run_id, submitted_message_id, status, terminal_disposition)| {
+                Ok(RunRecoveryRecord {
+                    run_id,
+                    submitted_message_id,
+                    status: RunRecoveryStatus::parse(&status)?,
+                    terminal_disposition: terminal_disposition
+                        .map(|value| RunTerminalDisposition::parse(&value))
+                        .transpose()?,
+                })
+            },
+        )
         .transpose()
 }
 
@@ -166,6 +257,10 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::None);
     };
+    if record.terminal_disposition.is_some() {
+        transaction.commit()?;
+        return Ok(ActiveRunReconciliation::CanonicalTerminal);
+    }
     if record.status != RunRecoveryStatus::Active {
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::None);
@@ -261,7 +356,9 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
     };
 
     if canonical_terminal {
-        clear_active_run(&transaction, session_id, &record.run_id)?;
+        let disposition = canonical_terminal_disposition(&transaction, session_id, &record)?
+            .unwrap_or(RunTerminalDisposition::Completed);
+        retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::CanonicalTerminal);
     }
@@ -285,6 +382,54 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
     Ok(ActiveRunReconciliation::Interrupted {
         run_id: record.run_id,
     })
+}
+
+fn canonical_terminal_disposition(
+    connection: &Connection,
+    session_id: &str,
+    record: &RunRecoveryRecord,
+) -> Result<Option<RunTerminalDisposition>> {
+    let mut statement = connection.prepare(
+        "SELECT event_json FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2 AND id > ?3
+         ORDER BY id ASC",
+    )?;
+    let rows = statement.query_map(
+        params![
+            session_id,
+            ORCHESTRATOR_STEERING_TARGET,
+            record.submitted_message_id
+        ],
+        |row| row.get::<_, String>(0),
+    )?;
+    let mut disposition = None;
+    for row in rows {
+        let event_json = row?;
+        let Some(entry) = decode_recovery_entry(&event_json) else {
+            continue;
+        };
+        if entry.kind != TranscriptMessageKind::Assistant {
+            continue;
+        }
+        let message = decode_recovery_message(&entry)?;
+        if let Message::Assistant {
+            content: Some(content),
+            tool_calls,
+            ..
+        } = message
+        {
+            if tool_calls.as_ref().is_none_or(Vec::is_empty) {
+                disposition = Some(if content == crate::agent::RUN_CANCELLED_MARKER {
+                    RunTerminalDisposition::Cancelled
+                } else if !content.trim().is_empty() {
+                    RunTerminalDisposition::Completed
+                } else {
+                    continue;
+                });
+            }
+        }
+    }
+    Ok(disposition)
 }
 
 #[cfg(test)]

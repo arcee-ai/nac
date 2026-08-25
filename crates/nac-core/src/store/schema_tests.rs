@@ -244,6 +244,7 @@ fn assert_current_schema(conn: &Connection) {
             "change_summary",
             "verification_summary",
             "completion_inbox_id",
+            "completion_suppressed",
             "created_at",
             "updated_at",
             "version",
@@ -263,6 +264,7 @@ fn assert_current_schema(conn: &Connection) {
             "report",
             "failure",
             "completion_inbox_id",
+            "completion_suppressed",
             "created_at",
             "updated_at",
             "version",
@@ -451,7 +453,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 22);
+    assert_eq!(STORE_SCHEMA_VERSION, 23);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -598,6 +600,7 @@ fn v20_store_adds_durable_traditional_children() {
             "change_summary",
             "verification_summary",
             "completion_inbox_id",
+            "completion_suppressed",
             "created_at",
             "updated_at",
             "version",
@@ -638,11 +641,44 @@ fn v21_store_adds_durable_managed_orchestrators() {
             "report",
             "failure",
             "completion_inbox_id",
+            "completion_suppressed",
             "created_at",
             "updated_at",
             "version",
         ]
     );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v22_store_adds_relationship_completion_obligations() {
+    let path = temp_store_path("v22_relationship_obligations");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch(
+            "ALTER TABLE traditional_children DROP COLUMN completion_suppressed;
+             ALTER TABLE managed_orchestrators DROP COLUMN completion_suppressed;
+             ALTER TABLE session_run_recovery DROP COLUMN terminal_disposition;
+             PRAGMA user_version = 22;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert!(table_columns(&migrated, "traditional_children")
+        .contains(&"completion_suppressed".to_string()));
+    assert!(table_columns(&migrated, "managed_orchestrators")
+        .contains(&"completion_suppressed".to_string()));
+    assert!(table_columns(&migrated, "session_run_recovery")
+        .contains(&"terminal_disposition".to_string()));
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))

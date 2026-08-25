@@ -268,6 +268,24 @@ pub fn load_traditional_child(
     load_child_with_connection(&connection, child_session_id)
 }
 
+pub fn load_traditional_child_for_parent(
+    path: &Path,
+    parent_session_id: &str,
+    child_session_id: &str,
+) -> Result<Option<TraditionalChildRecord>> {
+    let connection = open_runtime_connection(path)?;
+    Ok(connection
+        .query_row(
+            &format!(
+                "SELECT {CHILD_COLUMNS} FROM traditional_children
+                 WHERE parent_session_id = ?1 AND child_session_id = ?2"
+            ),
+            params![parent_session_id, child_session_id],
+            row_to_child,
+        )
+        .optional()?)
+}
+
 pub fn list_traditional_children(
     path: &Path,
     parent_session_id: &str,
@@ -317,7 +335,8 @@ pub fn begin_traditional_child_run(
          SET status = 'running', generation = generation + 1, run_id = ?2,
              execution_mode = ?3, report = NULL, failure = NULL,
              change_summary = NULL, verification_summary = NULL,
-             completion_inbox_id = NULL, updated_at = ?4, version = version + 1
+             completion_inbox_id = NULL, completion_suppressed = 0,
+             updated_at = ?4, version = version + 1
          WHERE child_session_id = ?1 AND version = ?5",
         params![
             child_session_id,
@@ -333,10 +352,9 @@ pub fn begin_traditional_child_run(
     Ok(child)
 }
 
-pub fn set_traditional_child_execution_mode(
+pub fn suppress_traditional_child_completion(
     path: &Path,
     child_session_id: &str,
-    execution_mode: TraditionalChildExecutionMode,
 ) -> Result<TraditionalChildRecord> {
     let connection = open_runtime_connection(path)?;
     let current = load_child_with_connection(&connection, child_session_id)?
@@ -348,22 +366,17 @@ pub fn set_traditional_child_execution_mode(
     }
     let changed = connection.execute(
         "UPDATE traditional_children
-         SET execution_mode = ?2, updated_at = ?3, version = version + 1
-         WHERE child_session_id = ?1 AND status = 'running' AND version = ?4",
-        params![
-            child_session_id,
-            execution_mode.as_str(),
-            now_utc(),
-            current.version
-        ],
+         SET completion_suppressed = 1, updated_at = ?2, version = version + 1
+         WHERE child_session_id = ?1 AND status = 'running' AND version = ?3",
+        params![child_session_id, now_utc(), current.version],
     )?;
     if changed != 1 {
         return Err(anyhow!(
-            "traditional child session '{child_session_id}' changed while updating execution mode"
+            "traditional child session '{child_session_id}' changed while suppressing completion"
         ));
     }
     load_child_with_connection(&connection, child_session_id)?
-        .ok_or_else(|| anyhow!("traditional child disappeared during mode update"))
+        .ok_or_else(|| anyhow!("traditional child disappeared during completion suppression"))
 }
 
 pub fn settle_traditional_child_run(
@@ -423,7 +436,14 @@ pub fn settle_traditional_child_run(
     )?;
     let mut settled = load_child_with_connection(&transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during settlement"))?;
-    if settled.execution_mode == Some(TraditionalChildExecutionMode::Background) {
+    let completion_suppressed: bool = transaction.query_row(
+        "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
+        params![child_session_id],
+        |row| row.get(0),
+    )?;
+    if settled.execution_mode == Some(TraditionalChildExecutionMode::Background)
+        && !completion_suppressed
+    {
         let content = completion_prompt(&settled)?;
         transaction.execute(
             "INSERT INTO session_inbox
@@ -610,6 +630,176 @@ mod tests {
         assert_eq!(inbox.len(), 1);
         assert_eq!(inbox[0].delivery, InboxDelivery::Queue);
         assert!(inbox[0].content.contains("provider failed"));
+    }
+
+    #[test]
+    fn deletion_suppression_preserves_background_mode_without_delivery() {
+        let path = fixture("suppressed_delivery");
+        create_traditional_child_relationship(
+            &path,
+            "parent",
+            "child",
+            GENERAL_CHILD_PROFILE,
+            "remove this child",
+        )
+        .unwrap();
+        begin_traditional_child_run(
+            &path,
+            "child",
+            "run-1",
+            TraditionalChildExecutionMode::Background,
+        )
+        .unwrap();
+
+        let suppressed = suppress_traditional_child_completion(&path, "child").unwrap();
+        assert_eq!(
+            suppressed.execution_mode,
+            Some(TraditionalChildExecutionMode::Background)
+        );
+        let settlement = settle_traditional_child_run(
+            &path,
+            "child",
+            "run-1",
+            TraditionalChildTerminal {
+                status: TraditionalChildStatus::Cancelled,
+                report: None,
+                failure: None,
+                change_summary: None,
+                verification_summary: None,
+            },
+        )
+        .unwrap();
+        assert!(settlement.newly_settled);
+        assert_eq!(
+            settlement.child.execution_mode,
+            Some(TraditionalChildExecutionMode::Background)
+        );
+        assert!(settlement.child.completion_inbox_id.is_none());
+        assert!(list_session_inbox(&path, "parent").unwrap().is_empty());
+    }
+
+    #[test]
+    fn canonical_terminal_recovery_is_retained_until_relationship_settlement() {
+        for (label, assistant_content, expected, reconcile_after_restart) in [
+            (
+                "completed_obligation",
+                "child finished",
+                RunTerminalDisposition::Completed,
+                false,
+            ),
+            (
+                "cancelled_obligation",
+                crate::agent::RUN_CANCELLED_MARKER,
+                RunTerminalDisposition::Cancelled,
+                true,
+            ),
+        ] {
+            let path = fixture(label);
+            create_traditional_child_relationship(
+                &path,
+                "parent",
+                "child",
+                GENERAL_CHILD_PROFILE,
+                "recover terminal child",
+            )
+            .unwrap();
+            begin_traditional_child_run(
+                &path,
+                "child",
+                "run-1",
+                TraditionalChildExecutionMode::Background,
+            )
+            .unwrap();
+            let writer = TranscriptLogWriter::new(&path).unwrap();
+            writer
+                .append_run_prompt(
+                    "child",
+                    0,
+                    &crate::types::Message::User {
+                        content: "perform child work".to_string(),
+                    },
+                    "run-1",
+                )
+                .unwrap();
+            writer
+                .append(
+                    "child",
+                    1,
+                    &crate::types::Message::Assistant {
+                        content: Some(assistant_content.to_string()),
+                        reasoning_text: None,
+                        reasoning_details: None,
+                        tool_calls: None,
+                        duration_ms: None,
+                        model_origin: None,
+                        reasoning_field: None,
+                    },
+                )
+                .unwrap();
+
+            if reconcile_after_restart {
+                assert_eq!(
+                    reconcile_active_run(&path, "child").unwrap(),
+                    ActiveRunReconciliation::CanonicalTerminal
+                );
+            } else {
+                let mut connection = open_runtime_connection(&path).unwrap();
+                let transaction = connection
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .unwrap();
+                clear_active_run(&transaction, "child", "run-1").unwrap();
+                transaction.commit().unwrap();
+            }
+
+            let recovery = load_run_recovery(&path, "child").unwrap().unwrap();
+            assert_eq!(recovery.terminal_disposition, Some(expected));
+            assert_eq!(
+                load_traditional_child(&path, "child")
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                TraditionalChildStatus::Running
+            );
+
+            let settlement = settle_traditional_child_run(
+                &path,
+                "child",
+                "run-1",
+                TraditionalChildTerminal {
+                    status: match expected {
+                        RunTerminalDisposition::Completed => TraditionalChildStatus::Completed,
+                        RunTerminalDisposition::Cancelled => TraditionalChildStatus::Cancelled,
+                    },
+                    report: None,
+                    failure: None,
+                    change_summary: None,
+                    verification_summary: None,
+                },
+            )
+            .unwrap();
+            assert!(settlement.newly_settled);
+            assert!(settlement.child.completion_inbox_id.is_some());
+            clear_settled_run_recovery(&path, "child", "run-1").unwrap();
+            assert!(load_run_recovery(&path, "child").unwrap().is_none());
+            let repeated = settle_traditional_child_run(
+                &path,
+                "child",
+                "run-1",
+                TraditionalChildTerminal {
+                    status: match expected {
+                        RunTerminalDisposition::Completed => TraditionalChildStatus::Completed,
+                        RunTerminalDisposition::Cancelled => TraditionalChildStatus::Cancelled,
+                    },
+                    report: None,
+                    failure: None,
+                    change_summary: None,
+                    verification_summary: None,
+                },
+            )
+            .unwrap();
+            assert!(!repeated.newly_settled);
+            assert_eq!(list_session_inbox(&path, "parent").unwrap().len(), 1);
+        }
     }
 
     #[test]

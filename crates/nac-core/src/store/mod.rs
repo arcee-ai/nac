@@ -34,8 +34,8 @@ pub(crate) use run_recovery::{
     replace_with_active_run,
 };
 pub use run_recovery::{
-    load_run_recovery, reconcile_active_run, ActiveRunReconciliation, RunRecoveryRecord,
-    RunRecoveryStatus,
+    clear_settled_run_recovery, load_run_recovery, reconcile_active_run, ActiveRunReconciliation,
+    RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
 };
 pub use schema::{check_readiness, default_store_path, initialize};
 pub use session_goals::*;

@@ -907,6 +907,70 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
 }
 
 #[tokio::test]
+async fn cancellation_adopts_a_committed_single_direct_steer_after_async_abort() {
+    let store_path = test_store_path("cancel_direct_steer_commit");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let seeded = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+    ];
+    store_snapshot_messages(&store_path, &seeded);
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    crate::store::create_session_inbox_item(
+        &store_path,
+        "session",
+        crate::store::InboxDelivery::Steer,
+        "keep this steer",
+        Some("run"),
+        None,
+    )
+    .unwrap();
+    writer
+        .append_pending_inbox_steers("session", "run", seeded.len() as u64)
+        .unwrap();
+
+    // Model the precise post-commit/pre-adoption abort: the blocking writer
+    // committed the User row and delivered inbox state, while the async task
+    // never extended the process-local transcript.
+    let mut agent = transcript_test_agent(
+        ModelClient::new_for_test(),
+        store_path.clone(),
+        Some("session"),
+        AgentMode::Direct,
+    );
+    agent.messages = seeded;
+    agent.committed_log_len = 3;
+    agent.direct_inbox_append_start = Some(2);
+
+    agent
+        .append_cancellation_marker_preserving_tools()
+        .await
+        .unwrap();
+
+    assert_eq!(agent.messages.len(), 4);
+    assert!(matches!(
+        &agent.messages[2],
+        Message::User { content } if content == "keep this steer"
+    ));
+    assert!(matches!(
+        &agent.messages[3],
+        Message::Assistant { content: Some(content), .. }
+            if content == "[run cancelled by user]"
+    ));
+    let inbox = crate::store::list_session_inbox(&store_path, "session").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, crate::store::InboxStatus::Delivered);
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].0, 2);
+    assert_eq!(log[1].0, 3);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn normalize_dangling_tail_trims_a_straggler_row_the_vec_never_saw() {
     let store_path = test_store_path("normalize_straggler");
     crate::store::initialize(&store_path).unwrap();

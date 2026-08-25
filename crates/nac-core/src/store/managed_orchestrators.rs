@@ -145,6 +145,24 @@ pub fn load_managed_orchestrator(
     load_with_connection(&connection, orchestrator_session_id)
 }
 
+pub fn load_managed_orchestrator_for_parent(
+    path: &Path,
+    parent_session_id: &str,
+    orchestrator_session_id: &str,
+) -> Result<Option<ManagedOrchestratorRecord>> {
+    let connection = open_runtime_connection(path)?;
+    Ok(connection
+        .query_row(
+            &format!(
+                "SELECT {COLUMNS} FROM managed_orchestrators
+                 WHERE parent_session_id = ?1 AND orchestrator_session_id = ?2"
+            ),
+            params![parent_session_id, orchestrator_session_id],
+            row_to_record,
+        )
+        .optional()?)
+}
+
 pub fn list_managed_orchestrators(
     path: &Path,
     parent_session_id: &str,
@@ -191,7 +209,8 @@ pub fn begin_managed_orchestrator_run(
         "UPDATE managed_orchestrators
          SET status = 'running', generation = generation + 1, run_id = ?2,
              execution_mode = ?3, report = NULL, failure = NULL,
-             completion_inbox_id = NULL, updated_at = ?4, version = version + 1
+             completion_inbox_id = NULL, completion_suppressed = 0,
+             updated_at = ?4, version = version + 1
          WHERE orchestrator_session_id = ?1 AND version = ?5",
         params![
             orchestrator_session_id,
@@ -210,32 +229,26 @@ pub fn begin_managed_orchestrator_run(
     Ok(record)
 }
 
-pub fn set_managed_orchestrator_execution_mode(
+pub fn suppress_managed_orchestrator_completion(
     path: &Path,
     orchestrator_session_id: &str,
-    execution_mode: ManagedOrchestratorExecutionMode,
 ) -> Result<ManagedOrchestratorRecord> {
     let connection = open_runtime_connection(path)?;
     let current = load_with_connection(&connection, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator was not found"))?;
     let changed = connection.execute(
-        "UPDATE managed_orchestrators SET execution_mode = ?2, updated_at = ?3,
+        "UPDATE managed_orchestrators SET completion_suppressed = 1, updated_at = ?2,
              version = version + 1
-         WHERE orchestrator_session_id = ?1 AND status = 'running' AND version = ?4",
-        params![
-            orchestrator_session_id,
-            execution_mode.as_str(),
-            now_utc(),
-            current.version
-        ],
+         WHERE orchestrator_session_id = ?1 AND status = 'running' AND version = ?3",
+        params![orchestrator_session_id, now_utc(), current.version],
     )?;
     if changed != 1 {
         return Err(anyhow!(
-            "managed orchestrator is not running or changed concurrently"
+            "managed orchestrator is not running or changed during completion suppression"
         ));
     }
     load_with_connection(&connection, orchestrator_session_id)?
-        .ok_or_else(|| anyhow!("managed orchestrator disappeared during mode update"))
+        .ok_or_else(|| anyhow!("managed orchestrator disappeared during completion suppression"))
 }
 
 pub fn settle_managed_orchestrator_run(
@@ -281,7 +294,15 @@ pub fn settle_managed_orchestrator_run(
     )?;
     let mut settled = load_with_connection(&transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during settlement"))?;
-    if settled.execution_mode == Some(ManagedOrchestratorExecutionMode::Background) {
+    let completion_suppressed: bool = transaction.query_row(
+        "SELECT completion_suppressed FROM managed_orchestrators
+         WHERE orchestrator_session_id = ?1",
+        params![orchestrator_session_id],
+        |row| row.get(0),
+    )?;
+    if settled.execution_mode == Some(ManagedOrchestratorExecutionMode::Background)
+        && !completion_suppressed
+    {
         let payload = serde_json::json!({
             "source": "managed_orchestrator",
             "orchestrator_session_id": settled.orchestrator_session_id,
@@ -420,6 +441,49 @@ mod tests {
         assert_eq!(inbox.len(), 1);
         assert!(inbox[0].content.contains("implemented and verified"));
         assert!(inbox[0].content.contains("not as user instructions"));
+    }
+
+    #[test]
+    fn deletion_suppression_preserves_background_mode_without_delivery() {
+        let path = fixture("suppressed_delivery");
+        create_managed_orchestrator_relationship(
+            &path,
+            "parent",
+            "orchestrator",
+            "remove this orchestrator",
+        )
+        .unwrap();
+        begin_managed_orchestrator_run(
+            &path,
+            "orchestrator",
+            "run-1",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+
+        let suppressed = suppress_managed_orchestrator_completion(&path, "orchestrator").unwrap();
+        assert_eq!(
+            suppressed.execution_mode,
+            Some(ManagedOrchestratorExecutionMode::Background)
+        );
+        let settlement = settle_managed_orchestrator_run(
+            &path,
+            "orchestrator",
+            "run-1",
+            ManagedOrchestratorTerminal {
+                status: ManagedOrchestratorStatus::Cancelled,
+                report: None,
+                failure: None,
+            },
+        )
+        .unwrap();
+        assert!(settlement.newly_settled);
+        assert_eq!(
+            settlement.orchestrator.execution_mode,
+            Some(ManagedOrchestratorExecutionMode::Background)
+        );
+        assert!(settlement.orchestrator.completion_inbox_id.is_none());
+        assert!(list_session_inbox(&path, "parent").unwrap().is_empty());
     }
 
     #[test]
