@@ -16,6 +16,7 @@ import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
+import { SessionIdentity } from "@/app/components/inspector/SessionIdentity";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -130,11 +131,25 @@ export default function SessionPage() {
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
+  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
+  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const sessionPanels: readonly SessionPanel[] = snapshot?.lineage
+    ? ["files", "history"]
+    : direct
+      ? ["delegated", "files", "history"]
+      : ["threads", "files", "worksets", "history"];
+  const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
+  const effectivePanel = sessionPanels.includes(requestedPanel) ? requestedPanel : sessionPanels[0];
+
+  useEffect(() => {
+    if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel) return;
+    navigate(routes.session(id, effectivePanel), { replace: true });
+  }, [effectivePanel, id, navigate, panel, snapshot]);
   // The phone dialog header shows the selected file's +/- badge; a revision
   // reports its own totals rather than the live workspace ones.
   const revisionChanges = useWorkspaceRevisionChanges(
     id,
-    isMobile && panel === "files" ? selectedRevision : null,
+    isMobile && effectivePanel === "files" ? selectedRevision : null,
   );
 
   useEffect(() => {
@@ -180,10 +195,15 @@ export default function SessionPage() {
   // ThreadsView syncs the open thread's name and running bit into the store so
   // this header stays aligned with the detail pane (including title shimmer).
   const currentThreadName = selectedThread;
-  const threadTitleRunning = panel === "threads" && selectedThreadRunning;
+  const threadTitleRunning = effectivePanel === "threads" && selectedThreadRunning;
 
   const sideBox = (
-    <SessionSideBox sessionId={id} snapshot={snapshot} panel={panel} onPanelChange={goToPanel} />
+    <SessionSideBox
+      sessionId={id}
+      snapshot={snapshot}
+      panel={effectivePanel}
+      onPanelChange={goToPanel}
+    />
   );
 
   const projectId = entry?.summary.project_id ?? null;
@@ -272,11 +292,16 @@ export default function SessionPage() {
           </div>
         )}
 
+        <SessionIdentity
+          behavior={entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null}
+          lineage={snapshot?.lineage ?? null}
+        />
+
         <div className="flex flex-col flex-1 min-h-0 w-full relative">
           <Transcript
             sessionId={id}
             snapshot={snapshot}
-            panel={panel}
+            panel={effectivePanel}
             onFocusPanel={focusPanel}
             errorNotice={errorNotice}
           />
@@ -312,20 +337,20 @@ export default function SessionPage() {
                       threadTitleRunning ? "text-shimmer-basic" : "text-basic-primary",
                     )}
                   >
-                    {panel === "threads"
+                    {effectivePanel === "threads"
                       ? (currentThreadName ?? SESSION_PANEL_LABEL.threads)
-                      : panel === "worksets"
+                      : effectivePanel === "worksets"
                         ? (selectedWorkset ??
                           snapshot?.worksets.items[0]?.id ??
                           SESSION_PANEL_LABEL.worksets)
-                        : panel === "files"
+                        : effectivePanel === "files"
                           ? (selectedFile?.split("/").pop() ??
                             snapshot?.workspace?.changed_files?.[0]?.path.split("/").pop() ??
                             SESSION_PANEL_LABEL.files)
-                          : SESSION_PANEL_LABEL.history}
+                          : SESSION_PANEL_LABEL[effectivePanel]}
                   </span>
                 </div>
-                {panel === "files" ? fileBadge : null}
+                {effectivePanel === "files" ? fileBadge : null}
               </div>
 
               {snapshot?.workspace?.branch ? (
@@ -334,7 +359,7 @@ export default function SessionPage() {
             </div>
           }
           headerActions={
-            panel === "history" ? null : (
+            effectivePanel === "history" ? null : (
               <Button
                 size={ButtonSize.Large}
                 variant={ButtonVariant.Ghost}
@@ -352,7 +377,8 @@ export default function SessionPage() {
         >
           <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
           <MobileBottomBar
-            panel={panel}
+            panel={effectivePanel}
+            panels={sessionPanels}
             onPanelChange={(next) => {
               // A fresh tab opens on the row it already has, not its list.
               showSidePanelList(false);

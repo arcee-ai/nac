@@ -13,6 +13,7 @@ import {
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { FilesView } from "@/app/components/inspector/FilesView";
+import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
@@ -150,15 +151,31 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
+  const behavior = snapshot?.metadata.behavior ?? "orchestrator";
+  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const delegatedTranscript = snapshot?.lineage != null;
+  const widePanels: readonly SessionPanel[] = delegatedTranscript
+    ? ["files"]
+    : direct
+      ? ["delegated", "files"]
+      : WIDE_SESSION_PANELS.filter((name) => name !== "delegated");
 
   // History belongs to the phone's bottom bar: a wide box reaches revisions
   // through its footer chip, so a link to that panel lands on the default one.
-  const active = !isMobile && panel === "history" ? DEFAULT_SESSION_PANEL : panel;
+  const fallback: SessionPanel = delegatedTranscript
+    ? "files"
+    : direct
+      ? "delegated"
+      : DEFAULT_SESSION_PANEL;
+  const active = widePanels.includes(panel) || (isMobile && panel === "history") ? panel : fallback;
 
   const body = (
     <>
       {active === "files" ? (
         <FilesView sessionId={sessionId} snapshot={snapshot} revision={selectedRevision} />
+      ) : null}
+      {active === "delegated" && direct && !delegatedTranscript ? (
+        <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
       ) : null}
       {active === "worksets" ? (
         <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />
@@ -187,7 +204,7 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
       >
         <SideBoxProgress sessionId={sessionId} />
         <div className="flex flex-1 min-w-0 items-center gap-1 " role="tablist">
-          {WIDE_SESSION_PANELS.map((name) => (
+          {widePanels.map((name) => (
             <HorizontalTabsItem
               key={name}
               role="tab"

@@ -15,6 +15,8 @@ export type ScriptMatch = {
   token?: string;
   functionOutputCallId?: string;
   requiredTools?: string[];
+  /** Match only after the named step was consumed, for repeated model inputs. */
+  afterStep?: string;
 };
 
 export type ProviderRequest = {
@@ -171,11 +173,27 @@ export class ScriptedProvider {
     step.consumed = true;
     record.matchedStep = step.id;
     step.gate?.markAccepted();
+    // A barrier models a slow model, not an unreachable one. Flush SSE
+    // headers before waiting so the production client does not classify the
+    // deliberate body delay as a connection failure and retry the request.
+    if (step.gate != null && step.response.kind !== "http_error" && step.response.stream === true) {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
+      response.flushHeaders();
+    }
     if (step.gate != null) await step.gate.waitForRelease();
     this.respond(response, step.response);
   }
 
   private matches(match: ScriptMatch, body: unknown): boolean {
+    if (
+      match.afterStep != null &&
+      !this.steps.some((step) => step.id === match.afterStep && step.consumed)
+    ) {
+      return false;
+    }
     const serialized = JSON.stringify(body);
     if (match.token != null && !serialized.includes(match.token)) return false;
     if (
@@ -229,10 +247,12 @@ export class ScriptedProvider {
       usage: { input_tokens: 7, output_tokens: 3, total_tokens: 10 },
     };
     if (scripted.stream === true) {
-      response.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-      });
+      if (!response.headersSent) {
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+        });
+      }
       response.write(
         `data: ${JSON.stringify({ type: "response.output_item.done", output_index: 0, item })}\n\n`,
       );

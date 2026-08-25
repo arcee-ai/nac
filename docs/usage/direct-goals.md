@@ -11,7 +11,16 @@ objective is required; the token budget is optional and has no implicit
 default. The same panel edits the objective or budget and lets the user pause,
 resume, clear, or apply `usage limited` and `budget limited` states. Clearing
 deletes the current generation. Once a goal is complete, creating another goal
-starts a fresh ID and zeroed accounting rather than reusing the old generation.
+starts a fresh ID and zeroed accounting rather than reusing the old generation;
+the completed-goal panel labels that action **Replace and start**.
+
+The direct composer also implements literal goal commands. `/goal <objective>`
+creates and activates a new goal, while `/goal edit`, `/goal pause`, `/goal
+resume`, and `/goal clear` open or apply the corresponding user control. `/goal`
+without arguments opens the detailed panel. An unfinished goal is never
+silently replaced: edit it or clear it first. These commands are handled by the
+web control plane; the objective then continues through NAC's ordinary durable
+goal runner rather than treating the slash text as a model prompt.
 
 The six durable statuses are `active`, `paused`, `blocked`, `usage_limited`,
 `budget_limited`, and `complete`. While active, NAC starts one continuation

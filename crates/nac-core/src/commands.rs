@@ -28,6 +28,7 @@ const MANAGED_ORCHESTRATOR_COMPLETION_PREFIX: &str =
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SlashCommand {
     Compact,
+    Goal,
 }
 
 /// User-facing metadata shared by command parsing and frontend discovery.
@@ -40,12 +41,20 @@ pub struct SlashCommandDefinition {
     pub accepts_arguments: bool,
 }
 
-const SLASH_COMMANDS: &[SlashCommandDefinition] = &[SlashCommandDefinition {
-    command: SlashCommand::Compact,
-    name: "compact",
-    description: "Compact the current session context",
-    accepts_arguments: false,
-}];
+const SLASH_COMMANDS: &[SlashCommandDefinition] = &[
+    SlashCommandDefinition {
+        command: SlashCommand::Compact,
+        name: "compact",
+        description: "Compact the current session context",
+        accepts_arguments: false,
+    },
+    SlashCommandDefinition {
+        command: SlashCommand::Goal,
+        name: "goal",
+        description: "Create or control a durable direct-session goal",
+        accepts_arguments: true,
+    },
+];
 
 pub fn slash_command_definitions() -> &'static [SlashCommandDefinition] {
     SLASH_COMMANDS
@@ -358,6 +367,24 @@ mod tests {
             }
         );
         assert_eq!(expand_user_prompt("/compact", None), "/compact");
+    }
+
+    #[test]
+    fn goal_accepts_an_objective_or_control_argument_and_is_frontend_handled() {
+        for input in [
+            "/goal",
+            "/goal implement the durable path",
+            "/goal edit",
+            "/goal pause",
+            "/goal resume",
+            "/goal clear",
+        ] {
+            assert_eq!(
+                prepare_user_input(input, None),
+                PreparedUserInput::FrontendCommand(SlashCommand::Goal),
+                "input: {input:?}"
+            );
+        }
     }
 
     #[test]

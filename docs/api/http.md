@@ -1,6 +1,6 @@
 # HTTP API
 
-The HTTP contract is generated from the Rust handlers and types in the running `nac-web` process. To review the current state of the aPI, start the server, then use the live docs:
+The HTTP contract is generated from the Rust handlers and types in the running `nac-web` process. To review the current state of the API, start the server, then use the live docs:
 
 ```sh
 nac-web
@@ -86,6 +86,23 @@ claim, timestamps, and version. The API accepts `active`, `paused`, `blocked`,
 `usage_limited`, and `budget_limited` as user/system status controls; users
 clear rather than setting `complete`. The model's native `update_goal` tool is
 the path that marks genuine completion or blockage.
+
+## Session behaviors and direct inbox
+
+`POST /sessions` accepts `behavior` as `orchestrator`, `direct`, or
+`direct-with-orchestrator`. It is persisted and immutable. Omitting it selects
+`orchestrator` for compatibility. Session summaries and detail metadata expose
+the value. A delegated session detail response also includes `lineage` with a
+`traditional-child` or `managed-orchestrator` kind, parent and root session IDs,
+and the immutable relationship description.
+
+Direct parents expose their durable input at `GET /sessions/{session_id}/inbox`
+and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
+(`steer` or `queue`) and `prompt`. Pending items can change delivery through versioned
+`PATCH /sessions/{session_id}/inbox/{item_id}` or be cancelled with versioned
+`DELETE` on that path. A steer targets the current non-finishing run when one
+exists; otherwise it participates in the same successor queue as ordinary
+queued input. These routes reject orchestrator and delegated-child ownership.
 
 ## Traditional child sessions
 
