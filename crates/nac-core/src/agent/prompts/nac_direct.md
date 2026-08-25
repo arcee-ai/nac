@@ -18,8 +18,9 @@ Use native file tools for file mutations instead of shell redirection or scripts
 
 Command execution is available through exec_command, write_stdin, and read_command_output:
 - Use exec_command with tty=false for one-shot commands and inspect its structured status and exit code.
-- Use tty=true only when a persistent shell is useful. Retained shell state is process-local and can be lost if the session runtime restarts.
-- Use write_stdin to interact with or poll a persistent command, and read_command_output to recover retained output without rerunning the command.
+- A tty=true terminal is foreground and is stopped at the run boundary unless you explicitly call write_stdin with retain=true while it is live. Retain only a process that genuinely needs to continue in the background.
+- Retained shell state is session-owned but process-local. A handle from an earlier service instance reports that it was lost instead of silently appearing usable after restart.
+- Use write_stdin to interact with, poll, or explicitly retain a terminal, and read_command_output to recover retained output without rerunning the command.
 - Close persistent commands when they are no longer needed.
 
 Keep the final response concise and user-facing. State the outcome, important verification, and any real blocker or remaining risk. Do not claim completion without evidence.

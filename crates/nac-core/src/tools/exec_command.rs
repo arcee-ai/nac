@@ -15,7 +15,7 @@ pub fn exec_command_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "exec_command".to_string(),
-            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for an interactive or persistent terminal; continue it with write_stdin."
+            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for an interactive foreground terminal; continue it with write_stdin and explicitly set retain=true there only when it must survive a direct run boundary."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -37,13 +37,14 @@ pub fn write_stdin_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "write_stdin".to_string(),
-            description: "Send input to a persistent terminal from exec_command tty=true, or poll with empty chars. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text. Supports <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, and arrow-key notation."
+            description: "Send input to a foreground terminal from exec_command tty=true, or poll with empty chars. Set retain=true to explicitly transition a live terminal into a session-owned background handle that survives the end of a direct run. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text. Supports <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, and arrow-key notation."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
                     "chars": { "type": "string", "description": "Input or key notation; empty polls output" },
+                    "retain": { "type": "boolean", "description": "Explicitly retain this live terminal across direct run boundaries (default: false)" },
                     "yield_time_ms": { "type": "number", "description": "Maximum poll duration in milliseconds (default: 500, max: 3600000)" },
                     "max_output_chars": { "type": "number", "description": "Concise preview budget (default: 8000)" }
                 },
@@ -120,7 +121,7 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
         return Ok((serde_json::to_string_pretty(&output)?, is_error));
     }
 
-    let session_name = make_session_name();
+    let session_name = manager.next_session_name();
     manager
         .create(session_name.clone(), cwd, 120, 40, &runtime.backend)
         .await?;
@@ -152,6 +153,7 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
     let result = async {
         let session_id = require_str(args, "session_id")?;
         let chars = args.get("chars").and_then(Value::as_str).unwrap_or("");
+        let retain = args.get("retain").and_then(Value::as_bool).unwrap_or(false);
         let yield_ms = clamp_yield(
             args.get("yield_time_ms")
                 .and_then(Value::as_u64)
@@ -162,11 +164,9 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
             .and_then(Value::as_u64)
             .unwrap_or(8_000) as usize;
         if runtime.terminal_manager.get(&session_id).await.is_none() {
-            return Err(anyhow!(
-                "terminal session '{session_id}' not found - it may have been closed or expired"
-            ));
+            return Err(runtime.terminal_manager.missing_session_error(&session_id));
         }
-        runtime
+        let mut output = runtime
             .terminal_manager
             .write_stdin(
                 &session_id,
@@ -175,7 +175,12 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
                 max_output,
                 Some(&runtime.command_cancellation),
             )
-            .await
+            .await?;
+        if retain && output.session_name.is_some() {
+            runtime.terminal_manager.retain(&session_id).await?;
+            output.retained = true;
+        }
+        Ok(output)
     }
     .await;
 
@@ -236,12 +241,6 @@ const MAX_YIELD_MS: u64 = 3_600_000;
 
 fn clamp_yield(ms: u64) -> u64 {
     ms.min(MAX_YIELD_MS)
-}
-
-fn make_session_name() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(1);
-    format!("shell-{}", COUNTER.fetch_add(1, Ordering::SeqCst))
 }
 
 #[cfg(test)]
@@ -615,6 +614,30 @@ mod tests {
         let page_value: Value =
             serde_json::from_str(page.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(page_value["content"].as_str().unwrap().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn write_stdin_explicitly_transitions_a_live_terminal_to_retained() {
+        let runtime = test_runtime();
+        let started = execute_exec_command(
+            &json!({"cmd": "sleep 5", "tty": true, "yield_time_ms": 10}),
+            &runtime,
+        )
+        .await;
+        let started: Value =
+            serde_json::from_str(started.content.as_text().expect("text tool result")).unwrap();
+        assert_eq!(started["retained"], false);
+        let session_id = started["session_name"].as_str().unwrap();
+        let retained = execute_write_stdin(
+            &json!({"session_id": session_id, "retain": true, "yield_time_ms": 10}),
+            &runtime,
+        )
+        .await;
+        assert!(!retained.is_error, "{}", retained.content);
+        let retained: Value =
+            serde_json::from_str(retained.content.as_text().expect("text tool result")).unwrap();
+        assert_eq!(retained["retained"], true);
+        runtime.terminal_manager.remove_all().await;
     }
 
     #[test]
