@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 19 adds revision/backend-bound direct permission grants. 18 added the durable
+// 20 adds durable direct-session goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
 // direct-session inbox. 17 added the immutable session
 // behavior discriminator and is also the
 // downgrade barrier: older binaries reject the future schema instead of
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 19;
+const STORE_SCHEMA_VERSION: i64 = 20;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -372,7 +372,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19
         | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
@@ -460,6 +460,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     create_session_run_recovery_table(&transaction)?;
     create_session_inbox_table(&transaction)?;
     create_permission_grants_table(&transaction)?;
+    create_session_goals_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -1038,6 +1039,47 @@ fn create_permission_grants_table(conn: &Connection) -> Result<()> {
          );
          CREATE INDEX IF NOT EXISTS idx_permission_grants_session
              ON permission_grants(session_id, backend, session_config_version, created_at, id);",
+    )?;
+    Ok(())
+}
+
+/// At most one durable goal generation belongs to a direct session. The
+/// accounting fields bind the currently participating run and are cleared at
+/// settlement; `continuation_run_id` distinguishes service-owned continuation
+/// from an ordinary user/inbox run for crash reconciliation and diagnostics.
+fn create_session_goals_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_goals (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             goal_id TEXT NOT NULL UNIQUE CHECK (length(trim(goal_id)) > 0),
+             objective TEXT NOT NULL CHECK (length(trim(objective)) > 0),
+             status TEXT NOT NULL
+                 CHECK (status IN ('active', 'paused', 'blocked', 'usage_limited', 'budget_limited', 'complete')),
+             token_budget INTEGER
+                 CHECK (token_budget IS NULL OR token_budget > 0),
+             tokens_used INTEGER NOT NULL DEFAULT 0 CHECK (tokens_used >= 0),
+             time_used_ms INTEGER NOT NULL DEFAULT 0 CHECK (time_used_ms >= 0),
+             accounting_run_id TEXT,
+             accounting_token_baseline INTEGER
+                 CHECK (accounting_token_baseline IS NULL OR accounting_token_baseline >= 0),
+             accounting_started_at_epoch_ms INTEGER
+                 CHECK (accounting_started_at_epoch_ms IS NULL OR accounting_started_at_epoch_ms >= 0),
+             continuation_run_id TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (
+                 (accounting_run_id IS NULL AND accounting_token_baseline IS NULL
+                  AND accounting_started_at_epoch_ms IS NULL AND continuation_run_id IS NULL)
+                 OR
+                 (accounting_run_id IS NOT NULL AND accounting_token_baseline IS NOT NULL
+                  AND accounting_started_at_epoch_ms IS NOT NULL
+                  AND (continuation_run_id IS NULL OR continuation_run_id = accounting_run_id))
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_goals_status
+             ON session_goals(status, updated_at, session_id);",
     )?;
     Ok(())
 }

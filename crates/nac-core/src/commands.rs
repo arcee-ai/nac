@@ -181,6 +181,11 @@ pub fn display_prompt_from_message(content: &str) -> String {
     if let Some(collapsed) = invoked_skills_display_prompt(content) {
         return collapsed;
     }
+    if content.starts_with("<nac_goal_continuation goal_id=\"")
+        && content.ends_with("\n</nac_goal_continuation>")
+    {
+        return "[durable goal continuation]".to_string();
+    }
     workset_command_display_prompt(content).unwrap_or_else(|| content.to_string())
 }
 
@@ -315,6 +320,20 @@ mod tests {
             }
         );
         assert_eq!(expand_user_prompt("/compact", None), "/compact");
+    }
+
+    #[test]
+    fn durable_goal_continuation_hides_internal_control_prompt_from_display() {
+        let internal =
+            "<nac_goal_continuation goal_id=\"goal-1\">\nContinue work\n</nac_goal_continuation>";
+        assert_eq!(
+            display_prompt_from_message(internal),
+            "[durable goal continuation]"
+        );
+        assert_eq!(
+            display_prompt_from_message("mention <nac_goal_continuation goal_id=\"x\">"),
+            "mention <nac_goal_continuation goal_id=\"x\">"
+        );
     }
 
     #[test]

@@ -42,6 +42,7 @@ import type {
   BrowseListing,
   CommitWorkspaceRequest,
   CreateModelConfigurationRequest,
+  CreateGoalRequest,
   CreateProjectRequest,
   CreateSessionRequest,
   DeleteProjectSessions,
@@ -50,6 +51,7 @@ import type {
   ModelConfigurationList,
   PermissionReply,
   PermissionStateResponse,
+  SessionGoalRecord,
   ProjectList,
   ProjectRecord,
   ProviderModel,
@@ -78,6 +80,7 @@ import type {
   SandboxAvailability,
   SwitchBranchRequest,
   UpdateConfigRequest,
+  UpdateGoalRequest,
   UpdateModelConfigurationRequest,
   UpdateProjectRequest,
   WorkspaceDiffStage,
@@ -138,6 +141,7 @@ export const queryKeys = {
     ["session", id, "thread-events", threadName] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
   sessionPermissions: (id: string) => ["session", id, "permissions"] as const,
+  sessionGoal: (id: string) => ["session", id, "goal"] as const,
   workspaceDiff: (
     id: string,
     path: string,
@@ -200,6 +204,60 @@ export function useDeletePermissionGrant() {
       api.deletePermissionGrant(sessionId, grantId),
     onSuccess: (_data, variables) =>
       client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+  });
+}
+
+export function useSessionGoal(sessionId: string, enabled: boolean) {
+  return useQuery<SessionGoalRecord | null>({
+    queryKey: queryKeys.sessionGoal(sessionId),
+    queryFn: ({ signal }) => api.getGoal(sessionId, signal),
+    enabled,
+    refetchInterval: enabled ? 1_000 : false,
+    retry: false,
+  });
+}
+
+export function useCreateGoal() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, payload }: { sessionId: string; payload: CreateGoalRequest }) =>
+      api.createGoal(sessionId, payload),
+    onSuccess: (goal, variables) =>
+      client.setQueryData(queryKeys.sessionGoal(variables.sessionId), goal),
+  });
+}
+
+export function useUpdateGoal() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      goalId,
+      payload,
+    }: {
+      sessionId: string;
+      goalId: string;
+      payload: UpdateGoalRequest;
+    }) => api.updateGoal(sessionId, goalId, payload),
+    onSuccess: (goal, variables) =>
+      client.setQueryData(queryKeys.sessionGoal(variables.sessionId), goal),
+  });
+}
+
+export function useClearGoal() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      goalId,
+      expectedVersion,
+    }: {
+      sessionId: string;
+      goalId: string;
+      expectedVersion: number;
+    }) => api.clearGoal(sessionId, goalId, expectedVersion),
+    onSuccess: (_data, variables) =>
+      client.setQueryData(queryKeys.sessionGoal(variables.sessionId), null),
   });
 }
 

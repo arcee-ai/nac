@@ -22,6 +22,7 @@ mod discovery;
 pub mod edit;
 pub mod exec_command;
 pub mod glob;
+pub(crate) mod goal;
 pub mod grep;
 pub mod kernel;
 pub(crate) mod mutation;
@@ -388,6 +389,8 @@ pub struct ToolRuntime {
     /// service attaches. Workers and the existing orchestrator retain their
     /// established allow-through behavior.
     pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
+    /// Direct-only bridge for exact mid-run durable-goal baselines.
+    pub(crate) goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
 }
 
 impl ToolRuntime {
@@ -478,6 +481,21 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
     "exec_command",
     "write_stdin",
     "read_command_output",
+];
+
+pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 11] = [
+    "read",
+    "write",
+    "edit",
+    "glob",
+    "grep",
+    "exec_command",
+    "write_stdin",
+    "read_command_output",
+    "create_goal",
+    "get_goal",
+    "update_goal",
 ];
 
 impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
@@ -644,6 +662,9 @@ fn worker_tool_registry(
         .register(LegacyDirectTool::<5>)
         .register(LegacyDirectTool::<6>)
         .register(LegacyDirectTool::<7>)
+        .register(goal::CreateGoalTool)
+        .register(goal::GetGoalTool)
+        .register(goal::UpdateGoalTool)
         .finish()?;
     // Keep the native instance retrievable; direct Rust callers do not need a
     // JSON round-trip to execute the same registered read operation.
@@ -655,19 +676,24 @@ pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot_where(|descriptor| {
-            !descriptor.name().is_empty()
-                && matches!(
-                    descriptor.admission,
-                    kernel::ToolAdmission::Parallel | kernel::ToolAdmission::Exclusive
-                )
+            WORKER_TOOL_NAMES.contains(&descriptor.name())
+                && !GOAL_TOOL_NAMES.contains(&descriptor.name())
         })
+        .definitions()
+}
+
+pub fn direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
+    worker_tool_registry(image_read)
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot(DIRECT_TOOL_NAMES)
+        .expect("built-in direct capability selection must be complete")
         .definitions()
 }
 
 pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission> {
     worker_tool_registry(false)
         .expect("built-in direct tool registration must be collision-free")
-        .snapshot(WORKER_TOOL_NAMES)
+        .snapshot(DIRECT_TOOL_NAMES)
         .expect("built-in direct capability selection must be complete")
         .admission(name)
 }
@@ -767,7 +793,7 @@ pub async fn execute_tool_with_context(
 
     let direct = worker_tool_registry(client.supports_image_tool_results())
         .expect("built-in direct tool registration must be collision-free")
-        .snapshot(WORKER_TOOL_NAMES)
+        .snapshot(DIRECT_TOOL_NAMES)
         .expect("built-in direct capability selection must be complete");
     if direct.contains(name) {
         return direct
@@ -797,7 +823,9 @@ pub async fn execute_tool_with_context(
 
 #[cfg(test)]
 mod discovery_tool_definition_tests {
-    use super::{kernel, worker_tool_definitions, worker_tool_registry, ReadTool};
+    use super::{
+        direct_tool_definitions, kernel, worker_tool_definitions, worker_tool_registry, ReadTool,
+    };
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -905,6 +933,21 @@ mod discovery_tool_definition_tests {
         assert_eq!(admissions["glob"], kernel::ToolAdmission::Parallel);
         assert_eq!(admissions["write"], kernel::ToolAdmission::Exclusive);
         assert_eq!(admissions["exec_command"], kernel::ToolAdmission::Exclusive);
+    }
+
+    #[test]
+    fn direct_registry_adds_goal_tools_without_changing_worker_inventory() {
+        let worker = worker_tool_definitions(false)
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>();
+        let direct = direct_tool_definitions(false)
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>();
+        assert_eq!(worker, super::WORKER_TOOL_NAMES);
+        assert_eq!(direct, super::DIRECT_TOOL_NAMES);
+        assert_eq!(&direct[8..], ["create_goal", "get_goal", "update_goal"]);
     }
 
     #[tokio::test]
@@ -1045,5 +1088,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         light_client: None,
         allowed_tools: None,
         permission_broker: None,
+        goal_runtime: None,
     }
 }

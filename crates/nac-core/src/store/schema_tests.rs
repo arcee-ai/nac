@@ -203,7 +203,31 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
-    for table in ["thread_steering", "thread_events", "session_inbox"] {
+    assert_eq!(
+        table_columns(conn, "session_goals"),
+        [
+            "session_id",
+            "goal_id",
+            "objective",
+            "status",
+            "token_budget",
+            "tokens_used",
+            "time_used_ms",
+            "accounting_run_id",
+            "accounting_token_baseline",
+            "accounting_started_at_epoch_ms",
+            "continuation_run_id",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    for table in [
+        "thread_steering",
+        "thread_events",
+        "session_inbox",
+        "session_goals",
+    ] {
         assert_session_cascade(conn, table);
     }
     assert_eq!(
@@ -379,7 +403,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 19);
+    assert_eq!(STORE_SCHEMA_VERSION, 20);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -445,6 +469,46 @@ fn v18_store_adds_revision_bound_permission_grants() {
             "backend",
             "session_config_version",
             "created_at",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v19_store_adds_durable_session_goals() {
+    let path = temp_store_path("v19_session_goals");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE session_goals; PRAGMA user_version = 19;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "session_goals"),
+        [
+            "session_id",
+            "goal_id",
+            "objective",
+            "status",
+            "token_budget",
+            "tokens_used",
+            "time_used_ms",
+            "accounting_run_id",
+            "accounting_token_baseline",
+            "accounting_started_at_epoch_ms",
+            "continuation_run_id",
+            "created_at",
+            "updated_at",
+            "version",
         ]
     );
     assert_eq!(

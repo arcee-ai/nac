@@ -43,8 +43,9 @@ Non-negotiable invariants:
   a confined direct `make test` are environmental, not inherited regressions.
 - The native tool kernel, immutable behavior foundation, persistent direct
   primary, durable inbox, behavior-specific compaction, and retained-terminal
-  lifecycle are committed. The direct permission/safety vertical is fully
-  verified and ready for its checkpoint commit.
+  lifecycle and direct permission/safety vertical are committed. The durable
+  direct-only `/goal` vertical is implemented and verified; traditional child
+  sessions are the next milestone.
 
 ## Ordered milestones
 
@@ -60,7 +61,7 @@ Non-negotiable invariants:
 4. **Completed — Permissions and safety.** Add ordered allow/ask/deny rules,
    canonical tool resources, interactive/headless approval behavior, saved
    grants, hard safety policy, and backend-specific defaults.
-5. **Pending — Direct `/goal`.** Add durable direct-only goal state, controls,
+5. **Completed — Direct `/goal`.** Add durable direct-only goal state, controls,
    accounting, idle continuation, restart reconciliation, and tests.
 6. **Pending — Traditional child sessions.** Add durable relationships,
    profiles, foreground/background execution, continuation/steering,
@@ -130,6 +131,12 @@ Non-negotiable invariants:
   grants. Pending asks are process-local and interactive-only, while grants are
   durable and bound to backend plus session config revision. Approval never
   changes execution backends.
+- Represent `/goal` as one versioned, direct-session-owned durable generation
+  with six explicit states and optional token budget. Account only usage after
+  the goal's run baseline, serialize continuation claims with the existing
+  session operation lease, prioritize the durable inbox, pause on explicit
+  cancellation, block on run failure, and reserve broad lifecycle control for
+  the user while model tools can only report genuine completion or blockage.
 
 ## Files and subsystems currently changing
 
@@ -146,6 +153,10 @@ Non-negotiable invariants:
   process-local interactive asks with timeout/cancellation dismissal, REST/SSE
   state, and the direct-only web approval/grant-management surface plus rebuilt
   production assets.
+- Milestone 5 adds schema-20 goal persistence and accounting, native direct-only
+  goal tools, service-owned idle/restart continuation and claim reconciliation,
+  REST/OpenAPI control, direct-only web controls, neutral internal transcript
+  rendering, documentation, and the rebuilt production assets.
 
 ## Verification
 
@@ -222,6 +233,22 @@ Non-negotiable invariants:
   reported the expected uncommitted asset delta that this checkpoint includes.
 - Recorded pre-goal baseline: `make check` and elevated `make ci` passed on
   2026-08-24.
+- Goal store/tool/service focused tests — passed for all six states, versioned
+  updates, optional budgets, mid-run accounting baselines, inbox priority,
+  cancellation pause, failure blocking, one continuation claim, restart
+  reconciliation, direct-only capability exposure, and model authority.
+- Goal REST/OpenAPI and frontend focused tests — passed for the complete user
+  lifecycle, exact routes and status mapping, direct-only flag controls,
+  accounting/budget display, and neutral internal continuation rendering.
+- `cargo test -p nac-core --locked` — 1010 passed, 9 ignored, 0 failed in
+  79.17s with durable goals.
+- `cargo test -p nac-server --locked` — 116 server and 21 CLI tests passed with
+  the goal REST/OpenAPI surface.
+- Frontend verification — 133 tests passed across 17 files; lint, typecheck,
+  format, and production build passed.
+- `make check`, `make lint`, and `make format-check` — passed after the complete
+  goal slice. `make test-assets` rebuilt the production bundle included by this
+  checkpoint.
 
 ## Completed commits
 
@@ -231,6 +258,7 @@ Non-negotiable invariants:
 - `2fad41d feat(core): add durable direct inbox`.
 - `e460fec feat(core): specialize direct compaction`.
 - `b905b34 feat(core): retain direct terminals`.
+- `a06d9e7 feat(core): add direct permissions`.
 
 ## Known problems and blockers
 
@@ -239,8 +267,9 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Define the direct-only durable `/goal` state machine and schema contract before
-touching the ordinary run loop: one active objective, explicit status and
-accounting, idle continuation ownership, cancellation, restart reconciliation,
-and exact interaction with the durable steer/queue inbox. Begin with migration
-and store-level transition tests, then integrate service/API controls.
+Define the durable traditional-child relationship, execution profile, lifecycle,
+and completion-delivery contracts against the current session service and the
+local OpenCode `v2` reference. Record the resolved contracts in
+`demo_decisions.md`, add the backward-compatible schema/store foundation and
+tests, then integrate native direct-session child control tools without
+collapsing child sessions into orchestrator workers.

@@ -609,6 +609,43 @@ export interface PermissionStateResponse {
   grants: PermissionGrantRecord[];
 }
 
+export type GoalStatus =
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usage_limited"
+  | "budget_limited"
+  | "complete";
+
+export interface SessionGoalRecord {
+  session_id: string;
+  goal_id: string;
+  objective: string;
+  status: GoalStatus;
+  token_budget: number | null;
+  tokens_used: number;
+  time_used_ms: number;
+  accounting_run_id: string | null;
+  accounting_token_baseline: number | null;
+  accounting_started_at_epoch_ms: number | null;
+  continuation_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+export interface CreateGoalRequest {
+  objective: string;
+  token_budget?: number;
+}
+
+export interface UpdateGoalRequest {
+  expected_version: number;
+  objective?: string;
+  token_budget?: number | null;
+  status?: GoalStatus;
+}
+
 export interface SessionEventBoundary {
   epoch_id: string;
   sequence_id: number;

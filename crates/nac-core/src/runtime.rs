@@ -1961,7 +1961,7 @@ mod tests {
             .iter()
             .map(|definition| definition.function.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(tool_names, crate::tools::WORKER_TOOL_NAMES);
+        assert_eq!(tool_names, crate::tools::DIRECT_TOOL_NAMES);
         assert!(matches!(
             created.agent.messages.first(),
             Some(Message::System { content })
@@ -1992,7 +1992,7 @@ mod tests {
                 .iter()
                 .map(|definition| definition.function.name.as_str())
                 .collect::<Vec<_>>(),
-            crate::tools::WORKER_TOOL_NAMES
+            crate::tools::DIRECT_TOOL_NAMES
         );
 
         let _ = std::fs::remove_dir_all(root);

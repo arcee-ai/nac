@@ -69,6 +69,24 @@ project edits affect only later sessions, and resume uses the session snapshot.
 Deleting a saved model configuration still referenced by a project returns
 409 and retains both the configuration and its credentials.
 
+## Direct goals
+
+`GET /sessions/{session_id}/goal` returns the current durable goal or JSON
+`null`. `POST /sessions/{session_id}/goal` creates an active generation from an
+`objective` and optional positive `token_budget`. It fails while another
+unfinished goal exists. `PATCH /sessions/{session_id}/goal/{goal_id}` uses
+`expected_version` for optimistic concurrency and can edit `objective`, set or
+clear `token_budget`, or set a user/system status. `DELETE` on the same path
+takes `expected_version` and clears the goal. These endpoints reject
+orchestrator sessions.
+
+Goal responses include the generation ID, six-state status, accumulated
+`tokens_used` and `time_used_ms`, optional budget, current run/continuation
+claim, timestamps, and version. The API accepts `active`, `paused`, `blocked`,
+`usage_limited`, and `budget_limited` as user/system status controls; users
+clear rather than setting `complete`. The model's native `update_goal` tool is
+the path that marks genuine completion or blockage.
+
 ## Remote access
 
 Remote access delegates the authority of the local user to every client that
