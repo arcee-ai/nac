@@ -635,10 +635,11 @@ async function waitForTrackedProcessExit(
   marker?: string,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (processGroupExists(pid) || [...tracked].some(processExists)) {
+  while (true) {
+    await refreshTrackedDescendants(tracked, marker);
+    if (!processGroupExists(pid) && ![...tracked].some(processExists)) return;
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
     await new Promise((resolve) => setTimeout(resolve, pollMs));
-    await refreshTrackedDescendants(tracked, marker);
   }
 }
 

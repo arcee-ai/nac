@@ -43,11 +43,9 @@ describe("E2E harness cleanup", () => {
       const leader = spawnLeaderWithSignalResistantDescendant(marker);
       if (leader.pid == null) throw new Error("leader did not receive a pid");
       spawnedGroups.push({ child: leader, marker });
+      const leaderExited = waitForExit(leader);
       const descendantPid = await readPid(leader);
-      await new Promise<void>((resolve, reject) => {
-        leader.once("error", reject);
-        leader.once("exit", () => resolve());
-      });
+      await leaderExited;
       expect(processExists(descendantPid)).toBe(true);
       expect(processGroupId(descendantPid)).toBe(descendantPid);
       await terminateProcessGroup(leader, {
@@ -56,6 +54,31 @@ describe("E2E harness cleanup", () => {
         pollMs: 10,
         marker,
       });
+      expect(processExists(descendantPid)).toBe(false);
+      spawnedGroups.splice(
+        spawnedGroups.findIndex((entry) => entry.child === leader),
+        1,
+      );
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "discovers a marked descendant spawned while its leader handles termination",
+    async () => {
+      const marker = `cleanup-term-race-${process.pid}-${Date.now()}`;
+      const spawned = spawnLeaderThatCreatesDescendantOnTerm(marker);
+      const leader = spawned.child;
+      if (leader.pid == null) throw new Error("leader did not receive a pid");
+      spawnedGroups.push({ child: leader, marker });
+      await spawned.ready;
+      const cleanup = terminateProcessGroup(leader, {
+        graceMs: 100,
+        killMs: 1_000,
+        pollMs: 10,
+        marker,
+      });
+      const descendantPid = await spawned.descendantPid;
+      await cleanup;
       expect(processExists(descendantPid)).toBe(false);
       spawnedGroups.splice(
         spawnedGroups.findIndex((entry) => entry.child === leader),
@@ -87,6 +110,74 @@ function spawnLeaderWithSignalResistantDescendant(marker: string): ChildProcess 
       ...process.env,
       NAC_E2E_CLEANUP_ID: marker,
     },
+  });
+}
+
+function spawnLeaderThatCreatesDescendantOnTerm(marker: string): {
+  child: ChildProcess;
+  ready: Promise<void>;
+  descendantPid: Promise<number>;
+} {
+  const leaderScript = `
+    const { spawn } = require("node:child_process");
+    let handled = false;
+    process.on("SIGTERM", () => {
+      if (handled) return;
+      handled = true;
+      const child = spawn(process.execPath, ["-e", ${JSON.stringify(`
+        process.on("SIGTERM", () => {});
+        process.send?.({ kind: "pid", pid: process.pid });
+        setInterval(() => {}, 1000);
+      `)}], {
+        detached: true,
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
+        env: process.env,
+      });
+      child.on("message", (message) => {
+        process.send?.(message);
+        child.disconnect();
+        child.unref();
+        process.disconnect?.();
+        process.exit(0);
+      });
+    });
+    process.send?.({ kind: "ready" });
+    setInterval(() => {}, 1000);
+  `;
+  const child = spawn(process.execPath, ["-e", leaderScript], {
+    detached: true,
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+    env: {
+      ...process.env,
+      NAC_E2E_CLEANUP_ID: marker,
+    },
+  });
+  const ready = new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.on("message", (message) => {
+      if (isProcessMessage(message) && message.kind === "ready") resolve();
+    });
+  });
+  const descendantPid = new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.on("message", (message) => {
+      if (isProcessMessage(message) && message.kind === "pid" && message.pid != null) {
+        resolve(message.pid);
+      }
+    });
+  });
+  return { child, ready, descendantPid };
+}
+
+function isProcessMessage(message: unknown): message is { kind: string; pid?: number } {
+  return typeof message === "object" && message != null && "kind" in message;
+}
+
+async function waitForExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode != null || child.signalCode != null) return;
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", () => resolve());
   });
 }
 
