@@ -26,6 +26,7 @@ pub use db::{
 pub(crate) use db::{list_sessions_with_connection, load_session_run_state};
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
+    SessionRelationshipLease,
 };
 // Compatibility aliases for callers that have not yet adopted operation-wide naming.
 pub type SessionRunLease = SessionOperationLease;

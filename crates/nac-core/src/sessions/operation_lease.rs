@@ -16,6 +16,21 @@ pub struct SessionOperationLease {
     session_id: String,
 }
 
+/// Cross-process exclusion for mutations of a session's owned child set.
+/// This is deliberately distinct from the run/compaction lease: a parent run
+/// must be able to create a child while still preventing deletion from taking
+/// its descendant snapshot concurrently.
+#[derive(Debug)]
+pub struct SessionRelationshipLease {
+    _file: File,
+}
+
+impl Drop for SessionRelationshipLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
 impl Drop for SessionOperationLease {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self._file);
@@ -120,6 +135,31 @@ impl SessionOperationLease {
     }
 }
 
+impl SessionRelationshipLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        session_id: &str,
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let canonical_store = canonical_store(store_path).map_err(store_error)?;
+        // Keep this suffix short: persisted identifiers are hex encoded and
+        // may be 120 bytes, so the complete component must remain below the
+        // common 255-byte filesystem limit.
+        let lock_path = secure_lock_path_with_suffix(&canonical_store, session_id, ".rel")
+            .map_err(store_error)?;
+        let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err(SessionOperationLeaseError::Busy(session_id.to_string()))
+            }
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error)
+                    .context(format!("failed to lock {}", lock_path.display())),
+            )),
+        }
+    }
+}
+
 fn canonical_store(store_path: &Path) -> anyhow::Result<PathBuf> {
     fs::canonicalize(store_path).map_err(anyhow::Error::new)
 }
@@ -129,6 +169,14 @@ fn store_error(error: anyhow::Error) -> SessionOperationLeaseError {
 }
 
 fn secure_lock_path(canonical_store: &Path, session_id: &str) -> anyhow::Result<PathBuf> {
+    secure_lock_path_with_suffix(canonical_store, session_id, ".lock")
+}
+
+fn secure_lock_path_with_suffix(
+    canonical_store: &Path,
+    session_id: &str,
+    suffix: &str,
+) -> anyhow::Result<PathBuf> {
     let file_name = canonical_store.file_name().ok_or_else(|| {
         anyhow::anyhow!("store path has no file name: {}", canonical_store.display())
     })?;
@@ -146,7 +194,7 @@ fn secure_lock_path(canonical_store: &Path, session_id: &str) -> anyhow::Result<
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    Ok(lock_dir.join(format!("{encoded_id}.lock")))
+    Ok(lock_dir.join(format!("{encoded_id}{suffix}")))
 }
 
 fn secure_create_lock_dir(path: &Path) -> anyhow::Result<()> {
@@ -294,6 +342,25 @@ mod tests {
         ));
         drop(lease);
         SessionOperationLease::try_acquire(&store_path, "../unsafe/session").unwrap();
+        let _ = fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn relationship_lease_is_distinct_exclusive_and_supports_maximum_ids() {
+        let store_path = test_store("relationship");
+        store::initialize(&store_path).unwrap();
+        let session_id = "s".repeat(120);
+
+        let operation = SessionOperationLease::try_acquire(&store_path, &session_id).unwrap();
+        let relationship = SessionRelationshipLease::try_acquire(&store_path, &session_id).unwrap();
+        assert!(matches!(
+            SessionRelationshipLease::try_acquire(&store_path, &session_id),
+            Err(SessionOperationLeaseError::Busy(_))
+        ));
+
+        drop(relationship);
+        SessionRelationshipLease::try_acquire(&store_path, &session_id).unwrap();
+        drop(operation);
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
     }
 

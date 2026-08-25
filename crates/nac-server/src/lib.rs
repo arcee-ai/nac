@@ -143,6 +143,8 @@ struct SessionManagerInner {
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
     managed_logins: managed_auth::ManagedLoginRegistry,
+    #[cfg(test)]
+    managed_monitor_peer_observed: tokio::sync::Notify,
 }
 
 struct ServerTraditionalChildController {
@@ -1291,6 +1293,8 @@ impl SessionManager {
                 workspace_diff_cache: RwLock::new(HashMap::new()),
                 git_probe_cache: RwLock::new(HashMap::new()),
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
+                #[cfg(test)]
+                managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),
         };
         nac_core::traditional_children::register_controller(
@@ -2462,17 +2466,12 @@ impl SessionManager {
         parent_session_id: &str,
         child_session_id: &str,
     ) -> Result<TraditionalChildRecord> {
-        let child =
-            nac_core::store::load_traditional_child(&self.inner.store_path, child_session_id)?
-                .ok_or_else(|| {
-                    anyhow!("traditional child session '{child_session_id}' was not found")
-                })?;
-        if child.parent_session_id != parent_session_id {
-            return Err(anyhow!(
-                "session '{child_session_id}' is not a child of parent '{parent_session_id}'"
-            ));
-        }
-        Ok(child)
+        nac_core::store::load_traditional_child_for_parent(
+            &self.inner.store_path,
+            parent_session_id,
+            child_session_id,
+        )?
+        .ok_or_else(|| anyhow!("traditional child was not found"))
     }
 
     pub async fn cancel_traditional_child(
@@ -2480,6 +2479,7 @@ impl SessionManager {
         parent_session_id: &str,
         child_session_id: &str,
     ) -> Result<TraditionalChildRecord> {
+        self.traditional_child(parent_session_id, child_session_id)?;
         let controller = nac_core::traditional_children::controller_for(&self.inner.store_path)?;
         controller.cancel(parent_session_id, child_session_id).await
     }
@@ -2502,19 +2502,12 @@ impl SessionManager {
         parent_session_id: &str,
         orchestrator_session_id: &str,
     ) -> Result<ManagedOrchestratorRecord> {
-        let orchestrator = nac_core::store::load_managed_orchestrator(
+        nac_core::store::load_managed_orchestrator_for_parent(
             &self.inner.store_path,
+            parent_session_id,
             orchestrator_session_id,
         )?
-        .ok_or_else(|| {
-            anyhow!("managed orchestrator session '{orchestrator_session_id}' was not found")
-        })?;
-        if orchestrator.parent_session_id != parent_session_id {
-            return Err(anyhow!(
-                "session '{orchestrator_session_id}' is not managed by parent '{parent_session_id}'"
-            ));
-        }
-        Ok(orchestrator)
+        .ok_or_else(|| anyhow!("managed orchestrator was not found"))
     }
 
     pub async fn start_managed_orchestrator(
@@ -2557,6 +2550,7 @@ impl SessionManager {
         parent_session_id: &str,
         orchestrator_session_id: &str,
     ) -> Result<ManagedOrchestratorRecord> {
+        self.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
         nac_core::orchestration_control::controller_for(&self.inner.store_path)?
             .cancel(parent_session_id, orchestrator_session_id)
             .await
@@ -2854,6 +2848,43 @@ impl SessionManager {
         }
     }
 
+    async fn submit_managed_orchestrator_prompt(
+        &self,
+        session_id: &str,
+        request: SubmitPromptRequest,
+        execution_mode: ManagedOrchestratorExecutionMode,
+    ) -> Result<SubmitPromptResponse> {
+        self.require_persisted_operation_session(session_id)?;
+        let gate = self.lifecycle_gate(session_id);
+        let _lifecycle = gate.lock().await;
+        let operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        self.require_persisted_operation_session(session_id)?;
+        let service = self
+            .attach_current_operation_service_locked(session_id, &operation_lease)
+            .await?;
+        let client = service.connect_client();
+        match client.prepare_user_input(&request.prompt) {
+            PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
+            PreparedUserInput::InvalidSlashCommand { message } => Err(anyhow!(message)),
+            PreparedUserInput::FrontendCommand(command) => Err(anyhow!(
+                "frontend command '{}' is not supported by the server API",
+                frontend_command_name(command)
+            )),
+            PreparedUserInput::SubmitPrompt(prompt) => {
+                let display_prompt = prompt.display_prompt.clone();
+                let handle = client
+                    .try_submit_prepared_managed_orchestrator_prompt_with_lease(
+                        prompt,
+                        operation_lease,
+                        execution_mode,
+                    )
+                    .map_err(anyhow::Error::new)?;
+                Ok(submit_response(handle, display_prompt))
+            }
+        }
+    }
+
     pub async fn queue_thread_steering(
         &self,
         session_id: &str,
@@ -2943,38 +2974,15 @@ impl SessionManager {
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
-        let orchestrators =
-            nac_core::store::list_managed_orchestrators(&self.inner.store_path, session_id)?;
-        for orchestrator in orchestrators {
-            if orchestrator.status == ManagedOrchestratorStatus::Running {
-                nac_core::store::set_managed_orchestrator_execution_mode(
-                    &self.inner.store_path,
-                    &orchestrator.orchestrator_session_id,
-                    ManagedOrchestratorExecutionMode::Foreground,
-                )?;
-            }
-            Box::pin(self.delete_session(&orchestrator.orchestrator_session_id)).await?;
-        }
-        let children =
-            nac_core::store::list_traditional_children(&self.inner.store_path, session_id)?;
-        for child in children {
-            if child.status == nac_core::store::TraditionalChildStatus::Running {
-                // This generation is being removed with its parent, so its
-                // cancellation must not enqueue a result that would wake the
-                // parent in the middle of deletion.
-                nac_core::store::set_traditional_child_execution_mode(
-                    &self.inner.store_path,
-                    &child.child_session_id,
-                    TraditionalChildExecutionMode::Foreground,
-                )?;
-            }
-            Box::pin(self.delete_session(&child.child_session_id)).await?;
-        }
         // Submission, config changes, and deletion share this gate. The
         // operation lease extends the exclusion to independent processes and
-        // remains held through deletion so an old run cannot save the row back.
+        // remains held through descendant enumeration and deletion. Child
+        // creation uses the same parent boundary, so no relationship can be
+        // committed after the enumeration snapshot.
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
+        let _relationship_lease =
+            sessions::SessionRelationshipLease::try_acquire(&self.inner.store_path, session_id)?;
         let service = self
             .inner
             .active_sessions
@@ -2982,11 +2990,35 @@ impl SessionManager {
             .await
             .get(session_id)
             .cloned();
+        let suppress_relationship_completion = || -> Result<()> {
+            if nac_core::store::load_managed_orchestrator(&self.inner.store_path, session_id)?
+                .is_some_and(|record| record.status == ManagedOrchestratorStatus::Running)
+            {
+                nac_core::store::suppress_managed_orchestrator_completion(
+                    &self.inner.store_path,
+                    session_id,
+                )?;
+            }
+            if nac_core::store::load_traditional_child(&self.inner.store_path, session_id)?
+                .is_some_and(|record| {
+                    record.status == nac_core::store::TraditionalChildStatus::Running
+                })
+            {
+                nac_core::store::suppress_traditional_child_completion(
+                    &self.inner.store_path,
+                    session_id,
+                )?;
+            }
+            Ok(())
+        };
         if let Some(service) = service.as_ref() {
             if service.active_compaction().is_some() {
                 return Err(anyhow!("session is busy with an active manual compaction"));
             }
             if let Some(active_run) = service.active_run() {
+                // Persist suppression before cancellation can settle the
+                // generation. This does not rewrite its admitted mode.
+                suppress_relationship_completion()?;
                 if let Err(error) = service
                     .connect_client()
                     .request_cancel(&active_run.run_id)
@@ -3004,6 +3036,18 @@ impl SessionManager {
         let _operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         self.require_persisted_operation_session(session_id)?;
+        suppress_relationship_completion()?;
+
+        let orchestrators =
+            nac_core::store::list_managed_orchestrators(&self.inner.store_path, session_id)?;
+        for orchestrator in orchestrators {
+            Box::pin(self.delete_session(&orchestrator.orchestrator_session_id)).await?;
+        }
+        let children =
+            nac_core::store::list_traditional_children(&self.inner.store_path, session_id)?;
+        for child in children {
+            Box::pin(self.delete_session(&child.child_session_id)).await?;
+        }
         let persisted_worktree = sessions::load_session(&self.inner.store_path, session_id)
             .ok()
             .and_then(|snapshot| snapshot.sandbox_spec)
@@ -3025,6 +3069,10 @@ impl SessionManager {
             if let Err(error) = workspace::forget(&target, session_id) {
                 eprintln!("nac: failed to drop workspace revisions: {error:#}");
             }
+        }
+
+        if let Some(service) = service.as_ref() {
+            service.destroy_terminals().await;
         }
 
         // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
@@ -3280,8 +3328,14 @@ impl SessionManager {
         parent_session_id: &str,
         description: &str,
     ) -> Result<String> {
-        let parent_service = self.attach_session(parent_session_id).await?;
-        if parent_service.metadata().behavior != sessions::SessionBehavior::DirectWithOrchestrator {
+        let gate = self.lifecycle_gate(parent_session_id);
+        let _lifecycle = gate.lock().await;
+        let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
+            &self.inner.store_path,
+            parent_session_id,
+        )?;
+        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
+        if parent.behavior != sessions::SessionBehavior::DirectWithOrchestrator {
             return Err(anyhow!(
                 "managed orchestrators require direct-with-orchestrator behavior"
             ));
@@ -3293,7 +3347,6 @@ impl SessionManager {
                 "managed orchestrator sessions cannot launch orchestrators"
             ));
         }
-        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
         let orchestrator_session_id = uuid::Uuid::new_v4().to_string();
         let mut orchestrator = sessions::new_snapshot(
             orchestrator_session_id.clone(),
@@ -3357,14 +3410,43 @@ impl SessionManager {
                 .run_id
                 .as_deref()
                 .ok_or_else(|| anyhow!("running managed orchestrator has no run id"))?;
-            let service = self.attach_session(orchestrator_session_id).await?;
-            if service
-                .active_run()
-                .is_some_and(|active| active.run_id.to_string() == run_id)
-            {
+            let cached = self
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .get(orchestrator_session_id)
+                .cloned();
+            if cached.as_ref().is_some_and(|service| {
+                service
+                    .active_run()
+                    .is_some_and(|active| active.run_id.to_string() == run_id)
+            }) {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
+
+            // A busy operation lease is positive evidence that another
+            // process still owns the generation. Never synthesize an
+            // interruption merely because this process has no active task.
+            let operation_lease = match sessions::SessionOperationLease::try_acquire(
+                &self.inner.store_path,
+                orchestrator_session_id,
+            ) {
+                Ok(lease) => lease,
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                    #[cfg(test)]
+                    self.inner.managed_monitor_peer_observed.notify_one();
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                Err(error) => return Err(anyhow::Error::new(error)),
+            };
+            let gate = self.lifecycle_gate(orchestrator_session_id);
+            let _lifecycle = gate.lock().await;
+            let service = self
+                .attach_current_operation_service_locked(orchestrator_session_id, &operation_lease)
+                .await?;
 
             let (_, events) = service.recent_events(None, DEFAULT_REPLAY_LIMIT);
             let terminal = nac_core::store::load_run_recovery(
@@ -3372,22 +3454,42 @@ impl SessionManager {
                 orchestrator_session_id,
             )?
             .filter(|recovery| recovery.run_id == run_id)
-            .and_then(|recovery| match recovery.status {
-                nac_core::store::RunRecoveryStatus::Interrupted => {
-                    Some(nac_core::store::ManagedOrchestratorTerminal {
-                        status: ManagedOrchestratorStatus::Interrupted,
-                        report: None,
-                        failure: Some("run interrupted by process restart".to_string()),
-                    })
+            .and_then(|recovery| {
+                if let Some(disposition) = recovery.terminal_disposition {
+                    return Some(match disposition {
+                        nac_core::store::RunTerminalDisposition::Completed => {
+                            nac_core::store::ManagedOrchestratorTerminal {
+                                status: ManagedOrchestratorStatus::Completed,
+                                report: None,
+                                failure: None,
+                            }
+                        }
+                        nac_core::store::RunTerminalDisposition::Cancelled => {
+                            nac_core::store::ManagedOrchestratorTerminal {
+                                status: ManagedOrchestratorStatus::Cancelled,
+                                report: None,
+                                failure: None,
+                            }
+                        }
+                    });
                 }
-                nac_core::store::RunRecoveryStatus::Failed => {
-                    Some(nac_core::store::ManagedOrchestratorTerminal {
-                        status: ManagedOrchestratorStatus::Failed,
-                        report: None,
-                        failure: Some("managed orchestrator run failed".to_string()),
-                    })
+                match recovery.status {
+                    nac_core::store::RunRecoveryStatus::Interrupted => {
+                        Some(nac_core::store::ManagedOrchestratorTerminal {
+                            status: ManagedOrchestratorStatus::Interrupted,
+                            report: None,
+                            failure: Some("run interrupted by process restart".to_string()),
+                        })
+                    }
+                    nac_core::store::RunRecoveryStatus::Failed => {
+                        Some(nac_core::store::ManagedOrchestratorTerminal {
+                            status: ManagedOrchestratorStatus::Failed,
+                            report: None,
+                            failure: Some("managed orchestrator run failed".to_string()),
+                        })
+                    }
+                    nac_core::store::RunRecoveryStatus::Active => None,
                 }
-                nac_core::store::RunRecoveryStatus::Active => None,
             })
             .or_else(|| {
                 events.iter().rev().find_map(|envelope| {
@@ -3424,7 +3526,42 @@ impl SessionManager {
                 })
             });
             let terminal = match terminal {
-                Some(terminal) => terminal,
+                Some(mut terminal) => {
+                    if terminal.status == ManagedOrchestratorStatus::Completed
+                        && terminal.report.is_none()
+                    {
+                        terminal.report = events.iter().rev().find_map(|envelope| {
+                            (envelope.run_id.as_ref().map(ToString::to_string).as_deref()
+                                == Some(run_id))
+                            .then_some(&envelope.event)
+                            .and_then(|event| match event {
+                                SessionEvent::RunCompleted { response, .. } => {
+                                    Some(response.clone())
+                                }
+                                _ => None,
+                            })
+                        });
+                        if terminal.report.is_none() {
+                            terminal.report = service
+                                .messages_page(MessagePageRequest {
+                                    before: None,
+                                    limit: 24,
+                                    include_system: false,
+                                })
+                                .await
+                                .ok()
+                                .and_then(|page| {
+                                    page.messages.into_iter().rev().find_map(
+                                        |message| match message {
+                                            Message::Assistant { content, .. } => content,
+                                            _ => None,
+                                        },
+                                    )
+                                });
+                        }
+                    }
+                    terminal
+                }
                 None => {
                     let report = service
                         .messages_page(MessagePageRequest {
@@ -3458,6 +3595,11 @@ impl SessionManager {
                 orchestrator_session_id,
                 run_id,
                 terminal,
+            )?;
+            nac_core::store::clear_settled_run_recovery(
+                &self.inner.store_path,
+                orchestrator_session_id,
+                run_id,
             )?;
             if settlement.newly_settled && settlement.orchestrator.completion_inbox_id.is_some() {
                 let parent_session_id = settlement.orchestrator.parent_session_id.clone();
@@ -3496,20 +3638,26 @@ impl SessionManager {
         description: &str,
     ) -> Result<String> {
         nac_core::traditional_children::validate_general_profile(profile)?;
-        let parent_service = self.attach_session(parent_session_id).await?;
-        let parent_metadata = parent_service.metadata();
-        if parent_metadata.behavior == sessions::SessionBehavior::Orchestrator {
+        let gate = self.lifecycle_gate(parent_session_id);
+        let _lifecycle = gate.lock().await;
+        let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
+            &self.inner.store_path,
+            parent_session_id,
+        )?;
+        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
+        if parent.behavior == sessions::SessionBehavior::Orchestrator {
             return Err(anyhow!(
                 "traditional children are available only to direct parent sessions"
             ));
         }
-        if parent_metadata.sandbox_status != "off" && parent_metadata.workspace_host_path.is_none()
-        {
-            return Err(anyhow!(
-                "traditional children require a host-backed shared workspace for sandboxed sessions"
-            ));
+        if parent.sandbox_spec.is_some() {
+            let parent_service = self.attach_session_locked(parent_session_id, None).await?;
+            if parent_service.metadata().workspace_host_path.is_none() {
+                return Err(anyhow!(
+                    "traditional children require a host-backed shared workspace for sandboxed sessions"
+                ));
+            }
         }
-        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
         if nac_core::store::load_traditional_child(&self.inner.store_path, parent_session_id)?
             .is_some()
         {
@@ -3519,7 +3667,7 @@ impl SessionManager {
         }
         let messages = nac_core::traditional_children::fresh_general_child_messages(
             &parent.messages,
-            &parent_metadata.cwd,
+            &parent.cwd.to_string_lossy(),
             description,
         )?;
         let child_session_id = uuid::Uuid::new_v4().to_string();
@@ -3612,16 +3760,11 @@ impl nac_core::traditional_children::TraditionalChildController
                 ));
             }
             let service = manager.attach_session(&child_session_id).await?;
-            let mut relation = service
+            let relation = service
                 .reconcile_traditional_child_terminal()
                 .await?
                 .unwrap_or(relation);
             if relation.status == nac_core::store::TraditionalChildStatus::Running {
-                relation = nac_core::store::set_traditional_child_execution_mode(
-                    &manager.inner.store_path,
-                    &child_session_id,
-                    request.execution_mode,
-                )?;
                 if service.active_run().is_some() {
                     service
                         .enqueue_direct_input(
@@ -3776,11 +3919,6 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             let service = manager.attach_session(&orchestrator_session_id).await?;
             if relation.status == ManagedOrchestratorStatus::Running {
                 if service.active_run().is_some() {
-                    relation = nac_core::store::set_managed_orchestrator_execution_mode(
-                        &manager.inner.store_path,
-                        &orchestrator_session_id,
-                        request.execution_mode,
-                    )?;
                     operations
                         .steer(&orchestrator_session_id, request.prompt, None)
                         .await?;
@@ -3793,33 +3931,21 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             if relation.status == ManagedOrchestratorStatus::Running {
                 return Err(anyhow!("managed orchestrator is still running"));
             }
-            let submitted = operations
-                .submit_prompt(
+            let submitted = manager
+                .submit_managed_orchestrator_prompt(
                     &orchestrator_session_id,
                     SubmitPromptRequest {
                         prompt: request.prompt,
                     },
+                    request.execution_mode,
                 )
                 .await?;
-            let relation = match nac_core::store::begin_managed_orchestrator_run(
+            let relation = nac_core::store::load_managed_orchestrator(
                 &manager.inner.store_path,
                 &orchestrator_session_id,
-                &submitted.run_id,
-                request.execution_mode,
-            ) {
-                Ok(relation) => relation,
-                Err(error) => {
-                    if let Err(cancel_error) =
-                        manager.cancel_active_run(&orchestrator_session_id).await
-                    {
-                        eprintln!(
-                            "nac: failed to cancel unadmitted orchestrator run {}: {cancel_error:#}",
-                            submitted.run_id
-                        );
-                    }
-                    return Err(error);
-                }
-            };
+            )?
+            .ok_or_else(|| anyhow!("managed orchestrator disappeared after run admission"))?;
+            debug_assert_eq!(relation.run_id.as_deref(), Some(submitted.run_id.as_str()));
             manager
                 .spawn_managed_orchestrator_monitor(orchestrator_session_id, relation.generation);
             Ok(relation)
@@ -8474,6 +8600,22 @@ mod tests {
         root
     }
 
+    #[test]
+    fn managed_monitor_peer_lease_process_helper() {
+        let Some(store_path) = std::env::var_os("NAC_TEST_MANAGED_PEER_STORE") else {
+            return;
+        };
+        let session_id = std::env::var("NAC_TEST_MANAGED_PEER_SESSION").unwrap();
+        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_MANAGED_PEER_READY").unwrap());
+        let _lease = sessions::SessionOperationLease::try_acquire(
+            std::path::Path::new(&store_path),
+            &session_id,
+        )
+        .unwrap();
+        std::fs::write(ready_path, b"ready").unwrap();
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
     fn test_manager(root: &std::path::Path) -> SessionManager {
         SessionManager::new(ServerOptions {
             root_cwd: root.to_path_buf(),
@@ -10209,6 +10351,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn managed_binding_failure_precedes_run_and_prompt_execution() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_binding_before_execution");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-bind-test-key"));
+        seed_editable_session(&root, "orchestrator");
+        let manager = test_manager(&root);
+        let orchestrator = "orchestrator".to_string();
+        let store_path = root.join("store.db");
+
+        let error = manager
+            .submit_managed_orchestrator_prompt(
+                &orchestrator,
+                SubmitPromptRequest {
+                    prompt: "must never execute".to_string(),
+                },
+                ManagedOrchestratorExecutionMode::Background,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "session operation coordination failed");
+        let service = manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .get(&orchestrator)
+            .cloned()
+            .unwrap();
+        assert!(service.active_run().is_none());
+        assert!(
+            nac_core::store::load_run_recovery(&store_path, &orchestrator)
+                .unwrap()
+                .is_none()
+        );
+        assert!(sessions::load_session(&store_path, &orchestrator)
+            .unwrap()
+            .messages
+            .is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn managed_orchestrator_cancel_propagates_and_delivers_once() {
         let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("managed_orchestrator_cancel");
@@ -10237,6 +10423,24 @@ mod tests {
         assert_eq!(started.status(), StatusCode::CREATED);
         let running: ManagedOrchestratorRecord =
             serde_json::from_slice(&response_body(started).await).unwrap();
+        let continued = nac_core::orchestration_control::controller_for(&root.join("store.db"))
+            .unwrap()
+            .start(
+                nac_core::orchestration_control::ManagedOrchestratorStartRequest {
+                    parent_session_id: "delegating".to_string(),
+                    orchestrator_session_id: Some(running.orchestrator_session_id.clone()),
+                    description: "cancel flow".to_string(),
+                    prompt: "additional foreground steering".to_string(),
+                    execution_mode: ManagedOrchestratorExecutionMode::Foreground,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            continued.execution_mode,
+            Some(ManagedOrchestratorExecutionMode::Background),
+            "continuation must not rewrite the admitted generation mode"
+        );
         tokio::task::spawn_blocking(move || {
             assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
         })
@@ -10343,6 +10547,116 @@ mod tests {
         assert_eq!(inbox.len(), 1);
         assert_eq!(relation.status, ManagedOrchestratorStatus::Interrupted);
         assert_eq!(relation.completion_inbox_id, Some(inbox[0].id));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn parent_attachment_settles_canonical_managed_terminal_once_after_restart() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_orchestrator_terminal_restart");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-terminal-restart-key"));
+        let (base_url, requests) =
+            scripted_direct_responses(&["parent acknowledged completed orchestrator"]);
+        seed_direct_with_orchestrator_session_with_base_url(&root, "delegating", base_url);
+        let store_path = root.join("store.db");
+
+        let first = test_manager(&root);
+        let orchestrator = first
+            .create_managed_orchestrator_session("delegating", "finish before restart")
+            .await
+            .unwrap();
+        nac_core::store::begin_managed_orchestrator_run(
+            &store_path,
+            &orchestrator,
+            "terminal-run",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+        let snapshot = sessions::load_session(&store_path, &orchestrator).unwrap();
+        let start_idx = snapshot.messages.len() as u64;
+        let writer = nac_core::store::TranscriptLogWriter::new(&store_path).unwrap();
+        writer
+            .append_run_prompt(
+                &orchestrator,
+                start_idx,
+                &Message::User {
+                    content: "complete durably".to_string(),
+                },
+                "terminal-run",
+            )
+            .unwrap();
+        writer
+            .append(
+                &orchestrator,
+                start_idx + 1,
+                &Message::Assistant {
+                    content: Some("durable orchestrator report".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
+                },
+            )
+            .unwrap();
+        let mut terminal_snapshot = snapshot;
+        let mut update = terminal_snapshot.apply_run_state(sessions::SessionRunState::default());
+        update.finished_run_id = Some("terminal-run".to_string());
+        sessions::save_session_run_state(&store_path, &update).unwrap();
+        assert!(
+            nac_core::store::load_run_recovery(&store_path, &orchestrator)
+                .unwrap()
+                .unwrap()
+                .terminal_disposition
+                .is_some()
+        );
+        drop(first);
+
+        let rebuilt = test_manager(&root);
+        rebuilt.snapshot("delegating").await.unwrap();
+        tokio::task::spawn_blocking(move || {
+            assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let relation =
+                    nac_core::store::load_managed_orchestrator(&store_path, &orchestrator)
+                        .unwrap()
+                        .unwrap();
+                if relation.status == ManagedOrchestratorStatus::Completed
+                    && relation.completion_inbox_id.is_some()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("canonical terminal obligation should settle");
+        rebuilt.snapshot("delegating").await.unwrap();
+        let relation = nac_core::store::load_managed_orchestrator(&store_path, &orchestrator)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            relation.report.as_deref(),
+            Some("durable orchestrator report")
+        );
+        assert!(
+            nac_core::store::load_run_recovery(&store_path, &orchestrator)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            nac_core::store::list_session_inbox(&store_path, "delegating")
+                .unwrap()
+                .len(),
+            1
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -10542,6 +10856,25 @@ mod tests {
             running.status,
             nac_core::store::TraditionalChildStatus::Running
         );
+        let continued = nac_core::traditional_children::controller_for(&root.join("store.db"))
+            .unwrap()
+            .start(
+                nac_core::traditional_children::TraditionalChildStartRequest {
+                    parent_session_id: "direct".to_string(),
+                    child_session_id: Some(running.child_session_id.clone()),
+                    profile: "general".to_string(),
+                    description: "cancel active child".to_string(),
+                    prompt: "additional foreground steering".to_string(),
+                    execution_mode: TraditionalChildExecutionMode::Foreground,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            continued.execution_mode,
+            Some(TraditionalChildExecutionMode::Background),
+            "continuation must not rewrite the admitted generation mode"
+        );
         tokio::task::spawn_blocking(move || {
             assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
         })
@@ -10686,6 +11019,193 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn wrong_parent_relationship_reads_are_opaque_not_found() {
+        let root = temp_root("relationship_ownership_opaque");
+        seed_direct_session(&root, "parent-a");
+        seed_direct_session(&root, "parent-b");
+        seed_direct_with_orchestrator_session_with_base_url(
+            &root,
+            "delegating-a",
+            "https://api.openai.com/v1".to_string(),
+        );
+        seed_direct_with_orchestrator_session_with_base_url(
+            &root,
+            "delegating-b",
+            "https://api.openai.com/v1".to_string(),
+        );
+        let manager = test_manager(&root);
+        let child = manager
+            .create_traditional_child_session("parent-a", "general", "owned child")
+            .await
+            .unwrap();
+        let orchestrator = manager
+            .create_managed_orchestrator_session("delegating-a", "owned orchestrator")
+            .await
+            .unwrap();
+
+        let child_error =
+            ApiError::from(manager.traditional_child("parent-b", &child).unwrap_err());
+        assert_eq!(child_error.status, StatusCode::NOT_FOUND);
+        assert_eq!(child_error.message, "traditional child was not found");
+        assert!(!child_error.message.contains(&child));
+        let child_cancel_error = ApiError::from(
+            manager
+                .cancel_traditional_child("parent-b", &child)
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(child_cancel_error.status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            child_cancel_error.message,
+            "traditional child was not found"
+        );
+        assert!(!child_cancel_error.message.contains(&child));
+
+        let orchestrator_error = ApiError::from(
+            manager
+                .managed_orchestrator("delegating-b", &orchestrator)
+                .unwrap_err(),
+        );
+        assert_eq!(orchestrator_error.status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            orchestrator_error.message,
+            "managed orchestrator was not found"
+        );
+        assert!(!orchestrator_error.message.contains(&orchestrator));
+        let orchestrator_cancel_error = ApiError::from(
+            manager
+                .cancel_managed_orchestrator("delegating-b", &orchestrator)
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(orchestrator_cancel_error.status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            orchestrator_cancel_error.message,
+            "managed orchestrator was not found"
+        );
+        assert!(!orchestrator_cancel_error.message.contains(&orchestrator));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn managed_monitor_treats_peer_lease_as_live() {
+        let root = temp_root("managed_peer_lease_live");
+        seed_direct_with_orchestrator_session_with_base_url(
+            &root,
+            "delegating",
+            "https://api.openai.com/v1".to_string(),
+        );
+        let manager = test_manager(&root);
+        let orchestrator = manager
+            .create_managed_orchestrator_session("delegating", "foreign live run")
+            .await
+            .unwrap();
+        let store_path = root.join("store.db");
+        let relation = nac_core::store::begin_managed_orchestrator_run(
+            &store_path,
+            &orchestrator,
+            "peer-run",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                &orchestrator,
+                0,
+                &Message::User {
+                    content: "peer is working".to_string(),
+                },
+                "peer-run",
+            )
+            .unwrap();
+        let ready_path = root.join("managed-peer-ready");
+        let mut peer = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::managed_monitor_peer_lease_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_TEST_MANAGED_PEER_STORE", &store_path)
+            .env("NAC_TEST_MANAGED_PEER_SESSION", &orchestrator)
+            .env("NAC_TEST_MANAGED_PEER_READY", &ready_path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        for _ in 0..200 {
+            if ready_path.exists() {
+                break;
+            }
+            assert!(
+                peer.try_wait().unwrap().is_none(),
+                "peer helper exited early"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ready_path.exists(), "peer helper never acquired the lease");
+
+        let peer_observed = manager.inner.managed_monitor_peer_observed.notified();
+        let monitor_manager = manager.clone();
+        let monitor_orchestrator = orchestrator.clone();
+        let monitor = tokio::spawn(async move {
+            monitor_manager
+                .monitor_managed_orchestrator(&monitor_orchestrator, relation.generation)
+                .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), peer_observed)
+            .await
+            .expect("monitor must observe the peer-owned operation lease");
+        assert!(!monitor.is_finished());
+        assert_eq!(
+            nac_core::store::load_managed_orchestrator(&store_path, &orchestrator)
+                .unwrap()
+                .unwrap()
+                .status,
+            ManagedOrchestratorStatus::Running
+        );
+        monitor.abort();
+        let _ = monitor.await;
+        peer.kill().unwrap();
+        peer.wait().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn parent_deletion_excludes_late_child_relationship_commit() {
+        let root = temp_root("delete_excludes_child_create");
+        seed_direct_session(&root, "parent");
+        let manager = test_manager(&root);
+        let gate = manager.lifecycle_gate("parent");
+        let blocker = gate.lock().await;
+
+        let delete_manager = manager.clone();
+        let delete = tokio::spawn(async move { delete_manager.delete_session("parent").await });
+        tokio::task::yield_now().await;
+        let create_manager = manager.clone();
+        let create = tokio::spawn(async move {
+            create_manager
+                .create_traditional_child_session("parent", "general", "must not be orphaned")
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!delete.is_finished());
+        assert!(!create.is_finished());
+
+        drop(blocker);
+        delete.await.unwrap().unwrap();
+        let error = create.await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("was not found"), "{error:#}");
+        assert!(sessions::list_sessions(&root.join("store.db"))
+            .unwrap()
+            .into_iter()
+            .all(|session| session.session_id != "parent"));
         let _ = std::fs::remove_dir_all(root);
     }
 

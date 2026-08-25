@@ -62,7 +62,7 @@ impl GoalRuntime {
         }
     }
 
-    fn current_baseline(&self) -> Option<GoalRunBaseline> {
+    pub(crate) fn current_baseline(&self) -> Option<GoalRunBaseline> {
         self.current_run
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

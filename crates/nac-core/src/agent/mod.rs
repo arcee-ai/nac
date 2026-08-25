@@ -255,6 +255,11 @@ pub struct Agent {
     /// delete them from stale in-memory boundaries (shared-store recovery,
     /// issue #146).
     committed_log_len: u64,
+    /// Start index of a direct-inbox append whose blocking transaction has
+    /// been submitted but whose canonical User rows have not yet been adopted
+    /// into `messages`. Tokio task abort cannot cancel that transaction, so
+    /// terminal normalization must reload rather than delete this exact tail.
+    direct_inbox_append_start: Option<u64>,
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
@@ -568,6 +573,7 @@ impl Agent {
             appended_steering_ids: HashSet::new(),
             transcript_log,
             committed_log_len,
+            direct_inbox_append_start: None,
             transcript_recovery_warning: None,
             interrupted_run_recovery: None,
             last_usage: None,
@@ -634,6 +640,10 @@ impl Agent {
 
     pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
         self.tool_runtime.terminal_manager.clone()
+    }
+
+    pub(crate) fn goal_runtime(&self) -> Option<Arc<crate::goals::GoalRuntime>> {
+        self.tool_runtime.goal_runtime.clone()
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
@@ -1511,6 +1521,9 @@ impl Agent {
     /// Both terminal paths treat a normalization error as best-effort: the
     /// next restore re-normalizes the stale tail.
     pub async fn normalize_dangling_tail(&mut self) -> Result<()> {
+        if self.direct_inbox_append_start.take().is_some() {
+            return self.reload_transcript_from_store().await;
+        }
         if self.durable_log_has_rows_past_own_commits().await? {
             return self.reload_transcript_from_store().await;
         }
@@ -1537,7 +1550,12 @@ impl Agent {
     /// path so the chat can retain dispatched thread cards and their persisted
     /// logs while the resulting transcript remains valid provider history.
     pub async fn append_cancellation_marker_preserving_tools(&mut self) -> Result<()> {
-        if self.durable_log_has_rows_past_own_commits().await? {
+        if self.direct_inbox_append_start.take().is_some() {
+            // A direct steer delivery transaction may have committed after
+            // the run task was aborted. Its User row and delivered inbox state
+            // are one durable fact; adopt the row before adding cancellation.
+            self.reload_transcript_from_store().await?;
+        } else if self.durable_log_has_rows_past_own_commits().await? {
             // Shared-store recovery (issue #146): a peer committed rows this
             // agent never saw. Adopt the durable state instead of deleting
             // the peer's committed rows from the stale in-memory length (see
@@ -1913,6 +1931,7 @@ impl Agent {
         // as ordinary transcript appends: cancellation must recognize a row
         // that commits after the async task is aborted as this process's row.
         self.committed_log_len = self.committed_log_len.max(start_idx + 1);
+        self.direct_inbox_append_start = Some(start_idx);
         let records = tokio::task::spawn_blocking(move || {
             writer.append_pending_inbox_steers(&session_id, &run_id, start_idx)
         })
@@ -1921,11 +1940,13 @@ impl Agent {
         let records = match records {
             Ok(records) => records,
             Err(error) => {
+                self.direct_inbox_append_start = None;
                 self.committed_log_len = pre_submission_committed;
                 return Err(error);
             }
         };
         if records.is_empty() {
+            self.direct_inbox_append_start = None;
             self.committed_log_len = pre_submission_committed;
             return Ok(0);
         }
@@ -1934,6 +1955,7 @@ impl Agent {
                 content: record.content.clone(),
             }));
         self.committed_log_len = self.messages.len() as u64;
+        self.direct_inbox_append_start = None;
         self.event_sink
             .emit_transcript_appended(self.messages.len() as u64);
         Ok(records.len())

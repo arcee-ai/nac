@@ -466,6 +466,24 @@ impl SessionClientHandle {
     }
 
     #[allow(clippy::result_large_err)]
+    pub fn try_submit_prepared_managed_orchestrator_prompt_with_lease(
+        &self,
+        prompt: PreparedPrompt,
+        lease: sessions::SessionOperationLease,
+        execution_mode: crate::store::ManagedOrchestratorExecutionMode,
+    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        self.service.try_submit_prompt_inner(
+            Some(self.client_id.clone()),
+            prompt.agent_prompt,
+            Some(lease),
+            RunAdmissionKind {
+                managed_orchestrator_execution_mode: Some(execution_mode),
+                ..RunAdmissionKind::default()
+            },
+        )
+    }
+
+    #[allow(clippy::result_large_err)]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -503,6 +521,7 @@ impl FrontendSnapshotAfterWorkspaceGate {
 #[derive(Clone)]
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
+    goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
     metadata: Arc<SessionMetadata>,
     /// Where git runs for this session's checkout — locally, or on the ssh host
     /// the session is working on. `None` for a sandbox with no mounted working
@@ -590,6 +609,7 @@ struct RunAdmissionKind {
     inbox_item_id: Option<i64>,
     goal_continuation: bool,
     child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
+    managed_orchestrator_execution_mode: Option<crate::store::ManagedOrchestratorExecutionMode>,
 }
 
 struct FinishingRun {
@@ -751,6 +771,7 @@ impl SessionService {
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
         let terminal_manager = run_config.agent.terminal_manager();
+        let goal_runtime = run_config.agent.goal_runtime();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
         // pass; later scans read only the newly appended tail rows.
@@ -761,6 +782,7 @@ impl SessionService {
         };
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
+            goal_runtime,
             metadata: Arc::new(metadata.clone()),
             workspace_git,
             config_version,
@@ -932,6 +954,13 @@ impl SessionService {
         }
     }
 
+    /// Terminates every session-owned terminal, including explicitly retained
+    /// handles. Deletion calls this before removing durable session state so
+    /// external service/client clones cannot keep processes alive.
+    pub async fn destroy_terminals(&self) {
+        self.terminal_manager.remove_all().await;
+    }
+
     pub async fn active_thread_names(&self) -> Vec<String> {
         let mut names = self.active_threads.names();
         names.sort();
@@ -1030,6 +1059,21 @@ impl SessionService {
         self.permission_broker
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("direct permission broker is unavailable"))
+    }
+
+    fn require_direct_goal_behavior(&self) -> Result<()> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        if crate::store::load_traditional_child(&self.metadata.store_path, session_id)?.is_some() {
+            return Err(anyhow::anyhow!(
+                "traditional child sessions cannot own autonomous goals"
+            ));
+        }
+        Ok(())
     }
 
     pub fn list_permission_requests(&self) -> Result<Vec<crate::permissions::PermissionRequest>> {
@@ -1158,7 +1202,7 @@ impl SessionService {
     }
 
     pub fn direct_goal(&self) -> Result<Option<crate::store::SessionGoalRecord>> {
-        self.require_direct_behavior()?;
+        self.require_direct_goal_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -1172,38 +1216,45 @@ impl SessionService {
         objective: &str,
         token_budget: Option<u64>,
     ) -> Result<crate::store::SessionGoalRecord> {
-        self.require_direct_behavior()?;
+        self.require_direct_goal_behavior()?;
         let session_id = self
             .metadata
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let active = self.active_run();
-        let baseline = if let Some(active) = &active {
-            let usage = self
-                .agent
-                .lock()
-                .await
-                .last_usage
-                .clone()
-                .unwrap_or_default();
-            Some(crate::store::GoalRunBaseline {
-                run_id: active.run_id.to_string(),
-                billable_tokens: usage.billable_tokens(),
-                started_at_epoch_ms: now_epoch_ms(),
-                continuation: false,
-            })
-        } else {
-            None
+        // Freeze run identity while capturing the lock-free GoalRuntime usage
+        // snapshot and committing the goal. Run finish/admission use this same
+        // guard, so a stale run id cannot be bound and then suppress wakeup.
+        let (goal, active_run_id) = {
+            let active = self.lock_active_operation();
+            let active_run_id = match active.as_ref() {
+                Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
+                    Some(run.snapshot.run_id.clone())
+                }
+                _ => None,
+            };
+            let baseline = active_run_id.as_ref().map(|run_id| {
+                self.goal_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.current_baseline())
+                    .filter(|baseline| baseline.run_id == run_id.as_str())
+                    .unwrap_or_else(|| crate::store::GoalRunBaseline {
+                        run_id: run_id.to_string(),
+                        billable_tokens: 0,
+                        started_at_epoch_ms: now_epoch_ms(),
+                        continuation: false,
+                    })
+            });
+            let goal = crate::store::create_session_goal(
+                &self.metadata.store_path,
+                session_id,
+                objective,
+                token_budget,
+                baseline.as_ref(),
+            )?;
+            (goal, active_run_id)
         };
-        let goal = crate::store::create_session_goal(
-            &self.metadata.store_path,
-            session_id,
-            objective,
-            token_budget,
-            baseline.as_ref(),
-        )?;
-        if active.is_none() {
+        if active_run_id.is_none() {
             self.start_next_direct_inbox_item().await?;
         }
         Ok(goal)
@@ -1215,7 +1266,7 @@ impl SessionService {
         expected_version: i64,
         update: crate::store::UserGoalUpdate,
     ) -> Result<crate::store::SessionGoalRecord> {
-        self.require_direct_behavior()?;
+        self.require_direct_goal_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -1235,7 +1286,7 @@ impl SessionService {
     }
 
     pub fn clear_direct_goal(&self, goal_id: &str, expected_version: i64) -> Result<()> {
-        self.require_direct_behavior()?;
+        self.require_direct_goal_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -1283,9 +1334,10 @@ impl SessionService {
                     None,
                     item.content,
                     Some(lease),
-                    Some(item.id),
-                    false,
-                    None,
+                    RunAdmissionKind {
+                        inbox_item_id: Some(item.id),
+                        ..RunAdmissionKind::default()
+                    },
                 )
                 .map(Some)
                 .map_err(anyhow::Error::new);
@@ -1299,9 +1351,10 @@ impl SessionService {
             None,
             goal_continuation_prompt(&goal),
             Some(lease),
-            None,
-            true,
-            None,
+            RunAdmissionKind {
+                goal_continuation: true,
+                ..RunAdmissionKind::default()
+            },
         )
         .map(Some)
         .map_err(anyhow::Error::new)
@@ -2220,7 +2273,7 @@ impl SessionService {
             ));
         }
 
-        let (transcript_scan, transcript_warning) = {
+        let (transcript_scan, transcript_warning, terminal_report) = {
             let mut agent = self.agent.lock().await;
             if let Some(refreshed_blob) = agent
                 .restore_messages_merging_log_tail(snapshot.messages.clone(), Some(operation_lease))
@@ -2231,6 +2284,7 @@ impl SessionService {
             (
                 TranscriptScanCache::from_transcript(&agent.messages),
                 agent.transcript_recovery_warning().map(str::to_owned),
+                latest_terminal_assistant_report(&agent.messages),
             )
         };
         *self.session_snapshot.lock().await = Some(snapshot);
@@ -2247,21 +2301,49 @@ impl SessionService {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = reconciled_run_id;
 
-        if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = &recovery {
-            self.event_bus.emit_with_context(
-                SessionEvent::RunFailed {
-                    message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
-                },
-                Some(SessionRunId::from_stored(run_id.clone())),
-                None,
-            );
-            self.settle_traditional_child_run(
-                &SessionRunId::from_stored(run_id.clone()),
-                crate::store::TraditionalChildStatus::Interrupted,
-                None,
-                Some(INTERRUPTED_RUN_WARNING.to_string()),
-            )
-            .await;
+        match &recovery {
+            crate::store::ActiveRunReconciliation::CanonicalTerminal => {
+                if let Some(record) =
+                    crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
+                {
+                    if let Some(disposition) = record.terminal_disposition {
+                        let status = match disposition {
+                            crate::store::RunTerminalDisposition::Completed => {
+                                crate::store::TraditionalChildStatus::Completed
+                            }
+                            crate::store::RunTerminalDisposition::Cancelled => {
+                                crate::store::TraditionalChildStatus::Cancelled
+                            }
+                        };
+                        self.settle_traditional_child_run(
+                            &SessionRunId::from_stored(record.run_id),
+                            status,
+                            (disposition == crate::store::RunTerminalDisposition::Completed)
+                                .then(|| terminal_report.clone())
+                                .flatten(),
+                            None,
+                        )
+                        .await;
+                    }
+                }
+            }
+            crate::store::ActiveRunReconciliation::Interrupted { run_id } => {
+                self.event_bus.emit_with_context(
+                    SessionEvent::RunFailed {
+                        message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                    },
+                    Some(SessionRunId::from_stored(run_id.clone())),
+                    None,
+                );
+                self.settle_traditional_child_run(
+                    &SessionRunId::from_stored(run_id.clone()),
+                    crate::store::TraditionalChildStatus::Interrupted,
+                    None,
+                    Some(INTERRUPTED_RUN_WARNING.to_string()),
+                )
+                .await;
+            }
+            crate::store::ActiveRunReconciliation::None => {}
         }
         Ok(recovery)
     }
@@ -2290,22 +2372,46 @@ impl SessionService {
         if recovery.run_id != child.run_id.as_deref().unwrap_or_default() {
             return Ok(Some(child));
         }
-        let (status, failure) = match recovery.status {
-            crate::store::RunRecoveryStatus::Active => return Ok(Some(child)),
-            crate::store::RunRecoveryStatus::Interrupted => (
-                crate::store::TraditionalChildStatus::Interrupted,
-                INTERRUPTED_RUN_WARNING.to_string(),
-            ),
-            crate::store::RunRecoveryStatus::Failed => (
-                crate::store::TraditionalChildStatus::Failed,
-                FAILED_RUN_WARNING.to_string(),
-            ),
+        let (status, report, failure) = if let Some(disposition) = recovery.terminal_disposition {
+            (
+                match disposition {
+                    crate::store::RunTerminalDisposition::Completed => {
+                        crate::store::TraditionalChildStatus::Completed
+                    }
+                    crate::store::RunTerminalDisposition::Cancelled => {
+                        crate::store::TraditionalChildStatus::Cancelled
+                    }
+                },
+                if disposition == crate::store::RunTerminalDisposition::Completed {
+                    self.messages_snapshot()
+                        .await
+                        .ok()
+                        .and_then(|messages| latest_terminal_assistant_report(&messages))
+                } else {
+                    None
+                },
+                String::new(),
+            )
+        } else {
+            match recovery.status {
+                crate::store::RunRecoveryStatus::Active => return Ok(Some(child)),
+                crate::store::RunRecoveryStatus::Interrupted => (
+                    crate::store::TraditionalChildStatus::Interrupted,
+                    None,
+                    INTERRUPTED_RUN_WARNING.to_string(),
+                ),
+                crate::store::RunRecoveryStatus::Failed => (
+                    crate::store::TraditionalChildStatus::Failed,
+                    None,
+                    FAILED_RUN_WARNING.to_string(),
+                ),
+            }
         };
         self.settle_traditional_child_run(
             &SessionRunId::from_stored(recovery.run_id),
             status,
-            None,
-            Some(failure),
+            report,
+            (!failure.is_empty()).then_some(failure),
         )
         .await;
         crate::store::load_traditional_child(&self.metadata.store_path, session_id)
@@ -2471,7 +2577,7 @@ impl SessionService {
         &self,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(None, expanded_prompt, None, None, false, None)
+        self.try_submit_prompt_inner(None, expanded_prompt, None, RunAdmissionKind::default())
     }
 
     #[allow(clippy::result_large_err)]
@@ -2480,7 +2586,12 @@ impl SessionService {
         client_id: SessionClientId,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(Some(client_id), expanded_prompt, None, None, false, None)
+        self.try_submit_prompt_inner(
+            Some(client_id),
+            expanded_prompt,
+            None,
+            RunAdmissionKind::default(),
+        )
     }
 
     #[allow(clippy::result_large_err)]
@@ -2494,9 +2605,7 @@ impl SessionService {
             Some(client_id),
             expanded_prompt,
             Some(lease),
-            None,
-            false,
-            None,
+            RunAdmissionKind::default(),
         )
     }
 
@@ -2510,9 +2619,10 @@ impl SessionService {
             None,
             expanded_prompt,
             None,
-            None,
-            false,
-            Some(execution_mode),
+            RunAdmissionKind {
+                child_execution_mode: Some(execution_mode),
+                ..RunAdmissionKind::default()
+            },
         )
     }
 
@@ -2669,18 +2779,10 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
-        inbox_item_id: Option<i64>,
-        goal_continuation: bool,
-        child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
+        admission: RunAdmissionKind,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        let active_run = self.try_begin_run_with_lease(
-            client_id,
-            &expanded_prompt,
-            operation_lease,
-            inbox_item_id,
-            goal_continuation,
-            child_execution_mode,
-        )?;
+        let active_run =
+            self.try_begin_run_with_lease(client_id, &expanded_prompt, operation_lease, admission)?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
@@ -2773,21 +2875,9 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
-        inbox_item_id: Option<i64>,
-        goal_continuation: bool,
-        child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
+        admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        self.try_begin_run_inner(
-            client_id,
-            expanded_prompt,
-            supplied_lease,
-            true,
-            RunAdmissionKind {
-                inbox_item_id,
-                goal_continuation,
-                child_execution_mode,
-            },
-        )
+        self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true, admission)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2803,6 +2893,7 @@ impl SessionService {
             inbox_item_id,
             goal_continuation,
             child_execution_mode,
+            managed_orchestrator_execution_mode,
         } = admission;
         let mut guard = self.lock_active_operation();
         match guard.as_ref() {
@@ -2928,7 +3019,24 @@ impl SessionService {
         };
         let (prompt_commit, _prompt_commit_receiver) =
             watch::channel(RunPromptCommitStatus::Pending);
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
+            if let (Some(session_id), Some(execution_mode)) = (
+                self.metadata.session_id.as_deref(),
+                managed_orchestrator_execution_mode,
+            ) {
+                crate::store::begin_managed_orchestrator_run(
+                    &self.metadata.store_path,
+                    session_id,
+                    active_run.run_id.as_str(),
+                    execution_mode,
+                )
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to bind managed orchestrator generation to run: {error:#}"
+                    )),
+                })?;
+            }
+        } else {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
                 if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
                     .map_err(|error| SessionSubmitError::Coordination {
@@ -3184,8 +3292,27 @@ impl SessionService {
                         }
                     });
                 }
+                if let Err(error) = crate::store::clear_settled_run_recovery(
+                    &self.metadata.store_path,
+                    session_id,
+                    run_id.as_str(),
+                ) {
+                    eprintln!(
+                        "nac: failed to clear settled child recovery for run {run_id}: {error:#}"
+                    );
+                }
             }
-            Ok(_) => {}
+            Ok(_) => {
+                if let Err(error) = crate::store::clear_settled_run_recovery(
+                    &self.metadata.store_path,
+                    session_id,
+                    run_id.as_str(),
+                ) {
+                    eprintln!(
+                        "nac: failed to clear settled child recovery for run {run_id}: {error:#}"
+                    );
+                }
+            }
             Err(error) => {
                 eprintln!("nac: failed to settle traditional child run {run_id}: {error:#}");
             }
@@ -3739,6 +3866,22 @@ fn prompt_preview(value: &str, max_chars: usize) -> String {
     }
     preview.push_str("...");
     preview
+}
+
+fn latest_terminal_assistant_report(messages: &[Message]) -> Option<String> {
+    messages.iter().rev().find_map(|message| match message {
+        Message::Assistant {
+            content: Some(content),
+            tool_calls,
+            ..
+        } if content != crate::agent::RUN_CANCELLED_MARKER
+            && !content.trim().is_empty()
+            && tool_calls.as_ref().is_none_or(Vec::is_empty) =>
+        {
+            Some(content.clone())
+        }
+        _ => None,
+    })
 }
 
 fn extract_report_section(report: &str, heading: &str) -> Option<String> {
@@ -5550,6 +5693,210 @@ pub(super) mod tests {
         assert_eq!(paused.status, crate::store::GoalStatus::Paused);
         assert!(paused.accounting_run_id.is_none());
         assert!(!service.has_active_operation());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn mid_run_goal_creation_does_not_wait_for_the_agent_loop_mutex() {
+        let session_id = "session-direct-goal-mid-run";
+        let (parts, store_path) = test_direct_active_service(
+            "direct_goal_mid_run",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        let service = parts.service;
+        let active = service.try_begin_run(None, "ordinary user work").unwrap();
+        let _agent_loop = service.agent.lock().await;
+
+        let goal = tokio::time::timeout(
+            Duration::from_millis(100),
+            service.create_direct_goal("capture the live run", None),
+        )
+        .await
+        .expect("goal creation must not wait for the model-loop mutex")
+        .unwrap();
+        assert_eq!(
+            goal.accounting_run_id.as_deref(),
+            Some(active.run_id.as_str())
+        );
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn traditional_child_cannot_create_an_autonomous_goal() {
+        let session_id = "session-direct-child-goal";
+        let (parts, store_path) = test_direct_active_service(
+            "direct_child_goal",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        crate::store::insert_test_session(&store_path, "parent");
+        let connection = crate::store::open_runtime_connection(&store_path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'parent'",
+                [],
+            )
+            .unwrap();
+        crate::store::create_traditional_child_relationship(
+            &store_path,
+            "parent",
+            session_id,
+            crate::store::GENERAL_CHILD_PROFILE,
+            "bounded child",
+        )
+        .unwrap();
+
+        let error = parts
+            .service
+            .create_direct_goal("must be rejected", None)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("cannot own autonomous goals"));
+        assert!(crate::store::load_session_goal(&store_path, session_id)
+            .unwrap()
+            .is_none());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn deletion_resource_teardown_terminates_retained_terminals() {
+        let session_id = "session-delete-retained-terminal";
+        let (parts, store_path) = test_direct_active_service(
+            "delete_retained_terminal",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        let service = parts.service;
+        let external_service = service.clone();
+        let _external_client = external_service.connect_client();
+        let terminal_name = service.terminal_manager.next_session_name();
+        let backend =
+            crate::sandbox::execution_backend_from_sandbox(None, &std::env::current_dir().unwrap());
+        service
+            .terminal_manager
+            .create(terminal_name.clone(), "sleep 30", None, 120, 40, &backend)
+            .await
+            .unwrap();
+        service
+            .terminal_manager
+            .retain(&terminal_name)
+            .await
+            .unwrap();
+        assert!(service.has_retained_terminals());
+
+        service.destroy_terminals().await;
+        assert!(external_service
+            .terminal_manager
+            .get(&terminal_name)
+            .await
+            .is_none());
+        assert!(!external_service.has_retained_terminals());
+
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn child_terminal_crash_window_recovers_report_and_delivers_once() {
+        let session_id = "session-child-terminal-recovery";
+        let (parts, store_path) = test_direct_active_service(
+            "child_terminal_recovery",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        crate::store::insert_test_session(&store_path, "parent");
+        crate::store::open_runtime_connection(&store_path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'parent'",
+                [],
+            )
+            .unwrap();
+        crate::store::create_traditional_child_relationship(
+            &store_path,
+            "parent",
+            session_id,
+            crate::store::GENERAL_CHILD_PROFILE,
+            "recover completed child",
+        )
+        .unwrap();
+        crate::store::begin_traditional_child_run(
+            &store_path,
+            session_id,
+            "run-terminal",
+            crate::store::TraditionalChildExecutionMode::Background,
+        )
+        .unwrap();
+        let start_idx = sessions::load_session(&store_path, session_id)
+            .unwrap()
+            .messages
+            .len() as u64;
+        let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+        writer
+            .append_run_prompt(
+                session_id,
+                start_idx,
+                &Message::User {
+                    content: "finish before the crash".to_string(),
+                },
+                "run-terminal",
+            )
+            .unwrap();
+        writer
+            .append(
+                session_id,
+                start_idx + 1,
+                &Message::Assistant {
+                    content: Some("durable child report".to_string()),
+                    reasoning_text: None,
+                    reasoning_details: None,
+                    tool_calls: None,
+                    duration_ms: None,
+                    model_origin: None,
+                    reasoning_field: None,
+                },
+            )
+            .unwrap();
+        let mut connection = crate::store::open_runtime_connection(&store_path).unwrap();
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        crate::store::clear_active_run(&transaction, session_id, "run-terminal").unwrap();
+        transaction.commit().unwrap();
+
+        let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id).unwrap();
+        assert_eq!(
+            parts
+                .service
+                .reconcile_durable_run_recovery(&lease)
+                .await
+                .unwrap(),
+            crate::store::ActiveRunReconciliation::CanonicalTerminal
+        );
+        let child = crate::store::load_traditional_child(&store_path, session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            child.status,
+            crate::store::TraditionalChildStatus::Completed
+        );
+        assert_eq!(child.report.as_deref(), Some("durable child report"));
+        assert!(crate::store::load_run_recovery(&store_path, session_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            crate::store::list_session_inbox(&store_path, "parent")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(!parts
+            .service
+            .has_unreconciled_durable_run_recovery()
+            .unwrap());
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }

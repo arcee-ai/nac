@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 22;
+const STORE_SCHEMA_VERSION: i64 = 23;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -375,7 +375,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -460,11 +460,31 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     create_projects_tables(&transaction)?;
     create_ssh_configurations_table(&transaction)?;
     create_session_run_recovery_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "session_run_recovery",
+        "terminal_disposition",
+        "TEXT CHECK (terminal_disposition IN ('completed', 'cancelled'))",
+    )?;
     create_session_inbox_table(&transaction)?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
     create_traditional_children_table(&transaction)?;
     create_managed_orchestrators_table(&transaction)?;
+    // Execution mode records how a generation was admitted and must remain
+    // immutable. Deletion suppresses completion delivery independently.
+    ensure_column(
+        &transaction,
+        "traditional_children",
+        "completion_suppressed",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
+    )?;
+    ensure_column(
+        &transaction,
+        "managed_orchestrators",
+        "completion_suppressed",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
+    )?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -973,7 +993,8 @@ fn create_ssh_configurations_table(conn: &Connection) -> Result<()> {
 }
 /// One content-free recovery obligation per session. The submitted transcript
 /// row remains the unique source for the prompt; this table only says which
-/// run owns it and whether that run is active, interrupted, or failed.
+/// run owns it and whether that run is active, interrupted, failed, or has a
+/// canonical terminal result whose relationship settlement is still owed.
 fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_run_recovery (
@@ -982,7 +1003,9 @@ fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
              run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
              submitted_message_id INTEGER NOT NULL
                  REFERENCES thread_events(id) ON DELETE CASCADE,
-             status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed'))
+             status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed')),
+             terminal_disposition TEXT
+                 CHECK (terminal_disposition IN ('completed', 'cancelled'))
          );",
     )?;
     Ok(())
@@ -1117,6 +1140,8 @@ fn create_traditional_children_table(conn: &Connection) -> Result<()> {
              verification_summary TEXT,
              completion_inbox_id INTEGER
                  REFERENCES session_inbox(id) ON DELETE SET NULL,
+             completion_suppressed INTEGER NOT NULL DEFAULT 0
+                 CHECK (completion_suppressed IN (0, 1)),
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
@@ -1168,6 +1193,8 @@ fn create_managed_orchestrators_table(conn: &Connection) -> Result<()> {
              failure TEXT,
              completion_inbox_id INTEGER
                  REFERENCES session_inbox(id) ON DELETE SET NULL,
+             completion_suppressed INTEGER NOT NULL DEFAULT 0
+                 CHECK (completion_suppressed IN (0, 1)),
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
