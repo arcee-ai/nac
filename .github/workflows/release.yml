@@ -138,6 +138,10 @@ jobs:
         working-directory: crates/nac-server/web
         run: npm ci
 
+      - name: Run frontend tests
+        working-directory: crates/nac-server/web
+        run: npm test
+
       - name: Typecheck the web app
         working-directory: crates/nac-server/web
         run: npm run typecheck
@@ -157,6 +161,23 @@ jobs:
 
       - name: Run nac-server tests
         run: cargo test -p nac-server --locked
+
+      - name: Install Playwright Chromium
+        working-directory: crates/nac-server/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run production-embedded browser tests
+        env:
+          NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
+        run: make test-e2e
+
+      - name: Upload browser test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nac-web-playwright
+          path: crates/nac-server/web/test-results
+          if-no-files-found: ignore
 
       - name: Smoke exact prerelease consent and installation
         env:

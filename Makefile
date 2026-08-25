@@ -1,4 +1,4 @@
-.PHONY: all build dev release install ci test test-rust test-assets check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all build dev demo release install ci test test-rust test-web test-assets test-e2e test-durability check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -55,6 +55,11 @@ dev:
 		"$$BROWSER_OPEN" "$$DEV_URL" || exit $$?; \
 		wait "$$server_pid"
 
+## Rebuild the committed production bundle, then run the real embedded app
+demo:
+	npm --prefix $(WEB_DIR) run build
+	$(MAKE) dev
+
 ## Build the nac-web binary (release)
 release:
 	$(CARGO) build --release --locked -p $(PKG) --bin $(BIN)
@@ -66,11 +71,15 @@ install:
 ## Run the same formatting, lint, and test gates expected in CI
 ci: format-check lint test
 
-## Run workspace Rust tests and web asset checks
-test: test-rust test-assets
+## Run workspace Rust tests, frontend tests, and web asset checks
+test: test-rust test-web test-assets
 
 test-rust:
 	$(CARGO) test --workspace --locked
+
+## Run frontend unit and component tests
+test-web:
+	npm --prefix $(WEB_DIR) test
 
 # Mirrors the release workflow: the bundle under assets/dist is committed, so a
 # stale one has to fail here rather than in CI.
@@ -83,6 +92,23 @@ test-assets:
 		git status --porcelain -- crates/$(PKG)/assets/dist; \
 		exit 1; \
 	fi
+
+## Run production-embedded Playwright tests with an isolated scripted provider
+test-e2e:
+	npm --prefix $(WEB_DIR) run build
+	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
+	NAC_E2E_BINARY="$(CURDIR)/target/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e
+
+## Run focused deterministic lifecycle and crash-window regressions
+test-durability:
+	$(CARGO) test --locked -p nac-core cancellation_adopts_a_committed_single_direct_steer_after_async_abort
+	$(CARGO) test --locked -p nac-core canonical_terminal_recovery_is_retained_until_relationship_settlement
+	$(CARGO) test --locked -p nac-core child_terminal_crash_window_recovers_report_and_delivers_once
+	$(CARGO) test --locked -p nac-server parent_deletion_excludes_late_child_relationship_commit
+	$(CARGO) test --locked -p nac-server managed_monitor_treats_peer_lease_as_live
+	$(CARGO) test --locked -p nac-server managed_binding_failure_precedes_run_and_prompt_execution
+	$(CARGO) test --locked -p nac-server parent_attachment_settles_canonical_managed_terminal_once_after_restart
+	$(CARGO) test --locked -p nac-server wrong_parent_relationship_reads_are_opaque_not_found
 
 ## Type-check the workspace without producing binaries
 check:
@@ -136,12 +162,16 @@ help:
 		'Targets:' \
 		'  build        Build nac-web (debug) [default]' \
 		'  dev          Build and run nac-web, then open it in the default browser' \
+		'  demo         Rebuild production assets, then run the embedded app' \
 		'  release      Build nac-web (release)' \
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  ci           Run formatting, lint, and test gates' \
-		'  test         Run Rust tests and web asset checks' \
+		'  test         Run Rust/frontend tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
+		'  test-web     Run frontend unit and component tests' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
+		'  test-e2e     Run production-embedded Playwright tests' \
+		'  test-durability Run focused lifecycle/crash-window regressions' \
 		'  check        Run cargo check --workspace --locked' \
 		'  lint         Lint frontend and production Rust targets' \
 		'  fix          Apply safe Rust lint fixes and format Rust sources' \

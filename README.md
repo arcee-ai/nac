@@ -94,4 +94,16 @@ curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall
 
 Pull requests are welcome. A CLA-signing bot checks every PR against arcee-ai's [CLA](https://github.com/arcee-ai/mergekit/blob/main/CLA.md); comment `I have read the CLA Document and I hereby sign the CLA` on your PR to sign it (or `recheck` to re-run the check).
 
+For production-equivalent local development, run `make demo`. It rebuilds the
+frontend bundle, compiles the real `nac-web` binary with those embedded assets,
+and opens the dashboard; use Ctrl-C and rerun it after source changes. The
+existing `make dev` target remains available when the committed bundle is
+already current.
+
+The local verification lanes are `make test-web` for frontend unit/component
+tests, `make test-e2e` for isolated real-browser tests against the embedded
+server and a credential-free scripted model, and `make test-durability` for the
+focused lifecycle/crash-window regressions. Install the E2E browser once with
+`npm --prefix crates/nac-server/web exec -- playwright install chromium`.
+
 nac is licensed under [Apache 2.0](LICENSE).

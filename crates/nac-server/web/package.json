@@ -11,6 +11,7 @@
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "sync-file-icons": "node scripts/sync-file-icons.mjs",
     "preview": "vite preview"
   },
@@ -32,6 +33,7 @@
     "@eslint/js": "^10.0.1",
     "@locator/babel-jsx": "^0.5.1",
     "@locator/runtime": "^0.5.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query-devtools": "^5.101.4",
     "@testing-library/react": "^16.3.2",

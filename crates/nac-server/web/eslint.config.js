@@ -28,4 +28,13 @@ export default tseslint.config([
     files: ["src/app/atoms/**", "src/app/providers/**"],
     rules: { "react-refresh/only-export-components": "off" },
   },
+  {
+    files: ["e2e/**/*.{ts,tsx}", "playwright.config.ts"],
+    languageOptions: { globals: globals.node },
+    rules: {
+      "no-empty-pattern": "off",
+      "react-hooks/rules-of-hooks": "off",
+      "react-refresh/only-export-components": "off",
+    },
+  },
 ]);
