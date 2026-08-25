@@ -384,6 +384,10 @@ pub struct ToolRuntime {
     /// is reserved for native/test callers that intentionally invoke the
     /// global operation boundary without a model-visible snapshot.
     pub allowed_tools: Option<Arc<std::collections::HashSet<String>>>,
+    /// Present only for persistent direct primaries after their session
+    /// service attaches. Workers and the existing orchestrator retain their
+    /// established allow-through behavior.
+    pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
 }
 
 impl ToolRuntime {
@@ -439,10 +443,13 @@ impl kernel::NativeTool for ReadTool {
             .map_err(|error| {
                 ToolResult::text(format!("Error: invalid read path: {error}"), true)
             })?;
-        Ok(vec![kernel::PermissionResource::new(
+        Ok(crate::permissions::file_resources(
             "read",
-            path.display().to_string(),
-        )])
+            path,
+            services.runtime.backend.as_ref(),
+            &services.runtime.store_path,
+            false,
+        ))
     }
 
     fn execute<'a>(
@@ -504,10 +511,10 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
 
     fn permission_resources(
         &self,
-        _input: &Self::Input,
-        _services: kernel::ToolServices<'_>,
+        input: &Self::Input,
+        services: kernel::ToolServices<'_>,
     ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
-        Ok(Vec::new())
+        legacy_permission_resources(KIND, input, services.runtime)
     }
 
     fn execute<'a>(
@@ -528,6 +535,100 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
                 _ => unreachable!("unknown built-in direct tool kind"),
             }
         })
+    }
+}
+
+fn legacy_permission_resources(
+    kind: u8,
+    input: &Value,
+    runtime: &ToolRuntime,
+) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+    fn invalid(message: impl Into<String>) -> ToolResult {
+        ToolResult::text(format!("Error: {}", message.into()), true)
+    }
+    fn string<'a>(input: &'a Value, key: &str) -> Result<&'a str, ToolResult> {
+        input
+            .get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid(format!("'{key}' argument must be a string")))
+    }
+    fn resolved_file(
+        action: &str,
+        path: &str,
+        runtime: &ToolRuntime,
+        mutating: bool,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        let path = runtime
+            .backend
+            .resolve_path(path)
+            .map_err(|error| invalid(format!("invalid {action} path: {error}")))?;
+        Ok(crate::permissions::file_resources(
+            action,
+            path,
+            runtime.backend.as_ref(),
+            &runtime.store_path,
+            mutating,
+        ))
+    }
+
+    match kind {
+        1 | 2 => resolved_file("edit", string(input, "path")?, runtime, true),
+        3 => {
+            let root = match input.get("root") {
+                None => ".",
+                Some(Value::String(root)) => root,
+                Some(_) => return Err(invalid("'root' argument must be a string")),
+            };
+            resolved_file("glob", root, runtime, false)
+        }
+        4 => {
+            let roots = match input.get("roots") {
+                None => vec!["."],
+                Some(Value::Array(roots)) if !roots.is_empty() => roots
+                    .iter()
+                    .map(|root| {
+                        root.as_str()
+                            .ok_or_else(|| invalid("'roots' must contain only strings"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                Some(Value::Array(_)) => {
+                    return Err(invalid("'roots' must contain at least one path"));
+                }
+                Some(_) => return Err(invalid("'roots' argument must be an array of strings")),
+            };
+            roots
+                .into_iter()
+                .map(|root| resolved_file("grep", root, runtime, false))
+                .collect::<Result<Vec<_>, _>>()
+                .map(|resources| resources.into_iter().flatten().collect())
+        }
+        5 => {
+            let command = string(input, "cmd")?;
+            let requested = match input.get("workdir") {
+                None => None,
+                Some(Value::String(workdir)) => Some(workdir.as_str()),
+                Some(_) => return Err(invalid("'workdir' argument must be a string")),
+            };
+            let cwd = runtime
+                .backend
+                .resolve_terminal_cwd(requested)
+                .map_err(|error| invalid(format!("invalid command working directory: {error}")))?
+                .unwrap_or_else(|| runtime.backend.default_terminal_cwd());
+            Ok(crate::permissions::shell_resources(
+                command,
+                &cwd,
+                runtime.backend.as_ref(),
+            ))
+        }
+        6 => Ok(vec![kernel::PermissionResource::new(
+            "terminal",
+            string(input, "session_id")?,
+        )]),
+        7 => Ok(vec![kernel::PermissionResource::new(
+            "command_output",
+            string(input, "output_id")?,
+        )]),
+        _ => unreachable!("unknown built-in direct tool kind"),
     }
 }
 
@@ -843,11 +944,74 @@ mod discovery_tool_definition_tests {
             &[kernel::PermissionResource::new(
                 "read",
                 directory.join("fixture.txt").display().to_string()
-            )]
+            )
+            .with_save_resource(directory.join("fixture.txt").display().to_string())]
         );
         let dynamic = prepared.invoke(services, &context).await;
         assert!(!dynamic.is_error, "{}", dynamic.content);
         assert!(dynamic.content.contains("native kernel"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn prepared_builtin_calls_project_validated_correlated_permission_resources() {
+        let directory =
+            std::env::temp_dir().join(format!("nac-kernel-resources-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = directory.clone();
+        runtime.store_path = directory.join("store.db");
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &directory);
+        let client = crate::model::ModelClient::new_for_test();
+        let services = kernel::ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+        let registry = worker_tool_registry(false).unwrap();
+        let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+
+        let write = snapshot
+            .prepare(
+                "write",
+                serde_json::json!({
+                    "path":".git/config",
+                    "content":"unsafe",
+                    "expected_revision":null
+                }),
+                services,
+            )
+            .unwrap();
+        assert_eq!(write.permission_resources()[0].action, "edit");
+        assert!(write.permission_resources()[0].hard_denial.is_some());
+
+        let shell = snapshot
+            .prepare(
+                "exec_command",
+                serde_json::json!({"cmd":"git status --short && cargo test -p nac-core"}),
+                services,
+            )
+            .unwrap();
+        assert_eq!(
+            shell
+                .permission_resources()
+                .iter()
+                .map(|resource| resource.resource.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "command:[git][status][--short]",
+                "command:[cargo][test][-p][nac-core]",
+            ]
+        );
+
+        let invalid = snapshot
+            .prepare(
+                "glob",
+                serde_json::json!({"pattern":"*", "root": 7}),
+                services,
+            )
+            .err()
+            .expect("invalid permission-relevant root must fail before authorization");
+        assert!(invalid.is_error);
         let _ = std::fs::remove_dir_all(directory);
     }
 }
@@ -880,5 +1044,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         light_client: None,
         allowed_tools: None,
+        permission_broker: None,
     }
 }

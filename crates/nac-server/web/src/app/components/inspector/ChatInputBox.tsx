@@ -17,6 +17,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
+import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { SshBadge } from "@/app/components/SshBadge";
 import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
@@ -977,6 +978,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
           {/* A phone's settings glyph lives in the pill instead. */}
           {isMobile ? null : settingsButton}
+
+          <PermissionControls sessionId={sessionId} behavior={entry?.summary.behavior ?? null} />
 
           {/* The model name is the first thing a narrow column gives up; the
               same switch lives in the session settings the gear opens. */}

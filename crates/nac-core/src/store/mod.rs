@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
+mod permission_grants;
 mod projects;
 mod render;
 mod run_recovery;
@@ -21,6 +22,7 @@ mod worksets;
 mod workspace_revisions;
 
 pub use model_configurations::*;
+pub use permission_grants::*;
 pub use projects::*;
 pub use render::*;
 pub(crate) use run_recovery::*;

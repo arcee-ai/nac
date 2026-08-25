@@ -42,8 +42,9 @@ Non-negotiable invariants:
   passed on 2026-08-24. Socket-binding `Operation not permitted` failures from
   a confined direct `make test` are environmental, not inherited regressions.
 - The native tool kernel, immutable behavior foundation, persistent direct
-  primary, durable inbox, and behavior-specific compaction are committed. The
-  retained-terminal lifecycle is verified and ready for its checkpoint commit.
+  primary, durable inbox, behavior-specific compaction, and retained-terminal
+  lifecycle are committed. The direct permission/safety vertical is fully
+  verified and ready for its checkpoint commit.
 
 ## Ordered milestones
 
@@ -56,7 +57,7 @@ Non-negotiable invariants:
 3. **Completed — Persistent direct session.** Add the compatible behavior
    discriminator, generalized direct loop, direct compaction/recovery,
    session-owned terminals, run outcomes, and durable steer/queue inbox.
-4. **In progress — Permissions and safety.** Add ordered allow/ask/deny rules,
+4. **Completed — Permissions and safety.** Add ordered allow/ask/deny rules,
    canonical tool resources, interactive/headless approval behavior, saved
    grants, hard safety policy, and backend-specific defaults.
 5. **Pending — Direct `/goal`.** Add durable direct-only goal state, controls,
@@ -123,6 +124,12 @@ Non-negotiable invariants:
   cooperative cleanup before abort, preserve failed streamed partial output
   with an explicit marker, and capture direct cancellation revisions. Existing
   orchestrator cancellation timing remains unchanged.
+- Apply direct permissions only after typed preparation and immediately before
+  invocation. Configured rules are ordered and backend-specific defaults remain
+  pragmatic; configured/native denials precede session-scoped remembered
+  grants. Pending asks are process-local and interactive-only, while grants are
+  durable and bound to backend plus session config revision. Approval never
+  changes execution backends.
 
 ## Files and subsystems currently changing
 
@@ -130,19 +137,15 @@ Non-negotiable invariants:
   registration/dispatch in `tools/mod.rs`, typed `read` input/execution,
   colocated `write`/`edit` definitions, and call identity wiring in
   `agent/dag.rs`.
-- Milestone 2 changes session snapshots/summaries, schema/migrations,
-  persistence queries, and view/service metadata. The current slice adds
-  direct construction/resume in `runtime.rs`,
-  direct prompt/tool policy in `agent`, exact capability and admission
-  enforcement in `tools`/`agent`, direct terminal outcomes in
-  `session_service.rs`, and explicit API behavior selection in `nac-server`.
-  The durable inbox slice added schema-18 persistence, atomic prompt/steer
-  delivery, service promotion/restart wakeup, and REST CRUD. The current slice
-  adds construction-selected direct compaction policy text and checkpoint
-  compatibility. The terminal slice makes PTYs foreground by default, adds an
-  explicit retained transition, preserves retained handles across direct runs
-  and cancellation, blocks idle service eviction, and diagnoses handles from a
-  prior process-local owner. UI controls remain in the web milestone.
+- Milestones 2–4 changed session snapshots and schema migrations, direct
+  construction/resume and prompting, capability/admission enforcement,
+  terminal and inbox lifecycle, and service/API behavior selection. The
+  permission checkpoint specifically adds backend-aware ordered policy, typed
+  canonical resources at the prepared-call seam, exact/narrow shell grants,
+  hard safety denials, schema-19 session/backend/config-revision-bound grants,
+  process-local interactive asks with timeout/cancellation dismissal, REST/SSE
+  state, and the direct-only web approval/grant-management surface plus rebuilt
+  production assets.
 
 ## Verification
 
@@ -197,6 +200,26 @@ Non-negotiable invariants:
   84.61s with the retained-terminal lifecycle.
 - `cargo test -p nac-server --locked` — 113 server and 21 CLI tests passed in
   87.28s with retained terminals preventing unsafe idle service eviction.
+- Permission policy/broker/kernel focused tests — passed for ordered wildcard
+  evaluation, strict multi-resource aggregation, configured/hard denial before
+  grants, backend defaults, canonical file/shell projection, exact external
+  scope, opaque expansions/redirections, hard command safety, headless failure,
+  once/always persistence, cancellation dismissal, and authorization before
+  side effects.
+- Permission schema/API focused tests — passed for v18-to-v19 migration,
+  deduplicated session/backend/config-revision grant scope, direct-only state,
+  reply/delete status mapping, and OpenAPI/router registration.
+- `cargo test -p nac-core --locked` — 999 passed, 9 ignored, 0 failed in
+  83.93s with permissions and safety.
+- `cargo test -p nac-server --locked` — 114 server and 21 CLI tests passed in
+  86.58s with the permission REST/SSE surface.
+- Frontend verification — 129 tests passed across 16 files; lint, typecheck,
+  format, and production build passed. Permission UI coverage includes
+  direct-only rendering, automatic pending presentation, all three replies,
+  and disabling unsafe reusable grants.
+- `make check`, `make lint`, and `make format-check` — passed after the complete
+  permission slice. `make test-assets` rebuilt the production bundle and
+  reported the expected uncommitted asset delta that this checkpoint includes.
 - Recorded pre-goal baseline: `make check` and elevated `make ci` passed on
   2026-08-24.
 
@@ -207,6 +230,7 @@ Non-negotiable invariants:
 - `edb14e4 feat(core): add persistent direct primary`.
 - `2fad41d feat(core): add durable direct inbox`.
 - `e460fec feat(core): specialize direct compaction`.
+- `b905b34 feat(core): retain direct terminals`.
 
 ## Known problems and blockers
 
@@ -215,6 +239,8 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Checkpoint the verified retained-terminal lifecycle, then begin ordered
-permissions and non-bypassable safety policy at the native tool invocation
-seam.
+Define the direct-only durable `/goal` state machine and schema contract before
+touching the ordinary run loop: one active objective, explicit status and
+accounting, idle continuation ownership, cancellation, restart reconciliation,
+and exact interaction with the durable steer/queue inbox. Begin with migration
+and store-level transition tests, then integrate service/API controls.

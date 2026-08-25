@@ -33,14 +33,42 @@ pub enum ToolAdmission {
 pub struct PermissionResource {
     pub action: String,
     pub resource: String,
+    /// Human-readable form for approval surfaces. Policy always matches the
+    /// canonical `resource`, never this presentation string.
+    pub display: String,
+    /// Harness-derived narrow resource that an `always` reply may persist.
+    /// `None` means this invocation is eligible for one-time approval only.
+    pub save_resource: Option<String>,
+    /// A non-configurable denial produced by the native operation. Neither a
+    /// configured allow nor a remembered grant may override it.
+    pub hard_denial: Option<String>,
 }
 
 impl PermissionResource {
     pub fn new(action: impl Into<String>, resource: impl Into<String>) -> Self {
+        let resource = resource.into();
         Self {
             action: action.into(),
-            resource: resource.into(),
+            display: resource.clone(),
+            resource,
+            save_resource: None,
+            hard_denial: None,
         }
+    }
+
+    pub fn with_display(mut self, display: impl Into<String>) -> Self {
+        self.display = display.into();
+        self
+    }
+
+    pub fn with_save_resource(mut self, resource: impl Into<String>) -> Self {
+        self.save_resource = Some(resource.into());
+        self
+    }
+
+    pub fn with_hard_denial(mut self, reason: impl Into<String>) -> Self {
+        self.hard_denial = Some(reason.into());
+        self
     }
 }
 
@@ -433,11 +461,26 @@ impl ToolSnapshot {
     ) -> ToolResult {
         match self.prepare(name, input, services) {
             Ok(prepared) => {
-                // The direct permission broker will decide over these validated
-                // resources before calling invoke. Existing workers preserve
-                // their allow-through behavior while using the same boundary.
                 let _admission = prepared.descriptor().admission;
-                let _resources = prepared.permission_resources();
+                if let Some(broker) = &services.runtime.permission_broker {
+                    match broker
+                        .authorize(
+                            name,
+                            prepared.permission_resources(),
+                            context,
+                            &services.runtime.command_cancellation,
+                        )
+                        .await
+                    {
+                        crate::permissions::AuthorizationOutcome::Allowed => {}
+                        crate::permissions::AuthorizationOutcome::Denied(reason) => {
+                            return ToolResult::text(
+                                format!("Error: permission denied for {name}: {reason}"),
+                                true,
+                            );
+                        }
+                    }
+                }
                 prepared.invoke(services, context).await
             }
             Err(error) => error,
@@ -665,5 +708,73 @@ mod tests {
             .await;
         assert!(!result.is_error);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn direct_broker_authorizes_between_prepare_and_side_effects() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = ToolRegistry::builder()
+            .register(CountTool {
+                calls: Arc::clone(&calls),
+                name: "count",
+            })
+            .finish()
+            .unwrap();
+        let snapshot = registry.snapshot(["count"]).unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("nac-kernel-permission-{}", uuid::Uuid::new_v4()));
+        let store_path = directory.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session-a");
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            store_path.clone(),
+            "session-a".to_string(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [crate::permissions::PermissionRule::new(
+                "count",
+                "*",
+                crate::permissions::PermissionEffect::Ask,
+            )],
+        ));
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path;
+        runtime.session_id = Some("session-a".to_string());
+        runtime.permission_broker = Some(Arc::clone(&broker));
+        let client = crate::model::ModelClient::new_for_test();
+        let services = ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+        let context = ToolCallContext {
+            call_id: Some("call-1".to_string()),
+            thread_name: None,
+        };
+
+        let headless = snapshot
+            .invoke("count", json!({"amount": 2}), services, &context)
+            .await;
+        assert!(headless.is_error);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let invoke = snapshot.invoke("count", json!({"amount": 2}), services, &context);
+        let reply = async {
+            loop {
+                if let Some(request) = broker.pending().pop() {
+                    broker
+                        .reply(&request.id, crate::permissions::PermissionReply::Once)
+                        .unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let (approved, ()) = tokio::join!(invoke, reply);
+        assert!(!approved.is_error, "{}", approved.content);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

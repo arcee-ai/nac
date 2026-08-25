@@ -377,6 +377,22 @@ pub enum SessionEvent {
     /// than a fault. Carries no message: the user already knows what happened,
     /// and the reason is a constant with nothing to report.
     RunCancelled,
+    /// Live approval request for a prepared direct-session tool invocation.
+    /// The broker owns the pending state; this event lets web clients render
+    /// it without polling.
+    PermissionAsked {
+        request: crate::permissions::PermissionRequest,
+    },
+    PermissionReplied {
+        request_id: String,
+        reply: crate::permissions::PermissionReply,
+    },
+    /// The waiting call ended without a user reply (for example cancellation
+    /// or timeout), so clients must remove the no-longer-actionable prompt.
+    PermissionDismissed {
+        request_id: String,
+        reason: String,
+    },
     SnapshotSaved {
         session_id: String,
     },
@@ -556,6 +572,13 @@ impl SessionEventBus {
     }
 
     pub fn has_assistant_delta_subscribers(&self) -> bool {
+        self.delta_sender.receiver_count() > 0
+    }
+
+    /// Web SSE subscriptions include the live-delta receiver, while internal
+    /// run/service receivers consume only the sequenced event channel. This is
+    /// therefore the fail-closed signal used by interactive approvals.
+    pub fn has_interactive_subscribers(&self) -> bool {
         self.delta_sender.receiver_count() > 0
     }
 

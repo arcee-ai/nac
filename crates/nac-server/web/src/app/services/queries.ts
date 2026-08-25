@@ -48,6 +48,8 @@ import type {
   ManagedSessionSummary,
   ModelCatalog,
   ModelConfigurationList,
+  PermissionReply,
+  PermissionStateResponse,
   ProjectList,
   ProjectRecord,
   ProviderModel,
@@ -135,6 +137,7 @@ export const queryKeys = {
   threadEvents: (id: string, threadName: string) =>
     ["session", id, "thread-events", threadName] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
+  sessionPermissions: (id: string) => ["session", id, "permissions"] as const,
   workspaceDiff: (
     id: string,
     path: string,
@@ -160,6 +163,43 @@ export function useStoreInfo() {
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
     staleTime: Infinity,
+  });
+}
+
+export function useSessionPermissions(sessionId: string, enabled: boolean) {
+  return useQuery<PermissionStateResponse>({
+    queryKey: queryKeys.sessionPermissions(sessionId),
+    queryFn: ({ signal }) => api.getPermissions(sessionId, signal),
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function useReplyPermission() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      requestId,
+      reply,
+    }: {
+      sessionId: string;
+      requestId: string;
+      reply: PermissionReply;
+    }) => api.replyPermission(sessionId, requestId, reply),
+    onSuccess: (_data, variables) =>
+      client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+  });
+}
+
+export function useDeletePermissionGrant() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, grantId }: { sessionId: string; grantId: string }) =>
+      api.deletePermissionGrant(sessionId, grantId),
+    onSuccess: (_data, variables) =>
+      client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
   });
 }
 

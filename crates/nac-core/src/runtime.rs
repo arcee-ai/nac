@@ -50,6 +50,8 @@ pub struct NacConfig {
     pub worker: WorkerConfig,
     #[serde(default)]
     pub security: SecurityConfig,
+    #[serde(default)]
+    pub permissions: PermissionConfig,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -65,6 +67,14 @@ pub struct SecurityConfig {
     /// destination out of reach of the unauthenticated HTTP API.
     #[serde(default)]
     pub trusted_base_url_hosts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct PermissionConfig {
+    /// Ordered low-to-high-precedence rules appended after NAC's pragmatic
+    /// backend defaults. Hard safety policy remains outside this list.
+    #[serde(default)]
+    pub rules: Vec<crate::permissions::PermissionRule>,
 }
 
 /// Model defaults from config.toml's `[model]` section. Slim by design:
@@ -113,6 +123,8 @@ struct NonModelNacConfig {
     worker: WorkerConfig,
     #[serde(default)]
     security: SecurityConfig,
+    #[serde(default)]
+    permissions: PermissionConfig,
 }
 
 impl From<NonModelNacConfig> for NacConfig {
@@ -124,6 +136,7 @@ impl From<NonModelNacConfig> for NacConfig {
             sandbox: config.sandbox,
             worker: config.worker,
             security: config.security,
+            permissions: config.permissions,
         }
     }
 }
@@ -949,6 +962,7 @@ async fn build_run_config_inner(
                 agents_md_message: None,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
                 light_client: light_client.clone(),
+                permission_rules: config.permissions.rules.clone(),
             },
         )?;
         let mut session_snapshot = sessions::new_snapshot(
@@ -1044,6 +1058,7 @@ async fn build_run_config_inner(
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
             light_client: light_client.clone(),
+            permission_rules: config.permissions.rules.clone(),
         },
     )?;
     let mut session_snapshot = sessions::new_snapshot(
@@ -1197,6 +1212,7 @@ pub async fn build_managed_worker_config(
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
             light_client: None,
+            permission_rules: config.permissions.rules.clone(),
         },
     )?;
 
@@ -1596,6 +1612,7 @@ async fn build_resume_config_from_snapshot(
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
             light_client,
+            permission_rules: config.permissions.rules.clone(),
         },
     )?;
     // Restore is blob ++ transcript log: rows the crashed previous run
@@ -2838,7 +2855,7 @@ url = "https://mcp.context7.com/mcp"
             std::fs::write(
                 root.join("config.toml"),
                 format!(
-                    "{invalid_model}\n[storage]\nstore_path = \"persisted/store.db\"\n\n[sandbox]\nimage = \"runtime-image\"\n\n[worker]\nthread_timeout_secs = 7200\n"
+                    "{invalid_model}\n[storage]\nstore_path = \"persisted/store.db\"\n\n[sandbox]\nimage = \"runtime-image\"\n\n[worker]\nthread_timeout_secs = 7200\n\n[[permissions.rules]]\naction = \"execute\"\nresource = \"command:[curl]*\"\neffect = \"deny\"\n"
                 ),
             )
             .unwrap();
@@ -2850,6 +2867,14 @@ url = "https://mcp.context7.com/mcp"
             );
             assert_eq!(config.sandbox.image.as_deref(), Some("runtime-image"));
             assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
+            assert_eq!(
+                config.permissions.rules,
+                [crate::permissions::PermissionRule::new(
+                    "execute",
+                    "command:[curl]*",
+                    crate::permissions::PermissionEffect::Deny,
+                )]
+            );
             assert!(config.model.model.is_none());
             assert_eq!(
                 NacConfig::load_from_cwd(&root).is_ok(),

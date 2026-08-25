@@ -38,6 +38,8 @@ import type {
   ModelConfigurationList,
   ModelConfigurationRecord,
   OrchestratorSteeringResponse,
+  PermissionReply,
+  PermissionStateResponse,
   ProjectList,
   ProjectRecord,
   ProviderModelList,
@@ -437,6 +439,17 @@ export const api = {
 
   getConfig: (id: string, signal?: AbortSignal) =>
     request<RawSessionConfig>("GET", `${sessionPath(id)}/config`, { signal }),
+
+  getPermissions: (id: string, signal?: AbortSignal) =>
+    request<PermissionStateResponse>("GET", `${sessionPath(id)}/permissions`, { signal }),
+
+  replyPermission: (id: string, requestId: string, reply: PermissionReply) =>
+    request<void>("POST", `${sessionPath(id)}/permissions/${encodeURIComponent(requestId)}`, {
+      body: { reply },
+    }),
+
+  deletePermissionGrant: (id: string, grantId: string) =>
+    request<void>("DELETE", `${sessionPath(id)}/permissions/grants/${encodeURIComponent(grantId)}`),
 
   updateConfig: (id: string, payload: UpdateConfigRequest) =>
     request<void>("PATCH", `${sessionPath(id)}/config`, { body: payload }),

@@ -18,6 +18,18 @@ fn worker_prompt_prefers_native_workspace_discovery() {
 }
 
 #[test]
+fn direct_prompt_treats_permission_denial_as_no_execution() {
+    let prompt = render_direct_system_prompt("/workspace")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(prompt.contains("permission-denied tool result means the"));
+    assert!(prompt.contains("operation did not execute"));
+    assert!(prompt.contains("do not evade the policy through a different tool"));
+    assert!(prompt.contains("headless run fails closed"));
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(
@@ -44,6 +56,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .expect("agent config must be valid");
@@ -238,6 +251,7 @@ fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 light_client: None,
+                permission_rules: Vec::new(),
             },
         )
         .expect("agent config must be valid")
@@ -345,6 +359,7 @@ async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();
@@ -464,6 +479,7 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();
@@ -599,6 +615,7 @@ async fn cancelled_image_result_still_emits_finished_event() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();
