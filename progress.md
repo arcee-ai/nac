@@ -40,9 +40,10 @@ Protected initial state verified on 2026-08-25:
    frontend tests in `make ci`, and adds deterministic durability and
    credential-free Playwright lanes with an isolated scripted Responses
    provider, process cleanup, and failure artifacts. NAC-REV-024 is resolved.
-4. **In progress — settled web MVP journeys.** Resolve NAC-REV-010, 011, 015,
-   020..023 through behavior-aware creation/navigation, active-run inbox UX,
-   literal `/goal`, child ownership guards, documentation, and browser tests.
+4. **Completed — settled web MVP journeys.** Commit `c60a839` resolves
+   NAC-REV-010, 011, 015, and 020..023 through behavior-aware creation and
+   navigation, active-run inbox UX, literal `/goal`, child ownership guards,
+   documentation, and production-embedded browser tests.
 5. **Pending — closure and integrated review.** Reproduce the permission-SSE
    lag risk, close all remaining findings, run final NAC adversarial review,
    production browser smoke, all required gates, and final state audit.
@@ -139,8 +140,26 @@ Protected initial state verified on 2026-08-25:
   healthy embedded HTML with `no-cache`, exited through Ctrl-C, and left no
   listener. No committed asset drift or worktree-local Playwright artifact was
   produced.
-- Next action: implement behavior-aware creation/navigation and the active-run
-  inbox journeys with component and real-browser contracts for milestone 4.
+- Milestone 4 implementation: every first-chat and New Chat path asks for one
+  of the three immutable behaviors with orchestrator freshly preselected;
+  sessions show behavior identity; direct navigation replaces empty Threads /
+  Worksets with Delegated work; traditional children and managed orchestrators
+  are grouped separately and open read-only lineage transcripts with Back to
+  Parent; the active direct composer defaults ordinary Send to durable steer,
+  exposes Queue Next, pending delivery changes/cancellation, and a separate run
+  stop; literal `/goal` commands use the durable goal API; completed goals have
+  direct replacement; and child ownership hides all autonomous controls.
+- Milestone 4 evidence: complete frontend format/typecheck/lint and 153 Vitest
+  tests pass; the `/goal` parser's 24-test group and both complete HTTP
+  child/orchestrator lifecycle tests pass; `make format-check` and `make lint`
+  pass. `make test-e2e` passes seven journeys against the freshly embedded
+  production bundle, covering first-chat cancellation/re-entry, all three UI
+  behavior choices and default reset, direct text and native tool round trips,
+  active durable steer delivery into the next provider request, literal goal
+  interpretation and continuation, and read-only child/managed transcripts.
+- Next action: reproduce and repair the permission SSE replay-gap risk, obtain
+  the final independent NAC review of the committed range, run every closure
+  gate plus the actual `make demo` browser smoke, then audit cleanup/state.
 
 ## Objective and invariants
 
