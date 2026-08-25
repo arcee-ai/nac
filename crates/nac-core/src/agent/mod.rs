@@ -43,6 +43,7 @@ const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
 const WORKER_SYSTEM_PROMPT: &str = include_str!("prompts/nac_worker.md");
 const ORCHESTRATOR_SYSTEM_PROMPT: &str = include_str!("prompts/nac_orchestrator.md");
 const DIRECT_SYSTEM_PROMPT: &str = include_str!("prompts/nac_direct.md");
+const GENERAL_CHILD_SYSTEM_PROMPT: &str = include_str!("prompts/nac_direct_child.md");
 pub(crate) const RUN_CANCELLED_MARKER: &str = "[run cancelled by user]";
 pub(crate) const RUN_FAILED_PARTIAL_MARKER: &str =
     "[run failed after this partial assistant response]";
@@ -54,11 +55,20 @@ fn render_worker_system_prompt(working_directory: &str) -> String {
     format!("{prefix}{working_directory}{suffix}")
 }
 
-fn render_direct_system_prompt(working_directory: &str) -> String {
+pub(crate) fn render_direct_system_prompt(working_directory: &str) -> String {
     let (prefix, suffix) = DIRECT_SYSTEM_PROMPT
         .split_once("{working_directory}")
         .expect("direct system prompt must contain {working_directory}");
     format!("{prefix}{working_directory}{suffix}")
+}
+
+pub(crate) fn render_general_child_system_prompt(
+    working_directory: &str,
+    description: &str,
+) -> String {
+    GENERAL_CHILD_SYSTEM_PROMPT
+        .replace("{working_directory}", working_directory)
+        .replace("{description}", description)
 }
 
 fn render_orchestrator_system_prompt(working_directory: &str, thread_timeout_secs: u64) -> String {
@@ -364,6 +374,18 @@ impl Agent {
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
         let mode = config.mode;
+        let traditional_child = if mode == AgentMode::Direct {
+            config
+                .session_id
+                .as_deref()
+                .map(|session_id| {
+                    crate::store::load_traditional_child(&config.store_path, session_id)
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
         let compaction = if matches!(mode, AgentMode::Orchestrator | AgentMode::Direct) {
             config.session_id.clone().map(|session_id| {
                 CompactionState::new(
@@ -410,10 +432,16 @@ impl Agent {
                     config.light_client.as_deref(),
                 ),
             ),
-            AgentMode::Direct => (
-                render_direct_system_prompt(&cwd),
-                tools::direct_tool_definitions(client.supports_image_tool_results()),
-            ),
+            AgentMode::Direct => match traditional_child.as_ref() {
+                Some(child) => (
+                    render_general_child_system_prompt(&cwd, &child.description),
+                    tools::worker_tool_definitions(client.supports_image_tool_results()),
+                ),
+                None => (
+                    render_direct_system_prompt(&cwd),
+                    tools::direct_tool_definitions(client.supports_image_tool_results()),
+                ),
+            },
         };
         if config.mode == AgentMode::Orchestrator {
             if let Some(light) = config.light_client.as_deref() {
@@ -469,8 +497,8 @@ impl Agent {
                 .map(|definition| definition.function.name.clone())
                 .collect(),
         );
-        let goal_runtime = match (mode, config.session_id.as_ref()) {
-            (AgentMode::Direct, Some(session_id)) => Some(Arc::new(
+        let goal_runtime = match (mode, config.session_id.as_ref(), traditional_child.as_ref()) {
+            (AgentMode::Direct, Some(session_id), None) => Some(Arc::new(
                 crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
             )),
             _ => None,

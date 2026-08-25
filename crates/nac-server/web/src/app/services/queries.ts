@@ -52,6 +52,8 @@ import type {
   PermissionReply,
   PermissionStateResponse,
   SessionGoalRecord,
+  StartTraditionalChildRequest,
+  TraditionalChildRecord,
   ProjectList,
   ProjectRecord,
   ProviderModel,
@@ -142,6 +144,7 @@ export const queryKeys = {
   sessionConfig: (id: string) => ["session", id, "config"] as const,
   sessionPermissions: (id: string) => ["session", id, "permissions"] as const,
   sessionGoal: (id: string) => ["session", id, "goal"] as const,
+  traditionalChildren: (id: string) => ["session", id, "children"] as const,
   workspaceDiff: (
     id: string,
     path: string,
@@ -258,6 +261,57 @@ export function useClearGoal() {
     }) => api.clearGoal(sessionId, goalId, expectedVersion),
     onSuccess: (_data, variables) =>
       client.setQueryData(queryKeys.sessionGoal(variables.sessionId), null),
+  });
+}
+
+export function useTraditionalChildren(sessionId: string, enabled: boolean) {
+  return useQuery<TraditionalChildRecord[]>({
+    queryKey: queryKeys.traditionalChildren(sessionId),
+    queryFn: ({ signal }) => api.listTraditionalChildren(sessionId, signal),
+    enabled,
+    refetchInterval: enabled ? 1_000 : false,
+    retry: false,
+  });
+}
+
+export function useStartTraditionalChild() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      payload,
+    }: {
+      sessionId: string;
+      payload: StartTraditionalChildRequest;
+    }) => api.startTraditionalChild(sessionId, payload),
+    onSuccess: (child, variables) => {
+      client.setQueryData<TraditionalChildRecord[]>(
+        queryKeys.traditionalChildren(variables.sessionId),
+        (children = []) => {
+          const without = children.filter(
+            (candidate) => candidate.child_session_id !== child.child_session_id,
+          );
+          return [...without, child];
+        },
+      );
+    },
+  });
+}
+
+export function useCancelTraditionalChild() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, childId }: { sessionId: string; childId: string }) =>
+      api.cancelTraditionalChild(sessionId, childId),
+    onSuccess: (child, variables) => {
+      client.setQueryData<TraditionalChildRecord[]>(
+        queryKeys.traditionalChildren(variables.sessionId),
+        (children = []) =>
+          children.map((candidate) =>
+            candidate.child_session_id === child.child_session_id ? child : candidate,
+          ),
+      );
+    },
   });
 }
 

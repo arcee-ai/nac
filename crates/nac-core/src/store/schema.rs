@@ -3,7 +3,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 20 adds durable direct-session goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
+// 21 adds durable traditional child sessions. 20 added durable direct-session
+// goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
 // direct-session inbox. 17 added the immutable session
 // behavior discriminator and is also the
 // downgrade barrier: older binaries reject the future schema instead of
@@ -15,7 +16,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 20;
+const STORE_SCHEMA_VERSION: i64 = 21;
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -372,7 +373,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
@@ -461,6 +462,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     create_session_inbox_table(&transaction)?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
+    create_traditional_children_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -1084,6 +1086,63 @@ fn create_session_goals_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Durable relationship and latest execution generation for an OpenCode-like
+/// traditional child session. The child is still a normal row in `sessions`;
+/// this table adds ownership, profile, bounded nesting, and exactly-once
+/// background completion delivery.
+fn create_traditional_children_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS traditional_children (
+             child_session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             parent_session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             root_session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             profile TEXT NOT NULL CHECK (profile IN ('general')),
+             description TEXT NOT NULL CHECK (
+                 length(trim(description)) > 0 AND length(description) <= 120
+             ),
+             nesting_depth INTEGER NOT NULL CHECK (nesting_depth = 1),
+             status TEXT NOT NULL DEFAULT 'idle'
+                 CHECK (status IN ('idle', 'running', 'completed', 'failed', 'cancelled', 'interrupted')),
+             generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+             run_id TEXT,
+             execution_mode TEXT CHECK (execution_mode IN ('foreground', 'background')),
+             report TEXT,
+             failure TEXT,
+             change_summary TEXT,
+             verification_summary TEXT,
+             completion_inbox_id INTEGER
+                 REFERENCES session_inbox(id) ON DELETE SET NULL,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (child_session_id <> parent_session_id),
+             CHECK (
+                 (status = 'idle' AND generation = 0 AND run_id IS NULL
+                  AND execution_mode IS NULL AND report IS NULL AND failure IS NULL
+                  AND change_summary IS NULL AND verification_summary IS NULL
+                  AND completion_inbox_id IS NULL)
+                 OR
+                 (status = 'running' AND generation > 0 AND run_id IS NOT NULL
+                  AND execution_mode IS NOT NULL AND report IS NULL AND failure IS NULL
+                  AND change_summary IS NULL AND verification_summary IS NULL
+                  AND completion_inbox_id IS NULL)
+                 OR
+                 (status IN ('completed', 'failed', 'cancelled', 'interrupted')
+                  AND generation > 0 AND run_id IS NOT NULL
+                  AND execution_mode IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_traditional_children_parent
+             ON traditional_children(parent_session_id, created_at, child_session_id);
+         CREATE INDEX IF NOT EXISTS idx_traditional_children_root_running
+             ON traditional_children(root_session_id, status, updated_at, child_session_id);",
+    )?;
+    Ok(())
+}
+
 /// Same bound the per-session column enforces, so a saved default can never
 /// describe a session the sessions table would refuse.
 fn model_configuration_threshold_check() -> String {
@@ -1199,6 +1258,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "session_run_recovery",
         "session_inbox",
         "permission_grants",
+        "traditional_children",
         "projects",
         "session_projects",
     ] {

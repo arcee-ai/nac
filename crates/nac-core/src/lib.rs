@@ -71,6 +71,7 @@ pub mod store;
 mod terminal;
 mod tool_content;
 mod tools;
+pub mod traditional_children;
 pub mod types;
 pub mod upgrade;
 pub mod view;

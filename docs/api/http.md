@@ -87,6 +87,26 @@ claim, timestamps, and version. The API accepts `active`, `paused`, `blocked`,
 clear rather than setting `complete`. The model's native `update_goal` tool is
 the path that marks genuine completion or blockage.
 
+## Traditional child sessions
+
+`GET /sessions/{session_id}/children` lists the durable children of a direct
+parent. `POST` on the same path starts a new `general` child or continues the
+`child_session_id` in the body. The request includes the immutable short
+`description`, a complete `prompt`, and optional `background` (default false).
+A foreground request waits for settlement; a background request returns the
+running relationship immediately.
+
+`GET /sessions/{session_id}/children/{child_session_id}` reads one owned child.
+`POST .../cancel` propagates cancellation to its active generation. Responses
+include generation, run and execution mode, terminal report or failure,
+workspace change and verification summaries when available, the durable parent
+completion inbox ID, timestamps, and version.
+
+These endpoints reject orchestrator parents, grandchildren, mismatched parent
+ownership, changes to a child's profile or description, sandboxed sessions
+without a host-backed shared workspace, and more than four simultaneously
+running children per root parent.
+
 ## Remote access
 
 Remote access delegates the authority of the local user to every client that

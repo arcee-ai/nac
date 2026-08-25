@@ -7,6 +7,7 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [Skills](usage/skills.md)
   - [Sandbox](usage/sandbox.md)
   - [Durable direct goals](usage/direct-goals.md)
+  - [Traditional child sessions](usage/traditional-children.md)
 - [Configuration](configuration/README.md)
   - [Example config](configuration/example.md)
   - [Model configuration](configuration/model.md)

@@ -44,8 +44,8 @@ Non-negotiable invariants:
 - The native tool kernel, immutable behavior foundation, persistent direct
   primary, durable inbox, behavior-specific compaction, and retained-terminal
   lifecycle and direct permission/safety vertical are committed. The durable
-  direct-only `/goal` vertical is implemented and verified; traditional child
-  sessions are the next milestone.
+  direct-only `/goal` and traditional-child verticals are implemented and
+  focused-verified. Internal orchestrator control is the active milestone.
 
 ## Ordered milestones
 
@@ -63,10 +63,10 @@ Non-negotiable invariants:
    grants, hard safety policy, and backend-specific defaults.
 5. **Completed — Direct `/goal`.** Add durable direct-only goal state, controls,
    accounting, idle continuation, restart reconciliation, and tests.
-6. **Pending — Traditional child sessions.** Add durable relationships,
+6. **Completed — Traditional child sessions.** Add durable relationships,
    profiles, foreground/background execution, continuation/steering,
    cancellation, completion injection, guards, and web navigation.
-7. **Pending — Internal orchestrator control.** Extract protocol-independent
+7. **In progress — Internal orchestrator control.** Extract protocol-independent
    operations, expose direct-with-orchestrator tools, persist relationships,
    prevent recursion, and preserve outgoing MCP behavior.
 8. **Pending — Web UI/API vertical completion.** Expose behaviors, direct
@@ -137,6 +137,14 @@ Non-negotiable invariants:
   session operation lease, prioritize the durable inbox, pause on explicit
   cancellation, block on run failure, and reserve broad lifecycle control for
   the user while model tools can only report genuine completion or blockage.
+- Represent a traditional child as one durable depth-one relationship and a
+  sequence of versioned generations. The visible immutable `general` profile
+  inherits the parent's model/backend/workspace and configured permission-rule
+  ceiling but starts with fresh grants/context and exactly the eight coding
+  tools. Background settlement owns exactly-once parent queue insertion;
+  foreground returns the same structured outcome directly. Parent attachment
+  reconciles abandoned children, parent deletion removes child sessions, and a
+  process-local per-store/workspace read/write gate serializes tool invocations.
 
 ## Files and subsystems currently changing
 
@@ -157,6 +165,12 @@ Non-negotiable invariants:
   goal tools, service-owned idle/restart continuation and claim reconciliation,
   REST/OpenAPI control, direct-only web controls, neutral internal transcript
   rendering, documentation, and the rebuilt production assets.
+- Milestone 6 adds schema-21 child relationships/generations, a server-backed
+  protocol-independent controller, native foreground/background/status/cancel
+  tools, fresh child construction with an exact capability boundary, durable
+  completion/restart reconciliation, REST/OpenAPI routes, web launch/status/
+  continuation/cancel/transcript navigation, readable completion rendering,
+  shared-workspace tool gates, cascade cleanup, and documentation.
 
 ## Verification
 
@@ -249,6 +263,22 @@ Non-negotiable invariants:
 - `make check`, `make lint`, and `make format-check` — passed after the complete
   goal slice. `make test-assets` rebuilt the production bundle included by this
   checkpoint.
+- Traditional-child focused core tests — 7 passed for schema migration,
+  immutable depth-one relationships, exact capability construction, foreground
+  settlement, exactly-once background delivery, concurrency release, and
+  readable completion rendering. Native controller/model-tool and workspace
+  gate tests also passed.
+- Traditional-child server tests — passed for live foreground then background
+  continuation, automatic parent delivery, cancellation propagation, parent-
+  only restart reconciliation, cascade deletion, orchestrator/nesting guards,
+  and exact OpenAPI/router registration.
+- Traditional-child frontend/type verification — TypeScript passed; 35 focused
+  tests passed across child controls and completion rendering.
+- Frontend verification — all 136 tests across 18 files passed; lint,
+  formatting, typecheck, and production build passed. `make test-assets`
+  rebuilt the expected committed bundle delta for this checkpoint.
+- `make lint` and the required pre-commit `make check` passed for the complete
+  traditional-child slice.
 
 ## Completed commits
 
@@ -259,17 +289,19 @@ Non-negotiable invariants:
 - `e460fec feat(core): specialize direct compaction`.
 - `b905b34 feat(core): retain direct terminals`.
 - `a06d9e7 feat(core): add direct permissions`.
+- `63ccd2c feat(core): add durable direct goals`.
 
 ## Known problems and blockers
 
-- None. The implementation surface is broad; milestones intentionally remain
-  narrow and reviewable.
+- Retained/background processes can mutate after the tool invocation releases
+  the process-local shared-workspace gate, and separate NAC processes do not
+  share that gate. Revision checks/conflict reporting remain authoritative;
+  the UI/docs tell callers not to assign overlapping mutations.
 
 ## Exact next action
 
-Define the durable traditional-child relationship, execution profile, lifecycle,
-and completion-delivery contracts against the current session service and the
-local OpenCode `v2` reference. Record the resolved contracts in
-`demo_decisions.md`, add the backward-compatible schema/store foundation and
-tests, then integrate native direct-session child control tools without
-collapsing child sessions into orchestrator workers.
+Commit the green schema-21 traditional-child vertical after `make check`, then
+inventory the outgoing MCP handler/service seam and add the durable managed-
+orchestrator relationship plus protocol-independent create/submit/steer/status/
+read/wait/cancel operations. Expose those only to `direct-with-orchestrator`
+without changing existing outgoing MCP behavior or orchestrator construction.

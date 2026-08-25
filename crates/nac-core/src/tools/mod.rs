@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak as StdWeak};
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::events::EventSink;
 use crate::mcp::McpRegistry;
@@ -18,6 +18,12 @@ pub(crate) const REMOTE_FILE_LOCK_RETRY_INTERVAL: Duration = Duration::from_mill
 const REMOTE_FILE_LOCK_BUSY_EXIT_CODE: i32 = 75;
 const REMOTE_FILE_LOCK_BUSY_MARKER: &str = "NAC_FILE_LOCK_BUSY";
 
+type SharedWorkspaceGate = RwLock<()>;
+type SharedWorkspaceKey = (PathBuf, PathBuf);
+static SHARED_WORKSPACE_GATES: LazyLock<
+    StdMutex<HashMap<SharedWorkspaceKey, StdWeak<SharedWorkspaceGate>>>,
+> = LazyLock::new(|| StdMutex::new(HashMap::new()));
+
 mod discovery;
 pub mod edit;
 pub mod exec_command;
@@ -27,6 +33,7 @@ pub mod grep;
 pub mod kernel;
 pub(crate) mod mutation;
 pub mod read;
+pub(crate) mod subagent;
 pub mod thread;
 pub mod workset;
 pub mod write;
@@ -357,6 +364,25 @@ mod active_thread_registry_tests {
             .is_empty());
         assert!(registry.is_active("worker"));
     }
+
+    #[test]
+    fn workspace_gate_is_shared_by_sessions_using_the_same_store_and_checkout() {
+        let shared_a = shared_workspace_gate_for(
+            Path::new("/tmp/nac-shared-store"),
+            Path::new("/tmp/nac-shared-workspace"),
+        );
+        let shared_b = shared_workspace_gate_for(
+            Path::new("/tmp/nac-shared-store"),
+            Path::new("/tmp/nac-shared-workspace"),
+        );
+        let other_workspace = shared_workspace_gate_for(
+            Path::new("/tmp/nac-shared-store"),
+            Path::new("/tmp/nac-other-workspace"),
+        );
+
+        assert!(Arc::ptr_eq(&shared_a, &shared_b));
+        assert!(!Arc::ptr_eq(&shared_a, &other_workspace));
+    }
 }
 
 #[derive(Clone)]
@@ -399,6 +425,23 @@ impl ToolRuntime {
             .as_ref()
             .is_none_or(|allowed| allowed.contains(name))
     }
+}
+
+fn shared_workspace_gate(runtime: &ToolRuntime) -> Arc<SharedWorkspaceGate> {
+    shared_workspace_gate_for(&runtime.store_path, &runtime.workspace_cwd)
+}
+
+fn shared_workspace_gate_for(store_path: &Path, workspace_cwd: &Path) -> Arc<SharedWorkspaceGate> {
+    let key = (store_path.to_path_buf(), workspace_cwd.to_path_buf());
+    let mut gates = SHARED_WORKSPACE_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(gate) = gates.get(&key).and_then(StdWeak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(RwLock::new(()));
+    gates.insert(key, Arc::downgrade(&gate));
+    gate
 }
 
 pub(crate) fn resolve_workspace_path(runtime: &ToolRuntime, path: impl AsRef<Path>) -> PathBuf {
@@ -464,9 +507,11 @@ impl kernel::NativeTool for ReadTool {
         // Provider capabilities shape the registered definition; the captured
         // tool setting remains authoritative for native callers.
         let _provider_supports_images = services.client.supports_image_tool_results();
-        Box::pin(
-            async move { read::execute_native(input, services.runtime, self.image_read).await },
-        )
+        Box::pin(async move {
+            let gate = shared_workspace_gate(services.runtime);
+            let _read = gate.read().await;
+            read::execute_native(input, services.runtime, self.image_read).await
+        })
     }
 }
 
@@ -484,7 +529,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 ];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 11] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 14] = [
     "read",
     "write",
     "edit",
@@ -496,6 +541,9 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 11] = [
     "create_goal",
     "get_goal",
     "update_goal",
+    "subagent",
+    "subagent_status",
+    "subagent_cancel",
 ];
 
 impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
@@ -542,17 +590,32 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
         _context: &'a kernel::ToolCallContext,
     ) -> futures_util::future::BoxFuture<'a, ToolResult> {
         Box::pin(async move {
+            let gate = shared_workspace_gate(services.runtime);
             match KIND {
-                1 => write::execute(input, services.runtime).await,
-                2 => edit::execute(input, services.runtime).await,
-                3 => glob::execute(input, services.runtime).await,
-                4 => grep::execute(input, services.runtime).await,
-                5 => exec_command::execute_exec_command(&input, services.runtime).await,
-                6 => exec_command::execute_write_stdin(&input, services.runtime).await,
-                7 => exec_command::execute_read_command_output(&input, services.runtime),
-                _ => unreachable!("unknown built-in direct tool kind"),
+                3 | 4 => {
+                    let _read = gate.read().await;
+                    execute_legacy_direct(KIND, input, services.runtime).await
+                }
+                1 | 2 | 5 | 6 => {
+                    let _write = gate.write().await;
+                    execute_legacy_direct(KIND, input, services.runtime).await
+                }
+                _ => execute_legacy_direct(KIND, input, services.runtime).await,
             }
         })
+    }
+}
+
+async fn execute_legacy_direct(kind: u8, input: Value, runtime: &ToolRuntime) -> ToolResult {
+    match kind {
+        1 => write::execute(input, runtime).await,
+        2 => edit::execute(input, runtime).await,
+        3 => glob::execute(input, runtime).await,
+        4 => grep::execute(input, runtime).await,
+        5 => exec_command::execute_exec_command(&input, runtime).await,
+        6 => exec_command::execute_write_stdin(&input, runtime).await,
+        7 => exec_command::execute_read_command_output(&input, runtime),
+        _ => unreachable!("unknown built-in direct tool kind"),
     }
 }
 
@@ -665,6 +728,9 @@ fn worker_tool_registry(
         .register(goal::CreateGoalTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
+        .register(subagent::SubagentTool)
+        .register(subagent::SubagentStatusTool)
+        .register(subagent::SubagentCancelTool)
         .finish()?;
     // Keep the native instance retrievable; direct Rust callers do not need a
     // JSON round-trip to execute the same registered read operation.

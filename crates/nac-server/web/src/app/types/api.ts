@@ -646,6 +646,45 @@ export interface UpdateGoalRequest {
   status?: GoalStatus;
 }
 
+export type TraditionalChildStatus =
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export type TraditionalChildExecutionMode = "foreground" | "background";
+
+export interface TraditionalChildRecord {
+  child_session_id: string;
+  parent_session_id: string;
+  root_session_id: string;
+  profile: "general";
+  description: string;
+  nesting_depth: number;
+  status: TraditionalChildStatus;
+  generation: number;
+  run_id: string | null;
+  execution_mode: TraditionalChildExecutionMode | null;
+  report: string | null;
+  failure: string | null;
+  change_summary: string | null;
+  verification_summary: string | null;
+  completion_inbox_id: number | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+export interface StartTraditionalChildRequest {
+  profile: "general";
+  description: string;
+  prompt: string;
+  child_session_id?: string;
+  background?: boolean;
+}
+
 export interface SessionEventBoundary {
   epoch_id: string;
   sequence_id: number;

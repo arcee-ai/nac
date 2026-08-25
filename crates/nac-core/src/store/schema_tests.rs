@@ -222,11 +222,35 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
+    assert_eq!(
+        table_columns(conn, "traditional_children"),
+        [
+            "child_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "profile",
+            "description",
+            "nesting_depth",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
+            "change_summary",
+            "verification_summary",
+            "completion_inbox_id",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
     for table in [
         "thread_steering",
         "thread_events",
         "session_inbox",
         "session_goals",
+        "traditional_children",
     ] {
         assert_session_cascade(conn, table);
     }
@@ -506,6 +530,50 @@ fn v19_store_adds_durable_session_goals() {
             "accounting_token_baseline",
             "accounting_started_at_epoch_ms",
             "continuation_run_id",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v20_store_adds_durable_traditional_children() {
+    let path = temp_store_path("v20_traditional_children");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE traditional_children; PRAGMA user_version = 20;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "traditional_children"),
+        [
+            "child_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "profile",
+            "description",
+            "nesting_depth",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
+            "change_summary",
+            "verification_summary",
+            "completion_inbox_id",
             "created_at",
             "updated_at",
             "version",
