@@ -42,11 +42,10 @@ Non-negotiable invariants:
   passed on 2026-08-24. Socket-binding `Operation not permitted` failures from
   a confined direct `make test` are environmental, not inherited regressions.
 - The native tool kernel, immutable behavior foundation, persistent direct
-  primary, durable inbox, behavior-specific compaction, and retained-terminal
-  lifecycle and direct permission/safety vertical are committed. The durable
-  direct-only `/goal`, traditional-child, and managed-orchestrator verticals
-  are implemented and focused-verified. Final broad regression, assets, and
-  handoff are the active milestone.
+  primary, durable inbox, behavior-specific compaction, retained-terminal
+  lifecycle, permission/safety, durable direct-only `/goal`, traditional-child,
+  and managed-orchestrator verticals are committed and fully verified. All
+  ordered milestones are complete.
 
 ## Ordered milestones
 
@@ -312,8 +311,12 @@ Non-negotiable invariants:
 - `make lint`, `make format-check`, and the required pre-commit `make check`
   passed after the complete managed-orchestrator slice. The first full
   `make ci` reached its final asset-integrity check and reported only the
-  expected uncommitted rebuilt production bundle; the bundle is included in
-  the managed-orchestrator commit and the complete gate will be rerun at HEAD.
+  expected uncommitted rebuilt production bundle; the bundle was included in
+  the managed-orchestrator commit before the complete gate reran at HEAD.
+- `make ci` — passed at managed-orchestrator commit `3e728d5`: formatting,
+  warning-denied Clippy/frontend lint, 1025 core tests with 9 ignored, 124
+  server tests, 21 CLI tests, doc tests, frontend typecheck/build, and committed
+  production-asset integrity all passed.
 
 ## Completed commits
 
@@ -326,6 +329,7 @@ Non-negotiable invariants:
 - `a06d9e7 feat(core): add direct permissions`.
 - `63ccd2c feat(core): add durable direct goals`.
 - `adcf1c0 feat(core): add durable traditional children`.
+- `3e728d5 feat(core): add managed orchestrator control`.
 
 ## Known problems and blockers
 
@@ -336,8 +340,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Commit the managed-orchestrator implementation and rebuilt production assets,
-then rerun full `make ci` against committed HEAD. Record the implementation
-commit and final successful gate in a handoff checkpoint, verify the worktree
-contains only the user's pre-existing `.gitignore` and `AGENTS.md` state, and
-close the goal.
+Goal implementation and verification are complete. Preserve the two pieces of
+pre-existing user state (`.gitignore` and untracked `AGENTS.md`) and use this
+file plus `demo_decisions.md` as the continuation handoff for future work.
