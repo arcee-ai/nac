@@ -302,11 +302,6 @@ pub fn isolate_process_group(command: &mut Command) {
     }
 }
 
-pub async fn terminate_child_tree(child: &mut Child) -> std::io::Result<()> {
-    let mut guard = ProcessTreeGuard::for_child(child);
-    guard.terminate(child).await
-}
-
 #[cfg(target_os = "linux")]
 pub(crate) fn signal_descendants(
     root: libc::pid_t,

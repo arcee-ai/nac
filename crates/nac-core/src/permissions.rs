@@ -1079,6 +1079,12 @@ fn hard_shell_denial_inner(
             return denial;
         }
     }
+    if git_environment_configuration_override(tokens) {
+        return Some(
+            "Git environment configuration is blocked because it can execute hidden commands"
+                .to_string(),
+        );
+    }
     let tokens = effective_command_tokens(tokens);
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
     if depth >= 8 && embedded_command_body(tokens).is_some() {
@@ -1139,7 +1145,7 @@ fn hard_shell_denial_inner(
     if command == "git" {
         if git_alias_override(tokens) {
             return Some(
-                "Git command-scoped aliases are blocked because they can execute hidden commands"
+                "Git command-scoped configuration is blocked because it can execute hidden commands"
                     .to_string(),
             );
         }
@@ -1197,15 +1203,38 @@ fn git_alias_override(tokens: &[String]) -> bool {
         } else {
             token.strip_prefix("--config-env=")
         };
-        if configured
-            .and_then(|configured| configured.split_once('=').map(|(key, _)| key))
-            .is_some_and(|key| key.trim().to_ascii_lowercase().starts_with("alias."))
-        {
+        if configured.is_some() {
             return true;
         }
         index += 1;
     }
     false
+}
+
+fn git_environment_configuration_override(tokens: &[String]) -> bool {
+    let effective = effective_command_tokens(tokens);
+    if effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        != Some("git")
+    {
+        return false;
+    }
+    let prefix_len = tokens.len().saturating_sub(effective.len());
+    tokens[..prefix_len].iter().any(|token| {
+        let Some((name, _)) = token.split_once('=') else {
+            return false;
+        };
+        let name = name.to_ascii_uppercase();
+        matches!(
+            name.as_str(),
+            "GIT_CONFIG_COUNT"
+                | "GIT_CONFIG_PARAMETERS"
+                | "GIT_CONFIG_GLOBAL"
+                | "GIT_CONFIG_SYSTEM"
+        ) || name.starts_with("GIT_CONFIG_KEY_")
+            || name.starts_with("GIT_CONFIG_VALUE_")
+    })
 }
 
 fn literal_shell_command_body(tokens: &[String]) -> Option<&str> {
@@ -1543,7 +1572,25 @@ fn is_broad_command_inner(tokens: &[String], depth: usize) -> bool {
                 || command == "xargs"
                 || command == "find" && find_exec_commands(effective).next().is_some()
         });
-    command_is_broad || embedded_command_body(effective).is_some()
+    command_is_broad
+        || cargo_inline_configuration(effective)
+        || embedded_command_body(effective).is_some()
+}
+
+fn cargo_inline_configuration(tokens: &[String]) -> bool {
+    if tokens
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        != Some("cargo")
+    {
+        return false;
+    }
+    tokens.iter().enumerate().skip(1).any(|(index, token)| {
+        token
+            .strip_prefix("--config=")
+            .is_some_and(|value| value.contains('='))
+            || index > 0 && tokens[index - 1] == "--config" && token.contains('=')
+    })
 }
 
 fn shell_path_resources(
@@ -1740,10 +1787,28 @@ fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
         return false;
     }
     match command {
+        "cargo" => cargo_bare_relative_path_position(tokens, index),
         "rg" => rg_bare_relative_path_position(tokens, command_index, index),
         "git" => git_bare_relative_path_position(tokens, command_index, index),
         _ => false,
     }
+}
+
+fn cargo_bare_relative_path_position(tokens: &[String], index: usize) -> bool {
+    let token = &tokens[index];
+    let option_and_value = token
+        .split_once('=')
+        .filter(|(option, _)| option.starts_with('-'));
+    option_and_value.is_some_and(|(option, value)| {
+        matches!(
+            option,
+            "--manifest-path" | "--target-dir" | "--lockfile-path"
+        ) || option == "--config" && !value.contains('=')
+    }) || index > 0
+        && matches!(
+            tokens[index - 1].as_str(),
+            "--manifest-path" | "--target-dir" | "--lockfile-path"
+        )
 }
 
 fn rg_bare_relative_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
@@ -2519,8 +2584,12 @@ mod tests {
             "git checkout .",
             "git -c alias.pwn='!git reset --hard' pwn",
             "git -calias.pwn='!sudo id' pwn",
+            "git -c include.path=.nac-alias pwn",
+            "git -cincludeIf.onbranch:main.path=.nac-alias pwn",
             "git --config-env=alias.pwn=ALIAS pwn",
             "git --config-env alias.pwn=ALIAS pwn",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.pwn GIT_CONFIG_VALUE_0='!git reset --hard' git pwn",
+            "env GIT_CONFIG_GLOBAL=.nac-alias git pwn",
             "sh -c 'git reset --hard'",
             "bash -lc 'sudo make install'",
             "bash --rcfile /dev/null -c 'sudo make install'",
@@ -2721,6 +2790,37 @@ mod tests {
             )
             .unwrap(),
             format!("rg -L needle {}", canonical_outside.display())
+        );
+
+        let cargo_manifest = outside.join("Cargo.toml");
+        std::fs::write(
+            &cargo_manifest,
+            "[package]\nname='outside'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let cargo_command = "cargo build --manifest-path=outside-link/Cargo.toml";
+        let cargo_projected = shell_resources(cargo_command, &workspace, &backend);
+        let cargo_canonical =
+            canonicalize_authorization_resources(&cargo_projected, &backend, Path::new(""))
+                .await
+                .unwrap();
+        assert!(cargo_canonical.iter().any(|resource| {
+            resource.action == "external_directory"
+                && resource
+                    .resource
+                    .starts_with(canonical_outside.to_str().unwrap())
+        }));
+        assert_eq!(
+            bind_authorized_shell_command(
+                cargo_command,
+                &workspace.canonicalize().unwrap(),
+                &cargo_canonical,
+            )
+            .unwrap(),
+            format!(
+                "cargo build --manifest-path={}",
+                cargo_manifest.canonicalize().unwrap().display()
+            )
         );
 
         let git_projected = shell_resources(
@@ -2965,6 +3065,37 @@ mod tests {
             .unwrap(),
             cargo_key_value
         );
+        assert!(cargo_key_value_resources
+            .iter()
+            .any(|resource| resource.action == "execute_broad"));
+
+        let attached_cargo_key_value = "cargo build --config=net.git-fetch-with-cli=true";
+        let attached_cargo_key_value_resources =
+            shell_resources(attached_cargo_key_value, Path::new("/workspace"), &backend);
+        assert!(!attached_cargo_key_value_resources
+            .iter()
+            .any(|resource| matches!(resource.action.as_str(), "execute_path" | "edit")));
+        assert!(attached_cargo_key_value_resources
+            .iter()
+            .any(|resource| resource.action == "execute_broad"));
+        assert_eq!(
+            bind_authorized_shell_command(
+                attached_cargo_key_value,
+                Path::new("/workspace"),
+                &attached_cargo_key_value_resources,
+            )
+            .unwrap(),
+            attached_cargo_key_value
+        );
+
+        let executable_config = shell_resources(
+            "cargo build --config 'build.rustc-wrapper=\"/outside/wrapper\"'",
+            Path::new("/workspace"),
+            &backend,
+        );
+        assert!(executable_config
+            .iter()
+            .any(|resource| resource.action == "execute_broad"));
 
         for command in [
             "tee .git/nac-owned",
