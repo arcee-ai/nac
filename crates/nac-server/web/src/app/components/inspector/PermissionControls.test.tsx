@@ -112,6 +112,25 @@ describe("direct permission controls", () => {
     expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("renders the exact escaped terminal input and keeps it once-only", () => {
+    const state = pendingState();
+    state.requests[0].tool = "write_stdin";
+    state.requests[0].resources = [
+      {
+        action: "terminal_input",
+        resource: "shell-owner-1",
+        display:
+          "send exact input \"rm -rf important<RET>\" to terminal handle 'shell-owner-1' on the local backend; the running process may interpret these bytes as commands",
+      },
+    ];
+    mount(state);
+
+    expect(screen.getByRole("dialog").textContent).toContain('"rm -rf important<RET>"');
+    expect(screen.getByRole("button", { name: "Always allow" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
+
   it("does not fetch or render controls for orchestrator sessions", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
