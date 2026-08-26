@@ -1065,27 +1065,16 @@ fn hard_shell_denial_inner(
     backend: &ExecutionBackend,
     depth: usize,
 ) -> Option<String> {
-    if let Some((env_command, body, trailing)) = literal_env_split_string(tokens) {
+    if literal_env_split_string(tokens).is_some() {
         if depth >= 8 {
             return Some("nested env split-string depth exceeds the safety limit".to_string());
         }
-        let body = match env_split_string_policy_body(body) {
-            Ok(body) => body,
+        let expanded = match expanded_env_split_tokens(tokens) {
+            Ok(Some(expanded)) => expanded,
+            Ok(None) => unreachable!("split-string presence changed while expanding"),
             Err(reason) => return Some(reason.to_string()),
         };
-        let denial = match parse_shell(&body) {
-            ParsedShell::Supported(mut segments) if segments.len() == 1 => {
-                let mut expanded =
-                    Vec::with_capacity(1 + segments.first().map_or(0, Vec::len) + trailing.len());
-                expanded.push(env_command.to_string());
-                expanded.append(&mut segments[0]);
-                expanded.extend_from_slice(trailing);
-                hard_shell_denial_inner(&expanded, cwd, backend, depth + 1)
-            }
-            ParsedShell::Supported(_) | ParsedShell::Opaque => {
-                Some("unsupported env split-string syntax is blocked".to_string())
-            }
-        };
+        let denial = hard_shell_denial_inner(&expanded, cwd, backend, depth + 1);
         if denial.is_some() {
             return denial;
         }
@@ -1148,6 +1137,12 @@ fn hard_shell_denial_inner(
         return Some("filesystem formatting commands are blocked".to_string());
     }
     if command == "git" {
+        if git_alias_override(tokens) {
+            return Some(
+                "Git command-scoped aliases are blocked because they can execute hidden commands"
+                    .to_string(),
+            );
+        }
         let destructive = tokens
             .iter()
             .skip(1)
@@ -1179,6 +1174,38 @@ fn hard_shell_denial_inner(
         }
     }
     None
+}
+
+fn git_alias_override(tokens: &[String]) -> bool {
+    let Some(command_index) = tokens.iter().position(|token| {
+        token
+            .rsplit('/')
+            .next()
+            .is_some_and(|command| command.eq_ignore_ascii_case("git"))
+    }) else {
+        return false;
+    };
+    let subcommand_index = git_subcommand_index(tokens, command_index).unwrap_or(tokens.len());
+    let mut index = command_index + 1;
+    while index < subcommand_index {
+        let token = &tokens[index];
+        let configured = if token == "-c" || token == "--config-env" {
+            index += 1;
+            tokens.get(index).map(String::as_str)
+        } else if let Some(configured) = token.strip_prefix("-c") {
+            (!configured.is_empty()).then_some(configured)
+        } else {
+            token.strip_prefix("--config-env=")
+        };
+        if configured
+            .and_then(|configured| configured.split_once('=').map(|(key, _)| key))
+            .is_some_and(|key| key.trim().to_ascii_lowercase().starts_with("alias."))
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 fn literal_shell_command_body(tokens: &[String]) -> Option<&str> {
@@ -1367,6 +1394,28 @@ fn env_split_string_policy_body(body: &str) -> Result<String, &'static str> {
     Ok(normalized)
 }
 
+fn expanded_env_split_tokens(tokens: &[String]) -> Result<Option<Vec<String>>, &'static str> {
+    let Some((env_command, body, trailing)) = literal_env_split_string(tokens) else {
+        return Ok(None);
+    };
+    let body = env_split_string_policy_body(body)?;
+    let ParsedShell::Supported(mut segments) = parse_shell(&body) else {
+        return Err("unsupported env split-string syntax is blocked");
+    };
+    if segments.len() != 1 {
+        return Err("unsupported env split-string syntax is blocked");
+    }
+    let mut expanded = segments.pop().unwrap_or_default();
+    expanded.extend_from_slice(trailing);
+    if expanded
+        .first()
+        .is_none_or(|token| token.starts_with('-') || is_environment_assignment(token))
+    {
+        expanded.insert(0, env_command.to_string());
+    }
+    Ok(Some(expanded))
+}
+
 fn effective_command_tokens(tokens: &[String]) -> &[String] {
     let mut index = 0;
     loop {
@@ -1467,10 +1516,21 @@ fn is_environment_assignment(token: &str) -> bool {
 }
 
 fn is_broad_command(tokens: &[String]) -> bool {
+    is_broad_command_inner(tokens, 0)
+}
+
+fn is_broad_command_inner(tokens: &[String], depth: usize) -> bool {
     const BROAD: &[&str] = &[
         "bash", "bun", "dash", "deno", "fish", "node", "nodejs", "npm", "perl", "php", "pnpm",
         "python", "python3", "ruby", "sh", "yarn", "zsh",
     ];
+    if depth < 8 {
+        if let Ok(Some(expanded)) = expanded_env_split_tokens(tokens) {
+            if is_broad_command_inner(&expanded, depth + 1) {
+                return true;
+            }
+        }
+    }
     let effective = effective_command_tokens(tokens);
     let command_is_broad = effective
         .first()
@@ -1565,11 +1625,17 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
         && index > 0
         && tokens[index - 1] == "-C"
         && git_subcommand.is_some_and(|subcommand| index < subcommand);
+    let cargo_key_value_config = command == "cargo"
+        && index > 0
+        && tokens[index - 1] == "--config"
+        && token.contains('=')
+        && !looks_like_shell_path(token);
     let previous_takes_path = index > 0
         && matches!(
             tokens[index - 1].as_str(),
             "--manifest-path" | "--config" | "--output" | "-o" | "-f" | "--file"
         )
+        && !cargo_key_value_config
         || git_global_c_value
         || index > 0 && matches!(command, "make" | "tar") && tokens[index - 1] == "-C"
         || command == "unzip" && index > 0 && tokens[index - 1] == "-d";
@@ -2451,6 +2517,10 @@ mod tests {
             "busybox rm -rf /workspace",
             "sudo make install > /tmp/result",
             "git checkout .",
+            "git -c alias.pwn='!git reset --hard' pwn",
+            "git -calias.pwn='!sudo id' pwn",
+            "git --config-env=alias.pwn=ALIAS pwn",
+            "git --config-env alias.pwn=ALIAS pwn",
             "sh -c 'git reset --hard'",
             "bash -lc 'sudo make install'",
             "bash --rcfile /dev/null -c 'sudo make install'",
@@ -2521,6 +2591,17 @@ mod tests {
         assert!(preprocessor
             .iter()
             .all(|resource| resource.hard_denial.is_none()));
+        for command in [
+            "env -S 'sh -c id'".to_string(),
+            format!("env -S {}", shell_quote("env -S 'sh -c id'")),
+        ] {
+            assert!(
+                shell_resources(&command, Path::new("/workspace"), &backend)
+                    .iter()
+                    .any(|resource| resource.action == "execute_broad"),
+                "split-string interpreter must retain broad authority: {command}"
+            );
+        }
         assert!(shell_resources(
             "printf x | xargs -n1 sudo true",
             Path::new("/workspace"),
@@ -2842,6 +2923,7 @@ mod tests {
         for command in [
             "rg needle /outside/.env",
             "cargo test --manifest-path /outside/Cargo.toml",
+            "cargo build --config /outside/cargo-config.toml",
             "make -f /outside/Makefile",
             "git diff --no-index /workspace/a /outside/b",
             "git diff --output=/outside/diff.txt",
@@ -2867,6 +2949,22 @@ mod tests {
         assert!(protected_output
             .iter()
             .any(|resource| resource.action == "edit" && resource.hard_denial.is_some()));
+
+        let cargo_key_value = "cargo build --config net.git-fetch-with-cli=true";
+        let cargo_key_value_resources =
+            shell_resources(cargo_key_value, Path::new("/workspace"), &backend);
+        assert!(!cargo_key_value_resources
+            .iter()
+            .any(|resource| matches!(resource.action.as_str(), "execute_path" | "edit")));
+        assert_eq!(
+            bind_authorized_shell_command(
+                cargo_key_value,
+                Path::new("/workspace"),
+                &cargo_key_value_resources,
+            )
+            .unwrap(),
+            cargo_key_value
+        );
 
         for command in [
             "tee .git/nac-owned",

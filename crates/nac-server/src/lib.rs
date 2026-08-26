@@ -482,6 +482,12 @@ pub struct CreateSessionRequest {
     /// orchestrator default.
     #[serde(default)]
     pub behavior: sessions::SessionBehavior,
+    /// Marks the required first chat for an empty project. The server
+    /// serializes this admission and returns the already-created primary chat
+    /// to concurrent callers instead of creating a duplicate. Ordinary New
+    /// Chat requests leave this false.
+    #[serde(default)]
+    pub first_chat: bool,
     /// Explicit project selection. Projects are never inferred from `cwd`.
     pub project_id: Option<String>,
     #[schema(value_type = Option<String>)]
@@ -1921,6 +1927,29 @@ impl SessionManager {
         &self,
         mut request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
+        let first_chat_project_id = if request.first_chat {
+            Some(
+                request
+                    .project_id
+                    .clone()
+                    .filter(|project_id| !project_id.trim().is_empty())
+                    .ok_or_else(|| anyhow!("invalid request: first_chat requires project_id"))?,
+            )
+        } else {
+            None
+        };
+        let first_chat_gate = first_chat_project_id
+            .as_ref()
+            .map(|project_id| self.lifecycle_gate(&format!("project-first-chat:{project_id}")));
+        let _first_chat_admission = match first_chat_gate.as_ref() {
+            Some(gate) => Some(gate.lock().await),
+            None => None,
+        };
+        if let Some(project_id) = first_chat_project_id.as_deref() {
+            if let Some(session_id) = self.newest_primary_project_session_id(project_id)? {
+                return self.snapshot(&session_id).await;
+            }
+        }
         self.sweep_idle_sessions(None).await;
         let behavior = request.behavior;
         let project_context = request
@@ -2074,6 +2103,20 @@ impl SessionManager {
             .await
             .insert(session_id, Arc::new(service));
         Ok(snapshot)
+    }
+
+    fn newest_primary_project_session_id(&self, project_id: &str) -> Result<Option<String>> {
+        let mut candidates = sessions::list_sessions(&self.inner.store_path)?
+            .into_iter()
+            .filter(|summary| summary.project_id.as_deref() == Some(project_id))
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        for candidate in candidates {
+            if self.session_lineage(&candidate.session_id)?.is_none() {
+                return Ok(Some(candidate.session_id));
+            }
+        }
+        Ok(None)
     }
 
     fn lifecycle_gate(&self, session_id: &str) -> Arc<Mutex<()>> {
@@ -9444,6 +9487,7 @@ mod tests {
 
         let request = CreateSessionRequest {
             behavior: sessions::SessionBehavior::Orchestrator,
+            first_chat: false,
             project_id: None,
             cwd: None,
             model: RequestField::Omitted,
@@ -9482,6 +9526,7 @@ mod tests {
             let error = manager
                 .create_session(CreateSessionRequest {
                     behavior: sessions::SessionBehavior::Orchestrator,
+                    first_chat: false,
                     project_id: None,
                     cwd: None,
                     model: RequestField::Omitted,
@@ -14162,6 +14207,7 @@ model = "gpt-5.2"
         let create_error = manager
             .create_session(CreateSessionRequest {
                 behavior: sessions::SessionBehavior::Orchestrator,
+                first_chat: false,
                 project_id: None,
                 cwd: None,
                 model: RequestField::Omitted,
@@ -14286,6 +14332,7 @@ model = "gpt-5.2"
         let created = manager
             .create_session(CreateSessionRequest {
                 behavior: sessions::SessionBehavior::Orchestrator,
+                first_chat: false,
                 project_id: None,
                 cwd: None,
                 model: RequestField::Value("test-model".to_string()),
@@ -15063,14 +15110,22 @@ model = "gpt-5.2"
             .await
             .unwrap();
 
-        let created = manager
-            .create_session(CreateSessionRequest {
-                project_id: Some(project.project_id.clone()),
-                reasoning_effort: RequestField::Value("low".to_string()),
-                ..CreateSessionRequest::default()
-            })
-            .await
-            .unwrap();
+        let first_chat = CreateSessionRequest {
+            first_chat: true,
+            project_id: Some(project.project_id.clone()),
+            reasoning_effort: RequestField::Value("low".to_string()),
+            ..CreateSessionRequest::default()
+        };
+        let (created, duplicate) = tokio::join!(
+            manager.create_session(first_chat.clone()),
+            manager.create_session(first_chat)
+        );
+        let created = created.unwrap();
+        let duplicate = duplicate.unwrap();
+        assert_eq!(
+            created.metadata.session_id, duplicate.metadata.session_id,
+            "concurrent required-first-chat requests must converge on one primary session"
+        );
         let session_id = created.metadata.session_id.clone().unwrap();
         assert_eq!(
             created.metadata.project_id.as_deref(),

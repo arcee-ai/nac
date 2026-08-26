@@ -1291,6 +1291,8 @@ export interface SandboxRequest {
 
 export interface CreateSessionRequest {
   behavior?: SessionBehavior;
+  /** Server-authoritative idempotent admission for a project's required first chat. */
+  first_chat?: boolean;
   project_id?: string | null;
   cwd?: string | null;
   model?: RequestField<string>;

@@ -37,8 +37,14 @@ vi.mock("@/app/components/modals/RenameProjectModal", () => ({
   RenameProjectModal: () => null,
 }));
 vi.mock("@/app/components/modals/NewChatModal", () => ({
-  NewChatModal: ({ projectId, onClose }: { projectId: string | null; onClose: () => void }) =>
-    projectId ? <button onClick={onClose}>Close required chat</button> : null,
+  NewChatModal: ({
+    projectId,
+    onClose,
+  }: {
+    projectId: string | null;
+    firstChat?: boolean;
+    onClose: () => void;
+  }) => (projectId ? <button onClick={onClose}>Close required chat</button> : null),
 }));
 
 function Harness() {

@@ -6,6 +6,12 @@ chat** action. It preselects **NAC orchestrator** each time and does not remembe
 the previous choice. The chosen behavior is shown above the transcript for the
 lifetime of the chat.
 
+An empty-project route refreshes project and chat ownership before presenting
+the required first-chat dialog. The create is also server-idempotent, so two
+browser tabs that submit that required dialog concurrently converge on one
+primary chat. This idempotency applies only to the required first chat; an
+explicit **New chat** remains a request for another session.
+
 The wire values are:
 
 - `orchestrator` — NAC's established planner and worker-thread topology. It

@@ -33,7 +33,7 @@ interface ProjectActions {
   remove: (project: ProjectRecord) => void;
   togglePin: (project: ProjectRecord) => Promise<void>;
   /** Starts a chat inside a project, inheriting its location and defaults. */
-  newChat: (projectId: string) => Promise<void>;
+  newChat: (projectId: string, firstChat?: boolean) => Promise<void>;
 }
 
 const ProjectActionsContext = createContext<ProjectActions | null>(null);
@@ -56,6 +56,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [session, setSession] = useState<SessionSummarySnapshot | null>(null);
   const [newChatProjectId, setNewChatProjectId] = useState<string | null>(null);
+  const [requiredFirstChat, setRequiredFirstChat] = useState(false);
 
   const togglePin = pin.toggle;
   const adoptSession = assignSession.mutateAsync;
@@ -75,7 +76,10 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     [adoptSession, toast],
   );
 
-  const newChat = useCallback(async (projectId: string) => setNewChatProjectId(projectId), []);
+  const newChat = useCallback(async (projectId: string, firstChat = false) => {
+    setRequiredFirstChat(firstChat);
+    setNewChatProjectId(projectId);
+  }, []);
 
   const value = useMemo<ProjectActions>(
     () => ({
@@ -154,6 +158,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const closeNewChat = () => {
     const targetProjectId = newChatProjectId;
     setNewChatProjectId(null);
+    setRequiredFirstChat(false);
     // An empty project route has no screen behind this required first-chat
     // dialog. Closing it must therefore return to the project list rather than
     // exposing an indefinite loader. Successful creation immediately replaces
@@ -171,7 +176,11 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     <ProjectActionsContext.Provider value={value}>
       {children}
       <CreateProjectModal open={modal === "create"} onClose={close} />
-      <NewChatModal projectId={newChatProjectId} onClose={closeNewChat} />
+      <NewChatModal
+        projectId={newChatProjectId}
+        firstChat={requiredFirstChat}
+        onClose={closeNewChat}
+      />
       <AssignToProjectModal open={modal === "assign"} onClose={close} summary={session} />
       <RenameProjectModal open={modal === "rename"} onClose={close} project={project} />
       <DeleteProjectModal open={modal === "delete"} onClose={close} project={project} />

@@ -405,6 +405,7 @@ function CreateProjectForm({
     // server rejects a project-selected create that also carries a cwd.
     const body: CreateSessionRequest = {
       behavior,
+      first_chat: true,
       project_id: projectId,
       model,
       base_url: baseUrl,

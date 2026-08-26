@@ -921,6 +921,10 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
             }
         }
         5 => {
+            reject_unknown(
+                object,
+                &["cmd", "workdir", "tty", "yield_time_ms", "max_output_chars"],
+            )?;
             required_string(object, "cmd")?;
             optional_string(object, "workdir")?;
             optional_bool(object, "tty")?;
@@ -928,6 +932,16 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
             optional_u64(object, "max_output_chars", 0, usize::MAX as u64)?;
         }
         6 => {
+            reject_unknown(
+                object,
+                &[
+                    "session_id",
+                    "chars",
+                    "retain",
+                    "yield_time_ms",
+                    "max_output_chars",
+                ],
+            )?;
             required_string(object, "session_id")?;
             optional_string(object, "chars")?;
             optional_bool(object, "retain")?;
@@ -935,6 +949,7 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
             optional_u64(object, "max_output_chars", 0, usize::MAX as u64)?;
         }
         7 => {
+            reject_unknown(object, &["output_id", "offset", "limit", "stream"])?;
             required_string(object, "output_id")?;
             optional_u64(object, "offset", 0, u64::MAX)?;
             optional_u64(
@@ -1635,6 +1650,27 @@ mod discovery_tool_definition_tests {
                 .prepare(tool, input, services)
                 .err()
                 .unwrap_or_else(|| panic!("{tool} must fully decode before authorization"));
+            assert!(error.is_error, "{tool}: {}", error.content);
+        }
+
+        for (tool, input) in [
+            (
+                "exec_command",
+                serde_json::json!({"cmd":"git status", "unknown":true}),
+            ),
+            (
+                "write_stdin",
+                serde_json::json!({"session_id":"shell-test", "unknown":true}),
+            ),
+            (
+                "read_command_output",
+                serde_json::json!({"output_id":"output", "unknown":true}),
+            ),
+        ] {
+            let error = snapshot
+                .prepare(tool, input, services)
+                .err()
+                .unwrap_or_else(|| panic!("{tool} must reject unknown input before authorization"));
             assert!(error.is_error, "{tool}: {}", error.content);
         }
 

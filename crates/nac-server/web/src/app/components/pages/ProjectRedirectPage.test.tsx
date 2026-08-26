@@ -11,6 +11,8 @@ const fakes = vi.hoisted(() => ({
   newChat: vi.fn(),
   projects: vi.fn(),
   sessions: vi.fn(),
+  refetchProjects: vi.fn(),
+  refetchSessions: vi.fn(),
 }));
 
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
@@ -18,8 +20,8 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
 }));
 
 vi.mock("@/app/services/queries", () => ({
-  useProjects: () => fakes.projects(),
-  useSessions: () => fakes.sessions(),
+  useProjects: () => ({ ...fakes.projects(), refetch: fakes.refetchProjects }),
+  useSessions: () => ({ ...fakes.sessions(), refetch: fakes.refetchSessions }),
 }));
 
 function mount() {
@@ -53,6 +55,8 @@ beforeEach(() => {
     isError: false,
     isSuccess: true,
   });
+  fakes.refetchProjects.mockReset().mockResolvedValue({ isSuccess: true });
+  fakes.refetchSessions.mockReset().mockResolvedValue({ isSuccess: true });
 });
 
 afterEach(cleanup);
@@ -61,7 +65,9 @@ describe("project redirect", () => {
   it("starts the first chat only after both ownership queries succeed", async () => {
     mount();
     await waitFor(() => expect(fakes.newChat).toHaveBeenCalledOnce());
-    expect(fakes.newChat).toHaveBeenCalledWith("project-1");
+    expect(fakes.newChat).toHaveBeenCalledWith("project-1", true);
+    expect(fakes.refetchProjects).toHaveBeenCalledOnce();
+    expect(fakes.refetchSessions).toHaveBeenCalledOnce();
   });
 
   it("does not create a chat when the session ownership query fails", async () => {
@@ -114,5 +120,19 @@ describe("project redirect", () => {
     mount();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fakes.newChat).not.toHaveBeenCalled();
+  });
+
+  it("does not open the required first-chat dialog until a fresh ownership read completes", async () => {
+    let resolveSessions: ((value: { isSuccess: boolean }) => void) | undefined;
+    fakes.refetchSessions.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSessions = resolve;
+      }),
+    );
+    mount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.newChat).not.toHaveBeenCalled();
+    resolveSessions?.({ isSuccess: true });
+    await waitFor(() => expect(fakes.newChat).toHaveBeenCalledWith("project-1", true));
   });
 });
