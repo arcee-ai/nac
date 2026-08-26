@@ -652,7 +652,15 @@ fn tool_is_abortable(name: &str) -> bool {
     !name.starts_with("mcp__")
         && !matches!(
             name,
-            "write" | "edit" | "glob" | "grep" | "thread" | "thread_delete" | "workset_define"
+            "write"
+                | "edit"
+                | "glob"
+                | "grep"
+                | "thread"
+                | "thread_delete"
+                | "workset_define"
+                | "exec_command"
+                | "write_stdin"
         )
 }
 

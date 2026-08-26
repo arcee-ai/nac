@@ -12,6 +12,29 @@ use crate::store::{self, WorkerContext};
 use crate::types::Message;
 
 pub(crate) const MANAGED_WORKER_CANCEL_ACK: &str = "__NAC_CANCEL_ACK__";
+/// Worker process exit when cancel ACK succeeded but command shutdown did not.
+/// Distinct from panic (`101`) so the parent can fail closed on leftover work
+/// without treating a dead host tree after a crash as cleanup failure.
+pub const MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT: i32 = 75;
+
+#[derive(Debug)]
+struct WorkerCleanupIncomplete(String);
+
+impl std::fmt::Display for WorkerCleanupIncomplete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for WorkerCleanupIncomplete {}
+
+pub fn is_managed_worker_cleanup_incomplete(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<WorkerCleanupIncomplete>().is_some()
+        || error
+            .root_cause()
+            .downcast_ref::<WorkerCleanupIncomplete>()
+            .is_some()
+}
 
 pub struct ManagedWorkerRunConfig {
     pub(crate) agent: Agent,
@@ -137,7 +160,10 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
     let send_result = agent.send(&action).await;
     if cancellation.is_cancelled() {
         if let Err(error) = agent.confirm_command_shutdown().await {
-            eprintln!("nac: worker command shutdown incomplete: {error:#}");
+            return Err(WorkerCleanupIncomplete(format!(
+                "worker command shutdown incomplete: {error:#}"
+            ))
+            .into());
         }
         return Ok(());
     }

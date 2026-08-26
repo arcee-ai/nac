@@ -121,6 +121,10 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
         return Ok((serde_json::to_string_pretty(&output)?, is_error));
     }
 
+    if runtime.command_cancellation.is_cancelled() {
+        return Err(anyhow!("terminal command cancelled"));
+    }
+
     let session_name = make_session_name();
     manager
         .create(session_name.clone(), cwd, 120, 40, &runtime.backend)

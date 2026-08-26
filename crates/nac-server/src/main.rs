@@ -426,7 +426,12 @@ struct SandboxArgs {
 async fn main() {
     if let Err(error) = run().await {
         eprintln!("Error: {error:#}");
-        process::exit(1);
+        let code = if nac_core::runtime::is_managed_worker_cleanup_incomplete(&error) {
+            nac_core::runtime::MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT
+        } else {
+            1
+        };
+        process::exit(code);
     }
 }
 

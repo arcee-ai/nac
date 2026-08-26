@@ -901,11 +901,11 @@ impl Agent {
             .terminal_manager
             .wait_for_one_shot_shutdown()
             .await?;
+        self.tool_runtime.active_tools.wait_for_shutdown().await;
         self.tool_runtime
             .terminal_manager
             .terminate_sessions()
             .await?;
-        self.tool_runtime.active_tools.wait_for_shutdown().await;
         Ok(())
     }
 

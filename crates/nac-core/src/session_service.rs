@@ -2188,12 +2188,15 @@ impl SessionService {
             task.abort();
             let _ = task.await;
         }
-        let (command_cleanup, terminal_cleanup, worker_cleanup, ()) = tokio::join!(
+        // Wait for in-flight tools and one-shots before draining PTY sessions.
+        // `exec_command` / `write_stdin` insert a session only after
+        // `TerminalSession::spawn`; a parallel drain can miss that insert.
+        let (command_cleanup, worker_cleanup, ()) = tokio::join!(
             self.terminal_manager.wait_for_one_shot_shutdown(),
-            self.terminal_manager.terminate_sessions(),
             self.active_threads.wait_for_shutdown(),
             self.active_tools.wait_for_shutdown(),
         );
+        let terminal_cleanup = self.terminal_manager.terminate_sessions().await;
         let mut cleanup_failures = Vec::new();
         if let Err(error) = command_cleanup {
             cleanup_failures.push(error.to_string());

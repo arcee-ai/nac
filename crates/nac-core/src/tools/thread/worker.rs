@@ -200,6 +200,26 @@ pub(crate) fn worker_model_arguments_for_test(client: &ModelClient) -> Vec<Strin
         .collect()
 }
 
+async fn reap_after_cooperative_worker_exit(
+    process_tree: &mut ProcessTreeGuard,
+    child: &mut tokio::process::Child,
+    status: std::process::ExitStatus,
+) -> Option<String> {
+    process_tree.mark_leader_reaped();
+    let worker_reported_incomplete =
+        status.code() == Some(crate::worker::MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT);
+    match process_tree.terminate(child).await {
+        Ok(()) if worker_reported_incomplete => {
+            Some("worker command shutdown incomplete".to_string())
+        }
+        Ok(()) => None,
+        Err(error) if worker_reported_incomplete => Some(format!(
+            "worker command shutdown incomplete; worker cleanup incomplete: {error}"
+        )),
+        Err(error) => Some(format!("worker cleanup incomplete: {error}")),
+    }
+}
+
 pub(super) async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
@@ -386,29 +406,22 @@ pub(super) async fn run_worker(
         if acknowledged {
             if let Ok(wait_result) = timeout(COOPERATIVE_CLEANUP_GRACE, child.wait()).await {
                 let status = wait_result?;
-                process_tree.mark_leader_reaped();
-                if status.success() {
-                    cooperatively_cancelled = true;
-                } else {
-                    // A worker panic or non-zero exit after cancel ack is not
-                    // proof that command descendants are still running. Reap
-                    // leftovers and fail closed only when that cannot finish.
-                    match process_tree.terminate(&mut child).await {
-                        Ok(()) => cooperatively_cancelled = true,
-                        Err(error) => {
-                            cooperatively_cancelled = true;
-                            cooperative_cleanup_error =
-                                Some(format!("worker cleanup incomplete: {error}"));
-                        }
-                    }
-                }
+                cooperatively_cancelled = true;
+                cooperative_cleanup_error =
+                    reap_after_cooperative_worker_exit(&mut process_tree, &mut child, status).await;
             }
         }
     } else if matches!(outcome, WaitOutcome::Exited(_)) {
-        process_tree.mark_leader_reaped();
         if cancellation.is_cancelled() {
-            outcome = WaitOutcome::Cancelled;
+            let status = match std::mem::replace(&mut outcome, WaitOutcome::Cancelled) {
+                WaitOutcome::Exited(wait_result) => wait_result?,
+                _ => unreachable!("checked Exited above"),
+            };
             cooperatively_cancelled = true;
+            cooperative_cleanup_error =
+                reap_after_cooperative_worker_exit(&mut process_tree, &mut child, status).await;
+        } else {
+            process_tree.mark_leader_reaped();
         }
     }
 
