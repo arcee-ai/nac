@@ -804,9 +804,10 @@ Non-negotiable invariants:
 ## Exact next action
 
 Closure is still active. Complete and commit the four `d9bfe35` review repairs,
-run all four exact gates on the coherent successor, record the evidence without
-claiming unavailable Podman-backed QA, and obtain another detached-clean
-four-lane/two-episode NAC review while preserving
+run all four exact gates on the coherent successor, record that evidence in a
+tracked successor without claiming unavailable Podman-backed QA, repeat the
+four gates on the evidence successor, and obtain another detached-clean four-
+lane/two-episode NAC review while preserving
 `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
 the ignored local decision notebook. Only a fresh detached-clean four-lane,
 two-episode NAC GO may advance to final browser smoke and status audit.
@@ -835,3 +836,10 @@ identity-free Conflict journals retain fail-closed content verification while
 allowing an operator's distinct complete canonical save to resolve the
 conflict. Focused regressions cover all four seams; broad exact gates and a new
 immutable review remain required.
+
+Coherent repair commit `b4110e97576e45503471ebf7c3476e1c49431ad3`
+passes the full exact gate set: `make ci` (catalog 2+7+24, core 1144/9 ignored,
+server 142, binary 21, frontend 175), all 10 deterministic durability checks,
+committed-asset freshness, and all 10 production-embedded Playwright journeys.
+This is exact implementation evidence only. The tracked evidence successor
+must repeat the same four gates before the required immutable review.
