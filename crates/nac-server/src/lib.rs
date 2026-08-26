@@ -3112,7 +3112,19 @@ impl SessionManager {
     async fn cancel_active_run_unchecked(&self, session_id: &str) -> Result<()> {
         let service = self.attach_session(session_id).await?;
         let Some(active) = service.active_run() else {
-            return Ok(());
+            // An uncached service is also returned when another NAC process
+            // owns the durable operation lease. Never report cancellation as
+            // successful merely because this process has no task handle.
+            return match sessions::SessionOperationLease::try_acquire(
+                &self.inner.store_path,
+                session_id,
+            ) {
+                Ok(_idle) => Ok(()),
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => Err(anyhow!(
+                    "session '{session_id}' is running in another process and cannot be cancelled from this process"
+                )),
+                Err(error) => Err(anyhow::Error::new(error)),
+            };
         };
         match service
             .connect_client()
@@ -11582,6 +11594,83 @@ mod tests {
         peer.kill().unwrap();
         peer.wait().unwrap();
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn peer_owned_direct_and_managed_cancellation_fail_fast() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let direct_root = temp_root("direct_peer_cancel_conflict");
+        let _env =
+            ScopedModelEnv::isolated(&direct_root.join("nac-home"), Some("peer-cancel-test-key"));
+        seed_direct_session(&direct_root, "direct");
+        let direct_manager = test_manager(&direct_root);
+        let direct_lease =
+            sessions::SessionOperationLease::try_acquire(&direct_root.join("store.db"), "direct")
+                .unwrap();
+        let direct_error = tokio::time::timeout(
+            Duration::from_secs(1),
+            direct_manager.cancel_active_run("direct"),
+        )
+        .await
+        .expect("peer-owned direct cancellation must not hang")
+        .unwrap_err();
+        assert!(
+            direct_error
+                .to_string()
+                .contains("running in another process"),
+            "unexpected direct cancellation error: {direct_error:#}"
+        );
+        drop(direct_lease);
+
+        let managed_root = temp_root("managed_peer_cancel_conflict");
+        seed_direct_with_orchestrator_session_with_base_url(
+            &managed_root,
+            "delegating",
+            "https://api.openai.com/v1".to_string(),
+        );
+        let managed_manager = test_manager(&managed_root);
+        let orchestrator = managed_manager
+            .create_managed_orchestrator_session("delegating", "peer work")
+            .await
+            .unwrap();
+        let store_path = managed_root.join("store.db");
+        nac_core::store::begin_managed_orchestrator_run(
+            &store_path,
+            &orchestrator,
+            "peer-run",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+        nac_core::store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .append_run_prompt(
+                &orchestrator,
+                0,
+                &Message::User {
+                    content: "peer is working".to_string(),
+                },
+                "peer-run",
+            )
+            .unwrap();
+        let managed_lease =
+            sessions::SessionOperationLease::try_acquire(&store_path, &orchestrator).unwrap();
+        let managed_error = tokio::time::timeout(
+            Duration::from_secs(1),
+            managed_manager.cancel_managed_orchestrator("delegating", &orchestrator),
+        )
+        .await
+        .expect("peer-owned managed cancellation must not hang")
+        .unwrap_err();
+        assert!(
+            managed_error
+                .to_string()
+                .contains("running in another process"),
+            "unexpected managed cancellation error: {managed_error:#}"
+        );
+        drop(managed_lease);
+
+        let _ = std::fs::remove_dir_all(direct_root);
+        let _ = std::fs::remove_dir_all(managed_root);
     }
 
     #[tokio::test]

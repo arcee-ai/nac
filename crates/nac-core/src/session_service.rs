@@ -654,6 +654,7 @@ impl Drop for CancellingRun {
     }
 }
 
+#[derive(Clone)]
 enum RunOutcome {
     Completed(String, Option<crate::model::TokenUsage>),
     Failed(String, Option<crate::model::TokenUsage>),
@@ -661,7 +662,8 @@ enum RunOutcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DurableRunTerminal {
-    Canonical,
+    Completed,
+    Cancelled,
     Failed,
 }
 
@@ -2738,6 +2740,24 @@ impl SessionService {
         &self,
         run_id: &SessionRunId,
     ) -> std::result::Result<(), SessionCancelError> {
+        // Cancellation owns terminal cleanup and several durable settlement
+        // commits. Run it in an owned task so dropping an HTTP/tool caller can
+        // never cancel the settlement future between those commits.
+        let service = self.clone();
+        let owned_run_id = run_id.clone();
+        match tokio::spawn(async move { service.request_cancel_owned(&owned_run_id).await }).await {
+            Ok(result) => result,
+            Err(error) => Err(SessionCancelError::Cleanup {
+                run_id: run_id.clone(),
+                message: format!("cancellation settlement task failed: {error}"),
+            }),
+        }
+    }
+
+    async fn request_cancel_owned(
+        &self,
+        run_id: &SessionRunId,
+    ) -> std::result::Result<(), SessionCancelError> {
         let Some(prompt_commit) = self.run_prompt_commit(run_id) else {
             return Err(SessionCancelError::NotActive {
                 run_id: run_id.clone(),
@@ -2839,7 +2859,7 @@ impl SessionService {
                 transcript_baseline,
                 None,
                 cancel_usage.clone(),
-                DurableRunTerminal::Canonical,
+                DurableRunTerminal::Cancelled,
             )
             .await
         {
@@ -2948,7 +2968,7 @@ impl SessionService {
             match result {
                 Ok(response) => {
                     service
-                        .finish_run_once(&task_run_id, RunOutcome::Completed(response, usage))
+                        .finish_run(&task_run_id, RunOutcome::Completed(response, usage))
                         .await;
                 }
                 Err(message) => {
@@ -2957,7 +2977,7 @@ impl SessionService {
                     // reason can be read.
                     eprintln!("nac: run failed: {message}");
                     service
-                        .finish_run_once(&task_run_id, RunOutcome::Failed(message, usage))
+                        .finish_run(&task_run_id, RunOutcome::Failed(message, usage))
                         .await;
                 }
             }
@@ -3230,6 +3250,26 @@ impl SessionService {
         Ok(active_run)
     }
 
+    async fn finish_run(&self, run_id: &SessionRunId, outcome: RunOutcome) {
+        loop {
+            if self.finish_run_once(run_id, outcome.clone()).await {
+                return;
+            }
+            let retry_cleanup = {
+                let guard = self.lock_active_operation();
+                matches!(
+                    guard.as_ref(),
+                    Some(ActiveSessionOperation::Run(active_run))
+                        if &active_run.snapshot.run_id == run_id && !active_run.finishing
+                )
+            };
+            if !retry_cleanup {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     async fn finish_run_once(&self, run_id: &SessionRunId, outcome: RunOutcome) -> bool {
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Err(error) = self.terminal_manager.settle_run().await {
@@ -3256,7 +3296,7 @@ impl SessionService {
         let durable_terminal = if matches!(outcome, RunOutcome::Failed(..)) {
             DurableRunTerminal::Failed
         } else {
-            DurableRunTerminal::Canonical
+            DurableRunTerminal::Completed
         };
         let goal_usage = completed_usage.clone();
         let goal_disposition = if matches!(outcome, RunOutcome::Failed(..)) {
@@ -3690,6 +3730,9 @@ impl SessionService {
         completed_usage: Option<crate::model::TokenUsage>,
         durable_terminal: DurableRunTerminal,
     ) -> Result<()> {
+        let goal_final_billable_tokens = completed_usage
+            .as_ref()
+            .map_or(0, crate::model::TokenUsage::billable_tokens);
         {
             let snapshot = self.session_snapshot.lock().await;
             if snapshot.is_none() {
@@ -3734,12 +3777,24 @@ impl SessionService {
             })
         };
         match durable_terminal {
-            DurableRunTerminal::Canonical => {
+            DurableRunTerminal::Completed | DurableRunTerminal::Cancelled => {
                 update.finished_run_id = Some(active_run.run_id.to_string());
             }
             DurableRunTerminal::Failed => {
                 update.failed_run_id = Some(active_run.run_id.to_string());
             }
+        }
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            update.goal_settlement = Some(crate::store::GoalRunSettlement {
+                run_id: active_run.run_id.to_string(),
+                final_billable_tokens: goal_final_billable_tokens,
+                terminal_at_epoch_ms: now_epoch_ms(),
+                disposition: match durable_terminal {
+                    DurableRunTerminal::Completed => crate::store::GoalRunDisposition::Completed,
+                    DurableRunTerminal::Cancelled => crate::store::GoalRunDisposition::Cancelled,
+                    DurableRunTerminal::Failed => crate::store::GoalRunDisposition::Failed,
+                },
+            });
         }
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
@@ -5993,15 +6048,17 @@ pub(super) mod tests {
             .await
             .unwrap();
 
-        assert!(
-            !finish_parts
-                .service
-                .finish_run_once(
-                    &finish_run.run_id,
+        let finish_service = finish_parts.service.clone();
+        let finish_run_id = finish_run.run_id.clone();
+        let finish_task = tokio::spawn(async move {
+            finish_service
+                .finish_run(
+                    &finish_run_id,
                     RunOutcome::Failed("model failed".to_string(), None),
                 )
-                .await
-        );
+                .await;
+        });
+        tokio::time::sleep(Duration::from_millis(250)).await;
         assert_eq!(
             finish_parts.service.active_run().unwrap().run_id,
             finish_run.run_id
@@ -6014,15 +6071,10 @@ pub(super) mod tests {
             .any(|event| matches!(event.event, SessionEvent::RunFailed { .. })));
 
         std::fs::write(&allow_cleanup, "allow").unwrap();
-        assert!(
-            finish_parts
-                .service
-                .finish_run_once(
-                    &finish_run.run_id,
-                    RunOutcome::Failed("model failed".to_string(), None),
-                )
-                .await
-        );
+        tokio::time::timeout(Duration::from_secs(2), finish_task)
+            .await
+            .expect("production run settlement did not retry terminal cleanup")
+            .unwrap();
         assert!(finish_parts.service.active_run().is_none());
 
         let _ = std::fs::remove_dir_all(cancel_store.parent().unwrap());
@@ -8698,7 +8750,7 @@ pub(super) mod tests {
                 finishing.transcript_baseline,
                 Some(42),
                 None,
-                DurableRunTerminal::Canonical,
+                DurableRunTerminal::Completed,
             )
             .await
             .unwrap();
@@ -8757,6 +8809,57 @@ pub(super) mod tests {
             .mark_run_cancelling(&active.run_id)
             .expect("dropping an interrupted cancellation claim must make it retryable");
         drop(retry);
+        let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn dropping_a_cancel_caller_does_not_drop_owned_settlement() {
+        let parts = test_picker_service("cancel_caller_drop_owned");
+        let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
+        let agent_guard = parts.service.agent.lock().await;
+        let service = parts.service.clone();
+        let run_id = active.run_id.clone();
+        let caller = tokio::spawn(async move { service.request_cancel(&run_id).await });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if parts
+                    .service
+                    .active_run()
+                    .is_some_and(|run| run.submitted_user_message.is_none())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("owned cancellation never claimed the run");
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        drop(agent_guard);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while parts.service.active_run().is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("detached cancellation settlement did not finish");
+        let agent = parts.service.agent.lock().await;
+        assert_eq!(
+            agent
+                .messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    Message::Assistant { content: Some(content), .. }
+                        if content == crate::agent::RUN_CANCELLED_MARKER
+                ))
+                .count(),
+            1
+        );
+        drop(agent);
         let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
     }
 

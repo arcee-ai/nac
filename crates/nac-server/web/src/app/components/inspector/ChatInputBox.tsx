@@ -728,9 +728,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   useEffect(() => consumePromptRequests((prompt) => void submit(prompt)), [submit]);
 
   const stop = useCallback(async () => {
-    const summary = entry?.summary;
-    if (summary) await actions.stopRun(summary);
-  }, [actions, entry]);
+    await actions.stopRun(sessionId);
+  }, [actions, sessionId]);
 
   const settingsButton = (
     <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
