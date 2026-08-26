@@ -89,7 +89,7 @@ impl ProcessTreeGuard {
     pub fn spawn_tracked(command: &mut Command) -> std::io::Result<(Child, Self)> {
         #[cfg(unix)]
         {
-            let (tree_id, root_id) = stamp_tree_env(command);
+            let (tree_id, root_id, _owns_session) = stamp_tree_env(command);
             let child = command.spawn()?;
             let mut guard = Self::for_child(&child);
             guard.tree_id = Some(tree_id);
@@ -108,7 +108,7 @@ impl ProcessTreeGuard {
     pub fn spawn_supervised(command: &mut Command) -> std::io::Result<(Child, Self)> {
         #[cfg(unix)]
         {
-            let (tree_id, root_id) = stamp_tree_env(command);
+            let (tree_id, root_id, owns_session) = stamp_tree_env(command);
             let mut leader_command = Command::new("/bin/sleep");
             leader_command
                 .arg("2147483647")
@@ -143,7 +143,7 @@ impl ProcessTreeGuard {
                 group_leader: Some(group_leader),
                 tree_id: Some(tree_id),
                 root_id: Some(root_id),
-                owns_session: true,
+                owns_session,
                 #[cfg(target_os = "macos")]
                 census: None,
             };
@@ -480,12 +480,13 @@ fn first_cleanup_error(
 }
 
 #[cfg(unix)]
-fn stamp_tree_env(command: &mut Command) -> (String, String) {
-    let root_id =
-        std::env::var(PROCESS_TREE_ROOT_ENV).unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+fn stamp_tree_env(command: &mut Command) -> (String, String, bool) {
+    let inherited = std::env::var(PROCESS_TREE_ROOT_ENV).ok();
+    let owns_session = inherited.is_none();
+    let root_id = inherited.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let tree_id = uuid::Uuid::new_v4().to_string();
     apply_tree_env(command, &tree_id, &root_id);
-    (tree_id, root_id)
+    (tree_id, root_id, owns_session)
 }
 
 #[cfg(unix)]

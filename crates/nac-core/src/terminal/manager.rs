@@ -488,7 +488,7 @@ impl TerminalManager {
         tokio::pin!(reader_shutdown_timer);
         let mut reader_shutdown_pending = force_reader_shutdown;
         let mut append_failed = false;
-        let mut drain_cancelled = false;
+        let mut drain_cancelled = !process_exited;
         loop {
             tokio::select! {
                 biased;
@@ -503,26 +503,10 @@ impl TerminalManager {
                         std::future::pending::<()>().await;
                     }
                 }, if !drain_cancelled => {
+                    // Wait-loop already terminated a live command, or the
+                    // process exited on its own. Do not rewrite Completed to
+                    // Cancelled or repeat remote pidfile kill.
                     drain_cancelled = true;
-                    status = CommandStatus::Cancelled;
-                    if let Some(pidfile) = pidfile.as_deref() {
-                        if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
-                            let cleanup_error = format!("command cleanup incomplete: {error}");
-                            runtime_error = Some(match runtime_error.take() {
-                                Some(existing) => format!("{existing}\n{cleanup_error}"),
-                                None => cleanup_error,
-                            });
-                        }
-                    }
-                    if let Err(error) = process_tree.terminate(&mut child).await {
-                        let cleanup_error = format!("command cleanup incomplete: {error}");
-                        runtime_error = Some(match runtime_error.take() {
-                            Some(existing) => format!("{existing}\n{cleanup_error}"),
-                            None => cleanup_error,
-                        });
-                    }
-                    exit_code = None;
-                    reader_shutdown.cancel();
                 }
                 chunk = receiver.recv() => {
                     let Some(chunk) = chunk else {

@@ -897,16 +897,29 @@ impl Agent {
     }
 
     pub(crate) async fn confirm_command_shutdown(&self) -> Result<()> {
-        self.tool_runtime
+        let one_shot = self
+            .tool_runtime
             .terminal_manager
             .wait_for_one_shot_shutdown()
-            .await?;
+            .await;
         self.tool_runtime.active_tools.wait_for_shutdown().await;
-        self.tool_runtime
+        let sessions = self
+            .tool_runtime
             .terminal_manager
             .terminate_sessions()
-            .await?;
-        Ok(())
+            .await;
+        let mut failures = Vec::new();
+        if let Err(error) = one_shot {
+            failures.push(error.to_string());
+        }
+        if let Err(error) = sessions {
+            failures.push(error.to_string());
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(failures.join("\n")))
+        }
     }
 
     #[cfg(test)]
