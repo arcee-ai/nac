@@ -3493,19 +3493,21 @@ impl SessionManager {
                 return Err(anyhow!("session is busy with an active operation"));
             }
         }
+        // Acquire the operation lease before converting resource ownership.
+        // Every lifecycle mutation uses this order, so no peer can win the
+        // shared/exclusive transition and mutate the session before rollback.
+        // This lease is declared before the rollback guard and therefore drops
+        // after shared ownership has been restored on every failed exit.
+        let _operation_lease =
+            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         if let Some(service) = service.as_ref() {
             service.release_sandbox_resource_lease();
         }
-        // Declare the rollback before the exclusive leases. On every failure,
-        // Rust drops those exclusive leases first and this guard then restores
-        // peer-visible ownership for a sandbox that remains attached.
         let mut sandbox_lease_rollback = SandboxResourceLeaseRollback::new(service.clone());
         let _resource_lease = sessions::SessionResourceMutationLease::try_acquire(
             &self.inner.store_path,
             session_id,
         )?;
-        let _operation_lease =
-            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         self.require_persisted_operation_session(session_id)?;
         suppression_rollback.suppress_running(session_id)?;
 
@@ -3538,12 +3540,6 @@ impl SessionManager {
             Some(target) => Some(target),
             None => self.workspace_root(session_id).await.ok(),
         };
-        if let Some(target) = revision_target {
-            if let Err(error) = workspace::forget(&target, session_id) {
-                eprintln!("nac: failed to drop workspace revisions: {error:#}");
-            }
-        }
-
         if let Some(service) = service.as_ref() {
             service.destroy_terminals().await?;
         }
@@ -3561,6 +3557,14 @@ impl SessionManager {
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
         if !deleted {
             return Err(anyhow!("session '{}' was not found", session_id));
+        }
+        // Only unpin Git objects after every fallible cleanup has succeeded
+        // and the durable rows that referenced them are gone. A forget failure
+        // can leak a ref, but can no longer make a retained revision unreadable.
+        if let Some(target) = revision_target {
+            if let Err(error) = workspace::forget(&target, session_id) {
+                eprintln!("nac: failed to drop workspace revisions: {error:#}");
+            }
         }
         suppression_rollback.disarm();
         self.inner.active_sessions.write().await.remove(session_id);
@@ -3611,16 +3615,15 @@ impl SessionManager {
             }
         }
 
-        let _resource_lease = sessions::SessionResourceMutationLease::try_acquire(
-            &self.inner.store_path,
-            session_id,
-        )?;
-
         // Independent server processes coordinate through the same
         // crash-safe lease. Keep it through validation, CAS persistence, and
         // local eviction, but never hold a SQLite transaction over model I/O.
         let _operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
+        let _resource_lease = sessions::SessionResourceMutationLease::try_acquire(
+            &self.inner.store_path,
+            session_id,
+        )?;
         self.require_primary_operation_session(session_id)?;
 
         let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
@@ -8971,13 +8974,57 @@ mod tests {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("durable_sandbox_delete");
         seed_editable_session(&root, "sandbox-session");
+        let git_executable = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|directory| directory.join("git"))
+            .find(|candidate| candidate.is_file())
+            .expect("git executable on PATH");
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new(&git_executable)
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.name", "NAC Test"]);
+        git(&["config", "user.email", "nac@example.invalid"]);
+        std::fs::write(root.join("revision.txt"), b"pinned\n").unwrap();
+        git(&["add", "revision.txt"]);
+        git(&["commit", "-m", "pinned revision"]);
+        git(&["update-ref", "refs/nac/revisions/sandbox-session", "HEAD"]);
+        let fork_point = String::from_utf8(
+            std::process::Command::new(&git_executable)
+                .arg("-C")
+                .arg(&root)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
         let store_path = root.join("store.db");
         let mut snapshot = sessions::load_session(&store_path, "sandbox-session").unwrap();
         nac_core::test_support::set_default_sandbox_spec(&mut snapshot);
+        nac_core::test_support::set_sandbox_worktree(
+            &mut snapshot,
+            root.clone(),
+            root.join("missing-worktree"),
+            fork_point,
+        );
         sessions::save_session(&store_path, &snapshot).unwrap();
 
         let bin = root.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(&git_executable, bin.join("git")).unwrap();
         let podman = bin.join("podman");
         let arguments = root.join("podman-arguments");
         std::fs::write(
@@ -9001,6 +9048,11 @@ mod tests {
             .to_string()
             .contains("failed to remove sandbox container"));
         assert!(sessions::load_session(&store_path, "sandbox-session").is_ok());
+        git(&[
+            "rev-parse",
+            "--verify",
+            "refs/nac/revisions/sandbox-session",
+        ]);
         assert_eq!(
             std::fs::read_to_string(&arguments).unwrap(),
             "rm\n--ignore\n-f\nnac-sandbox-session\n"
@@ -9009,6 +9061,18 @@ mod tests {
         unsafe { std::env::set_var("NAC_TEST_PODMAN_STATUS", "0") };
         manager.delete_session("sandbox-session").await.unwrap();
         assert!(sessions::load_session(&store_path, "sandbox-session").is_err());
+        let revision_ref = std::process::Command::new(&git_executable)
+            .arg("-C")
+            .arg(&root)
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "refs/nac/revisions/sandbox-session",
+            ])
+            .status()
+            .unwrap();
+        assert!(!revision_ref.success());
 
         unsafe {
             for (name, value) in [

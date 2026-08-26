@@ -184,7 +184,7 @@ fn validated_record(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct DocumentRevision(Option<[u8; 32]>);
+pub struct DocumentRevision(Option<[u8; 32]>);
 
 fn read_document_snapshot(path: &Path) -> ConfigurationResult<(DocumentMut, DocumentRevision)> {
     let (raw, revision) = match std::fs::read_to_string(path) {
@@ -225,6 +225,102 @@ fn current_document_revision(path: &Path) -> ConfigurationResult<DocumentRevisio
     }
 }
 
+#[cfg(unix)]
+fn exchange_paths(left: &Path, right: &Path) -> std::io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let left = CString::new(left.as_os_str().as_bytes())?;
+    let right = CString::new(right.as_os_str().as_bytes())?;
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            left.as_ptr(),
+            libc::AT_FDCWD,
+            right.as_ptr(),
+            libc::RENAME_EXCHANGE,
+        )
+    };
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let result = unsafe { libc::renamex_np(left.as_ptr(), right.as_ptr(), libc::RENAME_SWAP) };
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+    let result = -1;
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn exchange_paths(_left: &Path, _right: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "atomic file exchange is unavailable on this platform",
+    ))
+}
+
+fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    File::open(parent.unwrap_or_else(|| Path::new(".")))?.sync_all()
+}
+
+/// Atomically publishes only if the destination at the exchange instant is
+/// the exact document that was read. Existing files use the kernel's atomic
+/// swap operation so the displaced destination can be verified without a
+/// check/rename interval; first creation uses hard-link create-if-absent.
+fn publish_if_revision(
+    path: &Path,
+    temp: &Path,
+    expected_revision: &DocumentRevision,
+) -> ConfigurationResult<()> {
+    match expected_revision.0 {
+        None => match std::fs::hard_link(temp, path) {
+            Ok(()) => {
+                std::fs::remove_file(temp)
+                    .map_err(|error| McpServerConfigurationStoreError::Store(anyhow!(error)))?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(McpServerConfigurationStoreError::ConcurrentModification);
+            }
+            Err(error) => {
+                return Err(McpServerConfigurationStoreError::Store(anyhow!(error)));
+            }
+        },
+        Some(_) => {
+            exchange_paths(temp, path).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    McpServerConfigurationStoreError::ConcurrentModification
+                } else {
+                    McpServerConfigurationStoreError::Store(anyhow!(error))
+                }
+            })?;
+            let displaced_revision = match current_document_revision(temp) {
+                Ok(revision) => revision,
+                Err(error) => {
+                    let _ = exchange_paths(temp, path);
+                    return Err(error);
+                }
+            };
+            if displaced_revision != *expected_revision {
+                // Put the editor's exact document back. This second exchange
+                // is atomic; never remove the displaced file on this path.
+                exchange_paths(temp, path)
+                    .map_err(|error| McpServerConfigurationStoreError::Store(anyhow!(error)))?;
+                return Err(McpServerConfigurationStoreError::ConcurrentModification);
+            }
+            std::fs::remove_file(temp)
+                .map_err(|error| McpServerConfigurationStoreError::Store(anyhow!(error)))?;
+        }
+    }
+    sync_parent_directory(path)
+        .map_err(|error| McpServerConfigurationStoreError::Store(anyhow!(error)))?;
+    Ok(())
+}
+
 /// Writes through a sibling temp file and a rename, so a crash mid-write
 /// never leaves a truncated config behind. Header and env values may be
 /// secrets, so both the unique temp and the final file are always `0600`.
@@ -263,10 +359,7 @@ fn write_document(
             file.set_permissions(std::fs::Permissions::from_mode(0o600))
                 .map_err(io_error)?;
         }
-        if current_document_revision(path)? != expected_revision {
-            return Err(McpServerConfigurationStoreError::ConcurrentModification);
-        }
-        std::fs::rename(&temp, path).map_err(io_error)?;
+        publish_if_revision(path, &temp, &expected_revision)?;
         Ok(())
     })();
     if result.is_err() {
@@ -422,6 +515,22 @@ pub fn load_mcp_server_configuration(
         .ok_or_else(|| McpServerConfigurationStoreError::NotFound(name.to_string()))
 }
 
+/// Loads one record together with the exact whole-document revision from
+/// which its omitted-field values were derived.
+pub fn load_mcp_server_configuration_snapshot(
+    path: &Path,
+    name: &str,
+) -> ConfigurationResult<(McpServerConfigurationRecord, DocumentRevision)> {
+    let (document, revision) = read_document_snapshot(path)?;
+    let record = document
+        .get("mcp_servers")
+        .and_then(Item::as_table_like)
+        .and_then(|servers| servers.get(name))
+        .map(|item| record_of(name, item))
+        .ok_or_else(|| McpServerConfigurationStoreError::NotFound(name.to_string()))?;
+    Ok((record, revision))
+}
+
 pub fn insert_mcp_server_configuration(
     path: &Path,
     configuration: McpServerConfigurationRecord,
@@ -446,8 +555,24 @@ pub fn update_mcp_server_configuration(
     name: &str,
     configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
+    let (_, revision) = read_document_snapshot(path)?;
+    update_mcp_server_configuration_at_revision(path, name, configuration, revision)
+}
+
+/// Replaces an entry only when the whole document is still the revision from
+/// which the caller derived its patch. This prevents an API handler from
+/// restoring omitted fields read before a noncooperating editor save.
+pub fn update_mcp_server_configuration_at_revision(
+    path: &Path,
+    name: &str,
+    configuration: McpServerConfigurationRecord,
+    expected_revision: DocumentRevision,
+) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
     let (mut document, revision) = read_document_snapshot(path)?;
+    if revision != expected_revision {
+        return Err(McpServerConfigurationStoreError::ConcurrentModification);
+    }
     let servers = servers_table(&mut document)?;
     if !servers.contains_key(name) {
         return Err(McpServerConfigurationStoreError::NotFound(name.to_string()));
@@ -461,7 +586,7 @@ pub fn update_mcp_server_configuration(
         servers.remove(name);
     }
     servers[record.name.as_str()] = Item::Table(table_of(&record));
-    write_document(path, &document, revision)?;
+    write_document(path, &document, expected_revision)?;
     Ok(record)
 }
 
@@ -550,6 +675,30 @@ mod tests {
             .filter_map(Result::ok)
             .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp")));
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn stale_record_patch_cannot_restore_fields_after_editor_save() {
+        let path = temp_config();
+        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
+        let (mut stale, revision) =
+            load_mcp_server_configuration_snapshot(&path, "example").unwrap();
+
+        let mut editor = http_server("example");
+        editor.url = Some("https://editor.example/mcp".to_string());
+        update_mcp_server_configuration(&path, "example", editor.clone()).unwrap();
+
+        stale.enabled = false;
+        assert!(matches!(
+            update_mcp_server_configuration_at_revision(&path, "example", stale, revision)
+                .unwrap_err(),
+            McpServerConfigurationStoreError::ConcurrentModification
+        ));
+        assert_eq!(
+            load_mcp_server_configuration(&path, "example").unwrap(),
+            editor
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
