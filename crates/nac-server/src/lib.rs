@@ -267,13 +267,11 @@ impl ServerTraditionalChildController {
     }
 }
 
-/// Identifies a checkout across sessions. The connection has to be part of it:
-/// two sessions on the same path of different machines are different checkouts,
-/// and — the reason this is a pair rather than a path — two sessions on the same
-/// path of the *same* remote machine are the same one. The whole connection is
-/// what counts, not just the host name: the same name reached on another port or
-/// as another user is another machine as far as a checkout is concerned.
-type GitTargetKey = (Option<String>, PathBuf);
+/// Identifies a checkout across sessions using the same canonical Local/SSH
+/// identity as the cross-process mutation lease. This keeps caches, peer
+/// session admission, active runs, and retained terminals from splitting when
+/// two OpenSSH aliases reach the same effective host and canonical directory.
+type GitTargetKey = Vec<u8>;
 
 struct WorkspaceMutationAdmission {
     target: GitTarget,
@@ -283,12 +281,22 @@ struct WorkspaceMutationAdmission {
 }
 
 fn git_target_key(target: &GitTarget) -> GitTargetKey {
-    (
-        target
-            .ssh_connection()
-            .map(|connection| connection.identity()),
-        target.root().to_path_buf(),
-    )
+    target.lease_identity()
+}
+
+fn config_replacement_conflict(
+    has_active_operation: bool,
+    has_sandbox: bool,
+) -> Option<&'static str> {
+    if has_active_operation {
+        Some("session is busy with an active operation; wait for it before updating config")
+    } else if has_sandbox {
+        Some(
+            "session owns an active sandbox; config replacement is unavailable while container-local state must be preserved",
+        )
+    } else {
+        None
+    }
 }
 
 struct ResolvedLaunchLocation {
@@ -3117,6 +3125,7 @@ impl SessionManager {
         session_id: &str,
         request: SwitchBranchRequest,
     ) -> Result<workspace::BranchList> {
+        self.require_primary_operation_session(session_id)?;
         let admission = self.idle_workspace_root(session_id).await?;
         let target = admission.target.clone();
 
@@ -3145,6 +3154,7 @@ impl SessionManager {
         session_id: &str,
         request: CommitWorkspaceRequest,
     ) -> Result<workspace::CommitOutcome> {
+        self.require_primary_operation_session(session_id)?;
         let admission = self.idle_workspace_root(session_id).await?;
         let target = admission.target.clone();
 
@@ -3241,7 +3251,7 @@ impl SessionManager {
         request: ThreadSteeringRequest,
     ) -> Result<ThreadSteeringResponse> {
         self.require_primary_operation_session(session_id)?;
-        self.queue_thread_steering_unchecked(session_id, thread_name, request)
+        self.queue_thread_steering_unchecked(session_id, thread_name, request, None)
             .await
     }
 
@@ -3250,10 +3260,11 @@ impl SessionManager {
         session_id: &str,
         thread_name: &str,
         request: ThreadSteeringRequest,
+        expected_run_id: Option<&str>,
     ) -> Result<ThreadSteeringResponse> {
         let service = self.attach_session(session_id).await?;
         let record = service
-            .queue_thread_steering(thread_name, &request.instruction)
+            .queue_thread_steering_for_run(thread_name, &request.instruction, expected_run_id)
             .await?;
         Ok(ThreadSteeringResponse {
             steering_id: record.id,
@@ -3430,6 +3441,10 @@ impl SessionManager {
                 return Err(anyhow!("session is busy with an active operation"));
             }
         }
+        let _resource_lease = sessions::SessionResourceMutationLease::try_acquire(
+            &self.inner.store_path,
+            session_id,
+        )?;
         let _operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         self.require_persisted_operation_session(session_id)?;
@@ -3445,10 +3460,12 @@ impl SessionManager {
         for child in children {
             Box::pin(self.delete_session_cascade(&child.child_session_id)).await?;
         }
-        let persisted_worktree = sessions::load_session(&self.inner.store_path, session_id)
+        let persisted_sandbox = sessions::load_session(&self.inner.store_path, session_id)
             .ok()
-            .and_then(|snapshot| snapshot.sandbox_spec)
-            .and_then(|spec| spec.worktree);
+            .and_then(|snapshot| snapshot.sandbox_spec);
+        let persisted_worktree = persisted_sandbox
+            .as_ref()
+            .and_then(|spec| spec.worktree.clone());
         // The revision rows cascade with the session, but the git objects they
         // pinned only become collectable once the ref is gone. A missing
         // sandbox checkout must not hide the repository recorded in durable
@@ -3472,6 +3489,15 @@ impl SessionManager {
             service.destroy_terminals().await?;
         }
 
+        // Preserve the durable session row until owned container cleanup is
+        // confirmed. If Podman is unavailable or refuses removal, a later
+        // deletion retry still has the exact stable container identity.
+        if let Some(service) = service.as_ref() {
+            service.destroy_sandbox().await?;
+        } else if persisted_sandbox.is_some() {
+            nac_core::destroy_persisted_container(session_id).await?;
+        }
+
         // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
         let deleted = view::delete_session(&self.inner.store_path, session_id)?;
         if !deleted {
@@ -3479,14 +3505,10 @@ impl SessionManager {
         }
         suppression_rollback.disarm();
         self.inner.active_sessions.write().await.remove(session_id);
-        if let Some(service) = service {
-            // Explicitly destroy the sandbox even if SSE handlers retained the service.
-            service.destroy_sandbox().await;
-        } else if let Some(worktree) = persisted_worktree {
-            // No live service (the server restarted since the session ran):
-            // the container is already ownerless, but the persisted spec
-            // supplied the worktree metadata needed to remove the fork.
-            runtime::cleanup_session_worktree(&worktree);
+        if service.is_none() {
+            if let Some(worktree) = persisted_worktree {
+                runtime::cleanup_session_worktree(&worktree);
+            }
         }
         Ok(())
     }
@@ -3522,12 +3544,17 @@ impl SessionManager {
         // attachment paths cannot observe or insert a stale service.
         let mut active = self.inner.active_sessions.write().await;
         if let Some(service) = active.get(session_id) {
-            if service.has_active_operation() {
-                return Err(anyhow!(
-                    "session is busy with an active operation; wait for it before updating config"
-                ));
+            if let Some(conflict) =
+                config_replacement_conflict(service.has_active_operation(), service.has_sandbox())
+            {
+                return Err(anyhow!(conflict));
             }
         }
+
+        let _resource_lease = sessions::SessionResourceMutationLease::try_acquire(
+            &self.inner.store_path,
+            session_id,
+        )?;
 
         // Independent server processes coordinate through the same
         // crash-safe lease. Keep it through validation, CAS persistence, and
@@ -4375,6 +4402,9 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                 return Err(anyhow!("managed orchestrator is not running"));
             }
             if let Some(thread_name) = thread_name {
+                let expected_run_id = relation.run_id.as_deref().ok_or_else(|| {
+                    anyhow!("running managed orchestrator is missing its run identity")
+                })?;
                 manager
                     .queue_thread_steering_unchecked(
                         orchestrator_session_id,
@@ -4382,6 +4412,7 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                         ThreadSteeringRequest {
                             instruction: instruction.to_string(),
                         },
+                        Some(expected_run_id),
                     )
                     .await?;
             } else {
@@ -8861,6 +8892,79 @@ mod tests {
         assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
     }
 
+    #[test]
+    fn config_replacement_preserves_attached_sandbox_ownership() {
+        assert_eq!(
+            config_replacement_conflict(false, true),
+            Some(
+                "session owns an active sandbox; config replacement is unavailable while container-local state must be preserved"
+            )
+        );
+        assert!(config_replacement_conflict(false, false).is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_restart_container_cleanup_preserves_durable_delete_authority() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("durable_sandbox_delete");
+        seed_editable_session(&root, "sandbox-session");
+        let store_path = root.join("store.db");
+        let mut snapshot = sessions::load_session(&store_path, "sandbox-session").unwrap();
+        nac_core::test_support::set_default_sandbox_spec(&mut snapshot);
+        sessions::save_session(&store_path, &snapshot).unwrap();
+
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        let arguments = root.join("podman-arguments");
+        std::fs::write(
+            &podman,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NAC_TEST_PODMAN_ARGUMENTS\"\nexit \"$NAC_TEST_PODMAN_STATUS\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_arguments = std::env::var_os("NAC_TEST_PODMAN_ARGUMENTS");
+        let original_status = std::env::var_os("NAC_TEST_PODMAN_STATUS");
+        unsafe {
+            std::env::set_var("PATH", &bin);
+            std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
+            std::env::set_var("NAC_TEST_PODMAN_STATUS", "23");
+        }
+
+        let manager = test_manager(&root);
+        let error = manager.delete_session("sandbox-session").await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("failed to remove sandbox container"));
+        assert!(sessions::load_session(&store_path, "sandbox-session").is_ok());
+        assert_eq!(
+            std::fs::read_to_string(&arguments).unwrap(),
+            "rm\n--ignore\n-f\nnac-sandbox-session\n"
+        );
+
+        unsafe { std::env::set_var("NAC_TEST_PODMAN_STATUS", "0") };
+        manager.delete_session("sandbox-session").await.unwrap();
+        assert!(sessions::load_session(&store_path, "sandbox-session").is_err());
+
+        unsafe {
+            for (name, value) in [
+                ("PATH", original_path),
+                ("NAC_TEST_PODMAN_ARGUMENTS", original_arguments),
+                ("NAC_TEST_PODMAN_STATUS", original_status),
+            ] {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct ScopedModelEnv {
@@ -11769,6 +11873,31 @@ mod tests {
             .contains("accept work only through their parent"));
 
         for delegated in [&child, &orchestrator] {
+            let branch_error = manager
+                .switch_workspace_branch(
+                    delegated,
+                    SwitchBranchRequest {
+                        name: "delegated-mutation".to_string(),
+                        create: true,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(branch_error
+                .to_string()
+                .contains("accept work only through their parent"));
+            let commit_error = manager
+                .commit_workspace(
+                    delegated,
+                    CommitWorkspaceRequest {
+                        message: "delegated mutation".to_string(),
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(commit_error
+                .to_string()
+                .contains("accept work only through their parent"));
             let before = manager.session_config(delegated).unwrap();
             let config_error = manager
                 .update_session_config(
@@ -11822,6 +11951,27 @@ mod tests {
 
         let app = router(manager.clone());
         for delegated in [&child, &orchestrator] {
+            for (path, body) in [
+                (
+                    "workspace/branches",
+                    r#"{"name":"delegated-mutation","create":true}"#,
+                ),
+                ("workspace/commit", r#"{"message":"delegated mutation"}"#),
+            ] {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri(format!("/sessions/{delegated}/{path}"))
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::CONFLICT, "{path}");
+            }
             let config = app
                 .clone()
                 .oneshot(

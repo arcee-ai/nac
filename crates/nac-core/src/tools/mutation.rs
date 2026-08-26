@@ -1648,13 +1648,13 @@ def result(path, old, new, old_revision):
     }
 
 def lock_target(path):
-    resolved = Path(path).expanduser().resolve(strict=False)
+    resolved = os.path.normpath(os.path.abspath(os.path.expanduser(path)))
     lock_dir = Path(tempfile.gettempdir()) / f"nac-file-locks-{os.geteuid()}"
     lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_dir_stat = os.lstat(lock_dir)
     if not stat.S_ISDIR(lock_dir_stat.st_mode) or lock_dir_stat.st_uid != os.geteuid() or lock_dir_stat.st_mode & 0o077:
         fail("permission_denied", f"NAC file-lock directory has unsafe ownership or mode: {lock_dir}")
-    key = hashlib.sha256(os.fsencode(str(resolved))).hexdigest()
+    key = hashlib.sha256(os.fsencode(resolved)).hexdigest()
     lock_path = lock_dir / (key + ".lock")
     descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     lock_file = os.fdopen(descriptor, "r+b", buffering=0)
@@ -1668,12 +1668,50 @@ def lock_target(path):
         raise SystemExit(75)
     return resolved, lock_file
 
+def open_parent(path, create=False):
+    path = os.fspath(path)
+    if not os.path.isabs(path):
+        fail("permission_denied", f"remote native file path is not absolute: {path}")
+    components = [component for component in path.split("/") if component]
+    if not components:
+        fail("permission_denied", "remote native file path has no final component")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open("/", flags)
+    try:
+        for component in components[:-1]:
+            try:
+                child = os.open(component, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, mode=0o777, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor, components[-1]
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+def open_bound(path, flags):
+    parent, name = open_parent(path)
+    try:
+        descriptor = os.open(name, flags | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent)
+        return descriptor
+    finally:
+        os.close(parent)
+
 def default_creation_mode():
     mask = os.umask(0)
     os.umask(mask)
     return 0o666 & ~mask
 
-def publish(
+def publish_bound(
+    parent,
+    name,
     path,
     old_exists,
     new,
@@ -1682,9 +1720,14 @@ def publish(
     fail_before_publish=False,
     fail_after_publish=False,
 ):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(prefix=".nac-mutation-", suffix=".tmp", dir=path.parent)
-    temp_path = Path(temp_name)
+    path = os.fspath(path)
+    temp_name = ".nac-mutation-" + uuid.uuid4().hex + ".tmp"
+    descriptor = os.open(
+        temp_name,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+        dir_fd=parent,
+    )
     published = False
     try:
         with os.fdopen(descriptor, "wb", closefd=True) as target:
@@ -1715,10 +1758,16 @@ def publish(
         if fail_before_publish:
             raise OSError("injected failure before publication")
         if old_exists:
-            os.replace(temp_path, path)
+            os.replace(temp_name, name, src_dir_fd=parent, dst_dir_fd=parent)
         else:
             try:
-                os.link(temp_path, path)
+                os.link(
+                    temp_name,
+                    name,
+                    src_dir_fd=parent,
+                    dst_dir_fd=parent,
+                    follow_symlinks=False,
+                )
             except FileExistsError:
                 fail("already_exists", f"file already exists: {path}; expected_revision null only creates a missing file — read the file and retry write with its revision")
         published = True
@@ -1726,12 +1775,8 @@ def publish(
             if fail_after_publish:
                 raise OSError("injected failure after publication")
             if not old_exists:
-                temp_path.unlink()
-            directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+                os.unlink(temp_name, dir_fd=parent)
+            os.fsync(parent)
         except OSError as exc:
             emit({
                 "error": "io_error",
@@ -1743,19 +1788,37 @@ def publish(
     finally:
         if not published:
             try:
-                temp_path.unlink()
+                os.unlink(temp_name, dir_fd=parent)
             except FileNotFoundError:
                 pass
+
+def publish(path, old_exists, new, old_stat, output, fail_before_publish=False, fail_after_publish=False):
+    parent, name = open_parent(path, create=True)
+    try:
+        publish_bound(
+            parent,
+            name,
+            path,
+            old_exists,
+            new,
+            old_stat,
+            output,
+            fail_before_publish,
+            fail_after_publish,
+        )
+    finally:
+        os.close(parent)
 
 payload = json.load(sys.stdin)
 original_path = payload["path"]
 operation = payload["operation"]
 if operation == "read":
-    path = Path(payload["resolved_path"]).expanduser()
+    path = os.path.normpath(os.path.abspath(os.path.expanduser(payload["resolved_path"])))
     try:
-        with path.open("rb") as source:
+        descriptor = open_bound(path, os.O_RDONLY)
+        with os.fdopen(descriptor, "rb", closefd=True) as source:
             header = source.read(32)
-            extension = path.suffix.lower()
+            extension = os.path.splitext(path)[1].lower()
             supported_extension = extension in (".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".gif", ".webp")
             # Transport-only parity with image::guess_format; Rust validates the returned bytes.
             image_signature = (
@@ -1773,7 +1836,7 @@ if operation == "read":
                 if not payload.get("image_read", False):
                     fail("unsupported_image", f"the selected model cannot view image files: {original_path}")
                 image_limit = 20 * 1024 * 1024
-                if path.stat().st_size > image_limit:
+                if os.fstat(source.fileno()).st_size > image_limit:
                     fail("image_limit_exceeded", f"image exceeds the {image_limit} byte limit: {original_path}")
                 source.seek(0)
                 data = source.read(image_limit + 1)
@@ -1820,10 +1883,21 @@ if operation == "read":
     })
 
 path, lock_file = lock_target(payload["resolved_path"])
+parent = None
 try:
+    parent, name = open_parent(
+        path,
+        create=operation == "write" and payload.get("expected_revision") is None,
+    )
     try:
-        old = path.read_bytes()
-        old_stat = path.stat()
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent,
+        )
+        with os.fdopen(descriptor, "rb", closefd=True) as source:
+            old_stat = os.fstat(source.fileno())
+            old = source.read()
     except FileNotFoundError:
         old = None
         old_stat = None
@@ -1879,7 +1953,9 @@ try:
     else:
         fail("io_error", f"unknown mutation operation: {operation}")
     output = result(original_path, old or b"", new, rev(old) if old is not None else None)
-    publish(
+    publish_bound(
+        parent,
+        name,
         path,
         old is not None,
         new,
@@ -1890,6 +1966,8 @@ try:
     )
     emit(output)
 finally:
+    if parent is not None:
+        os.close(parent)
     lock_file.close()
 "#;
 
@@ -2473,6 +2551,7 @@ mod tests {
         let workspace = dir.join("workspace");
         fs::create_dir_all(&bin).unwrap();
         fs::create_dir_all(&workspace).unwrap();
+        let workspace = fs::canonicalize(workspace).unwrap();
         let fake_podman = bin.join("podman");
         fs::write(
             &fake_podman,
@@ -2545,6 +2624,7 @@ mod tests {
         let workspace = dir.join("workspace");
         fs::create_dir_all(&bin).unwrap();
         fs::create_dir_all(&workspace).unwrap();
+        let workspace = fs::canonicalize(workspace).unwrap();
         let fake_ssh = bin.join("ssh");
         fs::write(
             &fake_ssh,
@@ -2622,7 +2702,7 @@ mod tests {
         let payload = json!({
             "operation": "read",
             "path": "file.txt",
-            "resolved_path": path,
+            "resolved_path": resolve_target_path(&path).unwrap(),
             "offset": 1,
             "limit": 2
         });
@@ -2670,7 +2750,7 @@ mod tests {
         let payload = json!({
             "operation": "read",
             "path": "file.txt",
-            "resolved_path": path,
+            "resolved_path": resolve_target_path(&path).unwrap(),
             "offset": 0,
             "limit": 20
         });
@@ -2801,7 +2881,7 @@ mod tests {
 
         let output = Command::new("python3")
             .args(["-I", "-c", &script])
-            .arg(&path)
+            .arg(resolve_target_path(&path).unwrap())
             .output()
             .unwrap();
         assert!(
@@ -2941,6 +3021,87 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn remote_native_mutation_rejects_post_authorization_ancestor_symlink_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("nac-remote-binding-test-{}", Uuid::new_v4()));
+        let safe = root.join("safe");
+        let protected = root.join("protected");
+        fs::create_dir_all(&safe).unwrap();
+        fs::create_dir_all(&protected).unwrap();
+        let authorized = safe.join("new-hook");
+        let bound = resolve_target_path(&authorized).unwrap();
+        let protected_hook = protected.join("new-hook");
+        fs::write(&protected_hook, b"protected").unwrap();
+
+        fs::rename(&safe, root.join("safe-before-swap")).unwrap();
+        symlink(&protected, &safe).unwrap();
+        let payload = json!({
+            "operation": "write",
+            "path": "safe/new-hook",
+            "resolved_path": bound,
+            "expected_revision": null,
+            "content": "pwned"
+        });
+        let output = run_python_protocol_exact(
+            &payload,
+            &mut std::process::Command::new("python3"),
+            std::process::Stdio::piped(),
+        );
+        assert!(!output.status.success());
+        assert_eq!(fs::read(&protected_hook).unwrap(), b"protected");
+        assert!(!root.join("safe-before-swap/new-hook").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_native_mutation_keeps_the_open_parent_across_a_late_swap() {
+        let root =
+            std::env::temp_dir().join(format!("nac-remote-late-binding-test-{}", Uuid::new_v4()));
+        let safe = root.join("safe");
+        let moved = root.join("safe-before-swap");
+        let protected = root.join("protected");
+        fs::create_dir_all(&safe).unwrap();
+        fs::create_dir_all(&protected).unwrap();
+        let protected_hook = protected.join("new-hook");
+        fs::write(&protected_hook, b"protected").unwrap();
+        let authorized = resolve_target_path(&safe.join("new-hook")).unwrap();
+        let definitions = REMOTE_MUTATION_SCRIPT
+            .split_once("payload = json.load(sys.stdin)")
+            .unwrap()
+            .0;
+        let script = format!(
+            "{definitions}\npath = Path(sys.argv[1])\n\
+             parent, name = open_parent(path)\n\
+             os.rename(sys.argv[2], sys.argv[3])\n\
+             os.symlink(sys.argv[4], sys.argv[2])\n\
+             publish_bound(parent, name, path, False, b'pwned', None, {{'new_revision': rev(b'pwned')}})\n\
+             os.close(parent)\n"
+        );
+        let output = std::process::Command::new("python3")
+            .args(["-I", "-c", &script])
+            .arg(&authorized)
+            .arg(&safe)
+            .arg(&moved)
+            .arg(&protected)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read(&protected_hook).unwrap(), b"protected");
+        assert_eq!(fs::read(moved.join("new-hook")).unwrap(), b"pwned");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn worker_definitions_advertise_revisioned_batched_contract() {
         let definitions = crate::tools::worker_tool_definitions(false);
@@ -2971,6 +3132,18 @@ mod tests {
     }
 
     fn run_python_protocol(
+        payload: &Value,
+        command: &mut std::process::Command,
+        stdin: std::process::Stdio,
+    ) -> std::process::Output {
+        let mut payload = payload.clone();
+        if let Some(path) = payload.get("resolved_path").and_then(Value::as_str) {
+            payload["resolved_path"] = json!(resolve_target_path(Path::new(path)).unwrap());
+        }
+        run_python_protocol_exact(&payload, command, stdin)
+    }
+
+    fn run_python_protocol_exact(
         payload: &Value,
         command: &mut std::process::Command,
         stdin: std::process::Stdio,

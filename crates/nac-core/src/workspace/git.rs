@@ -34,6 +34,7 @@ pub enum GitTarget {
     },
     Ssh {
         connection: SshConnection,
+        lease_connection_identity: String,
         remote_cwd: PathBuf,
         control_path: PathBuf,
     },
@@ -214,8 +215,10 @@ impl GitTarget {
     /// control socket lives.
     pub fn ssh(connection: SshConnection, remote_cwd: PathBuf, config_cwd: &Path) -> Self {
         let control_path = connection.control_path(&PathContext::new(config_cwd));
+        let lease_connection_identity = connection.canonical_identity();
         Self::Ssh {
             connection,
+            lease_connection_identity,
             remote_cwd,
             control_path,
         }
@@ -233,10 +236,15 @@ impl GitTarget {
         match self {
             Self::Local { root } => workspace_lease_identity(None, root),
             Self::Ssh {
-                connection,
+                lease_connection_identity,
                 remote_cwd,
                 ..
-            } => workspace_lease_identity(Some(connection), remote_cwd),
+            } => {
+                let mut identity = format!("ssh:{lease_connection_identity}").into_bytes();
+                identity.push(0);
+                identity.extend_from_slice(remote_cwd.to_string_lossy().as_bytes());
+                identity
+            }
         }
     }
 
@@ -549,7 +557,7 @@ impl GitTarget {
 
 pub(crate) fn workspace_lease_identity(connection: Option<&SshConnection>, root: &Path) -> Vec<u8> {
     let mut identity = match connection {
-        Some(connection) => format!("ssh:{}", connection.identity()).into_bytes(),
+        Some(connection) => format!("ssh:{}", connection.canonical_identity()).into_bytes(),
         None => b"local".to_vec(),
     };
     identity.push(0);

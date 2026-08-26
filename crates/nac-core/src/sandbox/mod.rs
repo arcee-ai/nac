@@ -477,6 +477,13 @@ impl SandboxSession {
     }
 }
 
+/// Best-effort recovery cleanup for an owned container whose in-memory owner
+/// was lost in a process crash. Owned top-level containers use the durable
+/// session id as their key, so deletion after restart can still address them.
+pub async fn destroy_persisted_container(session_id: &str) -> Result<()> {
+    podman::destroy_owned_container(session_id).await
+}
+
 pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountSpec> {
     let (host_raw, guest_raw) = raw
         .split_once(':')

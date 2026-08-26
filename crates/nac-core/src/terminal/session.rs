@@ -37,6 +37,7 @@ pub struct TerminalSession {
     exit_code: Option<i32>,
     retained: bool,
     _workspace_activity: Option<crate::sessions::WorkspaceActivityLease>,
+    _session_resource: Option<crate::sessions::SessionResourceLease>,
     /// Remote process-tree cleanup: backends that return a pidfile from
     /// `terminal_pty_command` get a backend-side kill on session teardown.
     backend_cleanup: Option<(Arc<ExecutionBackend>, String)>,
@@ -160,6 +161,7 @@ impl TerminalSession {
             exit_code: None,
             retained: false,
             _workspace_activity: None,
+            _session_resource: None,
             backend_cleanup,
             cwd: resolved_cwd,
             cols,
@@ -247,10 +249,15 @@ impl TerminalSession {
         self.exit_code
     }
 
-    pub fn retain(&mut self, workspace_activity: Option<crate::sessions::WorkspaceActivityLease>) {
+    pub fn retain(
+        &mut self,
+        workspace_activity: Option<crate::sessions::WorkspaceActivityLease>,
+        session_resource: Option<crate::sessions::SessionResourceLease>,
+    ) {
         if !self.retained {
             self.retained = true;
             self._workspace_activity = workspace_activity;
+            self._session_resource = session_resource;
         }
     }
 

@@ -6,8 +6,11 @@
 //! separate identifier.
 
 use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
 
 use super::*;
@@ -61,6 +64,47 @@ impl From<anyhow::Error> for McpServerConfigurationStoreError {
 }
 
 type ConfigurationResult<T> = std::result::Result<T, McpServerConfigurationStoreError>;
+
+pub struct McpConfigurationWriteLease {
+    file: File,
+}
+
+impl Drop for McpConfigurationWriteLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+    }
+}
+
+/// Cross-process serialization for the dashboard's whole-document edits.
+pub fn acquire_mcp_configuration_write_lease(
+    path: &Path,
+) -> ConfigurationResult<McpConfigurationWriteLease> {
+    let parent = path.parent().ok_or_else(|| {
+        McpServerConfigurationStoreError::Store(anyhow!("config path has no parent"))
+    })?;
+    std::fs::create_dir_all(parent).map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to create config directory: {error}"
+        ))
+    })?;
+    let lock_path = path.with_extension("toml.lock");
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    let file = options.open(&lock_path).map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!("failed to open config lock: {error}"))
+    })?;
+    file.lock_exclusive().map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!("failed to lock config: {error}"))
+    })?;
+    Ok(McpConfigurationWriteLease { file })
+}
 
 /// The `config.toml` the dashboard edits: the same file every session parses
 /// when a worker launches. Resolved through a `PathContext` so a relative
@@ -154,9 +198,8 @@ fn read_document(path: &Path) -> ConfigurationResult<DocumentMut> {
 }
 
 /// Writes through a sibling temp file and a rename, so a crash mid-write
-/// never leaves a truncated config behind. The existing file's permissions
-/// carry over to the temp file — header and env values may be secrets, so a
-/// user's `0600` must survive a dashboard save.
+/// never leaves a truncated config behind. Header and env values may be
+/// secrets, so both the unique temp and the final file are always `0600`.
 fn write_document(path: &Path, document: &DocumentMut) -> ConfigurationResult<()> {
     let io_error = |error: std::io::Error| {
         McpServerConfigurationStoreError::Store(anyhow!(
@@ -167,12 +210,34 @@ fn write_document(path: &Path, document: &DocumentMut) -> ConfigurationResult<()
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(io_error)?;
     }
-    let temp = path.with_extension("toml.tmp");
-    std::fs::write(&temp, document.to_string()).map_err(io_error)?;
-    if let Ok(metadata) = std::fs::metadata(path) {
-        std::fs::set_permissions(&temp, metadata.permissions()).map_err(io_error)?;
+    let temp = path.with_extension(format!("toml.{}.tmp", uuid::Uuid::new_v4()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
     }
-    std::fs::rename(&temp, path).map_err(io_error)?;
+    let result: ConfigurationResult<()> = (|| {
+        let mut file = options.open(&temp).map_err(io_error)?;
+        file.write_all(document.to_string().as_bytes())
+            .map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))
+                .map_err(io_error)?;
+        }
+        std::fs::rename(&temp, path).map_err(io_error)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result?;
     Ok(())
 }
 
@@ -430,18 +495,69 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn saves_keep_the_existing_file_permissions() {
+    fn saves_create_and_repair_private_file_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
         let path = temp_config();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-
         insert_mcp_server_configuration(&path, http_server("example")).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        update_mcp_server_configuration(&path, "example", http_server("example")).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp")));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+    #[test]
+    fn mcp_config_process_helper() {
+        let Some(path) = std::env::var_os("NAC_TEST_MCP_CONFIG_PATH") else {
+            return;
+        };
+        let name = std::env::var("NAC_TEST_MCP_CONFIG_NAME").unwrap();
+        let path = PathBuf::from(path);
+        let _lease = acquire_mcp_configuration_write_lease(&path).unwrap();
+        insert_mcp_server_configuration(&path, http_server(&name)).unwrap();
+    }
+
+    #[test]
+    fn cross_process_writers_preserve_both_whole_document_updates() {
+        // Spawning the test binary inherits the process environment. Keep it
+        // from racing tests that temporarily redirect NAC_HOME or MCP config.
+        let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+        let path = temp_config();
+        let executable = std::env::current_exe().unwrap();
+        let spawn = |name: &str| {
+            std::process::Command::new(&executable)
+                .args([
+                    "--exact",
+                    "mcp::file_config::tests::mcp_config_process_helper",
+                    "--nocapture",
+                ])
+                .env("NAC_TEST_MCP_CONFIG_PATH", &path)
+                .env("NAC_TEST_MCP_CONFIG_NAME", name)
+                .spawn()
+                .unwrap()
+        };
+        let mut first = spawn("first");
+        let mut second = spawn("second");
+        assert!(first.wait().unwrap().success());
+        assert!(second.wait().unwrap().success());
+        let names = list_mcp_server_configurations(&path)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.name)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(names, ["first".to_string(), "second".to_string()].into());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

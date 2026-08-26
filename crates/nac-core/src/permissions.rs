@@ -649,25 +649,7 @@ fn backend_defaults(backend: PermissionBackend) -> Vec<PermissionRule> {
     ];
     if matches!(backend, PermissionBackend::Local | PermissionBackend::Ssh) {
         rules.push(PermissionRule::new("execute", "*", Ask));
-        for resource in [
-            "command:[cargo][build]*",
-            "command:[cargo][check]*",
-            "command:[cargo][clippy]*",
-            "command:[cargo][fmt]*",
-            "command:[cargo][test]*",
-            "command:[git][diff]*",
-            "command:[git][log]*",
-            "command:[git][show]*",
-            "command:[git][status]*",
-            "command:[make][check]*",
-            "command:[make][ci]*",
-            "command:[make][format-check]*",
-            "command:[make][lint]*",
-            "command:[make][test]*",
-            "command:[rg]*",
-        ] {
-            rules.push(PermissionRule::new("execute", resource, Allow));
-        }
+        rules.push(PermissionRule::new("execute", "command:[rg]*", Allow));
     }
     rules
 }
@@ -838,6 +820,14 @@ pub(crate) async fn canonicalize_authorization_resources(
             canonical.push(resource.clone());
         }
     }
+    if canonical
+        .iter()
+        .any(|resource| matches!(resource.action.as_str(), "execute_broad" | "execute_opaque"))
+    {
+        for resource in &mut canonical {
+            resource.save_resource = None;
+        }
+    }
     Ok(canonical)
 }
 
@@ -870,7 +860,7 @@ pub(crate) fn shell_resources(
                     resources.push(
                         PermissionResource::new("execute_broad", canonical_command(&tokens))
                             .with_display(format!(
-                                "broad interpreter or shell: {display}; {authority}"
+                                "broad executable authority: {display}; {authority}"
                             )),
                     );
                 }
@@ -915,6 +905,17 @@ pub(crate) fn shell_resources(
         Path::new(""),
         false,
     ));
+    if resources
+        .iter()
+        .any(|resource| matches!(resource.action.as_str(), "execute_broad" | "execute_opaque"))
+    {
+        // A broad approval authorizes this invocation as one inseparable unit.
+        // Persisting any exact command, cwd, or path fragment from it would
+        // misrepresent that authority as a reusable narrow grant.
+        for resource in &mut resources {
+            resource.save_resource = None;
+        }
+    }
     resources
 }
 
@@ -1747,7 +1748,22 @@ fn is_broad_command_inner(tokens: &[String], depth: usize) -> bool {
                 || command == "xargs"
                 || command == "find" && find_exec_commands(effective).next().is_some()
         });
-    command_is_broad || cargo_configuration(effective) || embedded_command_body(effective).is_some()
+    command_is_broad
+        || project_code_command(effective)
+        || cargo_configuration(effective)
+        || embedded_command_body(effective).is_some()
+}
+
+fn project_code_command(tokens: &[String]) -> bool {
+    tokens
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .is_some_and(|command| {
+            matches!(
+                command.to_ascii_lowercase().as_str(),
+                "cargo" | "git" | "gmake" | "make"
+            )
+        })
 }
 
 fn cargo_configuration(tokens: &[String]) -> bool {
@@ -2045,8 +2061,69 @@ fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
         "cargo" => cargo_bare_relative_path_position(tokens, index),
         "rg" => rg_bare_relative_path_position(tokens, command_index, index),
         "git" => git_bare_relative_path_position(tokens, command_index, index),
+        "chmod" | "chown" | "chgrp" => simple_bare_path_operand(tokens, command_index, index, 1),
+        "cat" | "cp" | "du" | "file" | "head" | "install" | "ln" | "ls" | "mkdir" | "mv"
+        | "readlink" | "realpath" | "rmdir" | "stat" | "tail" | "tee" | "touch" | "truncate"
+        | "unlink" | "wc" => simple_bare_path_operand(tokens, command_index, index, 0),
         _ => false,
     }
+}
+
+fn simple_bare_path_operand(
+    tokens: &[String],
+    command_index: usize,
+    index: usize,
+    leading_data_operands: usize,
+) -> bool {
+    const VALUE_OPTIONS: &[&str] = &[
+        "-m",
+        "--mode",
+        "-o",
+        "--owner",
+        "-g",
+        "--group",
+        "-t",
+        "--target-directory",
+        "-S",
+        "--suffix",
+        "--reference",
+        "-s",
+        "--size",
+        "-n",
+        "--lines",
+        "-c",
+        "--bytes",
+        "--block-size",
+        "--format",
+        "--printf",
+    ];
+    let mut options = true;
+    let mut skip_value = false;
+    let mut positional = 0usize;
+    for (cursor, token) in tokens.iter().enumerate().skip(command_index + 1) {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if options && token == "--" {
+            options = false;
+            continue;
+        }
+        if options && token.starts_with('-') && token != "-" {
+            let option = token
+                .split_once('=')
+                .map_or(token.as_str(), |(name, _)| name);
+            if VALUE_OPTIONS.contains(&option) && !token.contains('=') {
+                skip_value = true;
+            }
+            continue;
+        }
+        if cursor == index {
+            return positional >= leading_data_operands;
+        }
+        positional += 1;
+    }
+    false
 }
 
 fn cargo_bare_relative_path_position(tokens: &[String], index: usize) -> bool {
@@ -2970,7 +3047,7 @@ mod tests {
 
     #[test]
     fn backend_defaults_are_pragmatic_without_changing_authority() {
-        let safe = PermissionResource::new("execute", "command:[git][status][--short]");
+        let safe = PermissionResource::new("execute", "command:[rg][needle][src]");
         let arbitrary = PermissionResource::new("execute", "command:[curl][example.com]");
         assert_eq!(
             PermissionPolicy::for_backend(PermissionBackend::Local, [])
@@ -3105,13 +3182,19 @@ mod tests {
             Path::new("/workspace"),
             &backend,
         );
-        assert_eq!(resources.len(), 3);
+        assert_eq!(resources.len(), 5);
         assert_eq!(resources[0].resource, "command:[git][status][--short]");
-        assert_eq!(
-            resources[0].save_resource.as_deref(),
-            Some("command:[git][status]*")
+        assert!(
+            resources
+                .iter()
+                .filter(|resource| resource.action == "execute_broad")
+                .count()
+                == 2
         );
-        assert_eq!(resources[2].action, "execute_cwd");
+        assert!(resources
+            .iter()
+            .all(|resource| resource.save_resource.is_none()));
+        assert_eq!(resources[4].action, "execute_cwd");
 
         let opaque = shell_resources("bash -c '$(dynamic)'", Path::new("/workspace"), &backend);
         assert!(opaque[0].resource.starts_with("opaque:sha256:"));
@@ -3122,11 +3205,10 @@ mod tests {
             removal[0].save_resource.as_deref(),
             Some("command:[rm][-rf][target]")
         );
-        assert_eq!(
-            shell_resources("/usr/bin/python -c pass", Path::new("/workspace"), &backend)[0]
-                .save_resource
-                .as_deref(),
-            Some("command:[/usr/bin/python][-c][pass]")
+        assert!(
+            shell_resources("/usr/bin/python -c pass", Path::new("/workspace"), &backend)
+                .iter()
+                .all(|resource| resource.save_resource.is_none())
         );
         for command in ["echo $HOME", "cargo test > /tmp/result", "cat < input"] {
             let opaque = shell_resources(command, Path::new("/workspace"), &backend);
@@ -3932,10 +4014,9 @@ mod tests {
                     .display
                     .contains("parser protected-path rules cannot constrain code inside it")
         }));
-        assert_eq!(
-            broad[0].save_resource.as_deref(),
-            Some(broad[0].resource.as_str())
-        );
+        assert!(broad
+            .iter()
+            .all(|resource| resource.save_resource.is_none()));
 
         for command in [
             "rg needle /outside/.env",
@@ -4079,27 +4160,16 @@ mod tests {
         .is_some());
 
         let git_status = shell_resources("git -C repo status", Path::new("/workspace"), &backend);
-        let git_status_save = git_status[0]
-            .save_resource
-            .as_deref()
-            .expect("Git status should have a remembered prefix");
-        assert_eq!(git_status_save, "command:[git][-C][repo][status]*");
-        assert!(!wildcard_match(
-            git_status_save,
-            &canonical_command(&[
-                "git".to_string(),
-                "-C".to_string(),
-                "repo".to_string(),
-                "config".to_string(),
-                "nac.review".to_string(),
-                "pwned".to_string(),
-            ])
-        ));
+        assert!(git_status
+            .iter()
+            .any(|resource| resource.action == "execute_broad"));
+        assert!(git_status
+            .iter()
+            .all(|resource| resource.save_resource.is_none()));
         let incomplete_git = shell_resources("git -C repo", Path::new("/workspace"), &backend);
-        assert_eq!(
-            incomplete_git[0].save_resource.as_deref(),
-            Some(incomplete_git[0].resource.as_str())
-        );
+        assert!(incomplete_git
+            .iter()
+            .all(|resource| resource.save_resource.is_none()));
 
         let formatting = "rg -n --field-match-separator=a/b needle .";
         let formatting_resources = shell_resources(formatting, Path::new("/workspace"), &backend);
@@ -4141,7 +4211,7 @@ mod tests {
         for command in [
             "rm safe/config",
             "rg needle ./safe",
-            "cargo test --manifest-path ./safe/Cargo.toml",
+            "cp ./safe/source ./safe/config",
         ] {
             let resources = shell_resources(command, Path::new("/workspace"), &backend);
             let path = resources
@@ -4169,6 +4239,65 @@ mod tests {
                     .display
                     .contains("trusted arbitrary code execution")
         }));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bare_relative_mutation_operands_cannot_hide_protected_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let base =
+            std::env::temp_dir().join(format!("nac_bare_shell_path_{}", uuid::Uuid::new_v4()));
+        let workspace = base.join("workspace");
+        std::fs::create_dir_all(workspace.join(".git")).unwrap();
+        std::fs::write(workspace.join(".git/config"), "protected").unwrap();
+        std::fs::write(workspace.join("payload"), "payload").unwrap();
+        symlink(".git/config", workspace.join("config-link")).unwrap();
+        let backend = local(&workspace);
+        let protected = std::fs::canonicalize(workspace.join(".git/config")).unwrap();
+
+        for command in ["cp payload config-link", "chmod 0644 config-link"] {
+            let projected = shell_resources(command, &workspace, &backend);
+            let resources =
+                canonicalize_authorization_resources(&projected, &backend, &base.join("store.db"))
+                    .await
+                    .unwrap();
+            assert!(
+                resources.iter().any(|resource| {
+                    resource.action == "edit"
+                        && resource.resource == protected.display().to_string()
+                        && resource.hard_denial.is_some()
+                }),
+                "bare mutation operand did not retain protected authority: {command}: {resources:?}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn project_code_commands_are_broad_and_leave_no_reusable_fragments() {
+        let backend = local(Path::new("/workspace"));
+        for command in [
+            "cargo check",
+            "make test",
+            "GIT_EXTERNAL_DIFF=./payload git diff --ext-diff",
+            "git status --short",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            assert!(
+                resources
+                    .iter()
+                    .any(|resource| resource.action == "execute_broad"),
+                "project-code command was not disclosed as broad: {command}"
+            );
+            assert!(
+                resources
+                    .iter()
+                    .all(|resource| resource.save_resource.is_none()),
+                "broad invocation exposed a reusable partial grant: {command}"
+            );
+        }
     }
 
     #[tokio::test]

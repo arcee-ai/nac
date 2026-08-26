@@ -28,7 +28,8 @@ pub(crate) use db::{
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
-    SessionRelationshipLease, WorkspaceActivityLease, WorkspaceMutationLease,
+    SessionRelationshipLease, SessionResourceLease, SessionResourceMutationLease,
+    WorkspaceActivityLease, WorkspaceMutationLease,
 };
 // Compatibility aliases for callers that have not yet adopted operation-wide naming.
 pub type SessionRunLease = SessionOperationLease;

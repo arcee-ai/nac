@@ -58,7 +58,10 @@ preserves its stronger confinement boundary for the same invocation.
 For the current portable MVP, directly parsed shell path arguments fail closed:
 a pathname string cannot stay bound if another process replaces an ancestor
 between authorization and OS path resolution. Use NAC's native file/search
-tools, select the intended working directory and run a path-free command, or—
-only when that authority is appropriate—approve a broad interpreter under the
-trusted-code rule above. This conservative restriction applies on every backend
-and avoids presenting pathname revalidation as object-level confinement.
+tools, or—only when that authority is appropriate—approve broad executable
+authority under the trusted-code rule above. Cargo, Git, Make, and similar
+project-configured launchers are broad even when their command line contains no
+path: mutable build scripts, hooks, helpers, and recipes can execute arbitrary
+code. Broad and opaque approvals are invocation-only and never produce partial
+remembered grants. This conservative restriction applies on every backend and
+avoids presenting pathname revalidation as object-level confinement.

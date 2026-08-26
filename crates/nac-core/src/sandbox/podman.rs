@@ -228,59 +228,46 @@ if [ "$root_identity_state" = match ]; then
       done
     fi
   }
-  is_current_descendant() {
-    candidate=$1
-    while [ -n "$candidate" ] && [ "$candidate" -gt 1 ] 2>/dev/null; do
-      parent=$(ps -ww -o ppid= -p "$candidate" 2>/dev/null) || return 1
-      parent=$(printf '%s' "$parent" | tr -d ' ')
-      [ -n "$parent" ] || return 1
-      [ "$parent" = "$pid" ] && return 0
-      candidate=$parent
-    done
-    return 1
-  }
   pids=$(descendants "$pid")
-  if [ "$(identity_state)" = match ]; then
-    uncertain=0
-    verified_descendants=
-    for child in $pids; do
-      if [ ! -r "/proc/$pid/stat" ] && ! is_current_descendant "$child"; then
-        continue
-      fi
-      child_identity=$(process_identity "$child") || {
-        process_is_live "$child" && uncertain=1
-        continue
-      }
-      verified_descendants="${verified_descendants}${child}|${child_identity}
+  uncertain=0
+  verified_descendants=
+  for child in $pids; do
+    child_identity=$(process_identity "$child") || {
+      process_is_live "$child" && uncertain=1
+      continue
+    }
+    verified_descendants="${verified_descendants}${child}|${child_identity}
 "
-    done
-    while IFS='|' read -r child child_expected_identity; do
-      [ -n "$child" ] || continue
-      child_actual_identity=$(process_identity "$child") || {
-        process_is_live "$child" && uncertain=1
-        continue
-      }
-      if [ "$child_actual_identity" != "$child_expected_identity" ]; then
-        uncertain=1
-        continue
-      fi
-      kill -KILL "$child" 2>/dev/null || {
-        process_is_live "$child" && uncertain=1
-      }
-    done <<NAC_DESCENDANTS
+  done
+  # The root may exit after descendant discovery. The captured child identity
+  # remains sufficient authority to clean that exact process; do not discard
+  # it merely because the supervisor disappeared before revalidation.
+  while IFS='|' read -r child child_expected_identity; do
+    [ -n "$child" ] || continue
+    child_actual_identity=$(process_identity "$child") || {
+      process_is_live "$child" && uncertain=1
+      continue
+    }
+    if [ "$child_actual_identity" != "$child_expected_identity" ]; then
+      uncertain=1
+      continue
+    fi
+    kill -KILL "$child" 2>/dev/null || {
+      process_is_live "$child" && uncertain=1
+    }
+  done <<NAC_DESCENDANTS
 $verified_descendants
 NAC_DESCENDANTS
-    case "$(identity_state)" in
-      match)
-        kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || {
-          process_is_live "$pid" && uncertain=1
-        }
-        ;;
-      uncertain) uncertain=1 ;;
-      gone|mismatch) ;;
-    esac
-    [ "$uncertain" -eq 0 ] || exit 1
-  fi
+  case "$(identity_state)" in
+    match)
+      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || {
+        process_is_live "$pid" && uncertain=1
+      }
+      ;;
+    uncertain) uncertain=1 ;;
+    gone|mismatch) ;;
+  esac
+  [ "$uncertain" -eq 0 ] || exit 1
 elif [ "$root_identity_state" = uncertain ]; then
   # Inspection failure is not proof that the recorded process disappeared or
   # that its PID was reused. Preserve the pidfile as retry authority and report
@@ -298,6 +285,23 @@ pub(crate) struct PodmanSession {
     /// one was sent, else the session key. Keyed per launch so concurrent
     /// launches do not clobber each other's reported phase.
     activity_key: String,
+}
+
+pub(crate) async fn destroy_owned_container(session_key: &str) -> Result<()> {
+    let container_name = format!("nac-{}", sanitize_name(session_key));
+    let output = Command::new("podman")
+        .args(["rm", "--ignore", "-f", &container_name])
+        .output()
+        .await
+        .context("failed to execute Podman sandbox cleanup")?;
+    if !output.status.success() {
+        bail!(
+            "failed to remove sandbox container '{}': {}",
+            container_name,
+            first_stderr_line(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 impl PodmanSession {
@@ -722,16 +726,13 @@ impl PodmanSession {
     }
 
     /// Explicitly destroy the sandbox container, regardless of remaining
-    /// `Arc` references.  Best-effort and idempotent: `podman rm -f` already
-    /// handles non-existent containers gracefully.
+    /// `Arc` references. `--ignore` makes absence idempotent while every real
+    /// runtime failure remains visible to the lifecycle caller.
     pub(crate) async fn destroy(&self) -> Result<()> {
         if !self.owner {
             return Ok(());
         }
-        let mut cmd = Command::new("podman");
-        cmd.args(["rm", "-f", &self.container_name]);
-        let _ = cmd.output().await; // best-effort, ignore errors
-        Ok(())
+        destroy_owned_container(&self.session_key).await
     }
 }
 
@@ -1131,6 +1132,49 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn crash_recovery_addresses_the_durable_session_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-durable-cleanup-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let arguments = root.join("arguments");
+        std::fs::write(
+            &podman,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NAC_TEST_PODMAN_ARGUMENTS\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_arguments = std::env::var_os("NAC_TEST_PODMAN_ARGUMENTS");
+        unsafe {
+            std::env::set_var("PATH", &root);
+            std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
+        }
+        destroy_owned_container("durable-session-id").await.unwrap();
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            match original_arguments {
+                Some(path) => std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", path),
+                None => std::env::remove_var("NAC_TEST_PODMAN_ARGUMENTS"),
+            }
+        }
+        assert_eq!(
+            std::fs::read_to_string(&arguments).unwrap(),
+            "rm\n--ignore\n-f\nnac-durable-session-id\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn terminal_pipe_kill_reports_nonzero_podman_status() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -1192,7 +1236,7 @@ mod tests {
         assert!(SANDBOX_KILL_WRAPPER.contains("/proc/$target/stat"));
         assert!(SANDBOX_KILL_WRAPPER.contains("ps -eo pid=,ppid="));
         assert!(SANDBOX_KILL_WRAPPER.contains("$2 == parent"));
-        assert!(SANDBOX_KILL_WRAPPER.contains("is_current_descendant()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("verified_descendants"));
         assert!(SANDBOX_KILL_WRAPPER.contains("child_actual_identity"));
         assert!(SANDBOX_KILL_WRAPPER.contains("uncertain=1"));
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
@@ -1333,6 +1377,95 @@ mod tests {
             panic!("session-escaped descendant survived portable cleanup");
         }
         assert!(!wrapper_pidfile.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_cleanup_keeps_child_authority_when_root_disappears_after_discovery() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::CommandExt;
+
+        let root =
+            std::env::temp_dir().join(format!("nac-wrapper-root-loss-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let descendant_pid_path = root.join("descendant.pid");
+        let wrapper_pidfile = root.join("wrapper.pid");
+        let ps_counter = root.join("root-identity-count");
+        let fake_ps = root.join("ps");
+        std::fs::write(
+            &fake_ps,
+            b"#!/bin/sh\nif [ \"$*\" = \"-ww -o stat= -p $NAC_TEST_ROOT_PID\" ]; then\n  printf 'S\\n'\n  exit 0\nfi\nif [ \"$*\" = \"-ww -o lstart= -p $NAC_TEST_ROOT_PID\" ]; then\n  count=$(cat \"$NAC_TEST_PS_COUNTER\" 2>/dev/null || printf 0)\n  count=$((count + 1))\n  printf '%s' \"$count\" > \"$NAC_TEST_PS_COUNTER\"\n  if [ \"$count\" -ge 2 ]; then\n    kill -KILL \"$NAC_TEST_ROOT_PID\" 2>/dev/null || true\n    exit 1\n  fi\nfi\nexec /bin/ps \"$@\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let executable = std::env::current_exe().unwrap();
+        let executable = format!(
+            "'{}'",
+            executable.display().to_string().replace('\'', "'\"'\"'")
+        );
+        let command = format!(
+            "{executable} --exact sandbox::podman::tests::portable_descendant_helper --nocapture & wait"
+        );
+        let mut supervisor = std::process::Command::new("bash");
+        supervisor
+            .env("NAC_PORTABLE_DESCENDANT_PID_PATH", &descendant_pid_path)
+            .arg("-c")
+            .arg(command)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0);
+        let mut supervisor = supervisor.spawn().unwrap();
+        for _ in 0..200 {
+            if descendant_pid_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(descendant_pid_path.exists(), "escaped helper did not start");
+        let descendant_pid = std::fs::read_to_string(&descendant_pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        let supervisor_pid = supervisor.id();
+        std::fs::write(
+            &wrapper_pidfile,
+            format!(
+                "{supervisor_pid}\t{}\n",
+                portable_ps_identity(supervisor_pid)
+            ),
+        )
+        .unwrap();
+
+        let no_proc_wrapper = SANDBOX_KILL_WRAPPER.replace("/proc/", "/nac-no-proc/");
+        let output = std::process::Command::new("bash")
+            .env("PATH", format!("{}:/usr/bin:/bin", root.display()))
+            .env("NAC_TEST_ROOT_PID", supervisor_pid.to_string())
+            .env("NAC_TEST_PS_COUNTER", &ps_counter)
+            .arg("-c")
+            .arg(no_proc_wrapper)
+            .arg("nac-kill")
+            .arg(&wrapper_pidfile)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "root-loss uncertainty was hidden");
+        let _ = supervisor.wait();
+        for _ in 0..100 {
+            if unsafe { libc::kill(descendant_pid, 0) } != 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if unsafe { libc::kill(descendant_pid, 0) } == 0 {
+            unsafe { libc::kill(descendant_pid, libc::SIGKILL) };
+            panic!("captured descendant survived supervisor identity loss");
+        }
+        assert!(
+            wrapper_pidfile.exists(),
+            "uncertainty discarded retry authority"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

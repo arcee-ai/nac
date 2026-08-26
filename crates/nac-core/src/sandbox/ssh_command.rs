@@ -150,6 +150,60 @@ impl SshConnection {
                 .unwrap_or_default()
         )
     }
+
+    /// Resolve OpenSSH aliases for checkout-wide local lease keys without
+    /// changing the actual connection invocation (and therefore without
+    /// bypassing ProxyJump or other alias configuration).
+    pub fn canonical_identity(&self) -> String {
+        let mut command = std::process::Command::new("ssh");
+        command.arg("-G");
+        if let Some(port) = self.port {
+            command.args(["-p", &port.to_string()]);
+        }
+        if let Some(identity) = self.identity_file.as_deref() {
+            command.arg("-i").arg(identity);
+            command.args(["-o", "IdentitiesOnly=yes"]);
+        }
+        let Ok(output) = command.arg("--").arg(&self.host).output() else {
+            return self.identity();
+        };
+        if !output.status.success() {
+            return self.identity();
+        }
+        canonical_identity_from_ssh_config(&String::from_utf8_lossy(&output.stdout))
+            .unwrap_or_else(|| self.identity())
+    }
+}
+
+fn canonical_identity_from_ssh_config(text: &str) -> Option<String> {
+    let mut user = None;
+    let mut hostname = None;
+    let mut port = None;
+    let mut host_key_alias = None;
+    let mut identity_files = Vec::new();
+    for line in text.lines() {
+        let Some(index) = line.find(char::is_whitespace) else {
+            continue;
+        };
+        let key = &line[..index];
+        let value = line[index..].trim();
+        match key {
+            "user" => user = Some(value),
+            "hostname" => hostname = Some(value),
+            "port" => port = Some(value),
+            "hostkeyalias" if value != "none" => host_key_alias = Some(value),
+            "identityfile" => identity_files.push(value),
+            _ => {}
+        }
+    }
+    Some(format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        user.unwrap_or_default(),
+        hostname?,
+        port.unwrap_or_default(),
+        host_key_alias.unwrap_or_default(),
+        identity_files.join("\u{1e}")
+    ))
 }
 
 /// The key path as an absolute local path.
@@ -267,5 +321,30 @@ fn sanitize_socket_name(input: &str) -> String {
         "host".to_string()
     } else {
         shortened
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_identity_from_ssh_config;
+
+    #[test]
+    fn equivalent_aliases_share_one_effective_connection_identity() {
+        let first = canonical_identity_from_ssh_config(
+            "host alias-one\nuser deploy\nhostname source.example\nport 2222\nhostkeyalias none\nidentityfile ~/.ssh/build\n",
+        )
+        .unwrap();
+        let second = canonical_identity_from_ssh_config(
+            "host alias-two\nhostname source.example\nidentityfile ~/.ssh/build\nuser deploy\nport 2222\nhostkeyalias none\n",
+        )
+        .unwrap();
+        assert_eq!(first, second);
+        assert_ne!(
+            first,
+            canonical_identity_from_ssh_config(
+                "user deploy\nhostname source.example\nport 2222\nhostkeyalias isolated\nidentityfile ~/.ssh/build\n"
+            )
+            .unwrap()
+        );
     }
 }

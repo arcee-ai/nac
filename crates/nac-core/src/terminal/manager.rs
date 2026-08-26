@@ -26,6 +26,7 @@ const PIPE_CHANNEL_CHUNKS: usize = 16;
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
 type WorkspaceAuthority = Option<(PathBuf, Vec<u8>)>;
+type SessionResourceAuthority = Option<(PathBuf, String)>;
 
 const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
@@ -47,6 +48,7 @@ pub struct TerminalManager {
     preserve_retained_on_settlement: bool,
     instance_id: Arc<str>,
     workspace_authority: Arc<StdMutex<WorkspaceAuthority>>,
+    session_resource_authority: Arc<StdMutex<SessionResourceAuthority>>,
 }
 
 #[derive(Clone)]
@@ -118,6 +120,7 @@ impl TerminalManager {
             preserve_retained_on_settlement,
             instance_id: Arc::from(uuid::Uuid::new_v4().to_string()),
             workspace_authority: Arc::new(StdMutex::new(None)),
+            session_resource_authority: Arc::new(StdMutex::new(None)),
         })
     }
 
@@ -131,6 +134,17 @@ impl TerminalManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) =
             Some((store_path, workspace_identity));
+    }
+
+    pub(crate) fn configure_session_resource_authority(
+        &self,
+        store_path: PathBuf,
+        session_id: String,
+    ) {
+        *self
+            .session_resource_authority
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((store_path, session_id));
     }
 
     pub(crate) fn acquire_workspace_activity_lease(
@@ -148,6 +162,22 @@ impl TerminalManager {
                     &workspace_identity,
                 )
                 .map_err(anyhow::Error::new)
+            })
+            .transpose()
+    }
+
+    fn acquire_session_resource_lease(
+        &self,
+    ) -> Result<Option<crate::sessions::SessionResourceLease>> {
+        let authority = self
+            .session_resource_authority
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        authority
+            .map(|(store_path, session_id)| {
+                crate::sessions::SessionResourceLease::try_acquire(&store_path, &session_id)
+                    .map_err(anyhow::Error::new)
             })
             .transpose()
     }
@@ -1012,11 +1042,12 @@ impl TerminalManager {
             return Err(anyhow!("terminal session '{name}' has already exited"));
         }
         let workspace_activity = self.acquire_workspace_activity_lease()?;
+        let session_resource = self.acquire_session_resource_lease()?;
         match cancellation {
             Some(cancellation) => cancellation
-                .run_if_active(|| session.retain(workspace_activity))
+                .run_if_active(|| session.retain(workspace_activity, session_resource))
                 .ok_or_else(|| anyhow!("terminal command cancelled before retention"))?,
-            None => session.retain(workspace_activity),
+            None => session.retain(workspace_activity, session_resource),
         }
         Ok(self.session_info(name, session))
     }
@@ -2338,6 +2369,10 @@ mod tests {
         let identity = crate::workspace::GitTarget::local(root.clone()).lease_identity();
         let manager = TerminalManager::for_direct();
         manager.configure_workspace_authority(store_path.clone(), identity.clone());
+        manager.configure_session_resource_authority(
+            store_path.clone(),
+            "retained-session".to_string(),
+        );
         let name = manager.next_session_name();
         manager
             .create(
@@ -2356,8 +2391,22 @@ mod tests {
             crate::sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity),
             Err(crate::sessions::SessionOperationLeaseError::Busy(_))
         ));
+        assert!(matches!(
+            crate::sessions::SessionResourceMutationLease::try_acquire(
+                &store_path,
+                "retained-session"
+            ),
+            Err(crate::sessions::SessionOperationLeaseError::Busy(_))
+        ));
         manager.remove_all().await.unwrap();
         drop(crate::sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity).unwrap());
+        drop(
+            crate::sessions::SessionResourceMutationLease::try_acquire(
+                &store_path,
+                "retained-session",
+            )
+            .unwrap(),
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

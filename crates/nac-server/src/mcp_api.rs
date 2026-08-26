@@ -336,7 +336,9 @@ pub async fn create_server_handler(
         library_id: request.library_id,
     };
     let _write = CONFIG_WRITE.lock().await;
-    let record = mcp::insert_mcp_server_configuration(&config_path(&manager)?, configuration)?;
+    let path = config_path(&manager)?;
+    let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
+    let record = mcp::insert_mcp_server_configuration(&path, configuration)?;
     Ok((StatusCode::CREATED, Json(view(record))))
 }
 
@@ -357,6 +359,7 @@ pub async fn update_server_handler(
     let Json(request) = payload.map_err(ApiError::from)?;
     let path = config_path(&manager)?;
     let _write = CONFIG_WRITE.lock().await;
+    let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
     let existing = mcp::load_mcp_server_configuration(&path, &server_name)?;
 
     let configuration = McpServerConfigurationRecord {
@@ -421,7 +424,9 @@ pub async fn delete_server_handler(
     AxumPath(server_name): AxumPath<String>,
 ) -> Result<StatusCode, ApiError> {
     let _write = CONFIG_WRITE.lock().await;
-    if !mcp::delete_mcp_server_configuration(&config_path(&manager)?, &server_name)? {
+    let path = config_path(&manager)?;
+    let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
+    if !mcp::delete_mcp_server_configuration(&path, &server_name)? {
         return Err(McpServerConfigurationStoreError::NotFound(server_name).into());
     }
     Ok(StatusCode::NO_CONTENT)

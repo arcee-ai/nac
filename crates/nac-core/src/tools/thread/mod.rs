@@ -1165,7 +1165,7 @@ mod tests {
         assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
         runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for A")
+            .queue(&runtime.store_path, "test-session", "worker", "for A", None)
             .unwrap()
             .unwrap();
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
@@ -1181,7 +1181,7 @@ mod tests {
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
         let reused = runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for B")
+            .queue(&runtime.store_path, "test-session", "worker", "for B", None)
             .unwrap()
             .unwrap();
         assert_eq!(reused.dispatch_id, "dispatch-b");
@@ -1189,7 +1189,13 @@ mod tests {
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-b");
         assert!(runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "too late",)
+            .queue(
+                &runtime.store_path,
+                "test-session",
+                "worker",
+                "too late",
+                None,
+            )
             .unwrap()
             .is_none());
         let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
