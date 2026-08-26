@@ -46,16 +46,14 @@ Protected initial state verified on 2026-08-25:
    NAC-REV-010, 011, 015, and 020..023 through behavior-aware creation and
    navigation, active-run inbox UX, literal `/goal`, child ownership guards,
    documentation, and production-embedded browser tests.
-5. **In progress — closure and integrated review.** The exact evidence
-   successor `d645781` passed every required gate after commit. Its recovered,
-   acyclic four-lane review (session `33d02a21-58bb-4003-b638-fda79b774ab1`,
-   run `f0dcf3d3-64da-4523-9ea4-eca7aca58ea9`) rejected both exact-gate ledger
-   objections and accepted six code blockers: opaque redirect admission,
-   portable remote cleanup identity/reparenting, useful authority-bound PTY
-   input, live-artifact eviction, and delegated config mutation. The current
-   working repair closes the directly actionable seams with focused tests;
-   complete gates, an immutable successor review, production browser smoke,
-   and the final state audit remain.
+5. **In progress — closure and integrated review.** Exact repair `f7ded90`
+   closes all fourteen P1 and two P2 findings from the detached review of
+   `072a8be`. It passes all four release gates: `make ci` (catalog 2+7+24,
+   core 1128 passed/9 ignored, server 137, binary 21, frontend 173), durability
+   10/10, committed-asset freshness, and production-embedded Playwright 10/10.
+   This evidence-only successor must pass the same gates before a fresh
+   detached-clean four-lane NAC review; GO, final browser smoke, and the final
+   state audit remain required.
 
 ### Finding map
 
@@ -152,6 +150,21 @@ Protected initial state verified on 2026-08-25:
   pass: `make ci` (core 1091 passed with 9 environment-dependent ignores,
   server 134, binary 21, frontend 172), `make test-durability`, `make
   test-assets`, and production-embedded Playwright 10/10.
+- Exact evidence successor `072a8be` passed all four release gates. Its
+  detached-clean review (session `c329b848-6602-4cab-97bc-6ffd71fc130a`, run
+  `3ffb3edc-3a85-4b61-b944-1af47bbed085`) used exactly four initial lanes and
+  one same-lane continuation each, and returned NO-GO with no P0, fourteen P1,
+  and two P2 findings. The accepted seams were retained-resource lifecycle
+  exclusion; broad Cargo/Git/Make authority; bare mutation operands; remote
+  descriptor binding; SSH alias identity; portable supervisor-loss cleanup;
+  generation-bound steering; durable Podman cleanup identity; delegated Git;
+  private, cross-process MCP config saves; misleading broad remembered grants;
+  and this stale ledger.
+- Exact repair `f7ded90` closes all accepted `072a8be` findings and the
+  integrated attached-sandbox lifecycle refinement. Its complete exact gates
+  pass: `make ci` (catalog 2+7+24, core 1128 passed/9 ignored, server 137,
+  binary 21, frontend 173), `make test-durability` (10/10), `make test-assets`
+  with no committed-bundle drift, and production-embedded Playwright 10/10.
 
 ### Current verification and next action
 
@@ -272,10 +285,10 @@ Protected initial state verified on 2026-08-25:
   1109 passed/9 environment-dependent ignored, server 134, binary 21, frontend
   173, plus formatting, warning-denied lint, typecheck, docs, and production
   build.
-- Next action: finish the full regression audit, commit only tracked product
-  and progress files, run all four gates at the exact successor SHA, then obtain
-  a new detached-clean acyclic four-lane verdict. Production browser smoke and
-  final cleanup/state audit remain gated on GO.
+- Next action: commit this evidence-only ledger update, run all four gates at
+  that exact successor SHA, then obtain a new detached-clean acyclic four-lane
+  verdict. Production browser smoke and the final cleanup/state audit remain
+  gated on GO.
 - Exact evidence successor `d645781` passed `make ci`, `make test-durability`,
   `make test-assets`, and production-embedded Playwright 10/10 after commit.
   Its detached-clean four-lane review (session
@@ -637,6 +650,12 @@ Non-negotiable invariants:
   (catalog 2+7+24, core 1116 passed/9 ignored, server 135, binary 21,
   frontend 173), `make test-durability` (10/10), `make test-assets` with no
   committed-bundle drift, and production-embedded Playwright 10/10.
+- Exact evidence successor `072a8be4e8f8a3d4f5c2635e77005290879c9d69`
+  passed the same four gates before its fourteen-P1/two-P2 detached review.
+- Exact repair `f7ded90` closes that complete accepted finding set. Its four
+  exact-commit release gates pass: `make ci` (catalog 2+7+24, core 1128
+  passed/9 ignored, server 137, binary 21, frontend 173), durability 10/10,
+  committed-asset freshness, and production-embedded Playwright 10/10.
 
 ## Completed commits
 
@@ -653,14 +672,14 @@ Non-negotiable invariants:
 - `9b4125c close terminal authority and cleanup seams`.
 - `d6960ae close final authority review gaps`.
 - `e282d18 close remaining authority gaps`.
+- `072a8be record exact authority repair gates`.
+- `f7ded90 close immutable authority review findings`.
 
 ## Known problems and blockers
 
-- The seven `d6960ae` P1s are implemented and have passed immutable-SHA release
-  gates at `e282d18`; a fresh detached-clean review is still required. Retained
-  terminals now hold a shared cross-process checkout lease; branch/commit
-  admission takes its exclusive twin plus every same-checkout session operation
-  lease through the Git mutation.
+- The full accepted `072a8be` finding set is implemented and has passed
+  immutable-SHA release gates at `f7ded90`; the evidence-only successor still
+  needs the same gates and a fresh detached-clean four-lane review.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -672,5 +691,5 @@ Closure is still active. Commit this evidence-only ledger successor while
 preserving `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`,
 `demo_review.md`, and the ignored local decision notebook. Run all four release
 gates again at that exact successor SHA, then obtain a fresh detached-clean
-acyclic four-lane NAC verdict. A GO must be followed by the final production
-browser smoke and ledger/status audit before completion.
+acyclic four-lane NAC verdict. A GO must be followed by final browser smoke and
+the final ledger/status audit before completion.
