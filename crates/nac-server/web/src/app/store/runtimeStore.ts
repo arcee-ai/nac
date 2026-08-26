@@ -535,7 +535,8 @@ function steeringVerb(type: string): string {
   return "Steering expired";
 }
 
-export const useRunning = () => useStore((s) => s.running);
+export const useRunning = (sessionId: string | null) =>
+  useStore((state) => state.sessionId === sessionId && state.running);
 export const useActivity = () => useStore((s) => s.activity);
 export const useRunError = () => useStore((s) => s.error);
 export const useLiveEvents = () => useStore((s) => s.events);

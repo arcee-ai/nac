@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
@@ -34,7 +35,7 @@ const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
-    pending_remote_cleanups: Arc<StdMutex<HashMap<String, Arc<ExecutionBackend>>>>,
+    pending_remote_cleanups: Arc<StdMutex<HashMap<String, Arc<PendingRemoteCleanup>>>>,
     create_gate: Arc<Mutex<()>>,
     completed_sessions: Arc<Mutex<VecDeque<(String, CompletedTerminal)>>>,
     max_sessions: usize,
@@ -49,6 +50,30 @@ struct CompletedTerminal {
     output_id: String,
     preview_cursor: u64,
     exit_code: Option<i32>,
+}
+
+struct PendingRemoteCleanup {
+    backend: Arc<ExecutionBackend>,
+    transport_active: AtomicBool,
+}
+
+/// Marks the local SSH/Podman launcher inactive even when the command future
+/// is aborted. This value is deliberately created before the child/process
+/// guard so Rust's reverse local drop order stops the transport first.
+struct RemoteTransportOwnership {
+    cleanup: Arc<PendingRemoteCleanup>,
+}
+
+impl RemoteTransportOwnership {
+    fn stopped(&self) {
+        self.cleanup.transport_active.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Drop for RemoteTransportOwnership {
+    fn drop(&mut self) {
+        self.stopped();
+    }
 }
 
 impl TerminalManager {
@@ -394,6 +419,22 @@ impl TerminalManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // Register before spawning so this ownership guard outlives every
+        // child/process-tree local on task cancellation. There is no await in
+        // the registration/spawn window, so settlement cannot observe the
+        // entry until either spawn has succeeded or the failure path removes it.
+        let remote_transport = pidfile.as_deref().map(|pidfile| {
+            let cleanup = Arc::new(PendingRemoteCleanup {
+                backend: Arc::clone(backend),
+                transport_active: AtomicBool::new(true),
+            });
+            self.pending_remote_cleanups
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(pidfile.to_string(), Arc::clone(&cleanup));
+            RemoteTransportOwnership { cleanup }
+        });
+
         let spawned = if self.isolate_process_groups {
             ProcessTreeGuard::spawn_supervised(&mut command)
         } else {
@@ -405,6 +446,12 @@ impl TerminalManager {
         let (mut child, mut process_tree) = match spawned {
             Ok(spawned) => spawned,
             Err(error) => {
+                if let Some(remote_transport) = remote_transport.as_ref() {
+                    remote_transport.stopped();
+                }
+                if let Some(pidfile) = pidfile.as_deref() {
+                    self.forget_remote_cleanup(pidfile);
+                }
                 return CommandOutput {
                     status: CommandStatus::SpawnError,
                     exit_code: None,
@@ -419,13 +466,6 @@ impl TerminalManager {
                 };
             }
         };
-        if let Some(pidfile) = pidfile.as_deref() {
-            self.pending_remote_cleanups
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .insert(pidfile.to_string(), Arc::clone(backend));
-        }
-
         let stdout = child.stdout.take().expect("piped stdout is present");
         let stderr = child.stderr.take().expect("piped stderr is present");
         let output_id = self.output_registry.create(ArtifactKind::Command);
@@ -507,8 +547,11 @@ impl TerminalManager {
             // Stop the local transport first. A remote kill that observes no
             // pidfile is authoritative only after SSH/Podman can no longer
             // start the wrapper and create that pidfile afterwards.
-            match process_tree.terminate(&mut child).await {
-                Ok(()) => force_reader_shutdown = true,
+            let transport_stopped = match process_tree.terminate(&mut child).await {
+                Ok(()) => {
+                    force_reader_shutdown = true;
+                    true
+                }
                 Err(error) => {
                     reader_shutdown.cancel();
                     let cleanup_error = format!("command cleanup incomplete: {error}");
@@ -516,33 +559,48 @@ impl TerminalManager {
                         Some(existing) => format!("{existing}\n{cleanup_error}"),
                         None => cleanup_error,
                     });
+                    false
+                }
+            };
+            if transport_stopped {
+                if let Some(remote_transport) = remote_transport.as_ref() {
+                    remote_transport.stopped();
                 }
             }
-            if let Some(pidfile) = pidfile.as_deref() {
-                if let Err(error) = self.retry_remote_cleanup(pidfile).await {
-                    runtime_error = Some(match runtime_error.take() {
-                        Some(existing) => {
-                            format!("{existing}\nremote command cleanup incomplete: {error}")
-                        }
-                        None => format!("remote command cleanup incomplete: {error}"),
-                    });
+            if transport_stopped {
+                if let Some(pidfile) = pidfile.as_deref() {
+                    if let Err(error) = self.retry_remote_cleanup(pidfile).await {
+                        runtime_error = Some(match runtime_error.take() {
+                            Some(existing) => {
+                                format!("{existing}\nremote command cleanup incomplete: {error}")
+                            }
+                            None => format!("remote command cleanup incomplete: {error}"),
+                        });
+                    }
                 }
             }
             exit_code = None;
-        } else if self.isolate_process_groups {
-            if let Some(pidfile) = pidfile.as_deref() {
-                self.forget_remote_cleanup(pidfile);
+        } else {
+            if let Some(remote_transport) = remote_transport.as_ref() {
+                remote_transport.stopped();
             }
+            if let Some(pidfile) = pidfile.as_deref() {
+                if let Err(error) = self.retry_remote_cleanup(pidfile).await {
+                    status = CommandStatus::SpawnError;
+                    runtime_error = Some(format!(
+                        "remote command completion cleanup incomplete: {error}"
+                    ));
+                }
+            }
+        }
+        if process_exited && self.isolate_process_groups {
             // A successful shell leader can leave background descendants.
             // The dedicated owned group leader prevents pgid reuse while we
             // tear down that group after reaping the requested command.
             process_tree.mark_leader_reaped();
             process_tree.finish().await;
             force_reader_shutdown = true;
-        } else {
-            if let Some(pidfile) = pidfile.as_deref() {
-                self.forget_remote_cleanup(pidfile);
-            }
+        } else if process_exited {
             process_tree.disarm();
         }
 
@@ -761,16 +819,21 @@ impl TerminalManager {
     }
 
     async fn retry_remote_cleanup(&self, pidfile: &str) -> Result<()> {
-        let backend = self
+        let cleanup = self
             .pending_remote_cleanups
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(pidfile)
             .cloned();
-        let Some(backend) = backend else {
+        let Some(cleanup) = cleanup else {
             return Ok(());
         };
-        backend.terminal_pipe_kill(pidfile).await?;
+        if cleanup.transport_active.load(Ordering::SeqCst) {
+            return Err(anyhow!(
+                "local transport for remote command '{pidfile}' is still active"
+            ));
+        }
+        cleanup.backend.terminal_pipe_kill(pidfile).await?;
         self.forget_remote_cleanup(pidfile);
         Ok(())
     }
@@ -825,7 +888,10 @@ impl TerminalManager {
             .map(|mut sessions| {
                 sessions.values_mut().any(|session| {
                     session.refresh_status();
-                    session.is_retained() && session.is_alive()
+                    // An exited remote transport can still own a live backend
+                    // process. Keep its service until polling or explicit
+                    // teardown runs the pidfile cleanup.
+                    session.is_retained()
                 })
             })
             // A concurrent terminal operation is not a safe eviction point.
@@ -1307,10 +1373,72 @@ mod tests {
             &root,
         );
         let manager = TerminalManager::new();
-        let output = manager
-            .exec_one_shot("sleep 30", None, 120, 40, 10, 8_000, &remote_backend, None)
-            .await;
-        assert_eq!(output.status, CommandStatus::TimedOut);
+        let cancellation = ThreadCancellation::default();
+        let command_manager = manager.clone();
+        let command_backend = Arc::clone(&remote_backend);
+        let command_cancellation = cancellation.clone();
+        let command = tokio::spawn(async move {
+            command_manager
+                .exec_one_shot(
+                    "sleep 30",
+                    None,
+                    120,
+                    40,
+                    60_000,
+                    8_000,
+                    &command_backend,
+                    Some(&command_cancellation),
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !launcher_pid.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("remote transport did not start");
+        let settlement_error = manager.settle_run().await.unwrap_err();
+        assert!(settlement_error.to_string().contains("still active"));
+        assert_eq!(manager.pending_remote_cleanup_count(), 1);
+        assert!(!cleanup_overtook_transport.exists());
+
+        cancellation.cancel();
+        let output = command.await.unwrap();
+        assert_eq!(output.status, CommandStatus::Cancelled);
+        assert_eq!(manager.pending_remote_cleanup_count(), 0);
+        assert!(!cleanup_overtook_transport.exists());
+        sleep(Duration::from_millis(350)).await;
+        assert!(!late_side_effect.exists());
+
+        std::fs::remove_file(&launcher_pid).unwrap();
+        let aborted_manager = manager.clone();
+        let aborted_backend = Arc::clone(&remote_backend);
+        let aborted = tokio::spawn(async move {
+            aborted_manager
+                .exec_one_shot(
+                    "sleep 30",
+                    None,
+                    120,
+                    40,
+                    60_000,
+                    8_000,
+                    &aborted_backend,
+                    None,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !launcher_pid.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("remote transport for aborted command did not start");
+        aborted.abort();
+        assert!(aborted.await.unwrap_err().is_cancelled());
+        manager.settle_run().await.unwrap();
+        assert_eq!(manager.pending_remote_cleanup_count(), 0);
         assert!(!cleanup_overtook_transport.exists());
         sleep(Duration::from_millis(350)).await;
         assert!(!late_side_effect.exists());
@@ -1328,11 +1456,32 @@ mod tests {
             .unwrap();
         std::fs::write(&launcher_pid, pty_pid.to_string()).unwrap();
         manager
-            .set_backend_cleanup_for_test("pty", remote_backend, "/tmp/nac-order.pid".to_string())
+            .set_backend_cleanup_for_test(
+                "pty",
+                Arc::clone(&remote_backend),
+                "/tmp/nac-order.pid".to_string(),
+            )
             .await
             .unwrap();
         manager.remove_all().await.unwrap();
         assert!(!cleanup_overtook_transport.exists());
+
+        let natural_cleanup = root.join("natural-exit-cleanup");
+        std::fs::write(
+            &podman,
+            format!(
+                "#!/bin/sh\ncase \" $* \" in\n*' nac-kill '*) : > '{}'; exit 0 ;;\nesac\nexit 7\n",
+                natural_cleanup.display()
+            ),
+        )
+        .unwrap();
+        let output = manager
+            .exec_one_shot("exit 7", None, 120, 40, 1_000, 8_000, &remote_backend, None)
+            .await;
+        assert_eq!(output.status, CommandStatus::Completed);
+        assert_eq!(output.exit_code, Some(7));
+        assert!(natural_cleanup.exists());
+        assert_eq!(manager.pending_remote_cleanup_count(), 0);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1978,6 +2127,10 @@ mod tests {
         })
         .await
         .expect("retained commands did not exit");
+        assert!(
+            manager.has_retained(),
+            "an exited retained handle remains an explicit service-ownership obligation"
+        );
 
         let replacement = manager.next_session_name();
         manager

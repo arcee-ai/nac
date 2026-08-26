@@ -137,7 +137,7 @@ export function Transcript({
   onFocusPanel,
   errorNotice = null,
 }: TranscriptProps) {
-  const running = useRunning();
+  const running = useRunning(sessionId);
   const activity = useActivity();
   const error = useRunError();
   const liveThreads = useLiveThreads();

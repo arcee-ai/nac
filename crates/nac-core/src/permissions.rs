@@ -1177,6 +1177,14 @@ fn hard_shell_denial_inner(
     }
     let tokens = effective_command_tokens(tokens);
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
+    if matches!(
+        command.as_str(),
+        "chrt" | "ionice" | "numactl" | "setsid" | "stdbuf" | "taskset"
+    ) {
+        return Some(format!(
+            "execution wrapper '{command}' is blocked because it can conceal a protected command"
+        ));
+    }
     if command == "eval" {
         return Some(
             "shell eval is blocked because quoted data can become a protected command".to_string(),
@@ -1785,11 +1793,8 @@ fn shell_path_resources(
             let mutating = shell_path_is_mutating(tokens, index);
             let effective = effective_command_tokens(tokens);
             let command_index = tokens.len().saturating_sub(effective.len());
-            let preserve_final_component = effective
-                .first()
-                .and_then(|command| command.rsplit('/').next())
-                .is_some_and(|command| command.eq_ignore_ascii_case("rm"))
-                && rm_operand_path_position(tokens, command_index, index);
+            let preserve_final_component =
+                deletion_operand_path_position(tokens, command_index, index);
             if let Some((_, existing_mutating, existing_preserve_final)) =
                 paths.iter_mut().find(|(existing, _, _)| existing == &path)
             {
@@ -1886,14 +1891,25 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
             || index > 0 && matches!(tokens[index - 1].as_str(), "--git-dir" | "--work-tree"));
     let explicit_command_path = index == command_index && candidate.contains('/');
     let known_bare_path = bare_relative_path_position(tokens, index);
-    let rm_operand = command == "rm" && rm_operand_path_position(tokens, command_index, index);
+    let deletion_operand = deletion_operand_path_position(tokens, command_index, index);
     (previous_takes_path
         || git_global_path
         || explicit_command_path
         || looks_like_shell_path(candidate)
         || known_bare_path
-        || rm_operand)
+        || deletion_operand)
         .then(|| (option, Path::new(candidate)))
+}
+
+fn deletion_operand_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    let command = tokens
+        .get(command_index)
+        .and_then(|command| command.rsplit('/').next())
+        .unwrap_or_default();
+    matches!(
+        command.to_ascii_lowercase().as_str(),
+        "rm" | "rmdir" | "unlink"
+    ) && rm_operand_path_position(tokens, command_index, index)
 }
 
 fn rm_operand_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
@@ -1964,9 +1980,10 @@ fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
                 | "tee"
                 | "touch"
                 | "truncate"
+                | "unlink"
         )
         && (!tokens[index].starts_with('-')
-            || command == "rm" && rm_operand_path_position(tokens, command_index, index));
+            || deletion_operand_path_position(tokens, command_index, index));
     let in_place_editor = index > command_index
         && matches!(command.as_str(), "perl" | "sed")
         && tokens[command_index + 1..index].iter().any(|token| {
@@ -2430,6 +2447,16 @@ fn opaque_hard_shell_denial(
         );
     }
     let segments = opaque_shell_segments(command);
+    if segments.iter().any(|tokens| {
+        effective_command_tokens(tokens)
+            .first()
+            .is_some_and(|token| token.contains('$') || token.contains('`'))
+    }) {
+        return Some(
+            "dynamic command names are blocked because expansion can become a protected command"
+                .to_string(),
+        );
+    }
     if segments.iter().any(|tokens| dynamic_rm_command(tokens)) {
         return Some(
             "dynamic rm operands are blocked because protected deletion targets cannot be resolved before execution"
@@ -3086,6 +3113,8 @@ mod tests {
             "nice --adjustment 0 rm -rf .",
             "timeout 30 rm -rf .",
             "timeout --kill-after 1 30 rm -rf .",
+            "setsid rm -rf .",
+            "stdbuf -oL rm -rf .",
             "busybox rm -rf /workspace",
             "sudo make install > /tmp/result",
             "git checkout .",
@@ -3144,6 +3173,7 @@ mod tests {
             "xargs rm -rf .git",
             "sh -c 'rm -rf .git'",
             "eval 'rm -rf .'",
+            "x=; c=r${x}m; \"$c\" -rf .",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
@@ -3376,6 +3406,63 @@ mod tests {
                 .unwrap();
         assert_eq!(bound, format!("rm -f {}", requested.display()));
         assert!(!bound.contains(external.canonicalize().unwrap().to_str().unwrap()));
+
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unlink_and_rmdir_preserve_named_entries_and_git_mutation_policy() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!(
+            "nac-delete-entry-permission-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = base.join("workspace");
+        let external = base.join("external");
+        std::fs::create_dir_all(workspace.join(".git")).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(external.join("config"), "outside").unwrap();
+        symlink(&external, workspace.join(".git/link")).unwrap();
+        let backend = local(&workspace);
+
+        for command in ["unlink .git/link", "rmdir .git/link"] {
+            let projected = shell_resources(command, &workspace, &backend);
+            let authorized = canonicalize_authorization_resources(
+                &projected,
+                &backend,
+                Path::new("/unrelated/store.db"),
+            )
+            .await
+            .unwrap();
+            let requested = workspace.canonicalize().unwrap().join(".git/link");
+            let deletion = authorized
+                .iter()
+                .find(|resource| resource.action == "edit")
+                .expect("deletion resource");
+            assert_eq!(deletion.resource, requested.display().to_string());
+            assert!(deletion.hard_denial.is_some());
+            assert_eq!(
+                deletion.shell_binding.as_deref(),
+                Some(requested.to_str().unwrap())
+            );
+            let bound = bind_authorized_shell_command(
+                command,
+                &workspace.canonicalize().unwrap(),
+                &authorized,
+            )
+            .unwrap();
+            assert_eq!(
+                bound,
+                format!(
+                    "{} {}",
+                    command.split_whitespace().next().unwrap(),
+                    requested.display()
+                )
+            );
+            assert!(!bound.contains(external.canonicalize().unwrap().to_str().unwrap()));
+        }
 
         let _ = std::fs::remove_dir_all(base);
     }
