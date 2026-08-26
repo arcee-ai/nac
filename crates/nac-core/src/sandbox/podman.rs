@@ -91,9 +91,25 @@ fn start_guidance() -> String {
     "check 'podman info' on this host for why the runtime is not responding".to_string()
 }
 
-pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"supervisor='pidfile=$2
-printf '\''%s'\'' "$$" > "$pidfile"
-bash -c "$1"
+pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"supervisor='requested=$1
+pidfile=$2
+process_identity() {
+  target=$1
+  if [ -r "/proc/$target/stat" ]; then
+    rest=$(sed '\''s/^.*) //'\'' "/proc/$target/stat" 2>/dev/null) || return 1
+    set -- $rest
+    [ -n "${20:-}" ] || return 1
+    printf '\''proc:%s'\'' "${20}"
+    return 0
+  fi
+  started=$(ps -o lstart= -p "$target" 2>/dev/null) || return 1
+  started=$(printf '\''%s'\'' "$started" | sed '\''s/^[[:space:]]*//;s/[[:space:]]*$//'\'')
+  [ -n "$started" ] || return 1
+  printf '\''ps:%s'\'' "$started"
+}
+identity=$(process_identity "$$") || exit 125
+printf '\''%s\t%s\n'\'' "$$" "$identity" > "$pidfile"
+bash -c "$requested"
 status=$?
 pgid=$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '\'' '\'')
 group_members() {
@@ -129,8 +145,28 @@ fi"#;
 pub(crate) const SANDBOX_PTY_WRAPPER: &str = SANDBOX_EXEC_WRAPPER;
 
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
-pid=$(cat "$pidfile" 2>/dev/null) || exit 0
-if [ -n "$pid" ]; then
+pid=$(sed -n 's/[[:space:]].*$//p' "$pidfile" 2>/dev/null) || exit 0
+expected_identity=$(sed -n 's/^[^[:space:]]*[[:space:]]*//p' "$pidfile" 2>/dev/null) || exit 0
+process_identity() {
+  target=$1
+  if [ -r "/proc/$target/stat" ]; then
+    rest=$(sed 's/^.*) //' "/proc/$target/stat" 2>/dev/null) || return 1
+    set -- $rest
+    [ -n "${20:-}" ] || return 1
+    printf 'proc:%s' "${20}"
+    return 0
+  fi
+  started=$(ps -o lstart= -p "$target" 2>/dev/null) || return 1
+  started=$(printf '%s' "$started" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$started" ] || return 1
+  printf 'ps:%s' "$started"
+}
+identity_matches() {
+  [ -n "$pid" ] && [ -n "$expected_identity" ] || return 1
+  actual_identity=$(process_identity "$pid") || return 1
+  [ "$actual_identity" = "$expected_identity" ]
+}
+if identity_matches; then
   descendants() {
     parent=$1
     for stat in /proc/[0-9]*/stat; do
@@ -145,10 +181,14 @@ if [ -n "$pid" ]; then
     done
   }
   pids=$(descendants "$pid")
-  for child in $pids; do
-    kill -KILL "$child" 2>/dev/null || true
-  done
-  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  if identity_matches; then
+    for child in $pids; do
+      kill -KILL "$child" 2>/dev/null || true
+    done
+    if identity_matches; then
+      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    fi
+  fi
 fi
 rm -f "$pidfile""#;
 
@@ -1038,14 +1078,56 @@ mod tests {
             "exec wrapper: {SANDBOX_EXEC_WRAPPER}"
         );
         assert!(SANDBOX_EXEC_WRAPPER.contains("group_members()"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("/proc/$target/stat"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("${20:-}"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("%s\\t%s\\n"));
         assert!(SANDBOX_EXEC_WRAPPER.contains("kill -KILL \"$child\""));
         assert_eq!(SANDBOX_PTY_WRAPPER, SANDBOX_EXEC_WRAPPER);
-        assert!(SANDBOX_PTY_WRAPPER.contains("bash -c \"$1\""));
+        assert!(SANDBOX_PTY_WRAPPER.contains("bash -c \"$requested\""));
         assert!(!SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("expected_identity"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("identity_matches()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("/proc/$target/stat"));
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_wrapper_does_not_kill_a_reused_pid_with_a_different_identity() {
+        let root =
+            std::env::temp_dir().join(format!("nac-wrapper-pid-identity-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let pidfile = root.join("wrapper.pid");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        std::fs::write(&pidfile, format!("{}\tproc:not-this-process\n", child.id())).unwrap();
+
+        let output = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(SANDBOX_KILL_WRAPPER)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "kill wrapper failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "identity mismatch killed the process"
+        );
+        assert!(!pidfile.exists());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

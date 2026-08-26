@@ -1092,12 +1092,18 @@ fn legacy_permission_resources(
                 Some(Value::Bool(retain)) => *retain,
                 Some(_) => return Err(invalid("'retain' argument must be a boolean")),
             };
-            let action = if chars.is_empty() && !retain {
-                "terminal_observe"
+            let resource = if !chars.is_empty() {
+                kernel::PermissionResource::new("terminal_input", session_id)
+                    .with_display("nonempty model-driven terminal input is unavailable")
+                    .with_hard_denial(
+                        "nonempty terminal input is blocked because terminal programs can reinterpret it as unauthorized shell commands",
+                    )
+            } else if retain {
+                kernel::PermissionResource::new("terminal_retain", session_id)
             } else {
-                "terminal_input"
+                kernel::PermissionResource::new("terminal_observe", session_id)
             };
-            Ok(vec![kernel::PermissionResource::new(action, session_id)])
+            Ok(vec![resource])
         }
         7 => Ok(vec![kernel::PermissionResource::new(
             "command_output",
@@ -1704,6 +1710,20 @@ mod discovery_tool_definition_tests {
             )
             .unwrap();
         assert_eq!(input.permission_resources()[0].action, "terminal_input");
+        assert!(input.permission_resources()[0].hard_denial.is_some());
+        let retain = snapshot
+            .prepare(
+                "write_stdin",
+                serde_json::json!({
+                    "session_id":"shell-test",
+                    "chars":"",
+                    "retain":true
+                }),
+                services,
+            )
+            .unwrap();
+        assert_eq!(retain.permission_resources()[0].action, "terminal_retain");
+        assert!(retain.permission_resources()[0].hard_denial.is_none());
         let interactive_shell = snapshot
             .prepare(
                 "exec_command",

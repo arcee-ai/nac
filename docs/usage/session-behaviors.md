@@ -42,10 +42,11 @@ dropping it.
 
 Direct-tool approval authorizes one prepared operation on the session's already
 selected execution backend; it is not a sandbox and never changes that backend.
-Literal nested shell command bodies receive the same non-overridable checks as
-top-level commands. Direct sessions reject opaque commands and broad shells or
-interpreters when `tty=true`, because input sent later to a retained terminal
-cannot be analyzed before that process executes it. Use a bounded interactive
-program for a PTY and one-shot commands for explicit shell scripts. Podman
-confinement remains the non-bypassable filesystem and network boundary for
-commands that need it.
+Nested shell command bodies and executable wrappers are rejected when their
+paths cannot be authorized independently. Direct sessions also reject opaque
+commands and broad shells or interpreters when `tty=true`. Model-driven
+nonempty terminal input is unavailable because a terminal program can
+reinterpret it as an unauthorized shell command; empty polling and explicit
+retention remain available. Put every executable action in the original
+one-shot or bounded PTY command. Podman confinement remains the non-bypassable
+filesystem and network boundary for commands that need it.
