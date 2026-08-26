@@ -1101,6 +1101,33 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn direct_settlements_keep_zero_output_artifact_metadata_bounded() {
+        let mut manager = TerminalManager::for_direct();
+        manager.output_registry =
+            OutputRegistry::with_artifact_limit_for_test(CommandOutputLimits::default(), 4)
+                .unwrap();
+        let mut output_ids = Vec::new();
+        for _ in 0..6 {
+            let output = manager
+                .exec_one_shot("true", None, 120, 40, 5_000, 8_000, &backend(), None)
+                .await;
+            assert_eq!(output.status, CommandStatus::Completed);
+            assert_eq!(output.stdout_bytes, 0);
+            assert_eq!(output.stderr_bytes, 0);
+            output_ids.push(output.output_id.unwrap());
+            manager.settle_run().await.unwrap();
+        }
+
+        assert_eq!(manager.output_registry.artifact_count(), 4);
+        assert!(manager
+            .read_output(&output_ids[0], OutputStream::Combined, 0, 32)
+            .is_err());
+        assert!(manager
+            .read_output(output_ids.last().unwrap(), OutputStream::Combined, 0, 32)
+            .is_ok());
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn successful_one_shot_kills_background_descendants() {

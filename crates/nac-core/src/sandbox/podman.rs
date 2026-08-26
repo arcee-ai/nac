@@ -167,18 +167,29 @@ identity_matches() {
   [ "$actual_identity" = "$expected_identity" ]
 }
 if identity_matches; then
+  process_table=
+  if [ ! -r "/proc/$pid/stat" ]; then
+    process_table=$(ps -eo pid=,ppid= 2>/dev/null || ps -ax -o pid= -o ppid= 2>/dev/null) || exit 1
+  fi
   descendants() {
     parent=$1
-    for stat in /proc/[0-9]*/stat; do
-      [ -r "$stat" ] || continue
-      child=${stat#/proc/}
-      child=${child%/stat}
-      rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
-      set -- $rest
-      [ "${2:-}" = "$parent" ] || continue
-      printf '%s\n' "$child"
-      descendants "$child"
-    done
+    if [ -r "/proc/$pid/stat" ]; then
+      for stat in /proc/[0-9]*/stat; do
+        [ -r "$stat" ] || continue
+        child=${stat#/proc/}
+        child=${child%/stat}
+        rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
+        set -- $rest
+        [ "${2:-}" = "$parent" ] || continue
+        printf '%s\n' "$child"
+        descendants "$child"
+      done
+    else
+      for child in $(printf '%s\n' "$process_table" | awk -v parent="$parent" '$2 == parent { print $1 }'); do
+        printf '%s\n' "$child"
+        descendants "$child"
+      done
+    fi
   }
   pids=$(descendants "$pid")
   if identity_matches; then
@@ -1089,9 +1100,110 @@ mod tests {
         assert!(SANDBOX_KILL_WRAPPER.contains("expected_identity"));
         assert!(SANDBOX_KILL_WRAPPER.contains("identity_matches()"));
         assert!(SANDBOX_KILL_WRAPPER.contains("/proc/$target/stat"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("ps -eo pid=,ppid="));
+        assert!(SANDBOX_KILL_WRAPPER.contains("$2 == parent"));
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_descendant_helper() {
+        let Some(pid_path) = std::env::var_os("NAC_PORTABLE_DESCENDANT_PID_PATH") else {
+            return;
+        };
+        let session = unsafe { libc::setsid() };
+        assert!(session > 0, "failed to create escaped descendant session");
+        std::fs::write(pid_path, unsafe { libc::getpid() }.to_string()).unwrap();
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_wrapper_uses_ps_to_kill_session_escaped_descendants_without_proc() {
+        use std::os::unix::process::CommandExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-wrapper-portable-descendants-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let descendant_pid_path = root.join("descendant.pid");
+        let wrapper_pidfile = root.join("wrapper.pid");
+        let executable = std::env::current_exe().unwrap();
+        let executable = format!(
+            "'{}'",
+            executable.display().to_string().replace('\'', "'\"'\"'")
+        );
+        let command = format!(
+            "{executable} --exact sandbox::podman::tests::portable_descendant_helper --nocapture & wait"
+        );
+        let mut supervisor = std::process::Command::new("bash");
+        supervisor
+            .env("NAC_PORTABLE_DESCENDANT_PID_PATH", &descendant_pid_path)
+            .arg("-c")
+            .arg(command)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0);
+        let mut supervisor = supervisor.spawn().unwrap();
+
+        for _ in 0..200 {
+            if descendant_pid_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(descendant_pid_path.exists(), "escaped helper did not start");
+        let descendant_pid = std::fs::read_to_string(&descendant_pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        let supervisor_pid = supervisor.id();
+        let started = std::process::Command::new("ps")
+            .args(["-o", "lstart=", "-p", &supervisor_pid.to_string()])
+            .output()
+            .unwrap();
+        assert!(started.status.success());
+        let started = String::from_utf8(started.stdout).unwrap();
+        let started = started.trim();
+        assert!(!started.is_empty());
+        std::fs::write(
+            &wrapper_pidfile,
+            format!("{supervisor_pid}\tps:{started}\n"),
+        )
+        .unwrap();
+
+        // Make both identity and descendant discovery take their production
+        // non-/proc branches while keeping the rest of the wrapper identical.
+        let no_proc_wrapper = SANDBOX_KILL_WRAPPER.replace("/proc/", "/nac-no-proc/");
+        let output = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(no_proc_wrapper)
+            .arg("nac-kill")
+            .arg(&wrapper_pidfile)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "kill wrapper failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let _ = supervisor.wait();
+        for _ in 0..100 {
+            if unsafe { libc::kill(descendant_pid, 0) } != 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if unsafe { libc::kill(descendant_pid, 0) } == 0 {
+            unsafe { libc::kill(descendant_pid, libc::SIGKILL) };
+            panic!("session-escaped descendant survived portable cleanup");
+        }
+        assert!(!wrapper_pidfile.exists());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

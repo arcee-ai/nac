@@ -1181,6 +1181,7 @@ fn hard_shell_denial_inner(
             | "ionice"
             | "numactl"
             | "parallel"
+            | "prlimit"
             | "runuser"
             | "script"
             | "setsid"
@@ -3151,6 +3152,8 @@ mod tests {
             "script -q /dev/null rm -rf .",
             "script -q -c 'rm -rf .' /dev/null",
             "flock Cargo.lock unlink .git/config",
+            "prlimit -- bash",
+            "prlimit -- rm -rf .",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
             "sh -c 'unlink .git/config'",
@@ -3308,6 +3311,34 @@ mod tests {
         )
         .iter()
         .any(|resource| resource.hard_denial.is_some()));
+    }
+
+    #[test]
+    fn prlimit_cannot_conceal_commands_on_any_execution_backend() {
+        let sandbox = ExecutionBackend::Sandbox(crate::sandbox::SandboxSession::new_for_test(
+            crate::sandbox::SandboxSpec {
+                workdir: PathBuf::from("/workspace"),
+                ..crate::sandbox::SandboxSpec::default()
+            },
+        ));
+        let ssh = ExecutionBackend::Ssh(crate::sandbox::SshBackend::new(
+            "nobody@invalid".to_string(),
+            PathBuf::from("/workspace"),
+        ));
+        for (name, backend) in [
+            ("local", local(Path::new("/workspace"))),
+            ("podman", sandbox),
+            ("ssh", ssh),
+        ] {
+            for command in ["prlimit -- bash", "prlimit -- rm -rf ."] {
+                assert!(
+                    shell_resources(command, Path::new("/workspace"), &backend)[0]
+                        .hard_denial
+                        .is_some(),
+                    "{name} backend admitted concealed command: {command}"
+                );
+            }
+        }
     }
 
     #[cfg(unix)]

@@ -11,6 +11,10 @@ pub const DEFAULT_OUTPUT_PAGE_BYTES: usize = 16 * 1024;
 pub const MAX_OUTPUT_PAGE_BYTES: usize = 64 * 1024;
 const OUTPUT_CHUNK_COALESCE_BYTES: usize = 32 * 1024;
 const MAX_RETAINED_CHUNKS_PER_ARTIFACT: usize = 16 * 1024;
+// Artifact records have fixed metadata even when a command emits no bytes.
+// Bound their cardinality independently of the byte quotas so a production-
+// lived direct session cannot grow forever by running zero-output commands.
+const MAX_RETAINED_ARTIFACTS_PER_SESSION: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandOutputLimits {
@@ -127,15 +131,18 @@ pub(crate) struct OutputPreview {
 pub struct OutputRegistry {
     inner: Arc<Mutex<RegistryInner>>,
     limits: CommandOutputLimits,
+    max_artifacts: usize,
 }
 
 struct RegistryInner {
     artifacts: HashMap<String, Artifact>,
     retained_bytes: usize,
     next_sequence: u64,
+    next_artifact_sequence: u64,
 }
 
 struct Artifact {
+    created_sequence: u64,
     kind: ArtifactKind,
     chunks: VecDeque<OutputChunk>,
     stdout_bytes: u64,
@@ -176,15 +183,32 @@ static NEXT_OUTPUT_ID: AtomicU64 = AtomicU64::new(1);
 
 impl OutputRegistry {
     pub fn new(limits: CommandOutputLimits) -> Result<Self> {
+        Self::with_max_artifacts(limits, MAX_RETAINED_ARTIFACTS_PER_SESSION)
+    }
+
+    fn with_max_artifacts(limits: CommandOutputLimits, max_artifacts: usize) -> Result<Self> {
         let limits = limits.validate()?;
+        if max_artifacts == 0 {
+            return Err(anyhow!("command output artifact limit must be at least 1"));
+        }
         Ok(Self {
             inner: Arc::new(Mutex::new(RegistryInner {
                 artifacts: HashMap::new(),
                 retained_bytes: 0,
                 next_sequence: 1,
+                next_artifact_sequence: 1,
             })),
             limits,
+            max_artifacts,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_artifact_limit_for_test(
+        limits: CommandOutputLimits,
+        max_artifacts: usize,
+    ) -> Result<Self> {
+        Self::with_max_artifacts(limits, max_artifacts)
     }
 
     pub fn create(&self, kind: ArtifactKind) -> String {
@@ -194,7 +218,22 @@ impl OutputRegistry {
             ArtifactKind::Pty => "termout",
         };
         let output_id = format!("{prefix}-{number}");
+        let mut inner = self.inner.lock().expect("command output registry poisoned");
+        if inner.artifacts.len() >= self.max_artifacts {
+            let oldest_id = inner
+                .artifacts
+                .iter()
+                .min_by_key(|(_, artifact)| artifact.created_sequence)
+                .map(|(id, _)| id.clone())
+                .expect("a full artifact registry has an oldest entry");
+            if let Some(expired) = inner.artifacts.remove(&oldest_id) {
+                inner.retained_bytes = inner.retained_bytes.saturating_sub(expired.retained_bytes);
+            }
+        }
+        let created_sequence = inner.next_artifact_sequence;
+        inner.next_artifact_sequence = inner.next_artifact_sequence.saturating_add(1);
         let artifact = Artifact {
+            created_sequence,
             kind,
             chunks: VecDeque::new(),
             stdout_bytes: 0,
@@ -203,11 +242,7 @@ impl OutputRegistry {
             retained_bytes: 0,
             overflowed: false,
         };
-        self.inner
-            .lock()
-            .expect("command output registry poisoned")
-            .artifacts
-            .insert(output_id.clone(), artifact);
+        inner.artifacts.insert(output_id.clone(), artifact);
         output_id
     }
 
@@ -474,6 +509,15 @@ impl OutputRegistry {
             .lock()
             .expect("command output registry poisoned")
             .retained_bytes
+    }
+
+    #[cfg(test)]
+    pub fn artifact_count(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("command output registry poisoned")
+            .artifacts
+            .len()
     }
 }
 
@@ -968,6 +1012,23 @@ mod tests {
         let artifact = inner.artifacts.get(&id).unwrap();
         assert_eq!(artifact.chunks.len(), MAX_RETAINED_CHUNKS_PER_ARTIFACT);
         assert!(artifact.overflowed);
+    }
+
+    #[test]
+    fn zero_output_artifact_metadata_has_a_cardinality_bound() {
+        let registry =
+            OutputRegistry::with_artifact_limit_for_test(CommandOutputLimits::default(), 4)
+                .unwrap();
+        let oldest = registry.create(ArtifactKind::Command);
+        let mut newest = oldest.clone();
+        for _ in 0..4 {
+            newest = registry.create(ArtifactKind::Command);
+        }
+
+        assert_eq!(registry.artifact_count(), 4);
+        assert!(registry.stats(&oldest).is_err());
+        assert!(registry.stats(&newest).is_ok());
+        assert_eq!(registry.retained_bytes(), 0);
     }
 
     #[test]
