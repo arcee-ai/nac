@@ -90,7 +90,15 @@ pub struct RunRecoveryRecord {
 pub enum ActiveRunReconciliation {
     None,
     CanonicalTerminal,
+    Failed { run_id: String },
     Interrupted { run_id: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveredRunTerminal {
+    Completed,
+    Cancelled,
+    Failed,
 }
 
 pub(crate) fn replace_with_active_run(
@@ -123,6 +131,7 @@ pub(crate) fn clear_active_run(
     transaction: &Transaction<'_>,
     session_id: &str,
     run_id: &str,
+    disposition: RunTerminalDisposition,
 ) -> Result<()> {
     let Some(record) = load_run_recovery_with_connection(transaction, session_id)? else {
         return Ok(());
@@ -130,8 +139,6 @@ pub(crate) fn clear_active_run(
     if record.run_id != run_id || record.status != RunRecoveryStatus::Active {
         return Ok(());
     }
-    let disposition = canonical_terminal_disposition(transaction, session_id, &record)?
-        .unwrap_or(RunTerminalDisposition::Completed);
     retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition)?;
     Ok(())
 }
@@ -312,79 +319,47 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
         ));
     }
 
-    let canonical_terminal = {
-        let mut statement = transaction.prepare(
-            "SELECT event_json
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2 AND id > ?3
-             ORDER BY id ASC",
-        )?;
-        let rows = statement.query_map(
-            params![
-                session_id,
-                ORCHESTRATOR_STEERING_TARGET,
-                record.submitted_message_id
-            ],
-            |row| row.get::<_, String>(0),
-        )?;
-        let mut terminal = false;
-        for row in rows {
-            let event_json = row?;
-            let entry = decode_recovery_entry(&event_json)
-                .ok_or_else(|| anyhow!("active run tail contains a malformed transcript row"))?;
-            match entry.kind {
-                TranscriptMessageKind::User => terminal = false,
-                TranscriptMessageKind::Assistant => {
-                    let message = decode_recovery_message(&entry)?;
-                    match message {
-                        Message::Assistant {
-                            content: Some(content),
-                            tool_calls,
-                            ..
-                        } if content == crate::agent::RUN_CANCELLED_MARKER
-                            && tool_calls.as_ref().is_none_or(Vec::is_empty) =>
-                        {
-                            terminal = true;
-                            break;
-                        }
-                        Message::Assistant {
-                            content: Some(content),
-                            tool_calls,
-                            ..
-                        } if !content.trim().is_empty()
-                            && tool_calls.as_ref().is_none_or(Vec::is_empty) =>
-                        {
-                            terminal = true;
-                        }
-                        Message::Assistant { .. } => {}
-                        _ => {
-                            return Err(anyhow!(
-                                "active run transcript message kind does not match its payload"
-                            ))
-                        }
-                    }
-                }
-                TranscriptMessageKind::System | TranscriptMessageKind::Tool => {}
+    if let Some(disposition) = canonical_terminal_disposition(&transaction, session_id, &record)? {
+        match disposition {
+            RecoveredRunTerminal::Completed | RecoveredRunTerminal::Cancelled => {
+                let durable = match disposition {
+                    RecoveredRunTerminal::Completed => RunTerminalDisposition::Completed,
+                    RecoveredRunTerminal::Cancelled => RunTerminalDisposition::Cancelled,
+                    RecoveredRunTerminal::Failed => unreachable!(),
+                };
+                crate::store::reconcile_session_goal_terminal_with_connection(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    match disposition {
+                        RecoveredRunTerminal::Completed => GoalRunDisposition::Completed,
+                        RecoveredRunTerminal::Cancelled => GoalRunDisposition::Cancelled,
+                        RecoveredRunTerminal::Failed => unreachable!(),
+                    },
+                )?;
+                retain_or_clear_terminal_obligation(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    durable,
+                )?;
+                transaction.commit()?;
+                return Ok(ActiveRunReconciliation::CanonicalTerminal);
+            }
+            RecoveredRunTerminal::Failed => {
+                crate::store::reconcile_session_goal_terminal_with_connection(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    GoalRunDisposition::Failed,
+                )?;
+                mark_active_run_failed(&transaction, session_id, &record.run_id)?;
+                transaction.commit()?;
+                return Ok(ActiveRunReconciliation::Failed {
+                    run_id: record.run_id,
+                });
             }
         }
-        terminal
-    };
-
-    if canonical_terminal {
-        let disposition = canonical_terminal_disposition(&transaction, session_id, &record)?
-            .unwrap_or(RunTerminalDisposition::Completed);
-        crate::store::reconcile_session_goal_terminal_with_connection(
-            &transaction,
-            session_id,
-            &record.run_id,
-            match disposition {
-                RunTerminalDisposition::Completed => GoalRunDisposition::Completed,
-                RunTerminalDisposition::Cancelled => GoalRunDisposition::Cancelled,
-            },
-        )?;
-        retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
-        transaction.commit()?;
-        return Ok(ActiveRunReconciliation::CanonicalTerminal);
     }
 
     let changed = transaction.execute(
@@ -412,7 +387,7 @@ fn canonical_terminal_disposition(
     connection: &Connection,
     session_id: &str,
     record: &RunRecoveryRecord,
-) -> Result<Option<RunTerminalDisposition>> {
+) -> Result<Option<RecoveredRunTerminal>> {
     let mut statement = connection.prepare(
         "SELECT event_json FROM thread_events
          WHERE session_id = ?1 AND thread_name = ?2 AND id > ?3
@@ -432,6 +407,10 @@ fn canonical_terminal_disposition(
         let Some(entry) = decode_recovery_entry(&event_json) else {
             continue;
         };
+        if entry.kind == TranscriptMessageKind::User {
+            disposition = None;
+            continue;
+        }
         if entry.kind != TranscriptMessageKind::Assistant {
             continue;
         }
@@ -444,9 +423,14 @@ fn canonical_terminal_disposition(
         {
             if tool_calls.as_ref().is_none_or(Vec::is_empty) {
                 disposition = Some(if content == crate::agent::RUN_CANCELLED_MARKER {
-                    RunTerminalDisposition::Cancelled
+                    RecoveredRunTerminal::Cancelled
+                } else if content == crate::agent::RUN_FAILED_PARTIAL_MARKER
+                    || content
+                        .ends_with(&format!("\n\n{}", crate::agent::RUN_FAILED_PARTIAL_MARKER))
+                {
+                    RecoveredRunTerminal::Failed
                 } else if !content.trim().is_empty() {
-                    RunTerminalDisposition::Completed
+                    RecoveredRunTerminal::Completed
                 } else {
                     continue;
                 });
@@ -504,6 +488,7 @@ mod tests {
             sandbox_spec: None,
             run_state: crate::sessions::SessionRunState::default(),
             finished_run_id: None,
+            finished_run_disposition: None,
             failed_run_id: None,
             goal_settlement: None,
             updated_at: now_utc(),
@@ -875,6 +860,7 @@ mod tests {
 
         let mut update = run_state_update("session-a");
         update.finished_run_id = Some("run-1".to_string());
+        update.finished_run_disposition = Some(RunTerminalDisposition::Cancelled);
         update.goal_settlement = Some(GoalRunSettlement {
             run_id: "run-1".to_string(),
             final_billable_tokens: 12,
@@ -889,6 +875,115 @@ mod tests {
         assert!(goal.accounting_run_id.is_none());
         assert!(load_run_recovery(&path, "session-a").unwrap().is_none());
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn cancelled_run_state_checkpoint_does_not_depend_on_transcript_marker() {
+        let path = temp_store_path("explicit_cancel_terminal");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "parent");
+        insert_test_session(&path, "child");
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id IN ('parent', 'child')",
+                [],
+            )
+            .unwrap();
+        create_traditional_child_relationship(
+            &path,
+            "parent",
+            "child",
+            GENERAL_CHILD_PROFILE,
+            "cancel safely",
+        )
+        .unwrap();
+        begin_traditional_child_run(
+            &path,
+            "child",
+            "run-1",
+            TraditionalChildExecutionMode::Background,
+        )
+        .unwrap();
+        TranscriptLogWriter::new(&path)
+            .unwrap()
+            .append_run_prompt("child", 0, &user("prompt"), "run-1")
+            .unwrap();
+
+        let mut update = run_state_update("child");
+        update.finished_run_id = Some("run-1".to_string());
+        update.finished_run_disposition = Some(RunTerminalDisposition::Cancelled);
+        crate::sessions::save_session_run_state(&path, &update).unwrap();
+
+        let recovery = load_run_recovery(&path, "child").unwrap().unwrap();
+        assert_eq!(
+            recovery.terminal_disposition,
+            Some(RunTerminalDisposition::Cancelled)
+        );
+        assert_eq!(
+            reconcile_active_run(&path, "child").unwrap(),
+            ActiveRunReconciliation::CanonicalTerminal
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_partial_marker_recovery_blocks_bound_goal() {
+        let path = temp_store_path("failed_partial_goal_terminal");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session-a");
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'session-a'",
+                [],
+            )
+            .unwrap();
+        create_session_goal(&path, "session-a", "finish safely", None, None).unwrap();
+        bind_session_goal_run(
+            &path,
+            "session-a",
+            &GoalRunBaseline {
+                run_id: "run-1".to_string(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 10,
+                continuation: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_run_prompt("session-a", 0, &user("prompt"), "run-1")
+            .unwrap();
+        writer
+            .append(
+                "session-a",
+                1,
+                &assistant(&format!(
+                    "partial response\n\n{}",
+                    crate::agent::RUN_FAILED_PARTIAL_MARKER
+                )),
+            )
+            .unwrap();
+
+        assert_eq!(
+            reconcile_active_run(&path, "session-a").unwrap(),
+            ActiveRunReconciliation::Failed {
+                run_id: "run-1".to_string()
+            }
+        );
+        let goal = load_session_goal(&path, "session-a").unwrap().unwrap();
+        assert_eq!(goal.status, GoalStatus::Blocked);
+        assert!(goal.accounting_run_id.is_none());
+        assert_eq!(
+            load_run_recovery(&path, "session-a")
+                .unwrap()
+                .unwrap()
+                .status,
+            RunRecoveryStatus::Failed
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -929,6 +1024,7 @@ mod tests {
             .unwrap();
         let mut update = run_state_update("orchestrator");
         update.finished_run_id = Some("run-1".to_string());
+        update.finished_run_disposition = Some(RunTerminalDisposition::Completed);
         crate::sessions::save_session_run_state(&path, &update).unwrap();
         assert!(load_run_recovery(&path, "orchestrator")
             .unwrap()
@@ -979,6 +1075,7 @@ mod tests {
 
         let mut update = run_state_update("session-a");
         update.finished_run_id = Some("different-run".to_string());
+        update.finished_run_disposition = Some(RunTerminalDisposition::Completed);
         crate::sessions::save_session_run_state(&path, &update).unwrap();
         assert!(load_run_recovery(&path, "session-a").unwrap().is_some());
 

@@ -118,7 +118,7 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
                 40,
                 yield_ms,
                 max_output,
-                runtime.backend.as_ref(),
+                &runtime.backend,
                 Some(&runtime.command_cancellation),
             )
             .await;

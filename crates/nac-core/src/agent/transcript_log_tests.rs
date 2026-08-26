@@ -1339,7 +1339,7 @@ fn refresh_transcript_under_lease_rejects_a_foreign_lease() {
 }
 
 #[tokio::test]
-async fn steering_log_failure_truncates_the_staged_messages() {
+async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
     let store_path = test_store_path("steering_log_failure");
@@ -1353,7 +1353,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
         "steer now",
     )
     .unwrap();
-    // Inject the log failure precisely at the post-ack steering append: the
+    // Inject the log failure at the atomic steering transcript/ack commit: the
     // staged message carries the instruction text; the prompt does not.
     let connection = rusqlite::Connection::open(&store_path).unwrap();
     connection
@@ -1391,12 +1391,12 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     assert_eq!(log[0].0, 1);
     assert!(matches!(log[0].1, Message::User { ref content } if content == "current"));
 
-    // The ack is durable: the record stays delivered and is never
-    // redelivered, even though its message left the transcript.
+    // The acknowledgement rolled back with the transcript append. The record
+    // stays claimed by this dispatch and is retryable at the next boundary.
     let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].id, queued.id);
-    assert_eq!(records[0].status, "delivered");
+    assert_eq!(records[0].status, "claimed");
 
     // The next run appends contiguously from the checkpoint — no gap.
     connection
@@ -1406,17 +1406,19 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
     assert!(
-        !agent.messages.iter().any(|message| matches!(
+        agent.messages.iter().any(|message| matches!(
             message,
             Message::User { content } if content == "steer now"
         )),
-        "the acked steering is not redelivered"
+        "the unacknowledged steering is committed on retry"
     );
     let log = read_log(&store_path, "session");
-    assert_eq!(log.len(), 3);
+    assert_eq!(log.len(), 4);
     assert_eq!(log[1].0, 2);
     assert!(matches!(log[1].1, Message::User { ref content } if content == "next"));
     assert_eq!(log[2].0, 3);
+    assert!(matches!(log[2].1, Message::User { ref content } if content == "steer now"));
+    assert_eq!(log[3].0, 4);
 
     // The restore merge reads the log cleanly (the pre-fix gap failed it
     // loudly and bricked re-attach).
@@ -1430,7 +1432,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
         )
         .await
         .unwrap();
-    assert_eq!(restored.messages.len(), 4);
+    assert_eq!(restored.messages.len(), 5);
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

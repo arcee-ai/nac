@@ -452,6 +452,45 @@ impl TranscriptLogWriter {
         Ok(())
     }
 
+    /// Append a claimed orchestrator/thread steering batch and acknowledge
+    /// every steering row in the same transaction. Either both the canonical
+    /// User messages and delivered statuses commit, or neither does.
+    pub fn append_claimed_thread_steering(
+        &self,
+        session_id: &str,
+        dispatch_id: &str,
+        steering_ids: &[i64],
+        start_idx: u64,
+        messages: &[Message],
+    ) -> Result<()> {
+        if steering_ids.len() != messages.len() {
+            return Err(anyhow!(
+                "steering acknowledgement/message count mismatch: {} ids for {} messages",
+                steering_ids.len(),
+                messages.len()
+            ));
+        }
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let _operation = self
+            .operation
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut connection = open_runtime_connection(&self.store_path)?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        append_messages_in_transaction(&transaction, session_id, start_idx, messages)?;
+        super::steering::acknowledge_thread_steering_batch_with_connection(
+            &transaction,
+            steering_ids,
+            session_id,
+            dispatch_id,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Append the submitted user turn and install its recovery obligation in
     /// the same transaction. No provider request may begin until this returns.
     pub fn append_run_prompt(
@@ -1274,6 +1313,50 @@ mod tests {
         assert_eq!(summary.visible_message_count, 2);
         assert_eq!(summary.last_user_prompt.as_deref(), Some("tail"));
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn steering_acknowledgement_and_transcript_append_are_atomic() {
+        let path = temp_store_path("steering_atomic");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let steer = queue_thread_steering(
+            &path,
+            "session",
+            ORCHESTRATOR_STEERING_TARGET,
+            "dispatch",
+            "keep going",
+        )
+        .unwrap();
+        assert_eq!(
+            claim_thread_steering(&path, "session", "dispatch")
+                .unwrap()
+                .len(),
+            1
+        );
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let messages = [Message::User {
+            content: "keep going".to_string(),
+        }];
+
+        writer
+            .append_claimed_thread_steering("session", "dispatch", &[steer.id], 1, &messages)
+            .unwrap_err();
+        assert!(writer.read_from("session", 0).unwrap().is_empty());
+        assert_eq!(
+            list_thread_steering(&path, "session").unwrap()[0].status,
+            "claimed"
+        );
+
+        writer
+            .append_claimed_thread_steering("session", "dispatch", &[steer.id], 0, &messages)
+            .unwrap();
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 1);
+        assert_eq!(
+            list_thread_steering(&path, "session").unwrap()[0].status,
+            "delivered"
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

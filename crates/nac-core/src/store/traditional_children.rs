@@ -416,6 +416,60 @@ pub fn suppress_traditional_child_completion(
         .ok_or_else(|| anyhow!("traditional child disappeared during completion suppression"))
 }
 
+/// Roll back deletion-time completion suppression for the same generation.
+/// If cancellation already settled the background child while suppression was
+/// active, synthesize the omitted parent inbox delivery in this transaction.
+pub fn restore_traditional_child_completion(
+    path: &Path,
+    child_session_id: &str,
+    generation: u64,
+) -> Result<()> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let Some(current) = load_child_with_connection(&transaction, child_session_id)? else {
+        transaction.commit()?;
+        return Ok(());
+    };
+    let completion_suppressed: bool = transaction.query_row(
+        "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
+        params![child_session_id],
+        |row| row.get(0),
+    )?;
+    if current.generation != generation || !completion_suppressed {
+        transaction.commit()?;
+        return Ok(());
+    }
+    let mut completion_inbox_id = current.completion_inbox_id;
+    if current.status.is_terminal()
+        && current.execution_mode == Some(TraditionalChildExecutionMode::Background)
+        && completion_inbox_id.is_none()
+    {
+        let content = completion_prompt(&current)?;
+        let now = now_utc();
+        transaction.execute(
+            "INSERT INTO session_inbox
+             (session_id, delivery, status, content, created_at, updated_at)
+             VALUES (?1, 'queue', 'pending', ?2, ?3, ?3)",
+            params![current.parent_session_id, content, now],
+        )?;
+        completion_inbox_id = Some(transaction.last_insert_rowid());
+    }
+    let changed = transaction.execute(
+        "UPDATE traditional_children
+         SET completion_suppressed = 0, completion_inbox_id = COALESCE(completion_inbox_id, ?3),
+             updated_at = ?4, version = version + 1
+         WHERE child_session_id = ?1 AND generation = ?2 AND completion_suppressed = 1",
+        params![child_session_id, generation, completion_inbox_id, now_utc()],
+    )?;
+    if changed != 1 {
+        return Err(anyhow!(
+            "traditional child session '{child_session_id}' changed while restoring completion"
+        ));
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
 pub fn settle_traditional_child_run(
     path: &Path,
     child_session_id: &str,
@@ -742,6 +796,13 @@ mod tests {
         );
         assert!(settlement.child.completion_inbox_id.is_none());
         assert!(list_session_inbox(&path, "parent").unwrap().is_empty());
+
+        restore_traditional_child_completion(&path, "child", suppressed.generation).unwrap();
+        let restored = load_traditional_child(&path, "child").unwrap().unwrap();
+        assert!(restored.completion_inbox_id.is_some());
+        assert_eq!(list_session_inbox(&path, "parent").unwrap().len(), 1);
+        restore_traditional_child_completion(&path, "child", suppressed.generation).unwrap();
+        assert_eq!(list_session_inbox(&path, "parent").unwrap().len(), 1);
     }
 
     #[test]
@@ -813,7 +874,7 @@ mod tests {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .unwrap();
-                clear_active_run(&transaction, "child", "run-1").unwrap();
+                clear_active_run(&transaction, "child", "run-1", expected).unwrap();
                 transaction.commit().unwrap();
             }
 

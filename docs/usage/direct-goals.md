@@ -38,6 +38,11 @@ status to `budget_limited` and prevents another continuation. Cached-read and
 cache-write tokens are included because they are billable session usage; the
 context-window gauge is not.
 
+That mid-run baseline is process-local by design. If a different NAC process
+currently owns the session run, goal creation returns a conflict instead of
+creating an unbound generation or guessing its token baseline. Retry after the
+owning run settles or use the process that owns the active run.
+
 Continuation ownership is service-side and idempotent. A durable run claim and
 the existing cross-process session-operation lease prevent concurrent starts.
 On restart, NAC clears a stale claim while holding that lease and starts at most

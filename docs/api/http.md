@@ -93,6 +93,10 @@ claim, timestamps, and version. The API accepts `active`, `paused`, `blocked`,
 clear rather than setting `complete`. The model's native `update_goal` tool is
 the path that marks genuine completion or blockage.
 
+Goal creation during a run owned by another NAC process returns `409 Conflict`.
+The server never creates an unbound goal or guesses a cross-process mid-run
+token baseline.
+
 ## Session behaviors and direct inbox
 
 `POST /sessions` accepts `behavior` as `orchestrator`, `direct`, or

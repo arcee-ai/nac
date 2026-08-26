@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
@@ -34,6 +34,7 @@ const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    pending_remote_cleanups: Arc<StdMutex<HashMap<String, Arc<ExecutionBackend>>>>,
     create_gate: Arc<Mutex<()>>,
     completed_sessions: Arc<Mutex<VecDeque<(String, CompletedTerminal)>>>,
     max_sessions: usize,
@@ -77,6 +78,7 @@ impl TerminalManager {
     ) -> Result<Self> {
         Ok(Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            pending_remote_cleanups: Arc::new(StdMutex::new(HashMap::new())),
             create_gate: Arc::new(Mutex::new(())),
             completed_sessions: Arc::new(Mutex::new(VecDeque::new())),
             max_sessions: 16,
@@ -361,7 +363,7 @@ impl TerminalManager {
         _rows: u16,
         yield_ms: u64,
         max_output: usize,
-        backend: &ExecutionBackend,
+        backend: &Arc<ExecutionBackend>,
         cancellation: Option<&ThreadCancellation>,
     ) -> CommandOutput {
         let start = Instant::now();
@@ -417,6 +419,12 @@ impl TerminalManager {
                 };
             }
         };
+        if let Some(pidfile) = pidfile.as_deref() {
+            self.pending_remote_cleanups
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(pidfile.to_string(), Arc::clone(backend));
+        }
 
         let stdout = child.stdout.take().expect("piped stdout is present");
         let stderr = child.stderr.take().expect("piped stderr is present");
@@ -497,7 +505,7 @@ impl TerminalManager {
         let mut force_reader_shutdown = false;
         if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
-                if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
+                if let Err(error) = self.retry_remote_cleanup(pidfile).await {
                     runtime_error = Some(format!("remote command cleanup incomplete: {error}"));
                 }
             }
@@ -514,6 +522,9 @@ impl TerminalManager {
             }
             exit_code = None;
         } else if self.isolate_process_groups {
+            if let Some(pidfile) = pidfile.as_deref() {
+                self.forget_remote_cleanup(pidfile);
+            }
             // A successful shell leader can leave background descendants.
             // The dedicated owned group leader prevents pgid reuse while we
             // tear down that group after reaping the requested command.
@@ -521,6 +532,9 @@ impl TerminalManager {
             process_tree.finish().await;
             force_reader_shutdown = true;
         } else {
+            if let Some(pidfile) = pidfile.as_deref() {
+                self.forget_remote_cleanup(pidfile);
+            }
             process_tree.disarm();
         }
 
@@ -666,6 +680,9 @@ impl TerminalManager {
                 ));
             }
         }
+        if let Err(error) = self.retry_pending_remote_cleanups().await {
+            cleanup_errors.push(error.to_string());
+        }
         if cleanup_errors.is_empty() {
             self.completed_sessions.lock().await.clear();
             self.output_registry.clear();
@@ -695,6 +712,9 @@ impl TerminalManager {
                 ));
             }
         }
+        if let Err(error) = self.retry_pending_remote_cleanups().await {
+            cleanup_errors.push(error.to_string());
+        }
         if cleanup_errors.is_empty() {
             Ok(())
         } else {
@@ -723,6 +743,59 @@ impl TerminalManager {
         }
         session.kill().await?;
         Ok(sessions.remove(name))
+    }
+
+    fn forget_remote_cleanup(&self, pidfile: &str) {
+        self.pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(pidfile);
+    }
+
+    async fn retry_remote_cleanup(&self, pidfile: &str) -> Result<()> {
+        let backend = self
+            .pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(pidfile)
+            .cloned();
+        let Some(backend) = backend else {
+            return Ok(());
+        };
+        backend.terminal_pipe_kill(pidfile).await?;
+        self.forget_remote_cleanup(pidfile);
+        Ok(())
+    }
+
+    async fn retry_pending_remote_cleanups(&self) -> Result<()> {
+        let pidfiles = self
+            .pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut errors = Vec::new();
+        for pidfile in pidfiles {
+            if let Err(error) = self.retry_remote_cleanup(&pidfile).await {
+                errors.push(format!(
+                    "remote one-shot command cleanup for '{pidfile}' remains incomplete: {error:#}"
+                ));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(errors.join("; ")))
+        }
+    }
+
+    #[cfg(test)]
+    fn pending_remote_cleanup_count(&self) -> usize {
+        self.pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
     }
 
     pub async fn retain(&self, name: &str) -> Result<TerminalInfo> {
@@ -1103,6 +1176,75 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn failed_remote_one_shot_cleanup_remains_owned_for_settlement_retry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct RestorePath(Option<std::ffi::OsString>);
+        impl Drop for RestorePath {
+            fn drop(&mut self) {
+                unsafe {
+                    match self.0.take() {
+                        Some(path) => std::env::set_var("PATH", path),
+                        None => std::env::remove_var("PATH"),
+                    }
+                }
+            }
+        }
+
+        let _environment = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_path = std::env::var_os("PATH");
+        let _restore = RestorePath(original_path.clone());
+        let root = std::env::temp_dir().join(format!(
+            "nac-one-shot-cleanup-retry-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        let cleanup_calls = root.join("cleanup-calls");
+        std::fs::write(
+            &podman,
+            format!(
+                "#!/bin/sh\ncase \" $* \" in\n*' nac-kill '*)\n  count=$(cat '{}' 2>/dev/null || printf 0)\n  count=$((count + 1))\n  printf %s \"$count\" > '{}'\n  [ \"$count\" -gt 1 ]\n  exit $?\n  ;;\nesac\nsleep 30\n",
+                cleanup_calls.display(),
+                cleanup_calls.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut paths = vec![bin];
+        if let Some(path) = original_path.as_ref() {
+            paths.extend(std::env::split_paths(path));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+
+        let backend = crate::sandbox::execution_backend_from_sandbox(
+            Some(SandboxSession::new_for_test(SandboxSpec {
+                workdir: root.clone(),
+                ..Default::default()
+            })),
+            &root,
+        );
+        let manager = TerminalManager::new();
+        let output = manager
+            .exec_one_shot("sleep 30", None, 120, 40, 20, 8_000, &backend, None)
+            .await;
+        assert_eq!(output.status, CommandStatus::TimedOut);
+        assert!(output
+            .stderr_preview
+            .contains("remote command cleanup incomplete"));
+        assert_eq!(manager.pending_remote_cleanup_count(), 1);
+
+        manager.settle_run().await.unwrap();
+        assert_eq!(manager.pending_remote_cleanup_count(), 0);
+        assert_eq!(std::fs::read_to_string(&cleanup_calls).unwrap(), "2");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn cleanup_cancellation_preserves_ownership_and_parallel_create_keeps_capacity() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -1406,7 +1548,7 @@ mod tests {
                     40,
                     5_000,
                     8_000,
-                    task_backend.as_ref(),
+                    &task_backend,
                     Some(&task_cancellation),
                 )
                 .await
@@ -1519,7 +1661,7 @@ mod tests {
                     40,
                     5_000,
                     8_000,
-                    task_backend.as_ref(),
+                    &task_backend,
                     Some(&task_cancellation),
                 )
                 .await
@@ -1554,16 +1696,7 @@ mod tests {
         let task_backend = backend();
         let task = tokio::spawn(async move {
             task_manager
-                .exec_one_shot(
-                    &command,
-                    None,
-                    120,
-                    40,
-                    5_000,
-                    8_000,
-                    task_backend.as_ref(),
-                    None,
-                )
+                .exec_one_shot(&command, None, 120, 40, 5_000, 8_000, &task_backend, None)
                 .await
         });
 
@@ -1887,16 +2020,7 @@ mod tests {
             "python3 -c 'from pathlib import Path; import sys; p=Path(\"{marker}\"); p.write_text(\"1\" if not p.exists() else p.read_text()+\"1\"); sys.stdout.write(\"a\"*(1024*1024)+\"REMOTE_DIAGNOSTIC\"+\"z\"*(1024*1024)); sys.stderr.write(\"remote-err\\n\"); raise SystemExit(7)'"
         );
         let output = manager
-            .exec_one_shot(
-                &command,
-                None,
-                120,
-                40,
-                30_000,
-                1_000,
-                backend.as_ref(),
-                None,
-            )
+            .exec_one_shot(&command, None, 120, 40, 30_000, 1_000, &backend, None)
             .await;
         assert_eq!(output.status, CommandStatus::Completed);
         assert_eq!(output.exit_code, Some(7));
@@ -1932,7 +2056,7 @@ mod tests {
                 40,
                 10_000,
                 1_000,
-                backend.as_ref(),
+                &backend,
                 None,
             )
             .await;
@@ -1953,7 +2077,7 @@ mod tests {
                     40,
                     10_000,
                     1_000,
-                    task_backend.as_ref(),
+                    &task_backend,
                     Some(&task_cancellation),
                 )
                 .await
@@ -1973,7 +2097,7 @@ mod tests {
                 40,
                 10_000,
                 1_000,
-                backend.as_ref(),
+                &backend,
                 None,
             )
             .await;
@@ -1984,7 +2108,7 @@ mod tests {
         );
 
         let timed_out = manager
-            .exec_one_shot("sleep 5", None, 120, 40, 100, 1_000, backend.as_ref(), None)
+            .exec_one_shot("sleep 5", None, 120, 40, 100, 1_000, &backend, None)
             .await;
         assert_eq!(timed_out.status, CommandStatus::TimedOut);
         assert_eq!(timed_out.exit_code, None);
