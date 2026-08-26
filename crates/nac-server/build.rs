@@ -6,12 +6,17 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=NAC_RELEASE_VERSION");
     let release_version =
-        std::env::var("NAC_RELEASE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").into());
+        nonempty_env("NAC_RELEASE_VERSION").unwrap_or_else(|| env!("CARGO_PKG_VERSION").into());
     println!("cargo:rustc-env=NAC_RELEASE_VERSION={release_version}");
 
     // Embed the source revision so release builds remain commit-identifiable.
-    // Falls back to "unknown" when building from a source archive without git metadata.
-    let revision = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
+    // Container builds intentionally exclude `.git` from the build context, so
+    // CI can provide the checked-out revision explicitly. Source archives and
+    // ad-hoc builds without either input retain the existing "unknown" fallback.
+    println!("cargo:rerun-if-env-changed=NAC_BUILD_REVISION");
+    let revision = nonempty_env("NAC_BUILD_REVISION")
+        .or_else(|| git(&["rev-parse", "--short", "HEAD"]))
+        .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=NAC_BUILD_REVISION={revision}");
 
     // Re-run this script when the revision moves, otherwise incremental
@@ -28,6 +33,14 @@ fn main() {
             }
         }
     }
+}
+
+/// Returns a trimmed, non-empty build input.
+fn nonempty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// Tells Cargo to watch a path after Git resolves its worktree-aware location.

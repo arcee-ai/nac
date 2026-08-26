@@ -1,0 +1,118 @@
+name: Container
+
+on:
+  pull_request:
+    paths:
+      - '.dockerignore'
+      - '.github/workflows/container.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'Dockerfile'
+      - 'crates/**'
+      - 'scripts/container-smoke.sh'
+  push:
+    branches: [main, allison-demo]
+    paths:
+      - '.dockerignore'
+      - '.github/workflows/container.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'Dockerfile'
+      - 'crates/**'
+      - 'scripts/container-smoke.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_TAG: dev-${{ github.run_number }}.${{ github.run_attempt }}.0-${{ github.sha }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build smoke-test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: nac:container-smoke
+          build-args: |
+            NAC_BUILD_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=nac-container-amd64
+          cache-to: type=gha,scope=nac-container-amd64,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Smoke test the production container
+        run: sh scripts/container-smoke.sh nac:container-smoke "${{ github.sha }}"
+
+  publish:
+    if: github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      OIDC_ROLE_TO_ASSUME: ${{ vars.DEV_OIDC_ROLE_TO_ASSUME }}
+      ECR_REPOSITORY: ${{ vars.DEV_ECR_REPOSITORY }}
+      ECR_CACHE_REPOSITORY: ${{ vars.DEV_ECR_CACHE_REPOSITORY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate publishing configuration
+        run: |
+          test -n "$AWS_REGION"
+          test -n "$OIDC_ROLE_TO_ASSUME"
+          test -n "$ECR_REPOSITORY"
+          test -n "$ECR_CACHE_REPOSITORY"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.OIDC_ROLE_TO_ASSUME }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push immutable image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          build-args: |
+            NAC_BUILD_REVISION=${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.ECR_CACHE_REPOSITORY }}:nac-cache
+          cache-to: type=registry,ref=${{ env.ECR_CACHE_REPOSITORY }}:nac-cache,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Smoke test the published image
+        run: sh scripts/container-smoke.sh "$ECR_REPOSITORY@${{ steps.push.outputs.digest }}" "${{ github.sha }}"
+
+      - name: Record the published digest
+        run: echo "${ECR_REPOSITORY}:${IMAGE_TAG}@${IMAGE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}

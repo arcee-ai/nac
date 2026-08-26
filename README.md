@@ -69,6 +69,39 @@ export OPENAI_API_KEY=...   # or ANTHROPIC_API_KEY, TOGETHER_API_KEY, ARCEE_API_
 
 More details can be found in [Providers and logins](docs/configuration/credentials.md) and [Model configuration](docs/configuration/model.md). 
 
+### Production container
+
+The root `Dockerfile` builds the committed frontend into the Rust binary and
+runs `nac-web` directly as the non-root `10001:10001` user. Managed deployments
+must persist both `/nac-home` (the runtime user's `HOME` and `NAC_HOME`,
+including the SQLite store and credentials) and `/repositories` (project
+checkouts), and must supply an exact `NAC_ALLOWED_HOSTS` value for their public
+hostname.
+
+```sh
+docker build \
+  --build-arg NAC_BUILD_REVISION="$(git rev-parse --short HEAD)" \
+  -t nac:local .
+docker run --rm -p 3210:3210 \
+  -e NAC_ALLOWED_HOSTS=localhost \
+  --mount source=nac-home,target=/nac-home \
+  --mount source=nac-repositories,target=/repositories \
+  nac:local
+```
+
+NAC does not authenticate HTTP clients. Never expose this port without an
+authenticated and encrypted network boundary. Kubernetes storage must make the
+two mounted directories writable by UID/GID `10001` (for example through an
+appropriate pod `fsGroup` or a narrowly scoped volume initializer).
+
+Build and exercise the same read-only-root, capability-dropped runtime used by
+CI with:
+
+```sh
+docker build -t nac:container-smoke .
+sh scripts/container-smoke.sh nac:container-smoke
+```
+
 
 ### Uninstall
 

@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.cursor
+.env
+**/target
+crates/nac-server/web
+docs
+fixtures
+scripts
+skills
+start.sh
+start_dev.sh
+Makefile
+README.md
