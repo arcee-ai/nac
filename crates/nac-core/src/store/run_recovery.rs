@@ -257,7 +257,13 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::None);
     };
-    if record.terminal_disposition.is_some() {
+    if let Some(disposition) = record.terminal_disposition {
+        // Settlement and recovery cleanup are intentionally separate durable
+        // commits. If a process dies between them, a terminal relationship no
+        // longer owns this obligation; clear it during restart reconciliation
+        // so the next generation can replace the row. A still-running
+        // relationship retains the marker for its monitor to settle.
+        retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::CanonicalTerminal);
     }
@@ -764,6 +770,81 @@ mod tests {
         assert_eq!(
             reconcile_active_run(&path, "session-a").unwrap(),
             ActiveRunReconciliation::None
+        );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn recovery_clears_post_settlement_terminal_obligation_before_next_generation() {
+        let path = temp_store_path("settled_terminal");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "parent");
+        insert_test_session(&path, "orchestrator");
+        let connection = open_runtime_connection(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET behavior = 'orchestrator' WHERE session_id = 'orchestrator'",
+                [],
+            )
+            .unwrap();
+        create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "review")
+            .unwrap();
+        begin_managed_orchestrator_run(
+            &path,
+            "orchestrator",
+            "run-1",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_run_prompt("orchestrator", 0, &user("prompt"), "run-1")
+            .unwrap();
+        writer
+            .append("orchestrator", 1, &assistant("answer"))
+            .unwrap();
+        let mut update = run_state_update("orchestrator");
+        update.finished_run_id = Some("run-1".to_string());
+        crate::sessions::save_session_run_state(&path, &update).unwrap();
+        assert!(load_run_recovery(&path, "orchestrator")
+            .unwrap()
+            .unwrap()
+            .terminal_disposition
+            .is_some());
+
+        settle_managed_orchestrator_run(
+            &path,
+            "orchestrator",
+            "run-1",
+            ManagedOrchestratorTerminal {
+                status: ManagedOrchestratorStatus::Completed,
+                report: Some("answer".to_string()),
+                failure: None,
+            },
+        )
+        .unwrap();
+        // Simulate a crash before clear_settled_run_recovery.
+        assert_eq!(
+            reconcile_active_run(&path, "orchestrator").unwrap(),
+            ActiveRunReconciliation::CanonicalTerminal
+        );
+        assert!(load_run_recovery(&path, "orchestrator").unwrap().is_none());
+        writer
+            .append_run_prompt("orchestrator", 2, &user("continue"), "run-2")
+            .unwrap();
+        assert_eq!(
+            load_run_recovery(&path, "orchestrator")
+                .unwrap()
+                .unwrap()
+                .run_id,
+            "run-2"
         );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

@@ -159,6 +159,50 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("Managed NAC orchestrators", { exact: true })).toBeVisible();
 });
 
+test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const projectId = await createProject(request, harness);
+  const second = await page.context().newPage();
+  try {
+    await Promise.all([
+      page.goto(`${harness.baseUrl}/#/project/${projectId}`),
+      second.goto(`${harness.baseUrl}/#/project/${projectId}`),
+    ]);
+    await Promise.all([
+      expect(page.getByRole("dialog")).toContainText("New Chat"),
+      expect(second.getByRole("dialog")).toContainText("New Chat"),
+    ]);
+    await Promise.all([
+      page.getByRole("button", { name: "Create chat" }).click(),
+      second.getByRole("button", { name: "Create chat" }).click(),
+    ]);
+    await Promise.all([
+      expect(page).toHaveURL(/\/session\/([^/]+)\/threads$/),
+      expect(second).toHaveURL(/\/session\/([^/]+)\/threads$/),
+    ]);
+    const firstSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+    const secondSessionId = second.url().match(/\/session\/([^/]+)\//)?.[1];
+    expect(firstSessionId).toBeTruthy();
+    expect(secondSessionId).toBe(firstSessionId);
+
+    const sessions = await request.get(
+      `${harness.baseUrl}/sessions?project_id=${encodeURIComponent(projectId)}`,
+    );
+    expect(sessions.ok()).toBe(true);
+    expect((await sessions.json()) as unknown[]).toHaveLength(1);
+
+    const deleted = await request.delete(`${harness.baseUrl}/projects/${projectId}`);
+    expect(deleted.ok()).toBe(true);
+    await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+    await expect(page).toHaveURL(/\/#\/$/);
+  } finally {
+    await second.close();
+  }
+});
+
 test("steers an active direct run from the ordinary composer", async ({
   harness,
   page,

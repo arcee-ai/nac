@@ -283,6 +283,13 @@ impl NativeTool for SubagentCancelTool {
                     Ok(controller) => controller,
                     Err(error) => return ToolResult::text(format!("Error: {error:#}"), true),
                 };
+            if let Err(error) = owned_child(
+                services.runtime,
+                &parent_session_id,
+                &input.child_session_id,
+            ) {
+                return ToolResult::text(format!("Error: {error:#}"), true);
+            }
             match controller
                 .cancel(&parent_session_id, &input.child_session_id)
                 .await
@@ -299,14 +306,12 @@ fn owned_child(
     parent_session_id: &str,
     child_session_id: &str,
 ) -> anyhow::Result<TraditionalChildRecord> {
-    let child = crate::store::load_traditional_child(&runtime.store_path, child_session_id)?
-        .ok_or_else(|| {
-            anyhow::anyhow!("traditional child session '{child_session_id}' was not found")
-        })?;
-    if child.parent_session_id != parent_session_id {
-        anyhow::bail!("session '{child_session_id}' is not a child of the current session");
-    }
-    Ok(child)
+    crate::store::load_traditional_child_for_parent(
+        &runtime.store_path,
+        parent_session_id,
+        child_session_id,
+    )?
+    .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))
 }
 
 fn outcome_result(child: TraditionalChildRecord) -> ToolResult {
@@ -477,5 +482,74 @@ mod tests {
             starts[1].execution_mode,
             TraditionalChildExecutionMode::Background
         );
+    }
+
+    #[tokio::test]
+    async fn native_status_and_cancel_hide_foreign_child_ownership() {
+        let root =
+            std::env::temp_dir().join(format!("nac_subagent_opaque_{}", uuid::Uuid::new_v4()));
+        let store_path = root.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        for session_id in ["parent-a", "parent-b", "child-a"] {
+            crate::store::insert_test_session(&store_path, session_id);
+        }
+        let connection = crate::store::open_runtime_connection(&store_path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id IN ('parent-a', 'parent-b', 'child-a')",
+                [],
+            )
+            .unwrap();
+        crate::store::create_traditional_child_relationship(
+            &store_path,
+            "parent-a",
+            "child-a",
+            GENERAL_CHILD_PROFILE,
+            "review ownership",
+        )
+        .unwrap();
+        let controller = Arc::new(FakeController {
+            starts: Mutex::new(Vec::new()),
+        });
+        crate::traditional_children::register_controller(store_path.clone(), controller);
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path.clone();
+        runtime.session_id = Some("parent-b".to_string());
+        runtime.allowed_tools = Some(Arc::new(
+            crate::tools::DIRECT_TOOL_NAMES
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        ));
+        let client = crate::model::ModelClient::new_for_test();
+
+        for tool in ["subagent_status", "subagent_cancel"] {
+            let foreign = crate::tools::execute_tool(
+                tool,
+                json!({"child_session_id": "child-a"}),
+                &runtime,
+                &client,
+            )
+            .await;
+            let missing = crate::tools::execute_tool(
+                tool,
+                json!({"child_session_id": "missing"}),
+                &runtime,
+                &client,
+            )
+            .await;
+            assert!(foreign.is_error && missing.is_error);
+            assert_eq!(
+                foreign.content.as_text(),
+                missing.content.as_text(),
+                "{tool}"
+            );
+            assert_eq!(
+                foreign.content.as_text(),
+                Some("Error: traditional child was not found")
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

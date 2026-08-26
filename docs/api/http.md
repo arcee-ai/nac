@@ -42,6 +42,12 @@ same field as a filter. Selection is explicit—NAC never infers a project from
 location field, and an SSH project cannot use sandbox options. Each session
 belongs to at most one project. Project location is immutable.
 
+The web marks the required first chat with `first_chat: true`. This flag
+requires `project_id` and is an idempotent admission: concurrent first-chat
+requests for the same empty project return the same newly created primary
+session. If a primary chat already exists, its snapshot is returned instead.
+Ordinary **New chat** requests omit the flag and always create another session.
+
 `POST /projects/{project_id}/sessions` assigns an already-created session, whose
 `session_id` is the only body field. Membership is written once: a session that
 already belongs to a project returns 409, and so does one whose working
