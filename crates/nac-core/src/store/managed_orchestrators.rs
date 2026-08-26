@@ -246,6 +246,18 @@ pub fn begin_managed_orchestrator_run(
             "managed orchestrator already has a running generation"
         ));
     }
+    let completion_suppressed: bool = transaction.query_row(
+        "SELECT completion_suppressed FROM managed_orchestrators
+         WHERE orchestrator_session_id = ?1",
+        params![orchestrator_session_id],
+        |row| row.get(0),
+    )?;
+    if completion_suppressed {
+        return Err(anyhow!(
+            "managed orchestrator cannot start a new generation while generation {} completion delivery is suppressed",
+            current.generation
+        ));
+    }
     let running: u64 = transaction.query_row(
         "SELECT COUNT(*) FROM managed_orchestrators
          WHERE root_session_id = ?1 AND status = 'running'",

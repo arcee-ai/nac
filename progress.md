@@ -12,9 +12,10 @@ launch, browser-E2E, and deterministic durability coverage.
 
 Protected initial state verified on 2026-08-25:
 
-- HEAD is `fceb0fd` on `allison-demo`. The original implementation range is
-  `61b1709..d3e3fc0`; post-review closure now extends through `fceb0fd` with
-  immutable reviews at `02c58aa`, `dd897a4`, `40f3619`, and `fceb0fd`.
+- HEAD is `7cd1787` on `allison-demo`. The original implementation range is
+  `61b1709..d3e3fc0`; post-review closure now extends through `7cd1787` with
+  immutable reviews at `02c58aa`, `dd897a4`, `40f3619`, `fceb0fd`, and
+  `7cd1787`.
 - `.gitignore` is modified, `AGENTS.md` and `demo_review.md` are untracked, and
   `demo_decisions.md` is intentionally ignored. These are user-owned/local and
   must not be staged or committed.
@@ -45,10 +46,12 @@ Protected initial state verified on 2026-08-25:
    NAC-REV-010, 011, 015, and 020..023 through behavior-aware creation and
    navigation, active-run inbox UX, literal `/goal`, child ownership guards,
    documentation, and production-embedded browser tests.
-5. **In progress — closure and integrated review.** The exact review of
-   `fceb0fd` returned NO-GO with eight concrete safety, cancellation,
-   crash-recovery, Stop-availability, and ledger blockers. Their repair set and
-   focused regressions are complete; full gates, a new immutable NAC review,
+5. **In progress — closure and integrated review.** Commit `7cd1787` closed the
+   eight `fceb0fd` findings and passed every exact-commit gate. Its four-lane
+   review returned NO-GO with eleven command-admission, remote-ownership,
+   suppression-generation, retained-service, UI-scoping, pidfile, and ledger
+   blockers. The current uncommitted repair candidate addresses all eleven and
+   its focused regressions pass; complete gates, a new immutable NAC review,
    production browser smoke, and final state audit remain.
 
 ### Finding map
@@ -109,8 +112,15 @@ Protected initial state verified on 2026-08-25:
   operand-bearing wrapper bypasses, broad interactive PTY authority, remote
   cleanup ordering, interrupted steering-result adoption, crash-stranded
   completion suppression, double-projection Stop loss, and this stale ledger.
-  All eight are implemented in the current uncommitted candidate with focused
-  regressions passing.
+  Commit `7cd1787` closed all eight and passed the complete exact-commit gates.
+- Exact `7cd1787` review `01ef8869-f1e6-42ca-8a84-0fabb2a54692`, run
+  `fd9899cc-4a7f-45be-b71a-5f1166dc0014` — NO-GO; found wrapper and dynamic
+  command-name escapes, missing `unlink` mutation projection and `rmdir`
+  final-entry binding, early/forgotten remote cleanup ownership, exited
+  retained-service eviction, generation rollover over crash-stranded
+  completion suppression, restart-colliding Podman pidfiles, cross-session Stop
+  projection, and the stale ledger. The current uncommitted candidate addresses
+  all eleven with focused regressions passing.
 
 ### Current verification and next action
 
@@ -174,20 +184,21 @@ Protected initial state verified on 2026-08-25:
   behavior choices and default reset, direct text and native tool round trips,
   active durable steer delivery into the next provider request, literal goal
   interpretation and continuation, and read-only child/managed transcripts.
-- Exact `fceb0fd` gate baseline: `make ci` passed with catalog 2+7+24, core
-  1085 passed/9 ignored, server 133, binary 21, and frontend 169; `make
+- Exact `7cd1787` gate baseline: `make ci` passed with catalog 2+7+24, core
+  1087 passed/9 ignored, server 134, binary 21, and frontend 170; `make
   test-durability`, `make test-assets`, and production-embedded Playwright
   10/10 also passed.
-- Current repair evidence: hard-policy wrapper corpus, interactive-terminal
-  admission, local-before-remote cleanup ordering, interrupted atomic steering
-  adoption, deletion-owner crash repair for child and managed completion, and
-  partial-load Stop component tests pass. The current candidate's complete
-  suites pass with core 1087 passed/9 ignored, server 134, binary 21, and
-  frontend 170; format, lint, and typecheck also pass. The embedded production
-  bundle has been rebuilt, so an exact committed `make ci` remains the next
-  gate rather than claiming the expected pre-commit asset-staleness failure as
-  a pass.
-- Next action: commit the repair candidate and rebuilt bundle, run every
+- Current repair evidence: focused hard-policy wrapper/dynamic-name and exact
+  deletion-entry tests pass; active-settlement, cancellation, forced-abort,
+  natural-exit, retained-service, and retryable remote-cleanup tests pass;
+  suppression repair blocks both child and managed generation rollover until
+  the deletion lease is released and then delivers exactly once; UUID pidfile
+  and session-scoped Stop tests pass. The complete uncommitted candidate gates
+  pass: core 1088 passed/9 ignored, server 134, binary 21, frontend 171,
+  formatting, warning-denied lint, typecheck, and the durability lane. The
+  embedded production bundle has been rebuilt. These are pre-commit results,
+  not substitutes for the required exact-commit gates.
+- Next action: commit only the candidate and tracked evidence, rerun every
   exact-commit closure gate, obtain a fresh four-lane NAC review, then perform
   the actual `make demo` browser smoke and final cleanup/state audit.
 

@@ -634,6 +634,18 @@ describe("direct inbox and goal journeys", () => {
     await waitFor(() => expect(fakes.cancelActiveRun).toHaveBeenCalledWith("session"));
   });
 
+  it("does not project another session's active run into the visible composer", () => {
+    resetRuntime("other-session");
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working elsewhere",
+      started_at_epoch_ms: Date.now(),
+    });
+    composer({ behavior: "direct", entryAvailable: false, snapshotAvailable: false }, false);
+
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
+  });
+
   it("shows pending durable input and permits delivery edits and cancellation", async () => {
     composer({ behavior: "direct", inboxItems: [inbox()] });
 

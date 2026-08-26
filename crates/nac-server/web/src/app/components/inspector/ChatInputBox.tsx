@@ -271,7 +271,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
-  const running = useRunning();
+  const running = useRunning(sessionId);
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();

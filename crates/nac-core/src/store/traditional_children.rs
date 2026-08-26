@@ -375,6 +375,17 @@ pub fn begin_traditional_child_run(
             current.generation
         ));
     }
+    let completion_suppressed: bool = transaction.query_row(
+        "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
+        params![child_session_id],
+        |row| row.get(0),
+    )?;
+    if completion_suppressed {
+        return Err(anyhow!(
+            "traditional child session '{child_session_id}' cannot start a new generation while generation {} completion delivery is suppressed",
+            current.generation
+        ));
+    }
     let running: u64 = transaction.query_row(
         "SELECT COUNT(*) FROM traditional_children
          WHERE root_session_id = ?1 AND status = 'running'",

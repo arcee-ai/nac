@@ -2,7 +2,6 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::Stdio as StdStdio;
 use std::process::{Command as StdCommand, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -664,9 +663,7 @@ impl Drop for ActivityGuard {
 }
 
 pub(crate) fn make_sandbox_pidfile() -> String {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())
+    format!("/tmp/nac-exec-{}.pid", uuid::Uuid::new_v4().simple())
 }
 
 fn bind_mount_arg(mount: &MountSpec) -> Result<OsString> {
@@ -1025,10 +1022,11 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_pidfile_path_is_container_tmp_path() {
+    fn sandbox_pidfile_path_is_container_tmp_path_and_restart_unique() {
         let path = make_sandbox_pidfile();
         assert!(path.starts_with("/tmp/nac-exec-"));
         assert!(path.ends_with(".pid"));
+        assert_ne!(path, make_sandbox_pidfile());
     }
 
     #[test]

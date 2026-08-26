@@ -4008,6 +4008,7 @@ impl nac_core::traditional_children::TraditionalChildController
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("traditional child prompt is empty"));
             }
+            manager.repair_orphaned_completion_suppressions(&request.parent_session_id)?;
             let child_session_id = match request.child_session_id {
                 Some(child_session_id) => child_session_id,
                 None => {
@@ -4174,6 +4175,7 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("managed orchestrator prompt is empty"));
             }
+            manager.repair_orphaned_completion_suppressions(&request.parent_session_id)?;
             let orchestrator_session_id = match request.orchestrator_session_id {
                 Some(session_id) => session_id,
                 None => {
@@ -11466,6 +11468,16 @@ mod tests {
         assert!(nac_core::store::list_session_inbox(&store_path, "direct")
             .unwrap()
             .is_empty());
+        let admission_error = nac_core::store::begin_traditional_child_run(
+            &store_path,
+            &child_session_id,
+            "child-run-2",
+            TraditionalChildExecutionMode::Background,
+        )
+        .unwrap_err();
+        assert!(admission_error
+            .to_string()
+            .contains("completion delivery is suppressed"));
         drop(child_lease);
         manager
             .repair_orphaned_completion_suppressions("direct")
@@ -11483,6 +11495,14 @@ mod tests {
             Some(child_inbox[0].id)
         );
         assert_eq!(child.generation, 1);
+        let child_generation_two = nac_core::store::begin_traditional_child_run(
+            &store_path,
+            &child_session_id,
+            "child-run-2",
+            TraditionalChildExecutionMode::Background,
+        )
+        .unwrap();
+        assert_eq!(child_generation_two.generation, 2);
 
         let orchestrator_session_id = manager
             .create_managed_orchestrator_session("delegating", "repair orchestrator delivery")
@@ -11522,6 +11542,16 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        let admission_error = nac_core::store::begin_managed_orchestrator_run(
+            &store_path,
+            &orchestrator_session_id,
+            "orchestrator-run-2",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap_err();
+        assert!(admission_error
+            .to_string()
+            .contains("completion delivery is suppressed"));
         drop(orchestrator_lease);
         manager
             .repair_orphaned_completion_suppressions("delegating")
@@ -11535,6 +11565,14 @@ mod tests {
                 .len(),
             1
         );
+        let orchestrator_generation_two = nac_core::store::begin_managed_orchestrator_run(
+            &store_path,
+            &orchestrator_session_id,
+            "orchestrator-run-2",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+        assert_eq!(orchestrator_generation_two.generation, 2);
 
         let _ = std::fs::remove_dir_all(root);
     }
