@@ -3120,6 +3120,7 @@ impl SessionManager {
             .await
         {
             Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
+            Err(SessionCancelError::Cleanup { message, .. }) => Err(anyhow!(message)),
         }
     }
 
@@ -3226,7 +3227,7 @@ impl SessionManager {
         }
 
         if let Some(service) = service.as_ref() {
-            service.destroy_terminals().await;
+            service.destroy_terminals().await?;
         }
 
         // Session-owned auxiliary rows cascade; legacy child rows are removed by core.

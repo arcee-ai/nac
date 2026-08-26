@@ -124,11 +124,12 @@ impl TerminalManager {
             sessions.remove(&name)
         };
         if let Some(mut old) = old {
+            let name = old.name.clone();
             if let Err(error) = old.kill().await {
-                eprintln!(
-                    "nac: terminal session '{}' cleanup incomplete during replacement: {error:#}",
-                    old.name
-                );
+                self.sessions.lock().await.insert(name.clone(), old);
+                return Err(error).with_context(|| {
+                    format!("terminal session '{name}' cleanup incomplete during replacement")
+                });
             }
         }
 
@@ -146,14 +147,25 @@ impl TerminalManager {
                 .filter_map(|name| sessions.remove(&name))
                 .collect()
         };
+        let mut cleanup_errors = Vec::new();
+        let mut cleanup_failed = Vec::new();
         for mut session in exited {
-            if let Err(error) = session.kill().await {
-                eprintln!(
-                    "nac: exited terminal session '{}' descendant cleanup incomplete: {error:#}",
-                    session.name
-                );
+            let name = session.name.clone();
+            match session.kill().await {
+                Ok(()) => {
+                    self.remember_completed(&mut session).await;
+                }
+                Err(error) => {
+                    cleanup_errors.push(format!(
+                        "exited terminal session '{name}' cleanup incomplete: {error:#}"
+                    ));
+                    cleanup_failed.push((name, session));
+                }
             }
-            self.remember_completed(&mut session).await;
+        }
+        if !cleanup_failed.is_empty() {
+            self.sessions.lock().await.extend(cleanup_failed);
+            return Err(anyhow!(cleanup_errors.join("; ")));
         }
 
         let evicted: Vec<TerminalSession> = {
@@ -178,13 +190,20 @@ impl TerminalManager {
             }
             evicted
         };
+        let mut cleanup_errors = Vec::new();
+        let mut cleanup_failed = Vec::new();
         for mut session in evicted {
+            let name = session.name.clone();
             if let Err(error) = session.kill().await {
-                eprintln!(
-                    "nac: terminal session '{}' cleanup incomplete during eviction: {error:#}",
-                    session.name
-                );
+                cleanup_errors.push(format!(
+                    "terminal session '{name}' cleanup incomplete during eviction: {error:#}"
+                ));
+                cleanup_failed.push((name, session));
             }
+        }
+        if !cleanup_failed.is_empty() {
+            self.sessions.lock().await.extend(cleanup_failed);
+            return Err(anyhow!(cleanup_errors.join("; ")));
         }
 
         let session = TerminalSession::spawn(
@@ -211,7 +230,7 @@ impl TerminalManager {
     ) -> Result<TerminalOutput> {
         let start = Instant::now();
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-            self.settle_run().await;
+            self.settle_run().await?;
             return Err(anyhow!("terminal command cancelled"));
         }
         let bytes = parse_keys(input);
@@ -287,7 +306,7 @@ impl TerminalManager {
             )
             .await;
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-            self.settle_run().await;
+            self.settle_run().await?;
             return Err(anyhow!("terminal command cancelled"));
         }
         wait_result?;
@@ -300,7 +319,7 @@ impl TerminalManager {
             Ok(preview) => preview,
             Err(error) => {
                 if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-                    self.settle_run().await;
+                    self.settle_run().await?;
                     return Err(anyhow!("terminal command cancelled"));
                 }
                 return Err(error);
@@ -323,11 +342,12 @@ impl TerminalManager {
         };
 
         let (session_name, exit_code) = if let Some(mut session) = ended_session {
+            let name = session.name.clone();
             if let Err(error) = session.kill().await {
-                eprintln!(
-                    "nac: exited terminal session '{}' descendant cleanup incomplete: {error:#}",
-                    session.name
-                );
+                self.sessions.lock().await.insert(name.clone(), session);
+                return Err(error).with_context(|| {
+                    format!("exited terminal session '{name}' cleanup incomplete")
+                });
             }
             let exit_code = self.remember_completed(&mut session).await;
             (None, exit_code)
@@ -335,7 +355,7 @@ impl TerminalManager {
             (Some(name.to_string()), None)
         };
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-            self.settle_run().await;
+            self.settle_run().await?;
             return Err(anyhow!("terminal command cancelled"));
         }
 
@@ -635,7 +655,7 @@ impl TerminalManager {
         self.output_registry.page(output_id, stream, offset, limit)
     }
 
-    pub async fn remove_all(&self) {
+    pub async fn remove_all(&self) -> Result<()> {
         let sessions: Vec<TerminalSession> = self
             .sessions
             .lock()
@@ -643,22 +663,30 @@ impl TerminalManager {
             .drain()
             .map(|(_, session)| session)
             .collect();
+        let mut cleanup_errors = Vec::new();
+        let mut cleanup_failed = Vec::new();
         for mut session in sessions {
             if let Err(error) = session.kill().await {
-                eprintln!(
-                    "nac: terminal session '{}' cleanup incomplete during removal: {error:#}",
+                cleanup_errors.push(format!(
+                    "terminal session '{}' cleanup incomplete during removal: {error:#}",
                     session.name
-                );
+                ));
+                cleanup_failed.push((session.name.clone(), session));
             }
         }
-        self.completed_sessions.lock().await.clear();
-        self.output_registry.clear();
+        if cleanup_errors.is_empty() {
+            self.completed_sessions.lock().await.clear();
+            self.output_registry.clear();
+            Ok(())
+        } else {
+            self.sessions.lock().await.extend(cleanup_failed);
+            Err(anyhow!(cleanup_errors.join("; ")))
+        }
     }
 
-    pub async fn settle_run(&self) {
+    pub async fn settle_run(&self) -> Result<()> {
         if !self.preserve_retained_on_settlement {
-            self.remove_all().await;
-            return;
+            return self.remove_all().await;
         }
         let foreground: Vec<TerminalSession> = {
             let mut sessions = self.sessions.lock().await;
@@ -672,13 +700,22 @@ impl TerminalManager {
                 .filter_map(|name| sessions.remove(&name))
                 .collect()
         };
+        let mut cleanup_errors = Vec::new();
+        let mut cleanup_failed = Vec::new();
         for mut session in foreground {
             if let Err(error) = session.kill().await {
-                eprintln!(
-                    "nac: foreground terminal session '{}' cleanup incomplete: {error:#}",
+                cleanup_errors.push(format!(
+                    "foreground terminal session '{}' cleanup incomplete: {error:#}",
                     session.name
-                );
+                ));
+                cleanup_failed.push((session.name.clone(), session));
             }
+        }
+        if cleanup_errors.is_empty() {
+            Ok(())
+        } else {
+            self.sessions.lock().await.extend(cleanup_failed);
+            Err(anyhow!(cleanup_errors.join("; ")))
         }
     }
 
@@ -978,6 +1015,83 @@ mod tests {
             sleep(Duration::from_millis(10)).await;
         }
         assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "descendant survived");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminal_settlement_surfaces_remote_cleanup_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct RestorePath(Option<std::ffi::OsString>);
+        impl Drop for RestorePath {
+            fn drop(&mut self) {
+                unsafe {
+                    match self.0.take() {
+                        Some(path) => std::env::set_var("PATH", path),
+                        None => std::env::remove_var("PATH"),
+                    }
+                }
+            }
+        }
+
+        let _environment = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_path = std::env::var_os("PATH");
+        let _restore = RestorePath(original_path.clone());
+        let root = std::env::temp_dir().join(format!(
+            "nac-terminal-cleanup-error-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        let calls = root.join("calls");
+        std::fs::write(
+            &podman,
+            format!(
+                "#!/bin/sh\nif [ ! -e '{}' ]; then touch '{}'; exit 23; fi\nexit 0\n",
+                calls.display(),
+                calls.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut paths = vec![bin];
+        if let Some(path) = original_path.as_ref() {
+            paths.extend(std::env::split_paths(path));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+
+        let manager = TerminalManager::new();
+        manager
+            .create("remote".to_string(), "sleep 30", None, 120, 40, &backend())
+            .await
+            .unwrap();
+        let remote_backend = crate::sandbox::execution_backend_from_sandbox(
+            Some(SandboxSession::new_for_test(SandboxSpec {
+                workdir: root.clone(),
+                ..Default::default()
+            })),
+            &root,
+        );
+        manager
+            .sessions
+            .lock()
+            .await
+            .get_mut("remote")
+            .unwrap()
+            .set_backend_cleanup_for_test(remote_backend, "/tmp/nac-test.pid".to_string());
+
+        let error = manager.settle_run().await.unwrap_err().to_string();
+        assert!(
+            error.contains("Podman command cleanup exited with status"),
+            "unexpected settlement error: {error}"
+        );
+        assert!(manager.sessions.lock().await.contains_key("remote"));
+        manager.settle_run().await.unwrap();
+        assert!(manager.sessions.lock().await.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1318,7 +1432,7 @@ mod tests {
         });
 
         sleep(Duration::from_millis(50)).await;
-        manager.remove_all().await;
+        manager.remove_all().await.unwrap();
         let output = tokio::time::timeout(Duration::from_secs(2), task)
             .await
             .expect("one-shot command stalled after registry clear")
@@ -1405,10 +1519,10 @@ mod tests {
         let info = manager.retain(&retained).await.unwrap();
         assert!(info.retained);
 
-        manager.settle_run().await;
+        manager.settle_run().await.unwrap();
         assert!(manager.get(&foreground).await.is_none());
         assert!(manager.get(&retained).await.unwrap().retained);
-        manager.remove_all().await;
+        manager.remove_all().await.unwrap();
     }
 
     #[tokio::test]
@@ -1456,7 +1570,7 @@ mod tests {
             .expect("reaped retained status remains observable through a bounded tombstone");
         assert_eq!(completed.exit_code, Some(0));
         assert!(completed.session_name.is_none());
-        manager.remove_all().await;
+        manager.remove_all().await.unwrap();
         let _ = std::fs::remove_file(marker);
     }
 
@@ -1485,7 +1599,7 @@ mod tests {
             .contains("cancelled"));
         assert!(manager.get(&foreground).await.is_none());
         assert!(manager.get(&retained).await.is_some());
-        manager.remove_all().await;
+        manager.remove_all().await.unwrap();
     }
 
     #[test]
@@ -1542,7 +1656,7 @@ mod tests {
             .unwrap();
         assert_eq!(first.content, repeated.content);
         assert!(first.content.contains("PTY_DIAGNOSTIC"));
-        manager.remove_all().await;
+        manager.remove_all().await.unwrap();
     }
 
     #[tokio::test]
@@ -1561,7 +1675,7 @@ mod tests {
             )
             .await;
         let id = output.output_id.unwrap();
-        manager.remove_all().await;
+        manager.remove_all().await.unwrap();
         assert!(manager
             .read_output(&id, OutputStream::Combined, 0, 32)
             .is_err());

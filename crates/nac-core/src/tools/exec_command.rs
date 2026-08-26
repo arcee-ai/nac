@@ -320,7 +320,7 @@ mod tests {
             serde_json::from_str(one_shot.content.as_text().expect("text tool result")).unwrap();
         let pty: Value =
             serde_json::from_str(pty.content.as_text().expect("text tool result")).unwrap();
-        runtime.terminal_manager.remove_all().await;
+        runtime.terminal_manager.remove_all().await.unwrap();
         std::fs::write(
             result_path,
             serde_json::to_vec(&json!({ "one_shot": one_shot, "pty": pty })).unwrap(),
@@ -717,7 +717,7 @@ mod tests {
         let retained: Value =
             serde_json::from_str(retained.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(retained["retained"], true);
-        runtime.terminal_manager.remove_all().await;
+        runtime.terminal_manager.remove_all().await.unwrap();
     }
 
     #[test]

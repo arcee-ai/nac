@@ -388,13 +388,25 @@ impl std::error::Error for SessionSubmitError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionCancelError {
-    NotActive { run_id: SessionRunId },
+    NotActive {
+        run_id: SessionRunId,
+    },
+    Cleanup {
+        run_id: SessionRunId,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for SessionCancelError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotActive { run_id } => write!(formatter, "run {run_id} is not active"),
+            Self::Cleanup { run_id, message } => {
+                write!(
+                    formatter,
+                    "run {run_id} cancelled, but terminal cleanup failed: {message}"
+                )
+            }
         }
     }
 }
@@ -957,8 +969,8 @@ impl SessionService {
     /// Terminates every session-owned terminal, including explicitly retained
     /// handles. Deletion calls this before removing durable session state so
     /// external service/client clones cannot keep processes alive.
-    pub async fn destroy_terminals(&self) {
-        self.terminal_manager.remove_all().await;
+    pub async fn destroy_terminals(&self) -> Result<()> {
+        self.terminal_manager.remove_all().await
     }
 
     pub async fn active_thread_names(&self) -> Vec<String> {
@@ -2739,15 +2751,22 @@ impl SessionService {
             });
         };
 
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            cancelling_run.command_cancellation.cancel();
-            // Terminal handles are session-owned and can be idle while the
-            // model is between tool calls. Cancellation must therefore settle
-            // foreground PTYs directly instead of relying on another terminal
-            // poll to observe the run-scoped cancellation token. Explicitly
-            // retained handles survive by the direct-session contract.
-            self.terminal_manager.settle_run().await;
-        }
+        let terminal_cleanup_error =
+            if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+                cancelling_run.command_cancellation.cancel();
+                // Terminal handles are session-owned and can be idle while the
+                // model is between tool calls. Cancellation must therefore settle
+                // foreground PTYs directly instead of relying on another terminal
+                // poll to observe the run-scoped cancellation token. Explicitly
+                // retained handles survive by the direct-session contract.
+                self.terminal_manager
+                    .settle_run()
+                    .await
+                    .err()
+                    .map(|error| format!("{error:#}"))
+            } else {
+                None
+            };
 
         let steering_store = self
             .metadata
@@ -2848,6 +2867,12 @@ impl SessionService {
             if let Err(error) = self.start_next_direct_inbox_item().await {
                 eprintln!("nac: failed to promote direct inbox after cancellation: {error:#}");
             }
+        }
+        if let Some(message) = terminal_cleanup_error {
+            return Err(SessionCancelError::Cleanup {
+                run_id: cancelling_run.snapshot.run_id.clone(),
+                message,
+            });
         }
         Ok(())
     }
@@ -5869,7 +5894,7 @@ pub(super) mod tests {
             .unwrap();
         assert!(service.has_retained_terminals());
 
-        service.destroy_terminals().await;
+        service.destroy_terminals().await.unwrap();
         assert!(external_service
             .terminal_manager
             .get(&terminal_name)

@@ -712,7 +712,7 @@ impl Agent {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             });
-            self.tool_runtime.terminal_manager.settle_run().await;
+            self.record_terminal_cleanup_error().await;
             return Err(error);
         }
 
@@ -721,7 +721,7 @@ impl Agent {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             });
-            self.tool_runtime.terminal_manager.settle_run().await;
+            self.record_terminal_cleanup_error().await;
             return Err(error);
         }
 
@@ -797,7 +797,7 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.settle_run().await;
+                    self.record_terminal_cleanup_error().await;
                     return Err(error);
                 }
             };
@@ -839,7 +839,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.settle_run().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
 
@@ -870,7 +870,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.settle_run().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
             self.clear_partial_stream();
@@ -905,7 +905,7 @@ impl Agent {
                                 thread_name: self.thread_name.clone(),
                                 message: error.to_string(),
                             });
-                            self.tool_runtime.terminal_manager.settle_run().await;
+                            self.record_terminal_cleanup_error().await;
                             return Err(error);
                         }
                         continue;
@@ -920,7 +920,7 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.settle_run().await;
+                    self.record_terminal_cleanup_error().await;
                     return Err(error);
                 };
                 self.emit(AgentEvent::AssistantMessage {
@@ -929,10 +929,16 @@ impl Agent {
                     usage: Some(accumulated_usage.clone()),
                 });
                 self.last_usage = Some(accumulated_usage.clone());
+                if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
+                    self.emit(AgentEvent::Error {
+                        thread_name: self.thread_name.clone(),
+                        message: error.to_string(),
+                    });
+                    return Err(error);
+                }
                 self.emit(AgentEvent::RunFinished {
                     thread_name: self.thread_name.clone(),
                 });
-                self.tool_runtime.terminal_manager.settle_run().await;
                 return Ok(content);
             }
 
@@ -981,7 +987,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.settle_run().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
 
@@ -1009,7 +1015,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.settle_run().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
             if repeated_identical_failure {
@@ -1024,7 +1030,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.settle_run().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
         }
@@ -1916,7 +1922,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.settle_run().await;
+                self.record_terminal_cleanup_error().await;
                 Err(error)
             }
         }
@@ -1977,12 +1983,21 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.settle_run().await;
+                    self.record_terminal_cleanup_error().await;
                     Err(error)
                 }
             }
         } else {
             self.append_pending_steering_checked().await
+        }
+    }
+
+    async fn record_terminal_cleanup_error(&self) {
+        if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
+            self.emit(AgentEvent::Error {
+                thread_name: self.thread_name.clone(),
+                message: format!("terminal cleanup incomplete: {error:#}"),
+            });
         }
     }
 
