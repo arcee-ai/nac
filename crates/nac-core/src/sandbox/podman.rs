@@ -1174,6 +1174,50 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn observer_drop_never_removes_the_durable_session_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root =
+            std::env::temp_dir().join(format!("nac-podman-observer-drop-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let arguments = root.join("arguments");
+        std::fs::write(
+            &podman,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NAC_TEST_PODMAN_ARGUMENTS\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_arguments = std::env::var_os("NAC_TEST_PODMAN_ARGUMENTS");
+        unsafe {
+            std::env::set_var("PATH", &root);
+            std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
+        }
+        drop(PodmanSession::new(
+            SandboxSpec::default(),
+            "durable-session-id".to_string(),
+            false,
+            "observer".to_string(),
+        ));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            match original_arguments {
+                Some(path) => std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", path),
+                None => std::env::remove_var("NAC_TEST_PODMAN_ARGUMENTS"),
+            }
+        }
+        assert!(!arguments.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     async fn terminal_pipe_kill_reports_nonzero_podman_status() {
         use std::os::unix::fs::PermissionsExt;

@@ -360,7 +360,7 @@ pub async fn update_server_handler(
     let path = config_path(&manager)?;
     let _write = CONFIG_WRITE.lock().await;
     let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
-    let existing = mcp::load_mcp_server_configuration(&path, &server_name)?;
+    let (existing, revision) = mcp::load_mcp_server_configuration_snapshot(&path, &server_name)?;
 
     let configuration = McpServerConfigurationRecord {
         name: match request.name {
@@ -407,7 +407,12 @@ pub async fn update_server_handler(
         },
     };
 
-    let record = mcp::update_mcp_server_configuration(&path, &server_name, configuration)?;
+    let record = mcp::update_mcp_server_configuration_at_revision(
+        &path,
+        &server_name,
+        configuration,
+        revision,
+    )?;
     Ok(Json(view(record)))
 }
 

@@ -711,11 +711,18 @@ Non-negotiable invariants:
 
 ## Known problems and blockers
 
-- The accepted `a1e93f8` finding set is implemented in the candidate commits,
-  its production assets are rebuilt, and its focused and broad crate/frontend
-  tests and exact candidate gates pass. The tracked evidence successor still
-  needs the same four exact-SHA gates and a fresh detached four-lane GO before
-  release readiness can be claimed.
+- Exact evidence successor `f42f2b5cb1f097512e2d3cdcea620000d8c4ad91`
+  passed all four release gates, but its immutable review is NO-GO. The review
+  confirmed sandbox ownership/construction, deletion rollback, revision-pin,
+  MCP concurrent-publication, rsync-daemon, and executor-wrapper blockers. Its
+  authority continuation was additionally rejected by the provider filter, so
+  the required two-episode-per-lane topology was not achieved and cannot serve
+  as release evidence.
+- The accepted source blockers are now repaired with focused regressions.
+  Complete precommit core (1130 passed/9 ignored before the final observer-only
+  regression), server 140, and binary 21 suites pass, as do workspace check,
+  warning-denied lint, and formatting. This is implementation evidence only;
+  exact candidate gates and a new immutable review remain required.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -723,9 +730,8 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. This tracked evidence successor must receive all four
-release gates at its exact SHA while preserving `.gitignore`, untracked
+Closure is still active. Commit the coherent `f42f2b5` repair and repeat all
+four exact-SHA release gates while preserving `.gitignore`, untracked
 `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and the ignored local
-decision notebook, followed without another source change by a fresh
-detached-clean acyclic four-lane NAC verdict. A GO must be followed by final
-browser smoke and the final ledger/status audit.
+decision notebook. Only a fresh detached-clean acyclic four-lane NAC GO may
+advance to final browser smoke and the final ledger/status audit.

@@ -1199,12 +1199,14 @@ fn hard_shell_denial_inner(
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
     if matches!(
         command.as_str(),
-        "chrt"
+        "chroot"
+            | "chrt"
             | "daemon"
             | "daemonize"
             | "flock"
             | "ionice"
             | "numactl"
+            | "nsenter"
             | "parallel"
             | "prlimit"
             | "runuser"
@@ -1215,11 +1217,29 @@ fn hard_shell_denial_inner(
             | "stdbuf"
             | "systemd-run"
             | "taskset"
+            | "unshare"
             | "watch"
     ) {
         return Some(format!(
             "execution wrapper '{command}' is blocked because it can conceal a protected command"
         ));
+    }
+    if command == "rsync"
+        && tokens.iter().skip(1).any(|token| {
+            token == "--daemon"
+                || token.starts_with('-') && !token.starts_with("--") && token[1..].contains('e')
+                || token == "--rsh"
+                || token.starts_with("--rsh=")
+                || token == "--rsync-path"
+                || token.starts_with("--rsync-path=")
+                || token == "--config"
+                || token.starts_with("--config=")
+        })
+    {
+        return Some(
+            "rsync executable and daemon configuration is blocked because it can conceal commands"
+                .to_string(),
+        );
     }
     if command == "eval" {
         return Some(
@@ -3476,6 +3496,12 @@ mod tests {
                 "prlimit -- bash",
                 "prlimit -- rm -rf .",
                 "setpriv --no-new-privs sh -c 'rm -f .git/config'",
+                "unshare --map-root-user sh -c 'rm -f .git/config'",
+                "nsenter --target 1 --mount sh -c 'rm -f .git/config'",
+                "chroot . sh -c 'rm -f .git/config'",
+                "rsync --daemon --config=rsyncd.conf",
+                "rsync -e sh source destination",
+                "rsync --rsync-path=sh source host:destination",
             ] {
                 assert!(
                     shell_resources(command, Path::new("/workspace"), &backend)[0]

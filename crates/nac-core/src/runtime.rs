@@ -1545,8 +1545,12 @@ async fn build_resume_config_from_snapshot(
                     None => false,
                 };
                 let session_key = snapshot.session_id.clone();
+                // A persisted container is owned by the durable session, not
+                // by each process that observes it. Resume attachments must
+                // never acquire destructive Drop authority: multiple servers
+                // can legitimately observe the same stable container.
                 let session =
-                    SandboxSession::create(spec, session_key.clone(), true, session_key).await?;
+                    SandboxSession::create(spec, session_key.clone(), false, session_key).await?;
                 if materialize {
                     session.materialize_worktree().await?;
                     if let Some(worktree) = session.spec().worktree.as_ref() {
