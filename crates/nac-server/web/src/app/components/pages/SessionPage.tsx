@@ -354,7 +354,7 @@ export default function SessionPage() {
                 {effectivePanel === "files" ? fileBadge : null}
               </div>
 
-              {snapshot?.workspace?.branch ? (
+              {snapshot?.workspace?.branch && !snapshot.lineage ? (
                 <BranchPicker sessionId={id} branch={snapshot.workspace.branch} />
               ) : null}
             </div>

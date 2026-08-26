@@ -401,10 +401,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const filteredCommands = useMemo(() => {
     if (!commandQuery || !commandDefinitions) return [];
     const prefix = commandQuery.prefix.toLocaleLowerCase();
-    return commandDefinitions.filter((definition) =>
-      definition.name.toLocaleLowerCase().startsWith(prefix),
+    return commandDefinitions.filter(
+      (definition) =>
+        (definition.name !== "goal" || direct) &&
+        definition.name.toLocaleLowerCase().startsWith(prefix),
     );
-  }, [commandDefinitions, commandQuery]);
+  }, [commandDefinitions, commandQuery, direct]);
   const skillQuery = useMemo(
     () => skillReferenceQuery(value, selection.start, selection.end, skillDefinitions ?? []),
     [selection, skillDefinitions, value],
