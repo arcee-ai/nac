@@ -570,12 +570,10 @@ pub struct SessionService {
     /// the complete attached-service lifetime so peer config/delete mutations
     /// cannot treat a process-local cache miss as absence of ownership.
     sandbox_resource_lease: Arc<StdMutex<Option<sessions::SessionResourceLease>>>,
-    /// True when this session executes inside a sandbox container. Dropping
-    /// the last service reference drops the `SandboxSession`, and an owned
-    /// container's `Drop` runs `podman rm -f`; the next resume builds a fresh
-    /// container under a new session key, so container-local state would be
-    /// lost. The server's idle-session eviction uses this to leave sandboxed
-    /// sessions cached.
+    /// True when this session executes inside a sandbox container. Persisted
+    /// containers survive service drops, but the server still keeps attached
+    /// sandbox services cached so their resource lease continuously excludes
+    /// peer deletion and configuration mutation.
     has_sandbox: bool,
     /// Serializes process-local idle wake attempts. The cross-process
     /// operation lease remains the authoritative run admission boundary.
@@ -948,12 +946,9 @@ impl SessionService {
         self.event_bus.has_subscribers()
     }
 
-    /// True when this session executes inside a sandbox container. Evicting
-    /// such a session from the server's in-memory cache would drop its
-    /// `SandboxSession`: an owned container's `Drop` runs `podman rm -f`,
-    /// and the next resume builds a fresh container under a new session key,
-    /// so container-local state is lost either way. Idle eviction must skip
-    /// these sessions.
+    /// True when this session executes inside a sandbox container. Idle
+    /// eviction skips attached sandbox services so their shared resource
+    /// lease continuously excludes peer deletion and configuration mutation.
     pub fn has_sandbox(&self) -> bool {
         self.has_sandbox
     }
@@ -979,6 +974,21 @@ impl SessionService {
             );
         }
         Ok(())
+    }
+
+    /// Installs a shared lease acquired before resume-side resource
+    /// materialization. This closes the peer deletion window without opening
+    /// a second lock acquisition gap after the service is constructed.
+    pub fn adopt_sandbox_resource_lease(&self, lease: sessions::SessionResourceLease) {
+        if !self.has_sandbox {
+            return;
+        }
+        let mut slot = self
+            .sandbox_resource_lease
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        debug_assert!(slot.is_none());
+        *slot = Some(lease);
     }
 
     /// Deletion is the only operation allowed to relinquish attached sandbox

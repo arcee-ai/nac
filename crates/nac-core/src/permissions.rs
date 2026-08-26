@@ -1178,14 +1178,15 @@ fn hard_shell_denial_inner(
     backend: &ExecutionBackend,
     depth: usize,
 ) -> Option<String> {
-    if tokens
-        .iter()
-        .any(|token| token.starts_with("RSYNC_RSH=") || token.starts_with("RSYNC_CONNECT_PROG="))
-    {
-        return Some(
+    if let Some(name) = executable_environment_hook(tokens) {
+        return Some(if matches!(name, "RSYNC_RSH" | "RSYNC_CONNECT_PROG") {
             "rsync executable environment hooks are blocked because they can conceal commands"
-                .to_string(),
-        );
+                .to_string()
+        } else {
+            format!(
+                "dynamic-loader environment hook '{name}' is blocked because it can execute hidden code"
+            )
+        });
     }
     if shell_control_prefix(tokens) {
         return Some(
@@ -1606,7 +1607,7 @@ fn effective_command_tokens(tokens: &[String]) -> &[String] {
     loop {
         while tokens
             .get(index)
-            .is_some_and(|token| is_environment_assignment(token))
+            .is_some_and(|token| is_shell_environment_assignment(token))
         {
             index += 1;
         }
@@ -1741,13 +1742,64 @@ fn effective_command_tokens(tokens: &[String]) -> &[String] {
 }
 
 fn is_environment_assignment(token: &str) -> bool {
-    let Some((name, _)) = token.split_once('=') else {
-        return false;
-    };
+    environment_assignment_name(token).is_some()
+}
+
+fn is_shell_environment_assignment(token: &str) -> bool {
+    shell_environment_assignment_name(token).is_some()
+}
+
+fn environment_assignment_name(token: &str) -> Option<&str> {
+    let (name, _) = token.split_once('=')?;
+    valid_environment_name(name).then_some(name)
+}
+
+fn shell_environment_assignment_name(token: &str) -> Option<&str> {
+    let (left, _) = token.split_once('=')?;
+    let name = left.strip_suffix('+').unwrap_or(left);
+    valid_environment_name(name).then_some(name)
+}
+
+fn valid_environment_name(name: &str) -> bool {
     !name.is_empty()
         && name.bytes().enumerate().all(|(index, byte)| {
             byte == b'_' || byte.is_ascii_alphanumeric() && (index > 0 || !byte.is_ascii_digit())
         })
+}
+
+/// Returns an execution-bearing assignment only while it is in a position
+/// Bash or `env` treats as command environment. Tokens after the effective
+/// command are data and must not be rejected merely because they contain an
+/// assignment-looking string.
+fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
+    const HOOKS: &[&str] = &[
+        "RSYNC_RSH",
+        "RSYNC_CONNECT_PROG",
+        "LD_PRELOAD",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+    ];
+
+    let mut leading = 0;
+    while let Some(name) = tokens
+        .get(leading)
+        .and_then(|token| shell_environment_assignment_name(token))
+    {
+        if HOOKS.contains(&name) {
+            return Some(name);
+        }
+        leading += 1;
+    }
+
+    let command_index = tokens
+        .len()
+        .saturating_sub(effective_command_tokens(tokens).len());
+    tokens[leading..command_index]
+        .iter()
+        .filter_map(|token| environment_assignment_name(token))
+        .find(|name| HOOKS.contains(name))
 }
 
 fn is_broad_command(tokens: &[String]) -> bool {
@@ -3513,12 +3565,30 @@ mod tests {
                 "rsync --rsync-path=sh source host:destination",
                 "RSYNC_RSH=sh rsync source host:destination",
                 "RSYNC_CONNECT_PROG=sh rsync source host::module",
+                "RSYNC_RSH+=sh rsync source host:destination",
+                "RSYNC_CONNECT_PROG+=sh rsync source host::module",
+                "LD_PRELOAD=./payload.so ls",
+                "env LD_PRELOAD=./payload.so ls",
+                "LD_AUDIT=./payload.so ls",
+                "DYLD_INSERT_LIBRARIES=./payload.dylib ls",
             ] {
                 assert!(
                     shell_resources(command, Path::new("/workspace"), &backend)[0]
                         .hard_denial
                         .is_some(),
                     "{name} backend admitted concealed command: {command}"
+                );
+            }
+            for command in [
+                "printf '%s\\n' RSYNC_RSH=literal",
+                "printf '%s\\n' RSYNC_CONNECT_PROG=literal",
+                "printf '%s\\n' LD_PRELOAD=literal",
+            ] {
+                assert!(
+                    shell_resources(command, Path::new("/workspace"), &backend)[0]
+                        .hard_denial
+                        .is_none(),
+                    "{name} backend rejected harmless assignment-shaped data: {command}"
                 );
             }
         }

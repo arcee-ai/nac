@@ -288,6 +288,39 @@ pub(crate) struct PodmanSession {
     activity_key: String,
 }
 
+/// Owns an in-flight `podman run` until it is known to have settled. If the
+/// caller is cancelled while awaiting creation, cleanup is ordered after the
+/// exact detached child finishes so `rm` cannot race ahead of container
+/// registration.
+struct PendingContainerCreation {
+    task: Option<tokio::task::JoinHandle<std::io::Result<std::process::Output>>>,
+    session_key: String,
+}
+
+impl PendingContainerCreation {
+    fn disarm(&mut self) {
+        self.task = None;
+    }
+}
+
+impl Drop for PendingContainerCreation {
+    fn drop(&mut self) {
+        let Some(task) = self.task.take() else {
+            return;
+        };
+        let session_key = self.session_key.clone();
+        tokio::spawn(async move {
+            let _ = task.await;
+            if let Err(error) = destroy_owned_container(&session_key).await {
+                eprintln!(
+                    "nac: failed to roll back cancelled sandbox creation for '{}': {error:#}",
+                    session_key
+                );
+            }
+        });
+    }
+}
+
 pub(crate) async fn destroy_owned_container(session_key: &str) -> Result<()> {
     let container_name = format!("nac-{}", sanitize_name(session_key));
     let output = Command::new("podman")
@@ -639,11 +672,22 @@ impl PodmanSession {
     }
 
     async fn create_container(&self) -> Result<()> {
-        let mut command = Command::new("podman");
-        command.args(self.create_container_args()?);
-        let output = command
-            .output()
+        let args = self.create_container_args()?;
+        let task = tokio::spawn(async move {
+            let mut command = Command::new("podman");
+            command.args(args);
+            command.output().await
+        });
+        let mut pending = PendingContainerCreation {
+            task: Some(task),
+            session_key: self.session_key.clone(),
+        };
+        let output = pending
+            .task
+            .as_mut()
+            .expect("creation task is armed")
             .await
+            .map_err(|error| anyhow!("Podman sandbox creation task failed: {error}"))?
             .with_context(|| "failed to execute 'podman run'")?;
         if !output.status.success() {
             return Err(explain_runtime_failure(anyhow!(
@@ -653,6 +697,7 @@ impl PodmanSession {
             ))
             .await);
         }
+        pending.disarm();
         Ok(())
     }
 
@@ -738,13 +783,25 @@ impl Drop for PodmanSession {
             return;
         }
 
-        let _ = StdCommand::new("podman")
+        match StdCommand::new("podman")
             .arg("rm")
+            .arg("--ignore")
             .arg("-f")
             .arg(&self.container_name)
             .stdout(StdStdio::null())
             .stderr(StdStdio::null())
-            .spawn();
+            .status()
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => eprintln!(
+                "nac: failed to roll back fresh sandbox container '{}' (status {status})",
+                self.container_name
+            ),
+            Err(error) => eprintln!(
+                "nac: failed to execute rollback for fresh sandbox container '{}': {error}",
+                self.container_name
+            ),
+        }
     }
 }
 
@@ -1261,6 +1318,99 @@ mod tests {
             std::fs::read_to_string(&arguments).unwrap(),
             "rm\n--ignore\n-f\nnac-durable-session-id\n"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_creation_waits_for_run_before_removing_the_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-cancelled-create-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let started = root.join("started");
+        let release = root.join("release");
+        let container = root.join("container");
+        let removed = root.join("removed");
+        std::fs::write(
+            &podman,
+            r#"#!/bin/sh
+if [ "$1" = run ]; then
+  : > "$NAC_TEST_CREATE_STARTED"
+  while [ ! -e "$NAC_TEST_CREATE_RELEASE" ]; do /bin/sleep 0.01; done
+  : > "$NAC_TEST_CONTAINER"
+  exit 0
+fi
+if [ "$1" = rm ]; then
+  : > "$NAC_TEST_REMOVE_STARTED"
+  /bin/rm -f "$NAC_TEST_CONTAINER"
+  exit 0
+fi
+exit 0
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("PATH", &root);
+            std::env::set_var("NAC_TEST_CREATE_STARTED", &started);
+            std::env::set_var("NAC_TEST_CREATE_RELEASE", &release);
+            std::env::set_var("NAC_TEST_CONTAINER", &container);
+            std::env::set_var("NAC_TEST_REMOVE_STARTED", &removed);
+        }
+
+        let session = std::sync::Arc::new(PodmanSession::new(
+            SandboxSpec::default(),
+            "cancelled-create".to_string(),
+            false,
+            "cancelled-create".to_string(),
+        ));
+        let launch = tokio::spawn({
+            let session = std::sync::Arc::clone(&session);
+            async move { session.create_container().await }
+        });
+        for _ in 0..200 {
+            if started.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(started.exists(), "fake podman run did not start");
+        launch.abort();
+        let _ = launch.await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            !removed.exists(),
+            "cleanup ran before the in-flight podman run settled"
+        );
+
+        std::fs::write(&release, b"").unwrap();
+        for _ in 0..200 {
+            if removed.exists() && !container.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(removed.exists(), "ordered cancellation cleanup did not run");
+        assert!(!container.exists(), "cancelled creation left a container");
+
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            std::env::remove_var("NAC_TEST_CREATE_STARTED");
+            std::env::remove_var("NAC_TEST_CREATE_RELEASE");
+            std::env::remove_var("NAC_TEST_CONTAINER");
+            std::env::remove_var("NAC_TEST_REMOVE_STARTED");
+        }
+        drop(session);
         let _ = std::fs::remove_dir_all(root);
     }
 
