@@ -717,6 +717,7 @@ Non-negotiable invariants:
 - `a7b0693 close final lifecycle review gaps`.
 - `872f8b9 make persisted sandbox and MCP recovery durable`.
 - `a39766d close recovery and cancellation review gaps`.
+- `88fd04f preserve ordinary attachment contract`.
 
 ## Known problems and blockers
 
@@ -766,6 +767,13 @@ Non-negotiable invariants:
   is acquired only for a summary proven sandboxed and still precedes snapshot/
   Podman materialization. Both regressions and the sandbox ordering proof pass
   focused tests. A committed successor and all four exact gates remain required.
+- Exact repair successor `88fd04f287fcb043eb64ccdddcd52c8ea5b0eb83`
+  passes all four release gates: `make ci` (catalog 2+7+24, core 1141
+  passed/9 ignored, server 142, binary 21, frontend 175), `make
+  test-durability` (10/10), `make test-assets` with no committed-bundle drift,
+  and production-embedded Playwright (10/10). This closes implementation and
+  gate verification only; the required detached-clean exact-commit NAC review
+  has not yet returned GO.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -773,8 +781,9 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit the focused `a39766d` gate repairs and ledger,
-then repeat all four exact-SHA release gates while preserving
+Closure is still active. Commit this exact `88fd04f` gate evidence, repeat all
+four gates on that evidence successor, then run the required detached-clean
+four-lane/two-episode NAC review while preserving
 `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
 the ignored local decision notebook. Only a fresh detached-clean four-lane,
 two-episode NAC GO may advance to final browser smoke and status audit.
