@@ -513,6 +513,15 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open panel" }).click();
+  const mobilePanel = page.getByRole("dialog");
+  await expect(mobilePanel).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
+  await mobilePanel.getByRole("button", { name: "Close" }).click();
+  await expect(mobilePanel).toBeHidden();
+  await page.setViewportSize({ width: 1280, height: 720 });
+
   await page.getByRole("button", { name: "Back to Parent" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   const orchestratorRow = page

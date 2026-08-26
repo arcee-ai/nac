@@ -304,6 +304,18 @@ afterEach(() => {
 });
 
 describe("slash-command suggestions", () => {
+  it("offers goal commands only to direct behaviors", () => {
+    const orchestrator = composer({ behavior: "orchestrator" });
+    type(orchestrator, "/g");
+    expect(screen.getByRole("listbox").textContent).toContain("No matching commands");
+    expect(screen.queryByRole("option", { name: /goal/i })).toBeNull();
+
+    cleanup();
+    const direct = composer({ behavior: "direct" });
+    type(direct, "/g");
+    expect(screen.getByRole("option", { name: /goal/i })).toBeTruthy();
+  });
+
   it("opens from the initial token, filters case-insensitively, and exposes active-option semantics", () => {
     const textarea = composer();
     type(textarea, "  /C");
