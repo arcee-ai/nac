@@ -567,6 +567,7 @@ impl From<McpServerConfigurationStoreError> for ApiError {
             McpServerConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
             McpServerConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
             McpServerConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            McpServerConfigurationStoreError::ConcurrentModification => StatusCode::CONFLICT,
             McpServerConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self::new(status, error.to_string())

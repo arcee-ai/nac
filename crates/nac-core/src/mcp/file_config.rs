@@ -11,6 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
 
 use super::*;
@@ -39,6 +40,7 @@ pub enum McpServerConfigurationStoreError {
     InvalidInput(String),
     DuplicateName(String),
     NotFound(String),
+    ConcurrentModification,
     Store(anyhow::Error),
 }
 
@@ -50,6 +52,9 @@ impl std::fmt::Display for McpServerConfigurationStoreError {
                 write!(formatter, "an MCP server named '{name}' already exists")
             }
             Self::NotFound(name) => write!(formatter, "MCP server '{name}' was not found"),
+            Self::ConcurrentModification => formatter.write_str(
+                "config.toml changed while the MCP update was being prepared; retry the update",
+            ),
             Self::Store(error) => write!(formatter, "{error}"),
         }
     }
@@ -178,10 +183,18 @@ fn validated_record(
     })
 }
 
-fn read_document(path: &Path) -> ConfigurationResult<DocumentMut> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DocumentRevision(Option<[u8; 32]>);
+
+fn read_document_snapshot(path: &Path) -> ConfigurationResult<(DocumentMut, DocumentRevision)> {
+    let (raw, revision) = match std::fs::read_to_string(path) {
+        Ok(raw) => {
+            let revision = DocumentRevision(Some(Sha256::digest(raw.as_bytes()).into()));
+            (raw, revision)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            (String::new(), DocumentRevision(None))
+        }
         Err(error) => {
             return Err(McpServerConfigurationStoreError::Store(anyhow!(
                 "failed to read {}: {error}",
@@ -189,18 +202,37 @@ fn read_document(path: &Path) -> ConfigurationResult<DocumentMut> {
             )))
         }
     };
-    raw.parse().map_err(|error| {
+    let document = raw.parse().map_err(|error| {
         McpServerConfigurationStoreError::InvalidInput(format!(
             "{} is not valid TOML: {error}",
             path.display()
         ))
-    })
+    })?;
+    Ok((document, revision))
+}
+
+fn read_document(path: &Path) -> ConfigurationResult<DocumentMut> {
+    read_document_snapshot(path).map(|(document, _)| document)
+}
+
+fn current_document_revision(path: &Path) -> ConfigurationResult<DocumentRevision> {
+    match std::fs::read(path) {
+        Ok(raw) => Ok(DocumentRevision(Some(Sha256::digest(&raw).into()))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(DocumentRevision(None)),
+        Err(error) => Err(McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to inspect config before publication: {error}"
+        ))),
+    }
 }
 
 /// Writes through a sibling temp file and a rename, so a crash mid-write
 /// never leaves a truncated config behind. Header and env values may be
 /// secrets, so both the unique temp and the final file are always `0600`.
-fn write_document(path: &Path, document: &DocumentMut) -> ConfigurationResult<()> {
+fn write_document(
+    path: &Path,
+    document: &DocumentMut,
+    expected_revision: DocumentRevision,
+) -> ConfigurationResult<()> {
     let io_error = |error: std::io::Error| {
         McpServerConfigurationStoreError::Store(anyhow!(
             "failed to write {}: {error}",
@@ -230,6 +262,9 @@ fn write_document(path: &Path, document: &DocumentMut) -> ConfigurationResult<()
             use std::os::unix::fs::PermissionsExt;
             file.set_permissions(std::fs::Permissions::from_mode(0o600))
                 .map_err(io_error)?;
+        }
+        if current_document_revision(path)? != expected_revision {
+            return Err(McpServerConfigurationStoreError::ConcurrentModification);
         }
         std::fs::rename(&temp, path).map_err(io_error)?;
         Ok(())
@@ -392,7 +427,7 @@ pub fn insert_mcp_server_configuration(
     configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
-    let mut document = read_document(path)?;
+    let (mut document, revision) = read_document_snapshot(path)?;
     let servers = servers_table(&mut document)?;
     if servers.contains_key(&record.name) {
         return Err(McpServerConfigurationStoreError::DuplicateName(
@@ -400,7 +435,7 @@ pub fn insert_mcp_server_configuration(
         ));
     }
     servers[record.name.as_str()] = Item::Table(table_of(&record));
-    write_document(path, &document)?;
+    write_document(path, &document, revision)?;
     Ok(record)
 }
 
@@ -412,7 +447,7 @@ pub fn update_mcp_server_configuration(
     configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
-    let mut document = read_document(path)?;
+    let (mut document, revision) = read_document_snapshot(path)?;
     let servers = servers_table(&mut document)?;
     if !servers.contains_key(name) {
         return Err(McpServerConfigurationStoreError::NotFound(name.to_string()));
@@ -426,18 +461,18 @@ pub fn update_mcp_server_configuration(
         servers.remove(name);
     }
     servers[record.name.as_str()] = Item::Table(table_of(&record));
-    write_document(path, &document)?;
+    write_document(path, &document, revision)?;
     Ok(record)
 }
 
 /// Returns whether a configuration was actually removed.
 pub fn delete_mcp_server_configuration(path: &Path, name: &str) -> ConfigurationResult<bool> {
-    let mut document = read_document(path)?;
+    let (mut document, revision) = read_document_snapshot(path)?;
     let servers = servers_table(&mut document)?;
     if servers.remove(name).is_none() {
         return Ok(false);
     }
-    write_document(path, &document)?;
+    write_document(path, &document, revision)?;
     Ok(true)
 }
 
@@ -490,6 +525,31 @@ mod tests {
 
         assert!(delete_mcp_server_configuration(&path, "renamed").unwrap());
         assert!(list_mcp_server_configurations(&path).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn hand_edit_after_read_is_never_overwritten_by_stale_publication() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"before\"\n").unwrap();
+
+        let (mut document, revision) = read_document_snapshot(&path).unwrap();
+        let servers = servers_table(&mut document).unwrap();
+        servers["example"] = Item::Table(table_of(&http_server("example")));
+
+        let hand_edit = "model = \"from-editor\"\n# must survive\n";
+        std::fs::write(&path, hand_edit).unwrap();
+        assert!(matches!(
+            write_document(&path, &document, revision).unwrap_err(),
+            McpServerConfigurationStoreError::ConcurrentModification
+        ));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), hand_edit);
+        assert!(std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp")));
+
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
