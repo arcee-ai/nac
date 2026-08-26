@@ -825,9 +825,13 @@ is preserved fail-closed, and uncommitted full IDs are removed only after
 matching the per-launch label; failures remain retryable. Focused permission,
 creation-barrier, cancellation, cleanup-retry, and committed-row regressions,
 crate checks, and the complete core suite (1157 tests including 9 ignored)
-pass. A coherent commit, all four exact gates, an evidence successor with
-repeated exact gates, and a fresh valid detached-clean four-lane/two-episode
-NAC GO remain required before final browser smoke and status audit. Preserve
+pass. Coherent repair commit
+`d01a06662bd36e8256f4b18742c2316866e8ca05` also passes all four exact gates:
+`make ci` (catalog 2+7+24, core 1148/9 ignored, server 143, binary 21,
+frontend 175), all 10 deterministic durability checks, committed-asset
+freshness, and all 10 production-embedded Playwright journeys. An evidence
+successor with repeated exact gates and a fresh valid detached-clean four-lane,
+two-episode NAC GO remain required before final browser smoke and status audit. Preserve
 `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
 the ignored local decision notebook throughout.
 
