@@ -1209,6 +1209,7 @@ fn hard_shell_denial_inner(
             | "prlimit"
             | "runuser"
             | "script"
+            | "setpriv"
             | "setsid"
             | "start-stop-daemon"
             | "stdbuf"
@@ -2063,8 +2064,8 @@ fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
         "git" => git_bare_relative_path_position(tokens, command_index, index),
         "chmod" | "chown" | "chgrp" => simple_bare_path_operand(tokens, command_index, index, 1),
         "cat" | "cp" | "du" | "file" | "head" | "install" | "ln" | "ls" | "mkdir" | "mv"
-        | "readlink" | "realpath" | "rmdir" | "stat" | "tail" | "tee" | "touch" | "truncate"
-        | "unlink" | "wc" => simple_bare_path_operand(tokens, command_index, index, 0),
+        | "readlink" | "realpath" | "rsync" | "rmdir" | "stat" | "tail" | "tee" | "touch"
+        | "truncate" | "unlink" | "wc" => simple_bare_path_operand(tokens, command_index, index, 0),
         _ => false,
     }
 }
@@ -3455,7 +3456,7 @@ mod tests {
     }
 
     #[test]
-    fn prlimit_cannot_conceal_commands_on_any_execution_backend() {
+    fn executor_wrappers_cannot_conceal_commands_on_any_execution_backend() {
         let sandbox = ExecutionBackend::Sandbox(crate::sandbox::SandboxSession::new_for_test(
             crate::sandbox::SandboxSpec {
                 workdir: PathBuf::from("/workspace"),
@@ -3471,7 +3472,11 @@ mod tests {
             ("podman", sandbox),
             ("ssh", ssh),
         ] {
-            for command in ["prlimit -- bash", "prlimit -- rm -rf ."] {
+            for command in [
+                "prlimit -- bash",
+                "prlimit -- rm -rf .",
+                "setpriv --no-new-privs sh -c 'rm -f .git/config'",
+            ] {
                 assert!(
                     shell_resources(command, Path::new("/workspace"), &backend)[0]
                         .hard_denial
@@ -4253,10 +4258,15 @@ mod tests {
         std::fs::write(workspace.join(".git/config"), "protected").unwrap();
         std::fs::write(workspace.join("payload"), "payload").unwrap();
         symlink(".git/config", workspace.join("config-link")).unwrap();
+        symlink(".git", workspace.join("git-link")).unwrap();
         let backend = local(&workspace);
         let protected = std::fs::canonicalize(workspace.join(".git/config")).unwrap();
 
-        for command in ["cp payload config-link", "chmod 0644 config-link"] {
+        for command in [
+            "cp payload config-link",
+            "chmod 0644 config-link",
+            "rsync payload git-link/config",
+        ] {
             let projected = shell_resources(command, &workspace, &backend);
             let resources =
                 canonicalize_authorization_resources(&projected, &backend, &base.join("store.db"))

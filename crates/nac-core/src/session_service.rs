@@ -565,6 +565,11 @@ pub struct SessionService {
     skills: Option<Arc<SkillRegistry>>,
     terminal_manager: crate::terminal::TerminalManager,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
+    /// A sandbox service owns container-local state even while it has no run
+    /// or retained terminal. Keep a shared cross-process resource lease for
+    /// the complete attached-service lifetime so peer config/delete mutations
+    /// cannot treat a process-local cache miss as absence of ownership.
+    sandbox_resource_lease: Arc<StdMutex<Option<sessions::SessionResourceLease>>>,
     /// True when this session executes inside a sandbox container. Dropping
     /// the last service reference drops the `SandboxSession`, and an owned
     /// container's `Drop` runs `podman rm -f`; the next resume builds a fresh
@@ -839,6 +844,7 @@ impl SessionService {
             skills,
             terminal_manager,
             permission_broker,
+            sandbox_resource_lease: Arc::new(StdMutex::new(None)),
             has_sandbox,
             inbox_wake: Arc::new(Mutex::new(())),
             #[cfg(test)]
@@ -950,6 +956,40 @@ impl SessionService {
     /// these sessions.
     pub fn has_sandbox(&self) -> bool {
         self.has_sandbox
+    }
+
+    /// Establishes durable peer-visible ownership for an attached sandbox.
+    /// Server construction calls this before publishing the service in its
+    /// process-local cache.
+    pub fn acquire_sandbox_resource_lease(&self) -> Result<()> {
+        if !self.has_sandbox {
+            return Ok(());
+        }
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(());
+        };
+        let mut lease = self
+            .sandbox_resource_lease
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if lease.is_none() {
+            *lease = Some(
+                sessions::SessionResourceLease::try_acquire(&self.metadata.store_path, session_id)
+                    .map_err(anyhow::Error::new)?,
+            );
+        }
+        Ok(())
+    }
+
+    /// Deletion is the only operation allowed to relinquish attached sandbox
+    /// ownership before the service is dropped. It immediately takes the
+    /// exclusive twin, so a peer attachment wins the race only by making the
+    /// deletion fail closed.
+    pub fn release_sandbox_resource_lease(&self) {
+        self.sandbox_resource_lease
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
     }
 
     pub fn has_retained_terminals(&self) -> bool {
@@ -4817,6 +4857,22 @@ pub(super) mod tests {
             resume_base_cwd: PathBuf::from("/repo"),
         });
         assert!(parts.service.has_sandbox());
+        parts.service.acquire_sandbox_resource_lease().unwrap();
+        assert!(matches!(
+            sessions::SessionResourceMutationLease::try_acquire(
+                &store_path,
+                "has-sandbox-sandboxed"
+            ),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        parts.service.release_sandbox_resource_lease();
+        drop(
+            sessions::SessionResourceMutationLease::try_acquire(
+                &store_path,
+                "has-sandbox-sandboxed",
+            )
+            .unwrap(),
+        );
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
