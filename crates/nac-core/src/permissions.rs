@@ -1786,6 +1786,7 @@ fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
                 | "ln"
                 | "mkdir"
                 | "mv"
+                | "rm"
                 | "rsync"
                 | "rmdir"
                 | "tee"
@@ -2245,6 +2246,11 @@ fn opaque_hard_shell_denial(
     cwd: &Path,
     backend: &ExecutionBackend,
 ) -> Option<String> {
+    if raw_shell_control_prefix(command) {
+        return Some(
+            "shell control syntax is blocked because it can hide protected commands".to_string(),
+        );
+    }
     let tokens = opaque_literal_tokens(command);
     if command.contains('$') && literal_env_split_string(&tokens).is_some() {
         return Some("dynamic env split-string expansion is blocked".to_string());
@@ -2272,6 +2278,24 @@ fn opaque_hard_shell_denial(
         }
     }
     None
+}
+
+fn raw_shell_control_prefix(command: &str) -> bool {
+    let command = command.trim_start();
+    [
+        "!", "{", "}", "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done",
+        "case", "esac", "select", "function", "[[", "]]",
+    ]
+    .iter()
+    .any(|prefix| {
+        command.strip_prefix(prefix).is_some_and(|remainder| {
+            remainder.is_empty()
+                || remainder
+                    .chars()
+                    .next()
+                    .is_some_and(|next| next.is_whitespace() || matches!(next, ';' | '|' | '&'))
+        })
+    })
 }
 
 fn opaque_literal_tokens(command: &str) -> Vec<String> {
@@ -2664,6 +2688,8 @@ mod tests {
             "! git reset --hard",
             "{ git reset --hard; }",
             "if true; then git reset --hard; fi",
+            "! rm -rf $PWD",
+            "{ rm -rf $PWD; }",
             "find . -delete",
             "xargs rm -rf .git",
             "sh -c 'rm -rf .git'",
@@ -3212,6 +3238,7 @@ mod tests {
             "touch .git/nac-owned",
             "dd if=/dev/null of=.git/nac-owned",
             "sed -i s/a/b/ .git/config",
+            "rm -f .git/config",
             "unzip archive.zip -d .git/hooks",
             "wget https://example.invalid/config -O .git/config",
         ] {

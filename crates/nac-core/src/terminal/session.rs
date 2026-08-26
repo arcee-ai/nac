@@ -255,10 +255,21 @@ impl TerminalSession {
         self.child.process_id()
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_backend_cleanup_for_test(
+        &mut self,
+        backend: Arc<ExecutionBackend>,
+        pidfile: String,
+    ) {
+        self.backend_cleanup = Some((backend, pidfile));
+    }
+
     pub async fn kill(&mut self) -> Result<()> {
-        if let Some((backend, pidfile)) = &self.backend_cleanup {
-            let _ = backend.terminal_pipe_kill(pidfile).await;
-        }
+        let backend_cleanup = if let Some((backend, pidfile)) = &self.backend_cleanup {
+            backend.terminal_pipe_kill(pidfile).await
+        } else {
+            Ok(())
+        };
 
         self.refresh_status();
         #[cfg(unix)]
@@ -274,6 +285,7 @@ impl TerminalSession {
         self.alive.store(false, Ordering::SeqCst);
         #[cfg(unix)]
         descendant_result?;
+        backend_cleanup.context("remote terminal cleanup incomplete")?;
         Ok(())
     }
 
