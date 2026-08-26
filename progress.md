@@ -803,11 +803,11 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Complete and commit the four `0c048b6` review repairs,
-run all four exact gates on the coherent successor, record that evidence in a
-tracked successor without claiming unavailable Podman-backed QA, repeat the
-four gates on the evidence successor, and obtain another detached-clean four-
-lane/two-episode NAC review while preserving
+Closure is still active. Coherent repair commit
+`5d3fdc0026b33f0ee7320935761f595eaa0e198e` has passed all four exact gates.
+Commit this evidence-only ledger update, repeat the four gates on that exact
+code-identical successor, and obtain another detached-clean four-lane/two-
+episode NAC review while preserving
 `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
 the ignored local decision notebook. Only a fresh detached-clean four-lane,
 two-episode NAC GO may advance to final browser smoke and status audit.
@@ -884,3 +884,10 @@ Integrated precommit verification is green: core 1146 passed/9 ignored,
 server 143, binary 21, workspace check, formatting, frontend lint, and
 warning-denied workspace Clippy. This is implementation evidence only; the
 coherent commit and all four exact gates remain required before review.
+
+Coherent repair commit `5d3fdc0026b33f0ee7320935761f595eaa0e198e`
+passes the complete exact gate set: `make ci` (catalog 2+7+24, core 1146/9
+ignored, server 143, binary 21, frontend 175), all 10 deterministic durability
+checks, committed-asset freshness, and all 10 production-embedded Playwright
+journeys. This is exact implementation evidence only. The tracked evidence
+successor must repeat the same four gates before the required immutable review.
