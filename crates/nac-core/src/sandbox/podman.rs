@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::Stdio as StdStdio;
 use std::process::{Command as StdCommand, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -279,7 +280,7 @@ rm -f "$pidfile""#;
 pub(crate) struct PodmanSession {
     spec: SandboxSpec,
     session_key: String,
-    owner: bool,
+    cleanup_on_drop: AtomicBool,
     container_name: String,
     /// Key setup activity is reported under: a client-supplied launch id when
     /// one was sent, else the session key. Keyed per launch so concurrent
@@ -315,7 +316,7 @@ impl PodmanSession {
         Self {
             spec,
             session_key,
-            owner,
+            cleanup_on_drop: AtomicBool::new(owner),
             container_name,
             activity_key,
         }
@@ -323,6 +324,10 @@ impl PodmanSession {
 
     pub(crate) fn spec(&self) -> &SandboxSpec {
         &self.spec
+    }
+
+    pub(crate) fn retain_for_durable_session(&self) {
+        self.cleanup_on_drop.store(false, Ordering::Release);
     }
 
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
@@ -339,12 +344,6 @@ impl PodmanSession {
             Err(error) => return Err(explain_runtime_failure(error).await),
         };
         if !exists {
-            if !self.owner {
-                bail!(
-                    "sandbox session '{}' is not available; start the parent nac process first",
-                    self.session_key
-                );
-            }
             self.ensure_image().await?;
             super::report_activity(&self.activity_key, "starting the sandbox container");
             self.create_container().await?;
@@ -729,16 +728,13 @@ impl PodmanSession {
     /// `Arc` references. `--ignore` makes absence idempotent while every real
     /// runtime failure remains visible to the lifecycle caller.
     pub(crate) async fn destroy(&self) -> Result<()> {
-        if !self.owner {
-            return Ok(());
-        }
         destroy_owned_container(&self.session_key).await
     }
 }
 
 impl Drop for PodmanSession {
     fn drop(&mut self) {
-        if !self.owner {
+        if !self.cleanup_on_drop.load(Ordering::Acquire) {
             return;
         }
 
@@ -1175,7 +1171,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn observer_drop_never_removes_the_durable_session_container() {
+    fn durable_session_drop_never_removes_its_container() {
         use std::os::unix::fs::PermissionsExt;
 
         let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
@@ -1196,12 +1192,14 @@ mod tests {
             std::env::set_var("PATH", &root);
             std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
         }
-        drop(PodmanSession::new(
+        let session = PodmanSession::new(
             SandboxSpec::default(),
             "durable-session-id".to_string(),
-            false,
-            "observer".to_string(),
-        ));
+            true,
+            "owner".to_string(),
+        );
+        session.retain_for_durable_session();
+        drop(session);
         std::thread::sleep(std::time::Duration::from_millis(50));
         unsafe {
             match original_path {
@@ -1214,6 +1212,55 @@ mod tests {
             }
         }
         assert!(!arguments.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn explicit_lifecycle_cleanup_removes_an_observer_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-observer-destroy-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let arguments = root.join("arguments");
+        std::fs::write(
+            &podman,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NAC_TEST_PODMAN_ARGUMENTS\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_arguments = std::env::var_os("NAC_TEST_PODMAN_ARGUMENTS");
+        unsafe {
+            std::env::set_var("PATH", &root);
+            std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
+        }
+        let session = PodmanSession::new(
+            SandboxSpec::default(),
+            "durable-session-id".to_string(),
+            false,
+            "observer".to_string(),
+        );
+        session.destroy().await.unwrap();
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            match original_arguments {
+                Some(path) => std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", path),
+                None => std::env::remove_var("NAC_TEST_PODMAN_ARGUMENTS"),
+            }
+        }
+        assert_eq!(
+            std::fs::read_to_string(&arguments).unwrap(),
+            "rm\n--ignore\n-f\nnac-durable-session-id\n"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

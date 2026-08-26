@@ -60,7 +60,7 @@ fn file_servers_for_policy(
     if !path.exists() {
         return (BTreeMap::new(), None);
     }
-    let raw = match std::fs::read_to_string(&path) {
+    let raw = match super::read_mcp_configuration_consistently(&path) {
         Ok(raw) => raw,
         Err(error) => {
             let reason = format!("could not read config: {error:#}");

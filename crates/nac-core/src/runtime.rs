@@ -207,7 +207,7 @@ impl NacConfig {
     /// case where they are the only statement of intent available, so the
     /// importer reads them directly instead of through [`ModelConfig`].
     pub fn load_model_identity_from_file(path: &Path) -> Result<ConfiguredModelIdentity> {
-        let raw = std::fs::read_to_string(path)
+        let raw = Self::read_explicit_config(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
         toml::from_str::<ConfiguredModelIdentityConfig>(&raw)
             .map(|config| config.model)
@@ -219,7 +219,7 @@ impl NacConfig {
     /// Unlike the ambient search, a missing file is an error: the user named
     /// this path, so silently falling back to defaults would hide a typo.
     pub fn load_from_file(path: &Path) -> Result<Self> {
-        let raw = std::fs::read_to_string(path)
+        let raw = Self::read_explicit_config(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
     }
@@ -262,13 +262,17 @@ impl NacConfig {
     }
 
     fn read_config(path: &Path) -> Result<String> {
-        match std::fs::read_to_string(path) {
-            Ok(raw) => Ok(raw),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-            Err(error) => {
-                Err(error).with_context(|| format!("failed to read config {}", path.display()))
-            }
+        crate::mcp::read_mcp_configuration_consistently(path)
+            .map_err(anyhow::Error::new)
+            .with_context(|| format!("failed to read config {}", path.display()))
+    }
+
+    fn read_explicit_config(path: &Path) -> Result<String> {
+        if path.file_name().is_some_and(|name| name == "config.toml") {
+            return Self::read_config(path);
         }
+        std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config {}", path.display()))
     }
 }
 
@@ -1089,6 +1093,9 @@ async fn build_run_config_inner(
     session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
     session_snapshot.light_model = light_model;
     sessions::create_session(&store_path, &session_snapshot)?;
+    if let Some(sandbox) = sandbox.as_ref() {
+        sandbox.retain_for_durable_session();
+    }
     worktree_rollback.disarm();
 
     Ok(OrchestratorRunConfig {
