@@ -41,6 +41,7 @@ pub enum McpServerConfigurationStoreError {
     DuplicateName(String),
     NotFound(String),
     ConcurrentModification,
+    RecoveryRequired { config: PathBuf, preserved: PathBuf },
     Store(anyhow::Error),
 }
 
@@ -54,6 +55,12 @@ impl std::fmt::Display for McpServerConfigurationStoreError {
             Self::NotFound(name) => write!(formatter, "MCP server '{name}' was not found"),
             Self::ConcurrentModification => formatter.write_str(
                 "config.toml changed while the MCP update was being prepared; retry the update",
+            ),
+            Self::RecoveryRequired { config, preserved } => write!(
+                formatter,
+                "config.toml changed at the publication boundary; NAC preserved both {} and {} and will not read either until the canonical config is explicitly saved with the intended complete content",
+                config.display(),
+                preserved.display()
             ),
             Self::Store(error) => write!(formatter, "{error}"),
         }
@@ -108,7 +115,109 @@ pub fn acquire_mcp_configuration_write_lease(
     file.lock_exclusive().map_err(|error| {
         McpServerConfigurationStoreError::Store(anyhow!("failed to lock config: {error}"))
     })?;
-    Ok(McpConfigurationWriteLease { file })
+    let lease = McpConfigurationWriteLease { file };
+    recover_pending_transaction_locked(path)?;
+    Ok(lease)
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct PublicationTransaction {
+    version: u8,
+    expected_revision: [u8; 32],
+    candidate_revision: [u8; 32],
+    temp_name: String,
+    phase: PublicationPhase,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+enum PublicationPhase {
+    Prepared,
+    Conflict { displaced_revision: [u8; 32] },
+}
+
+const PUBLICATION_TRANSACTION_VERSION: u8 = 1;
+
+fn transaction_path(path: &Path) -> PathBuf {
+    path.with_extension("toml.nac-txn")
+}
+
+fn open_private_new(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    options.open(path)
+}
+
+fn read_transaction(path: &Path) -> ConfigurationResult<Option<PublicationTransaction>> {
+    let marker = transaction_path(path);
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    let file = match options.open(&marker) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(McpServerConfigurationStoreError::Store(anyhow!(
+                "failed to open MCP publication journal {}: {error}",
+                marker.display()
+            )))
+        }
+    };
+    let transaction: PublicationTransaction = serde_json::from_reader(file).map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!(
+            "MCP publication journal {} is invalid; preserve it and the config for recovery: {error}",
+            marker.display()
+        ))
+    })?;
+    if transaction.version != PUBLICATION_TRANSACTION_VERSION {
+        return Err(McpServerConfigurationStoreError::Store(anyhow!(
+            "MCP publication journal {} has unsupported version {}; preserve it and the config for recovery",
+            marker.display(),
+            transaction.version
+        )));
+    }
+    Ok(Some(transaction))
+}
+
+fn transaction_temp_path(
+    path: &Path,
+    transaction: &PublicationTransaction,
+) -> ConfigurationResult<PathBuf> {
+    let name = Path::new(&transaction.temp_name);
+    if name.components().count() != 1 || name.file_name().is_none() {
+        return Err(McpServerConfigurationStoreError::Store(anyhow!(
+            "MCP publication journal for {} contains an unsafe temp name",
+            path.display()
+        )));
+    }
+    let expected_prefix = format!(
+        "{}.",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| McpServerConfigurationStoreError::Store(anyhow!(
+                "config path has a non-UTF-8 file name"
+            )))?
+    );
+    if !transaction.temp_name.starts_with(&expected_prefix)
+        || !transaction.temp_name.ends_with(".tmp")
+    {
+        return Err(McpServerConfigurationStoreError::Store(anyhow!(
+            "MCP publication journal for {} does not reference a NAC temp file",
+            path.display()
+        )));
+    }
+    Ok(path.parent().unwrap_or_else(|| Path::new(".")).join(name))
 }
 
 /// The `config.toml` the dashboard edits: the same file every session parses
@@ -202,17 +311,17 @@ fn read_document_snapshot(path: &Path) -> ConfigurationResult<(DocumentMut, Docu
             )))
         }
     };
-    let document = raw.parse().map_err(|error| {
+    let document = parse_document(path, &raw)?;
+    Ok((document, revision))
+}
+
+fn parse_document(path: &Path, raw: &str) -> ConfigurationResult<DocumentMut> {
+    raw.parse().map_err(|error| {
         McpServerConfigurationStoreError::InvalidInput(format!(
             "{} is not valid TOML: {error}",
             path.display()
         ))
-    })?;
-    Ok((document, revision))
-}
-
-fn read_document(path: &Path) -> ConfigurationResult<DocumentMut> {
-    read_document_snapshot(path).map(|(document, _)| document)
+    })
 }
 
 fn current_document_revision(path: &Path) -> ConfigurationResult<DocumentRevision> {
@@ -268,10 +377,186 @@ fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
     File::open(parent.unwrap_or_else(|| Path::new(".")))?.sync_all()
 }
 
-/// Atomically publishes only if the destination at the exchange instant is
-/// the exact document that was read. Existing files use the kernel's atomic
-/// swap operation so the displaced destination can be verified without a
-/// check/rename interval; first creation uses hard-link create-if-absent.
+fn remove_file_if_present(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn persist_transaction(
+    path: &Path,
+    transaction: &PublicationTransaction,
+) -> ConfigurationResult<()> {
+    let marker = transaction_path(path);
+    let staging = marker.with_extension(format!("nac-txn.{}.tmp", uuid::Uuid::new_v4()));
+    let result: ConfigurationResult<()> = (|| {
+        let mut file = open_private_new(&staging).map_err(|error| {
+            McpServerConfigurationStoreError::Store(anyhow!(
+                "failed to create MCP publication journal staging file: {error}"
+            ))
+        })?;
+        let encoded = serde_json::to_vec(transaction).map_err(|error| {
+            McpServerConfigurationStoreError::Store(anyhow!(
+                "failed to encode MCP publication journal: {error}"
+            ))
+        })?;
+        file.write_all(&encoded).map_err(|error| {
+            McpServerConfigurationStoreError::Store(anyhow!(
+                "failed to write MCP publication journal: {error}"
+            ))
+        })?;
+        file.sync_all().map_err(|error| {
+            McpServerConfigurationStoreError::Store(anyhow!(
+                "failed to sync MCP publication journal: {error}"
+            ))
+        })?;
+        std::fs::rename(&staging, &marker).map_err(|error| {
+            McpServerConfigurationStoreError::Store(anyhow!(
+                "failed to publish MCP publication journal: {error}"
+            ))
+        })?;
+        sync_parent_directory(path).map_err(|error| {
+            McpServerConfigurationStoreError::Store(anyhow!(
+                "failed to sync MCP publication journal directory: {error}"
+            ))
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = remove_file_if_present(&staging);
+    }
+    result
+}
+
+fn clear_transaction(path: &Path) -> ConfigurationResult<()> {
+    remove_file_if_present(&transaction_path(path)).map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to remove MCP publication journal: {error}"
+        ))
+    })?;
+    sync_parent_directory(path).map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to sync MCP publication cleanup: {error}"
+        ))
+    })?;
+    Ok(())
+}
+
+fn finish_transaction(path: &Path, temp: &Path) -> ConfigurationResult<()> {
+    remove_file_if_present(temp).map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to remove MCP publication temp: {error}"
+        ))
+    })?;
+    clear_transaction(path)
+}
+
+fn unresolved_transaction_error(path: &Path, temp: &Path) -> McpServerConfigurationStoreError {
+    McpServerConfigurationStoreError::RecoveryRequired {
+        config: path.to_path_buf(),
+        preserved: temp.to_path_buf(),
+    }
+}
+
+fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
+    let Some(mut transaction) = read_transaction(path)? else {
+        return Ok(());
+    };
+    let temp = transaction_temp_path(path, &transaction)?;
+    let expected = DocumentRevision(Some(transaction.expected_revision));
+    let candidate = DocumentRevision(Some(transaction.candidate_revision));
+    let current = current_document_revision(path)?;
+    let temp_revision = current_document_revision(&temp)?;
+
+    match transaction.phase {
+        PublicationPhase::Prepared => {
+            if current == candidate && temp_revision == expected {
+                // The exchange validated successfully before the crash.
+                return finish_transaction(path, &temp);
+            }
+            if current == candidate {
+                let Some(payload_revision) = temp_revision.0 else {
+                    // Candidate is canonical and its displaced expected file
+                    // was already removed, so commit cleanup had completed.
+                    return clear_transaction(path);
+                };
+                transaction.phase = PublicationPhase::Conflict {
+                    displaced_revision: payload_revision,
+                };
+                persist_transaction(path, &transaction)?;
+                return Err(unresolved_transaction_error(path, &temp));
+            }
+            if temp_revision == candidate || temp_revision == expected {
+                // Publication did not happen, rollback completed, or a valid
+                // publication was followed by a later editor save. In all
+                // three cases the canonical path is authoritative.
+                return finish_transaction(path, &temp);
+            }
+            if temp_revision == DocumentRevision(None) {
+                return clear_transaction(path);
+            }
+            Err(unresolved_transaction_error(path, &temp))
+        }
+        PublicationPhase::Conflict { displaced_revision } => {
+            if temp_revision == DocumentRevision(None) {
+                // Removing the preserved conflict file explicitly chooses the
+                // current canonical document.
+                return clear_transaction(path);
+            }
+            if temp_revision != DocumentRevision(Some(displaced_revision)) {
+                return Err(unresolved_transaction_error(path, &temp));
+            }
+            if current != candidate {
+                // There is no automatic rollback in this protocol, so any
+                // non-candidate canonical value was written after the
+                // conflict and is an explicit resolution. Preserve it.
+                return finish_transaction(path, &temp);
+            }
+            Err(unresolved_transaction_error(path, &temp))
+        }
+    }
+}
+
+/// Reads the ambient user-editable config under the same cross-process lock as
+/// dashboard publication. Pending crash state is recovered before bytes are
+/// exposed, so NAC startup, registry loading, and dashboard reads never retain
+/// an unvalidated exchange candidate.
+pub fn read_mcp_configuration_consistently(path: &Path) -> ConfigurationResult<String> {
+    let _lease = acquire_mcp_configuration_write_lease(path)?;
+    match std::fs::read_to_string(path) {
+        Ok(raw) => Ok(raw),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to read {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_EXCHANGE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+    static AFTER_EXCHANGE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn run_exchange_test_hook(
+    hook: &'static std::thread::LocalKey<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>,
+) {
+    if let Some(callback) = hook.with(|slot| slot.borrow_mut().take()) {
+        callback();
+    }
+}
+
+/// Publishes complete file images and detects a noncooperating editor at the
+/// exchange boundary. Existing files use a recoverable exchange transaction;
+/// the kernel has no content-conditioned rename, so any ambiguous exchange
+/// race preserves both files and blocks NAC readers. First creation uses the
+/// stricter hard-link create-if-absent primitive.
 fn publish_if_revision(
     path: &Path,
     temp: &Path,
@@ -290,7 +575,38 @@ fn publish_if_revision(
                 return Err(McpServerConfigurationStoreError::Store(anyhow!(error)));
             }
         },
-        Some(_) => {
+        Some(expected_revision_bytes) => {
+            // Reject the ordinary stale case before publication. A writer can
+            // still race the final check because the kernel exchange has no
+            // content predicate; the journal makes that state recoverable.
+            if current_document_revision(path)? != *expected_revision {
+                return Err(McpServerConfigurationStoreError::ConcurrentModification);
+            }
+            let candidate_revision = current_document_revision(temp)?;
+            let candidate_revision_bytes = candidate_revision.0.ok_or_else(|| {
+                McpServerConfigurationStoreError::Store(anyhow!(
+                    "MCP publication candidate disappeared before exchange"
+                ))
+            })?;
+            let temp_name = temp
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    McpServerConfigurationStoreError::Store(anyhow!(
+                        "MCP publication temp has a non-UTF-8 file name"
+                    ))
+                })?
+                .to_string();
+            let mut transaction = PublicationTransaction {
+                version: PUBLICATION_TRANSACTION_VERSION,
+                expected_revision: expected_revision_bytes,
+                candidate_revision: candidate_revision_bytes,
+                temp_name,
+                phase: PublicationPhase::Prepared,
+            };
+            persist_transaction(path, &transaction)?;
+            #[cfg(test)]
+            run_exchange_test_hook(&BEFORE_EXCHANGE_HOOK);
             exchange_paths(temp, path).map_err(|error| {
                 if error.kind() == std::io::ErrorKind::NotFound {
                     McpServerConfigurationStoreError::ConcurrentModification
@@ -298,22 +614,25 @@ fn publish_if_revision(
                     McpServerConfigurationStoreError::Store(anyhow!(error))
                 }
             })?;
-            let displaced_revision = match current_document_revision(temp) {
-                Ok(revision) => revision,
-                Err(error) => {
-                    let _ = exchange_paths(temp, path);
-                    return Err(error);
-                }
-            };
+            sync_parent_directory(path).map_err(|error| {
+                McpServerConfigurationStoreError::Store(anyhow!(
+                    "failed to sync MCP publication exchange: {error}"
+                ))
+            })?;
+            #[cfg(test)]
+            run_exchange_test_hook(&AFTER_EXCHANGE_HOOK);
+            let displaced_revision = current_document_revision(temp)?;
             if displaced_revision != *expected_revision {
-                // Put the editor's exact document back. This second exchange
-                // is atomic; never remove the displaced file on this path.
-                exchange_paths(temp, path)
-                    .map_err(|error| McpServerConfigurationStoreError::Store(anyhow!(error)))?;
-                return Err(McpServerConfigurationStoreError::ConcurrentModification);
+                let payload_revision = displaced_revision
+                    .0
+                    .ok_or_else(|| unresolved_transaction_error(path, temp))?;
+                transaction.phase = PublicationPhase::Conflict {
+                    displaced_revision: payload_revision,
+                };
+                persist_transaction(path, &transaction)?;
+                return Err(unresolved_transaction_error(path, temp));
             }
-            std::fs::remove_file(temp)
-                .map_err(|error| McpServerConfigurationStoreError::Store(anyhow!(error)))?;
+            finish_transaction(path, temp)?;
         }
     }
     sync_parent_directory(path)
@@ -338,6 +657,7 @@ fn write_document(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(io_error)?;
     }
+    recover_pending_transaction_locked(path)?;
     let temp = path.with_extension(format!("toml.{}.tmp", uuid::Uuid::new_v4()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -362,7 +682,7 @@ fn write_document(
         publish_if_revision(path, &temp, &expected_revision)?;
         Ok(())
     })();
-    if result.is_err() {
+    if result.is_err() && !transaction_path(path).exists() {
         let _ = std::fs::remove_file(&temp);
     }
     result?;
@@ -492,7 +812,8 @@ fn servers_table(document: &mut DocumentMut) -> ConfigurationResult<&mut Table> 
 pub fn list_mcp_server_configurations(
     path: &Path,
 ) -> ConfigurationResult<Vec<McpServerConfigurationRecord>> {
-    let document = read_document(path)?;
+    let raw = read_mcp_configuration_consistently(path)?;
+    let document = parse_document(path, &raw)?;
     let Some(servers) = document.get("mcp_servers").and_then(Item::as_table_like) else {
         return Ok(Vec::new());
     };
@@ -506,7 +827,8 @@ pub fn load_mcp_server_configuration(
     path: &Path,
     name: &str,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
-    let document = read_document(path)?;
+    let raw = read_mcp_configuration_consistently(path)?;
+    let document = parse_document(path, &raw)?;
     document
         .get("mcp_servers")
         .and_then(Item::as_table_like)
@@ -699,6 +1021,168 @@ mod tests {
             load_mcp_server_configuration(&path, "example").unwrap(),
             editor
         );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn conflict_never_erases_a_second_editor_save() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let (mut document, revision) = read_document_snapshot(&path).unwrap();
+        document["model"] = toml_edit::value("candidate");
+
+        let first_path = path.clone();
+        BEFORE_EXCHANGE_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                std::fs::write(&first_path, "model = \"b\"\n").unwrap();
+            }));
+        });
+        let second_path = path.clone();
+        AFTER_EXCHANGE_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                std::fs::write(&second_path, "model = \"d\"\n").unwrap();
+            }));
+        });
+
+        assert!(matches!(
+            write_document(&path, &document, revision).unwrap_err(),
+            McpServerConfigurationStoreError::RecoveryRequired { .. }
+        ));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "model = \"d\"\n");
+        assert!(transaction_path(&path).exists());
+        let preserved: Vec<PathBuf> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|candidate| candidate.extension().is_some_and(|value| value == "tmp"))
+            .collect();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(&preserved[0]).unwrap(),
+            "model = \"b\"\n"
+        );
+        assert_eq!(
+            read_mcp_configuration_consistently(&path).unwrap(),
+            "model = \"d\"\n"
+        );
+        assert!(!preserved[0].exists());
+        assert!(!transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    fn prepare_crash_transaction(
+        path: &Path,
+        expected_revision: [u8; 32],
+        candidate: &str,
+    ) -> (PathBuf, PublicationTransaction) {
+        let temp = path.with_extension(format!("toml.{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&temp, candidate).unwrap();
+        let candidate_revision = current_document_revision(&temp).unwrap().0.unwrap();
+        let transaction = PublicationTransaction {
+            version: PUBLICATION_TRANSACTION_VERSION,
+            expected_revision,
+            candidate_revision,
+            temp_name: temp.file_name().unwrap().to_str().unwrap().to_string(),
+            phase: PublicationPhase::Prepared,
+        };
+        persist_transaction(path, &transaction).unwrap();
+        (temp, transaction)
+    }
+
+    #[test]
+    fn recovery_aborts_a_crash_after_journal_before_exchange() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let expected = current_document_revision(&path).unwrap().0.unwrap();
+        let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
+
+        assert_eq!(
+            read_mcp_configuration_consistently(&path).unwrap(),
+            "model = \"a\"\n"
+        );
+        assert!(!temp.exists());
+        assert!(!transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn recovery_commits_a_crash_after_a_valid_exchange() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let expected = current_document_revision(&path).unwrap().0.unwrap();
+        let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
+        exchange_paths(&temp, &path).unwrap();
+
+        assert_eq!(
+            read_mcp_configuration_consistently(&path).unwrap(),
+            "model = \"candidate\"\n"
+        );
+        assert!(!temp.exists());
+        assert!(!transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn recovery_quarantines_a_crash_after_a_conflicting_exchange() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let expected = current_document_revision(&path).unwrap().0.unwrap();
+        let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
+        std::fs::write(&path, "model = \"b\"\n").unwrap();
+        exchange_paths(&temp, &path).unwrap();
+
+        assert!(read_mcp_configuration_consistently(&path).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "model = \"candidate\"\n"
+        );
+        assert_eq!(std::fs::read_to_string(&temp).unwrap(), "model = \"b\"\n");
+        assert!(transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn check_exchange_race_preserves_both_files_and_blocks_readers() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let (mut document, revision) = read_document_snapshot(&path).unwrap();
+        document["model"] = toml_edit::value("candidate");
+
+        let first_path = path.clone();
+        BEFORE_EXCHANGE_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                std::fs::write(&first_path, "model = \"b\"\n").unwrap();
+            }));
+        });
+        let error = write_document(&path, &document, revision).unwrap_err();
+        assert!(matches!(
+            error,
+            McpServerConfigurationStoreError::RecoveryRequired { .. }
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "model = \"candidate\"\n"
+        );
+        let preserved: Vec<PathBuf> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|candidate| candidate.extension().is_some_and(|value| value == "tmp"))
+            .collect();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(&preserved[0]).unwrap(),
+            "model = \"b\"\n"
+        );
+        assert!(transaction_path(&path).exists());
+        assert!(read_mcp_configuration_consistently(&path).is_err());
+        assert!(preserved[0].exists());
+        assert!(transaction_path(&path).exists());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

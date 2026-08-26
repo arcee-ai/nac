@@ -573,6 +573,7 @@ impl From<McpServerConfigurationStoreError> for ApiError {
             McpServerConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
             McpServerConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             McpServerConfigurationStoreError::ConcurrentModification => StatusCode::CONFLICT,
+            McpServerConfigurationStoreError::RecoveryRequired { .. } => StatusCode::CONFLICT,
             McpServerConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self::new(status, error.to_string())
@@ -582,6 +583,17 @@ impl From<McpServerConfigurationStoreError> for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recoverable_publication_conflicts_remain_http_conflicts() {
+        let error: ApiError = McpServerConfigurationStoreError::RecoveryRequired {
+            config: PathBuf::from("/tmp/config.toml"),
+            preserved: PathBuf::from("/tmp/config.toml.saved.tmp"),
+        }
+        .into();
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(error.message.contains("preserved both"));
+    }
 
     #[test]
     fn references_pass_through_and_literals_are_masked() {

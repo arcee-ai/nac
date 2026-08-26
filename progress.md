@@ -708,21 +708,35 @@ Non-negotiable invariants:
 - `9ec0417 protect concurrent MCP config edits`.
 - `31a0d70 hide unsupported delegated controls`.
 - `54612fc record immutable review repair status`.
+- `f42f2b5 record exact final repair gates`.
+- `a7b0693 close final lifecycle review gaps`.
 
 ## Known problems and blockers
 
-- Exact evidence successor `f42f2b5cb1f097512e2d3cdcea620000d8c4ad91`
-  passed all four release gates, but its immutable review is NO-GO. The review
-  confirmed sandbox ownership/construction, deletion rollback, revision-pin,
-  MCP concurrent-publication, rsync-daemon, and executor-wrapper blockers. Its
-  authority continuation was additionally rejected by the provider filter, so
-  the required two-episode-per-lane topology was not achieved and cannot serve
-  as release evidence.
-- The accepted source blockers are now repaired with focused regressions.
-  Complete precommit core (1130 passed/9 ignored before the final observer-only
-  regression), server 140, and binary 21 suites pass, as do workspace check,
-  warning-denied lint, and formatting. This is implementation evidence only;
-  exact candidate gates and a new immutable review remain required.
+- Exact candidate `a7b0693d155ea75b741086bb95f1b2bb8fbd14a9`
+  passed all four release gates, but its valid detached-clean immutable review
+  is NO-GO. Session `0c010f3f-325f-4083-9bd3-59bcd2b71bd6`, run
+  `89e9fbb5-b232-4f72-9864-fc906b9aaa11`, retained exactly two episodes for
+  each of exactly four requested lanes. It confirmed three aggregate blockers:
+  MCP exchange-before-validation can expose rejected data and lose a second
+  editor save; cached resumed-sandbox deletion can orphan the container; and
+  successful fresh persistence still leaves Drop able to erase the container
+  that later resume expects.
+- The active repair makes durable persistence the ownership transition: failed
+  launch still cleans its fresh container, successful persistence disables Drop
+  cleanup, explicit deletion is authoritative from fresh or resumed services,
+  and resume recreates an absent stable container. Read-only NAC audit
+  `2b615ea1-341c-4a35-b806-1668958d5727` proved strict existing-path content
+  CAS impossible against arbitrary noncooperating renames and supplied the
+  recoverable boundary now implemented: journal-aware NAC readers, synced
+  metadata-only transaction state, one exchange with no automatic rollback,
+  automatic recovery only for proven states, and fail-closed preservation of
+  both complete files on a true conflict. Sixteen focused MCP file-config tests
+  plus the sandbox and rsync regressions pass. The complete precommit suites
+  also pass: core 1137 with 9 intentional ignores, server 140, binary 21,
+  workspace check, warning-denied lint, and formatting. This is implementation
+  evidence only; the coherent commit, exact candidate gates, and a new
+  immutable review remain required.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -730,8 +744,10 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit the coherent `f42f2b5` repair and repeat all
-four exact-SHA release gates while preserving `.gitignore`, untracked
-`AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and the ignored local
-decision notebook. Only a fresh detached-clean acyclic four-lane NAC GO may
-advance to final browser smoke and the final ledger/status audit.
+Closure is still active. Complete the recoverable MCP publication contract,
+finish focused and broad regressions for the `a7b0693` NO-GO repair, then commit
+only the intended tracked implementation/ledger files. Repeat all four
+exact-SHA release gates while preserving `.gitignore`, untracked `AGENTS.md`,
+`demo_ext_managed.md`, `demo_review.md`, and the ignored local decision
+notebook. Only a fresh detached-clean acyclic four-lane NAC GO may advance to
+final browser smoke and the final ledger/status audit.

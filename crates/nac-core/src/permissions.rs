@@ -1178,6 +1178,15 @@ fn hard_shell_denial_inner(
     backend: &ExecutionBackend,
     depth: usize,
 ) -> Option<String> {
+    if tokens
+        .iter()
+        .any(|token| token.starts_with("RSYNC_RSH=") || token.starts_with("RSYNC_CONNECT_PROG="))
+    {
+        return Some(
+            "rsync executable environment hooks are blocked because they can conceal commands"
+                .to_string(),
+        );
+    }
     if shell_control_prefix(tokens) {
         return Some(
             "shell control syntax is blocked because it can hide protected commands".to_string(),
@@ -3502,6 +3511,8 @@ mod tests {
                 "rsync --daemon --config=rsyncd.conf",
                 "rsync -e sh source destination",
                 "rsync --rsync-path=sh source host:destination",
+                "RSYNC_RSH=sh rsync source host:destination",
+                "RSYNC_CONNECT_PROG=sh rsync source host::module",
             ] {
                 assert!(
                     shell_resources(command, Path::new("/workspace"), &backend)[0]

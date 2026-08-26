@@ -2045,10 +2045,10 @@ impl SessionManager {
     /// - no client holds a live event-stream subscription (an open SSE
     ///   connection, which the eviction would close), and
     /// - it owns no explicitly retained process-local terminal, and
-    /// - it does not execute inside a sandbox container: dropping the service
-    ///   would drop the `SandboxSession`, an owned container's `Drop` runs
-    ///   `podman rm -f`, and the next resume builds a fresh container under a
-    ///   new session key, so eviction would destroy container-local state.
+    /// - it does not execute inside a sandbox container: a durably persisted
+    ///   container survives service Drop, but reconstructing its agent would
+    ///   still discard process-local attachment state while the durable
+    ///   container remains live.
     ///
     /// `except` names the session the caller is attaching or creating, which
     /// is skipped so the caller does not evict the very service it is about to

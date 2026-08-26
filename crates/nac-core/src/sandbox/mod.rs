@@ -323,6 +323,14 @@ impl SandboxSession {
         }
     }
 
+    /// Once the durable session row commits, explicit lifecycle deletion owns
+    /// container cleanup. Process shutdown must not erase resumable state.
+    pub(crate) fn retain_for_durable_session(&self) {
+        match self {
+            Self::Podman(inner) => inner.retain_for_durable_session(),
+        }
+    }
+
     pub fn status_text(&self) -> String {
         let backend = self.spec().backend.as_str();
         format!("on ({backend}, image={})", self.image())
@@ -456,8 +464,8 @@ impl SandboxSession {
     }
 
     /// Explicitly destroy the sandbox (container or VM), regardless of
-    /// remaining `Arc` references.  Best-effort and idempotent.  Only
-    /// acts if this session is the owner.
+    /// remaining `Arc` references. Explicit lifecycle cleanup is authoritative
+    /// even when this process attached as an observer.
     pub async fn destroy(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.destroy().await,
