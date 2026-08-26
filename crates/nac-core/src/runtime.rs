@@ -1577,8 +1577,12 @@ async fn build_resume_config_from_snapshot(
                 // by each process that observes it. Resume attachments must
                 // never acquire destructive Drop authority: multiple servers
                 // can legitimately observe the same stable container.
-                let session =
-                    SandboxSession::create(spec, session_key.clone(), false, session_key).await?;
+                let session = SandboxSession::create_for_durable_resume(
+                    spec,
+                    session_key.clone(),
+                    session_key,
+                )
+                .await?;
                 if materialize {
                     session.materialize_worktree().await?;
                     if let Some(worktree) = session.spec().worktree.as_ref() {
