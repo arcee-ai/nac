@@ -3521,9 +3521,12 @@ impl SessionManager {
         for child in children {
             Box::pin(self.delete_session_cascade(&child.child_session_id)).await?;
         }
-        let persisted_sandbox = sessions::load_session(&self.inner.store_path, session_id)
-            .ok()
-            .and_then(|snapshot| snapshot.sandbox_spec);
+        // Deletion must fail closed if the durable snapshot cannot be decoded.
+        // Treating a parse/store failure as an unsandboxed session would let an
+        // uncached delete commit while skipping its only container/worktree
+        // cleanup metadata and erase all retry authority.
+        let persisted_sandbox =
+            sessions::load_session(&self.inner.store_path, session_id)?.sandbox_spec;
         let persisted_worktree = persisted_sandbox
             .as_ref()
             .and_then(|spec| spec.worktree.clone());
@@ -8992,6 +8995,68 @@ mod tests {
             )
         );
         assert!(config_replacement_conflict(false, false).is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn deletion_fails_closed_when_snapshot_decode_cannot_yield_sandbox_metadata() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("delete_invalid_snapshot_preserves_sandbox_authority");
+        seed_editable_session(&root, "sandbox-session");
+        let store_path = root.join("store.db");
+        let mut snapshot = sessions::load_session(&store_path, "sandbox-session").unwrap();
+        nac_core::test_support::set_default_sandbox_spec(&mut snapshot);
+        sessions::save_session(&store_path, &snapshot).unwrap();
+
+        let mut raw = sessions::load_session_config(&store_path, "sandbox-session").unwrap();
+        raw.backend = Some("auto".to_string());
+        sessions::update_raw_session_config(&store_path, &raw).unwrap();
+        assert!(sessions::load_session(&store_path, "sandbox-session").is_err());
+
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        let arguments = root.join("podman-arguments");
+        std::fs::write(
+            &podman,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NAC_TEST_PODMAN_ARGUMENTS\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_arguments = std::env::var_os("NAC_TEST_PODMAN_ARGUMENTS");
+        unsafe {
+            std::env::set_var("PATH", &bin);
+            std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
+        }
+
+        let manager = test_manager(&root);
+        manager
+            .delete_session("sandbox-session")
+            .await
+            .expect_err("invalid snapshot must fail closed before cleanup or row deletion");
+        assert!(
+            sessions::load_session_config(&store_path, "sandbox-session").is_ok(),
+            "durable row and sandbox retry authority must remain"
+        );
+        assert!(
+            !arguments.exists(),
+            "container cleanup must not run without decoded ownership metadata"
+        );
+
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            match original_arguments {
+                Some(path) => std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", path),
+                None => std::env::remove_var("NAC_TEST_PODMAN_ARGUMENTS"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

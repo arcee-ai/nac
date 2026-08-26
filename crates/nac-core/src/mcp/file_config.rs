@@ -650,10 +650,11 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
             if !preserved_matches {
                 return Err(unresolved_transaction_error(path, &temp));
             }
-            if !current.same_content(candidate) {
+            if !current.same_content(candidate) && !current.same_content(displaced) {
                 // There is no automatic rollback in this protocol, so any
-                // non-candidate canonical value was written after the
-                // conflict and is an explicit resolution. Preserve it.
+                // canonical value distinct from both ambiguous byte images
+                // was written after the conflict and is an explicit
+                // resolution. Preserve it.
                 return finish_transaction(path, &temp);
             }
             Err(unresolved_transaction_error(path, &temp))
@@ -1336,6 +1337,37 @@ mod tests {
         );
         assert!(!temp.exists());
         assert!(!transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn legacy_identity_free_conflict_rejects_preserved_equal_canonical_content() {
+        let path = crate::mcp::test_support::unique_temp_dir("nac-mcp-file-config-preserved-equal")
+            .join("config.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let expected = current_document_revision(&path).unwrap().digest.unwrap();
+        let (temp, mut transaction) =
+            prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
+        exchange_paths(&temp, &path).unwrap();
+        let displaced_revision = current_document_revision(&temp).unwrap().digest.unwrap();
+        transaction.expected_identity = None;
+        transaction.candidate_identity = None;
+        transaction.phase = PublicationPhase::Conflict {
+            displaced_revision,
+            displaced_identity: None,
+        };
+        persist_transaction(&path, &transaction).unwrap();
+
+        let replacement = path.with_extension("toml.operator-resolution");
+        std::fs::copy(&temp, &replacement).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        assert!(matches!(
+            read_mcp_configuration_consistently(&path).unwrap_err(),
+            McpServerConfigurationStoreError::RecoveryRequired { .. }
+        ));
+        assert!(temp.exists());
+        assert!(transaction_path(&path).exists());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

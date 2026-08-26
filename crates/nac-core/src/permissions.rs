@@ -1179,7 +1179,10 @@ fn hard_shell_denial_inner(
     depth: usize,
 ) -> Option<String> {
     if let Some(name) = executable_environment_hook(tokens) {
-        return Some(if matches!(name, "RSYNC_RSH" | "RSYNC_CONNECT_PROG") {
+        return Some(if name == "indirect stateful shell assignment" {
+            "indirect stateful shell assignments are blocked because they can mutate dynamic-loader hooks without disclosing the target variable"
+                .to_string()
+        } else if matches!(name, "RSYNC_RSH" | "RSYNC_CONNECT_PROG") {
             "rsync executable environment hooks are blocked because they can conceal commands"
                 .to_string()
         } else {
@@ -1772,6 +1775,7 @@ fn valid_environment_name(name: &str) -> bool {
 /// command are data and must not be rejected merely because they contain an
 /// assignment-looking string.
 fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
+    const INDIRECT_ASSIGNMENT: &str = "indirect stateful shell assignment";
     const HOOKS: &[&str] = &[
         "RSYNC_RSH",
         "RSYNC_CONNECT_PROG",
@@ -1815,15 +1819,61 @@ fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
     let command = effective
         .first()
         .and_then(|command| command.rsplit('/').next())?;
+    let command = command.to_ascii_lowercase();
+
+    // `printf -v NAME` mutates the current Bash process without using
+    // assignment syntax. If NAME is exported, a later simple command inherits
+    // the value, so it must receive the same non-bypassable hook denial as a
+    // direct assignment.
+    if command == "printf" {
+        let mut operands = effective[1..].iter();
+        while let Some(option) = operands.next() {
+            let target = if option == "-v" {
+                operands.next().map(String::as_str)
+            } else {
+                option
+                    .strip_prefix("-v")
+                    .filter(|target| !target.is_empty())
+            };
+            if let Some(target) = target {
+                return HOOKS.contains(&target).then_some(target);
+            }
+            if option == "--" || !option.starts_with('-') {
+                break;
+            }
+        }
+        return None;
+    }
+
     if !matches!(
-        command.to_ascii_lowercase().as_str(),
+        command.as_str(),
         "declare" | "export" | "readonly" | "typeset"
     ) {
         return None;
     }
+
+    // Bash namerefs make the eventual assignment target depend on shell state
+    // from an earlier segment. Reject creation of that indirection rather than
+    // pretending the visible alias can be authorized as a narrow variable.
+    if matches!(command.as_str(), "declare" | "typeset")
+        && effective[1..]
+            .iter()
+            .take_while(|token| *token != "--")
+            .any(|token| {
+                token
+                    .strip_prefix(['-', '+'])
+                    .is_some_and(|flags| flags.contains('n'))
+            })
+    {
+        return Some(INDIRECT_ASSIGNMENT);
+    }
     effective[1..]
         .iter()
-        .filter_map(|token| shell_environment_assignment_name(token))
+        .filter(|token| !token.starts_with('-') && !token.starts_with('+'))
+        .filter_map(|token| {
+            shell_environment_assignment_name(token)
+                .or_else(|| valid_environment_name(token).then_some(token.as_str()))
+        })
         .find(|name| HOOKS.contains(name))
 }
 
@@ -3604,6 +3654,10 @@ mod tests {
                 "builtin readonly LD_LIBRARY_PATH=./payload",
                 "declare -x LD_PRELOAD+=:./payload.so",
                 "typeset -x LD_AUDIT=./payload.so",
+                "export LD_PRELOAD; printf -v LD_PRELOAD %b '\\x2fworkspace\\x2fpayload.so'; ls",
+                "command printf -vLD_AUDIT %s ./payload.so; /bin/true",
+                "declare -n p=LD_LIBRARY_PATH; p=./payload; export LD_LIBRARY_PATH; /bin/true",
+                "builtin typeset -xn p=LD_PRELOAD; p=./payload.so; /bin/true",
             ] {
                 assert!(
                     shell_resources(command, Path::new("/workspace"), &backend)[0]

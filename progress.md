@@ -803,7 +803,7 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Complete and commit the four `d9bfe35` review repairs,
+Closure is still active. Complete and commit the four `0c048b6` review repairs,
 run all four exact gates on the coherent successor, record that evidence in a
 tracked successor without claiming unavailable Podman-backed QA, repeat the
 four gates on the evidence successor, and obtain another detached-clean four-
@@ -843,3 +843,44 @@ server 142, binary 21, frontend 175), all 10 deterministic durability checks,
 committed-asset freshness, and all 10 production-embedded Playwright journeys.
 This is exact implementation evidence only. The tracked evidence successor
 must repeat the same four gates before the required immutable review.
+
+## Exact `0c048b6` review
+
+Evidence successor `0c048b68f002a731efb522dd04400aed093801f3` repeated and
+passed the complete exact gate set: `make ci` (catalog 2+7+24, core 1144/9
+ignored, server 142, binary 21, frontend 175), durability 10/10, committed-
+asset freshness, and production-embedded Playwright 10/10. Detached clean NAC
+session `2e756da0-84a2-40a0-b174-eb95d2fe005a`, run
+`54cbb23e-8d3f-4290-831a-b5495bf4068c`, was structurally valid and read-only:
+only `authority`, `durability`, `product`, and `adversarial` existed, each
+retained exactly two episodes, and every episode reconfirmed the exact SHA and
+empty porcelain. The aggregate verdict was NO-GO.
+
+Four implementation blockers are accepted. Stateful Bash can mutate an
+exported loader hook through `printf -v` or a nameref without direct assignment
+syntax. Podman rollback accepts unvalidated cidfile contents and deletes the
+record before confirming `rm`, so tampering can target a peer and transient
+failure loses retry authority. Identity-free MCP Conflict recovery accepts a
+canonical image equal to the preserved digest even though that byte-identical
+choice remains ambiguous. Uncached deletion converts full snapshot decode
+failure into “no sandbox,” allowing durable cleanup metadata to be skipped and
+then erased. The exact gates are authoritative; stale ledger wording is a
+bounded formal completion issue, not missing test evidence. Parent-cascade
+partial progress and release-profile E2E are non-blocking hardening. Podman is
+still unavailable, so no live Podman QA is claimed.
+
+The active repair hard-denies bare hook export/declaration, `printf -v` hook
+targets, and nameref creation while retaining harmless post-command data.
+Cancelled creation now uses a private per-launch record containing a full
+container ID and persisted ownership token, verifies the matching Podman label,
+uses an operand delimiter, and removes the record only after successful
+cleanup. Legacy identity-free recovery requires canonical content distinct
+from both candidate and preserved digests. Deletion now fails closed if its
+durable snapshot cannot decode. Focused regressions for all four seams pass;
+full suites, a coherent commit, exact gates, and a new immutable review remain
+required.
+
+Integrated precommit verification is green: core 1146 passed/9 ignored,
+server 143, binary 21, workspace check, formatting, frontend lint, and
+warning-denied workspace Clippy. This is implementation evidence only; the
+coherent commit and all four exact gates remain required before review.
