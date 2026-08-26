@@ -12,6 +12,7 @@ import {
 } from "@/app/atoms";
 import { LibraryPicker } from "@/app/components/modals/MCPServersModal/McpLibraryPicker";
 import { McpServerForm } from "@/app/components/modals/MCPServersModal/McpServerForm";
+import { McpServersLoadError } from "@/app/components/modals/MCPServersModal/McpServersLoadError";
 import { useMcpLibrary, useMcpServers } from "@/app/services/queries";
 import type { McpLibraryEntry } from "@/app/types/api";
 
@@ -25,7 +26,7 @@ type Draft = { template: McpLibraryEntry | null };
  */
 export function McpServersMobile({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: library } = useMcpLibrary();
-  const { data, isLoading } = useMcpServers();
+  const { data, error, isError, isFetching, isLoading, refetch } = useMcpServers();
   const servers = data?.servers ?? [];
   const [picking, setPicking] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -60,30 +61,40 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
   return (
     <>
       <Modal open={open} onClose={onClose} title="MCP servers">
-        <div className="flex flex-col gap-1 [&>*]:shrink-0">
-          <TabButton size={TabButtonSize.Large} onClick={() => setPicking(true)}>
-            <Icon iconName={IconName.Add} />
-            <span className="text-left flex-grow truncate">Add server</span>
-            <Icon iconName={IconName.Right} className="shrink-0" />
-          </TabButton>
-          {servers.length ? <Separator /> : null}
-          {servers.map((server) => (
-            <TabButton
-              key={server.name}
-              size={TabButtonSize.Large}
-              onClick={() => setEditing(server.name)}
-            >
-              <span className="text-left flex-grow truncate">{server.name}</span>
+        {isError ? (
+          <McpServersLoadError
+            error={error}
+            retrying={isFetching}
+            onRetry={() => {
+              void refetch();
+            }}
+          />
+        ) : (
+          <div className="flex flex-col gap-1 [&>*]:shrink-0">
+            <TabButton size={TabButtonSize.Large} onClick={() => setPicking(true)}>
+              <Icon iconName={IconName.Add} />
+              <span className="text-left flex-grow truncate">Add server</span>
               <Icon iconName={IconName.Right} className="shrink-0" />
             </TabButton>
-          ))}
-          {isLoading ? (
-            <div className="flex items-center gap-2 px-2 py-1">
-              <Loader size={LoaderSize.Micro} />
-              <span className="text-micro text-basic-muted">Loading…</span>
-            </div>
-          ) : null}
-        </div>
+            {servers.length ? <Separator /> : null}
+            {servers.map((server) => (
+              <TabButton
+                key={server.name}
+                size={TabButtonSize.Large}
+                onClick={() => setEditing(server.name)}
+              >
+                <span className="text-left flex-grow truncate">{server.name}</span>
+                <Icon iconName={IconName.Right} className="shrink-0" />
+              </TabButton>
+            ))}
+            {isLoading ? (
+              <div className="flex items-center gap-2 px-2 py-1">
+                <Loader size={LoaderSize.Micro} />
+                <span className="text-micro text-basic-muted">Loading…</span>
+              </div>
+            ) : null}
+          </div>
+        )}
       </Modal>
 
       <Modal

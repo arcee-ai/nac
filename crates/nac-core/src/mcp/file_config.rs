@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -58,7 +58,7 @@ impl std::fmt::Display for McpServerConfigurationStoreError {
             ),
             Self::RecoveryRequired { config, preserved } => write!(
                 formatter,
-                "config.toml changed at the publication boundary; NAC preserved both {} and {} and will not read either until the canonical config is explicitly saved with the intended complete content",
+                "config.toml changed at the publication boundary; NAC preserved canonical {} and displaced {} and will not read the config until an operator either removes the preserved file to keep the canonical document, or atomically saves different intended complete content at the canonical path; re-saving byte-identical canonical content remains intentionally ambiguous",
                 config.display(),
                 preserved.display()
             ),
@@ -124,7 +124,11 @@ pub fn acquire_mcp_configuration_write_lease(
 struct PublicationTransaction {
     version: u8,
     expected_revision: [u8; 32],
+    #[serde(default)]
+    expected_identity: Option<FileIdentity>,
     candidate_revision: [u8; 32],
+    #[serde(default)]
+    candidate_identity: Option<FileIdentity>,
     temp_name: String,
     phase: PublicationPhase,
 }
@@ -133,13 +137,21 @@ struct PublicationTransaction {
 #[serde(tag = "phase", rename_all = "snake_case")]
 enum PublicationPhase {
     Prepared,
-    Conflict { displaced_revision: [u8; 32] },
+    Conflict {
+        displaced_revision: [u8; 32],
+        #[serde(default)]
+        displaced_identity: Option<FileIdentity>,
+    },
 }
 
 const PUBLICATION_TRANSACTION_VERSION: u8 = 1;
 
 fn transaction_path(path: &Path) -> PathBuf {
     path.with_extension("toml.nac-txn")
+}
+
+pub(super) fn mcp_configuration_state_exists(path: &Path) -> bool {
+    path.exists() || transaction_path(path).exists()
 }
 
 fn open_private_new(path: &Path) -> std::io::Result<File> {
@@ -292,24 +304,115 @@ fn validated_record(
     })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DocumentRevision(Option<[u8; 32]>);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+    file_type: u32,
+}
 
-fn read_document_snapshot(path: &Path) -> ConfigurationResult<(DocumentMut, DocumentRevision)> {
-    let (raw, revision) = match std::fs::read_to_string(path) {
-        Ok(raw) => {
-            let revision = DocumentRevision(Some(Sha256::digest(raw.as_bytes()).into()));
-            (raw, revision)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DocumentRevision {
+    digest: Option<[u8; 32]>,
+    identity: Option<FileIdentity>,
+}
+
+impl DocumentRevision {
+    const fn missing() -> Self {
+        Self {
+            digest: None,
+            identity: None,
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            (String::new(), DocumentRevision(None))
+    }
+
+    const fn recorded(digest: [u8; 32], identity: Option<FileIdentity>) -> Self {
+        Self {
+            digest: Some(digest),
+            identity,
         }
+    }
+
+    fn same_content(self, other: Self) -> bool {
+        self.digest == other.digest
+    }
+}
+
+#[cfg(unix)]
+fn file_identity(metadata: &std::fs::Metadata) -> FileIdentity {
+    use std::os::unix::fs::MetadataExt;
+    FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        file_type: metadata.mode() & u32::from(libc::S_IFMT),
+    }
+}
+
+#[cfg(not(unix))]
+fn file_identity(_metadata: &std::fs::Metadata) -> FileIdentity {
+    FileIdentity {
+        device: 0,
+        inode: 0,
+        file_type: 0,
+    }
+}
+
+fn read_document_image(path: &Path) -> ConfigurationResult<Option<(Vec<u8>, DocumentRevision)>> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(McpServerConfigurationStoreError::Store(anyhow!(
-                "failed to read {}: {error}",
+                "failed to open {}: {error}",
                 path.display()
             )))
         }
+    };
+    let metadata = file.metadata().map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to inspect {}: {error}",
+            path.display()
+        ))
+    })?;
+    if !metadata.is_file() {
+        return Err(McpServerConfigurationStoreError::Store(anyhow!(
+            "{} is not a regular file",
+            path.display()
+        )));
+    }
+    let identity = file_identity(&metadata);
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw).map_err(|error| {
+        McpServerConfigurationStoreError::Store(anyhow!(
+            "failed to read {}: {error}",
+            path.display()
+        ))
+    })?;
+    let revision = DocumentRevision {
+        digest: Some(Sha256::digest(&raw).into()),
+        identity: Some(identity),
+    };
+    Ok(Some((raw, revision)))
+}
+
+fn read_document_snapshot(path: &Path) -> ConfigurationResult<(DocumentMut, DocumentRevision)> {
+    let (raw, revision) = match read_document_image(path)? {
+        Some((raw, revision)) => (
+            String::from_utf8(raw).map_err(|error| {
+                McpServerConfigurationStoreError::InvalidInput(format!(
+                    "{} is not valid UTF-8: {error}",
+                    path.display()
+                ))
+            })?,
+            revision,
+        ),
+        None => (String::new(), DocumentRevision::missing()),
     };
     let document = parse_document(path, &raw)?;
     Ok((document, revision))
@@ -325,13 +428,9 @@ fn parse_document(path: &Path, raw: &str) -> ConfigurationResult<DocumentMut> {
 }
 
 fn current_document_revision(path: &Path) -> ConfigurationResult<DocumentRevision> {
-    match std::fs::read(path) {
-        Ok(raw) => Ok(DocumentRevision(Some(Sha256::digest(&raw).into()))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(DocumentRevision(None)),
-        Err(error) => Err(McpServerConfigurationStoreError::Store(anyhow!(
-            "failed to inspect config before publication: {error}"
-        ))),
-    }
+    Ok(read_document_image(path)?
+        .map(|(_, revision)| revision)
+        .unwrap_or_else(DocumentRevision::missing))
 }
 
 #[cfg(unix)]
@@ -465,8 +564,12 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
         return Ok(());
     };
     let temp = transaction_temp_path(path, &transaction)?;
-    let expected = DocumentRevision(Some(transaction.expected_revision));
-    let candidate = DocumentRevision(Some(transaction.candidate_revision));
+    let expected =
+        DocumentRevision::recorded(transaction.expected_revision, transaction.expected_identity);
+    let candidate = DocumentRevision::recorded(
+        transaction.candidate_revision,
+        transaction.candidate_identity,
+    );
     let current = current_document_revision(path)?;
     let temp_revision = current_document_revision(&temp)?;
 
@@ -477,13 +580,30 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
                 return finish_transaction(path, &temp);
             }
             if current == candidate {
-                let Some(payload_revision) = temp_revision.0 else {
+                let Some(payload_revision) = temp_revision.digest else {
                     // Candidate is canonical and its displaced expected file
                     // was already removed, so commit cleanup had completed.
                     return clear_transaction(path);
                 };
                 transaction.phase = PublicationPhase::Conflict {
                     displaced_revision: payload_revision,
+                    displaced_identity: temp_revision.identity,
+                };
+                persist_transaction(path, &transaction)?;
+                return Err(unresolved_transaction_error(path, &temp));
+            }
+            if transaction.candidate_identity.is_none() && current.same_content(candidate) {
+                // Version-one journals written before file identity was
+                // recorded cannot prove that the canonical inode is the
+                // published candidate. Convert them to an explicit conflict
+                // instead of accepting a content-only match; the normal
+                // operator recovery choices then remain available.
+                let Some(payload_revision) = temp_revision.digest else {
+                    return clear_transaction(path);
+                };
+                transaction.phase = PublicationPhase::Conflict {
+                    displaced_revision: payload_revision,
+                    displaced_identity: temp_revision.identity,
                 };
                 persist_transaction(path, &transaction)?;
                 return Err(unresolved_transaction_error(path, &temp));
@@ -494,21 +614,32 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
                 // three cases the canonical path is authoritative.
                 return finish_transaction(path, &temp);
             }
-            if temp_revision == DocumentRevision(None) {
+            if transaction.candidate_identity.is_none()
+                && temp_revision.same_content(candidate)
+                && !current.same_content(candidate)
+            {
+                // A legacy prepared journal with the candidate still in the
+                // temp file did not publish. Keep the current canonical file.
+                return finish_transaction(path, &temp);
+            }
+            if temp_revision == DocumentRevision::missing() {
                 return clear_transaction(path);
             }
             Err(unresolved_transaction_error(path, &temp))
         }
-        PublicationPhase::Conflict { displaced_revision } => {
-            if temp_revision == DocumentRevision(None) {
+        PublicationPhase::Conflict {
+            displaced_revision,
+            displaced_identity,
+        } => {
+            if temp_revision == DocumentRevision::missing() {
                 // Removing the preserved conflict file explicitly chooses the
                 // current canonical document.
                 return clear_transaction(path);
             }
-            if temp_revision != DocumentRevision(Some(displaced_revision)) {
+            if temp_revision != DocumentRevision::recorded(displaced_revision, displaced_identity) {
                 return Err(unresolved_transaction_error(path, &temp));
             }
-            if current != candidate {
+            if !current.same_content(candidate) {
                 // There is no automatic rollback in this protocol, so any
                 // non-candidate canonical value was written after the
                 // conflict and is an explicit resolution. Preserve it.
@@ -525,13 +656,14 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
 /// an unvalidated exchange candidate.
 pub fn read_mcp_configuration_consistently(path: &Path) -> ConfigurationResult<String> {
     let _lease = acquire_mcp_configuration_write_lease(path)?;
-    match std::fs::read_to_string(path) {
-        Ok(raw) => Ok(raw),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(McpServerConfigurationStoreError::Store(anyhow!(
-            "failed to read {}: {error}",
-            path.display()
-        ))),
+    match read_document_image(path)? {
+        Some((raw, _)) => String::from_utf8(raw).map_err(|error| {
+            McpServerConfigurationStoreError::InvalidInput(format!(
+                "{} is not valid UTF-8: {error}",
+                path.display()
+            ))
+        }),
+        None => Ok(String::new()),
     }
 }
 
@@ -562,7 +694,7 @@ fn publish_if_revision(
     temp: &Path,
     expected_revision: &DocumentRevision,
 ) -> ConfigurationResult<()> {
-    match expected_revision.0 {
+    match expected_revision.digest {
         None => match std::fs::hard_link(temp, path) {
             Ok(()) => {
                 std::fs::remove_file(temp)
@@ -583,7 +715,7 @@ fn publish_if_revision(
                 return Err(McpServerConfigurationStoreError::ConcurrentModification);
             }
             let candidate_revision = current_document_revision(temp)?;
-            let candidate_revision_bytes = candidate_revision.0.ok_or_else(|| {
+            let candidate_revision_bytes = candidate_revision.digest.ok_or_else(|| {
                 McpServerConfigurationStoreError::Store(anyhow!(
                     "MCP publication candidate disappeared before exchange"
                 ))
@@ -600,7 +732,9 @@ fn publish_if_revision(
             let mut transaction = PublicationTransaction {
                 version: PUBLICATION_TRANSACTION_VERSION,
                 expected_revision: expected_revision_bytes,
+                expected_identity: expected_revision.identity,
                 candidate_revision: candidate_revision_bytes,
+                candidate_identity: candidate_revision.identity,
                 temp_name,
                 phase: PublicationPhase::Prepared,
             };
@@ -621,13 +755,16 @@ fn publish_if_revision(
             })?;
             #[cfg(test)]
             run_exchange_test_hook(&AFTER_EXCHANGE_HOOK);
+            let published_revision = current_document_revision(path)?;
             let displaced_revision = current_document_revision(temp)?;
-            if displaced_revision != *expected_revision {
+            if published_revision != candidate_revision || displaced_revision != *expected_revision
+            {
                 let payload_revision = displaced_revision
-                    .0
+                    .digest
                     .ok_or_else(|| unresolved_transaction_error(path, temp))?;
                 transaction.phase = PublicationPhase::Conflict {
                     displaced_revision: payload_revision,
+                    displaced_identity: displaced_revision.identity,
                 };
                 persist_transaction(path, &transaction)?;
                 return Err(unresolved_transaction_error(path, temp));
@@ -1078,11 +1215,14 @@ mod tests {
     ) -> (PathBuf, PublicationTransaction) {
         let temp = path.with_extension(format!("toml.{}.tmp", uuid::Uuid::new_v4()));
         std::fs::write(&temp, candidate).unwrap();
-        let candidate_revision = current_document_revision(&temp).unwrap().0.unwrap();
+        let candidate_revision = current_document_revision(&temp).unwrap();
+        let expected_identity = current_document_revision(path).unwrap().identity;
         let transaction = PublicationTransaction {
             version: PUBLICATION_TRANSACTION_VERSION,
             expected_revision,
-            candidate_revision,
+            expected_identity,
+            candidate_revision: candidate_revision.digest.unwrap(),
+            candidate_identity: candidate_revision.identity,
             temp_name: temp.file_name().unwrap().to_str().unwrap().to_string(),
             phase: PublicationPhase::Prepared,
         };
@@ -1095,7 +1235,7 @@ mod tests {
         let path = temp_config();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().0.unwrap();
+        let expected = current_document_revision(&path).unwrap().digest.unwrap();
         let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
 
         assert_eq!(
@@ -1112,7 +1252,7 @@ mod tests {
         let path = temp_config();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().0.unwrap();
+        let expected = current_document_revision(&path).unwrap().digest.unwrap();
         let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
         exchange_paths(&temp, &path).unwrap();
 
@@ -1126,11 +1266,40 @@ mod tests {
     }
 
     #[test]
+    fn legacy_identity_free_journal_is_quarantined_but_remains_recoverable() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let expected = current_document_revision(&path).unwrap().digest.unwrap();
+        let (temp, mut transaction) =
+            prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
+        transaction.expected_identity = None;
+        transaction.candidate_identity = None;
+        persist_transaction(&path, &transaction).unwrap();
+        exchange_paths(&temp, &path).unwrap();
+
+        assert!(matches!(
+            read_mcp_configuration_consistently(&path).unwrap_err(),
+            McpServerConfigurationStoreError::RecoveryRequired { .. }
+        ));
+        let replacement = path.with_extension("toml.operator-resolution");
+        std::fs::write(&replacement, "model = \"chosen\"\n").unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        assert_eq!(
+            read_mcp_configuration_consistently(&path).unwrap(),
+            "model = \"chosen\"\n"
+        );
+        assert!(!temp.exists());
+        assert!(!transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn recovery_quarantines_a_crash_after_a_conflicting_exchange() {
         let path = temp_config();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().0.unwrap();
+        let expected = current_document_revision(&path).unwrap().digest.unwrap();
         let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
         std::fs::write(&path, "model = \"b\"\n").unwrap();
         exchange_paths(&temp, &path).unwrap();
@@ -1183,6 +1352,59 @@ mod tests {
         assert!(read_mcp_configuration_consistently(&path).is_err());
         assert!(preserved[0].exists());
         assert!(transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn equal_content_atomic_replacement_is_quarantined_by_file_identity() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = "model = \"a\"\n";
+        std::fs::write(&path, original).unwrap();
+        let (mut document, revision) = read_document_snapshot(&path).unwrap();
+        document["model"] = toml_edit::value("candidate");
+
+        let replacement = path.with_extension("toml.editor-replacement");
+        std::fs::write(&replacement, original).unwrap();
+        let target = path.clone();
+        BEFORE_EXCHANGE_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                std::fs::rename(&replacement, &target).unwrap();
+            }));
+        });
+
+        assert!(matches!(
+            write_document(&path, &document, revision).unwrap_err(),
+            McpServerConfigurationStoreError::RecoveryRequired { .. }
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "model = \"candidate\"\n"
+        );
+        assert!(read_mcp_configuration_consistently(&path).is_err());
+        let preserved = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|candidate| candidate.extension().is_some_and(|value| value == "tmp"))
+            .expect("equal-content replacement must remain preserved");
+        assert_eq!(std::fs::read_to_string(&preserved).unwrap(), original);
+
+        let identical_save = path.with_extension("toml.identical-save");
+        std::fs::write(&identical_save, "model = \"candidate\"\n").unwrap();
+        std::fs::rename(&identical_save, &path).unwrap();
+        assert!(
+            read_mcp_configuration_consistently(&path).is_err(),
+            "a byte-identical save remains ambiguous even with a new file identity"
+        );
+
+        std::fs::remove_file(&preserved).unwrap();
+        assert_eq!(
+            read_mcp_configuration_consistently(&path).unwrap(),
+            "model = \"candidate\"\n",
+            "removing the preserved file explicitly keeps the canonical document"
+        );
+        assert!(!transaction_path(&path).exists());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

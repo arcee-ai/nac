@@ -4,6 +4,7 @@ import { Modal, ModalSize } from "@/app/atoms";
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { LibraryPicker } from "@/app/components/modals/MCPServersModal/McpLibraryPicker";
 import { McpServerForm } from "@/app/components/modals/MCPServersModal/McpServerForm";
+import { McpServersLoadError } from "@/app/components/modals/MCPServersModal/McpServersLoadError";
 import { McpServersMobile } from "@/app/components/modals/MCPServersModal/McpServersMobile";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -26,7 +27,7 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
   // Warms the catalog as soon as the modal opens, so the picker's grouped
   // sections are already there when "Add server" is selected.
   const { data: library } = useMcpLibrary();
-  const { data, isLoading } = useMcpServers();
+  const { data, error, isError, isFetching, isLoading, refetch } = useMcpServers();
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);
   const [template, setTemplate] = useState<McpLibraryEntry | null>(null);
@@ -63,45 +64,55 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
       bodyClassName="p-0 overflow-hidden"
       footer={footer}
     >
-      <div className="flex flex-col md:flex-row items-stretch h-full min-h-0">
-        <ConfigListNav
-          draftLabel="Add server"
-          draftSelected={drafting}
-          onSelectDraft={() => pick(DRAFT)}
-          entries={servers.map((entry) => ({
-            id: entry.name,
-            name: entry.name,
-          }))}
-          selectedId={selected}
-          onSelect={pick}
-          isLoading={isLoading}
+      {isError ? (
+        <McpServersLoadError
+          error={error}
+          retrying={isFetching}
+          onRetry={() => {
+            void refetch();
+          }}
         />
+      ) : (
+        <div className="flex flex-col md:flex-row items-stretch h-full min-h-0">
+          <ConfigListNav
+            draftLabel="Add server"
+            draftSelected={drafting}
+            onSelectDraft={() => pick(DRAFT)}
+            entries={servers.map((entry) => ({
+              id: entry.name,
+              name: entry.name,
+            }))}
+            selectedId={selected}
+            onSelect={pick}
+            isLoading={isLoading}
+          />
 
-        {drafting && !template && !customDraft ? (
-          <LibraryPicker
-            onPick={(entry) => setTemplate(entry)}
-            onCustom={() => setCustomDraft(true)}
-            onClose={onClose}
-            setFooter={setFooter}
-          />
-        ) : (
-          <McpServerForm
-            key={record ? record.name : (template?.id ?? "custom")}
-            record={record}
-            template={template}
-            libraryEntry={libraryEntry}
-            onBack={() => {
-              setPicked(DRAFT);
-              setTemplate(null);
-              setCustomDraft(false);
-            }}
-            onClose={onClose}
-            onSaved={pick}
-            onDeleted={() => pick(DRAFT)}
-            setFooter={setFooter}
-          />
-        )}
-      </div>
+          {drafting && !template && !customDraft ? (
+            <LibraryPicker
+              onPick={(entry) => setTemplate(entry)}
+              onCustom={() => setCustomDraft(true)}
+              onClose={onClose}
+              setFooter={setFooter}
+            />
+          ) : (
+            <McpServerForm
+              key={record ? record.name : (template?.id ?? "custom")}
+              record={record}
+              template={template}
+              libraryEntry={libraryEntry}
+              onBack={() => {
+                setPicked(DRAFT);
+                setTemplate(null);
+                setCustomDraft(false);
+              }}
+              onClose={onClose}
+              onSaved={pick}
+              onDeleted={() => pick(DRAFT)}
+              setFooter={setFooter}
+            />
+          )}
+        </div>
+      )}
     </Modal>
   );
 }

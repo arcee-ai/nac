@@ -299,7 +299,7 @@ async fn refresh_library_cache(
     path = "/mcp_library/servers",
     operation_id = "get_mcp_library_servers",
     tag = "mcp-library",
-    responses((status = 200, description = "Success", body = McpServerList, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+    responses((status = 200, description = "Success", body = McpServerList, content_type = "application/json"), (status = 409, description = "Configuration recovery is required", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
 )]
 pub async fn list_servers_handler(
     State(manager): State<SessionManager>,
@@ -422,7 +422,7 @@ pub async fn update_server_handler(
     operation_id = "delete_mcp_library_servers_server_name",
     tag = "mcp-library",
     params(("server_name" = String, Path)),
-    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Configuration recovery is required", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
 )]
 pub async fn delete_server_handler(
     State(manager): State<SessionManager>,
@@ -443,7 +443,7 @@ pub async fn delete_server_handler(
     operation_id = "post_mcp_library_servers_test",
     tag = "mcp-library",
     request_body(content = TestMcpServerRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = TestMcpServerResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+    responses((status = 200, description = "Success", body = TestMcpServerResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Configuration recovery is required", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
 )]
 pub async fn test_server_handler(
     State(manager): State<SessionManager>,

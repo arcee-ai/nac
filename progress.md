@@ -46,17 +46,17 @@ Protected initial state verified on 2026-08-25:
    NAC-REV-010, 011, 015, and 020..023 through behavior-aware creation and
    navigation, active-run inbox UX, literal `/goal`, child ownership guards,
    documentation, and production-embedded browser tests.
-5. **In progress — closure and integrated review.** Exact evidence successor
-   `a1e93f8` passed all four release gates after `f7ded90`, then its detached
-   four-lane review returned NO-GO with five P1 and four P2 findings. The
-   candidate commits `e8aefaa`, `9ec0417`, and `31a0d70` close the accepted
-   executor-wrapper, bare-rsync, cancelled-Git, cancelled-deletion,
-   peer-sandbox, external-MCP-edit, mobile
-   delegated-branch, and orchestrator-goal seams. Focused tests, complete core
-   and server suites, and all 174 frontend tests plus typecheck/lint/format are
-   green. Exact candidate `54612fc` passes all four release gates. Its tracked
-   evidence successor must pass them again before fresh review GO; final
-   browser smoke and the final state audit then remain required.
+5. **In progress — closure and integrated review.** Exact candidate
+   `872f8b9f0a8aef061bba4b31f6d469352637ad92` passes all four release gates:
+   `make ci` (catalog 2+7+24, core 1137 passed/9 ignored, server 141, binary 21,
+   frontend 174), durability 10/10, committed-asset freshness, and production
+   Playwright 10/10. Its valid detached-clean review (session
+   `3572e4aa-da71-45b8-83c7-6f3be6d7d9fe`, run
+   `8d8f05a4-33bd-4f21-8f04-6b19082cdd53`) retained exactly two episodes for
+   exactly `authority`, `durability`, `product`, and `adversarial` and returned
+   NO-GO. The active repair covers the accepted shell-assignment, fresh and
+   resumed Podman lifecycle, equal-content MCP ABA/recovery UX, read-only
+   config import, OpenAPI, and ledger findings before another exact candidate.
 
 ### Finding map
 
@@ -184,6 +184,11 @@ Protected initial state verified on 2026-08-25:
 
 ### Current verification and next action
 
+- Exact `872f8b9f0a8aef061bba4b31f6d469352637ad92` evidence: `make ci`
+  passed with catalog 2+7+24, core 1137/9 ignored, server 141, binary 21, and
+  frontend 174; deterministic durability passed 10/10; committed assets were
+  fresh; and production-embedded Playwright passed 10/10. The valid immutable
+  review still returned NO-GO, so those gates are evidence, not acceptance.
 - Initial Git state/history inspection: complete.
 - Required repository/notebook/review/objective reading: complete.
 - Current `a1e93f8` repair focused evidence: executor-wrapper and bare-rsync
@@ -710,9 +715,20 @@ Non-negotiable invariants:
 - `54612fc record immutable review repair status`.
 - `f42f2b5 record exact final repair gates`.
 - `a7b0693 close final lifecycle review gaps`.
+- `872f8b9 make persisted sandbox and MCP recovery durable`.
 
 ## Known problems and blockers
 
+- Exact candidate `872f8b9f0a8aef061bba4b31f6d469352637ad92`
+  passed every release gate but its valid immutable review is NO-GO. Session
+  `3572e4aa-da71-45b8-83c7-6f3be6d7d9fe`, run
+  `8d8f05a4-33bd-4f21-8f04-6b19082cdd53`, used exactly four names with two
+  episodes each. Accepted blockers are Bash `+=` rsync-hook bypass and loader
+  environment execution, cancellation/rollback of fresh Podman creation,
+  peer attachment recreating a container after deletion, equal-content MCP
+  ABA acceptance, misleading/hidden MCP recovery state, basename-triggered
+  sidecar writes for explicit read-only config imports, overbroad rsync token
+  scanning, and incomplete 409/OpenAPI/ledger behavior.
 - Exact candidate `a7b0693d155ea75b741086bb95f1b2bb8fbd14a9`
   passed all four release gates, but its valid detached-clean immutable review
   is NO-GO. Session `0c010f3f-325f-4083-9bd3-59bcd2b71bd6`, run
@@ -722,21 +738,22 @@ Non-negotiable invariants:
   editor save; cached resumed-sandbox deletion can orphan the container; and
   successful fresh persistence still leaves Drop able to erase the container
   that later resume expects.
-- The active repair makes durable persistence the ownership transition: failed
-  launch still cleans its fresh container, successful persistence disables Drop
-  cleanup, explicit deletion is authoritative from fresh or resumed services,
-  and resume recreates an absent stable container. Read-only NAC audit
-  `2b615ea1-341c-4a35-b806-1668958d5727` proved strict existing-path content
-  CAS impossible against arbitrary noncooperating renames and supplied the
-  recoverable boundary now implemented: journal-aware NAC readers, synced
-  metadata-only transaction state, one exchange with no automatic rollback,
-  automatic recovery only for proven states, and fail-closed preservation of
-  both complete files on a true conflict. Sixteen focused MCP file-config tests
-  plus the sandbox and rsync regressions pass. The complete precommit suites
-  also pass: core 1137 with 9 intentional ignores, server 140, binary 21,
-  workspace check, warning-denied lint, and formatting. This is implementation
-  evidence only; the coherent commit, exact candidate gates, and a new
-  immutable review remain required.
+- The active `872f8b9` repair classifies Bash `+=` and loader hooks only in
+  execution-bearing assignment positions while accepting assignment-shaped
+  data arguments. Fresh Podman creation is cancellation-owned until `run`
+  settles, ordinary post-create launch failures perform checked rollback, and
+  resume acquires peer-visible resource authority before snapshot/container
+  materialization. MCP revisions bind both complete-file digest and file
+  identity, including fail-closed migration of legacy identity-free journals;
+  equal-content atomic replacement and byte-identical recovery saves remain
+  quarantined, while removing the preserved file or saving distinct canonical
+  content resolves the conflict. Explicitly selected configs are pure reads,
+  list/delete/test document reachable 409 recovery responses, and desktop plus
+  mobile dashboards render the actionable server error with retry. Eighteen MCP
+  state-machine tests and every focused authority regression pass; workspace
+  check and all 175 frontend tests also pass. This is implementation evidence
+  only; the coherent commit, exact candidate gates, and a new immutable review
+  remain required.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -744,10 +761,8 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Complete the recoverable MCP publication contract,
-finish focused and broad regressions for the `a7b0693` NO-GO repair, then commit
-only the intended tracked implementation/ledger files. Repeat all four
-exact-SHA release gates while preserving `.gitignore`, untracked `AGENTS.md`,
-`demo_ext_managed.md`, `demo_review.md`, and the ignored local decision
-notebook. Only a fresh detached-clean acyclic four-lane NAC GO may advance to
-final browser smoke and the final ledger/status audit.
+Closure is still active. Commit only the intended tracked `872f8b9` repair and
+ledger files, then repeat all four exact-SHA release gates while preserving
+`.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
+the ignored local decision notebook. Only a fresh detached-clean four-lane,
+two-episode NAC GO may advance to final browser smoke and status audit.

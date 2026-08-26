@@ -57,7 +57,7 @@ fn file_servers_for_policy(
     let Some(path) = default_config_path(paths) else {
         return (BTreeMap::new(), None);
     };
-    if !path.exists() {
+    if !super::file_config::mcp_configuration_state_exists(&path) {
         return (BTreeMap::new(), None);
     }
     let raw = match super::read_mcp_configuration_consistently(&path) {

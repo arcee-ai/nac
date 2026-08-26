@@ -3724,6 +3724,9 @@ impl SessionManager {
         session_id: &str,
         operation_lease: Option<&sessions::SessionOperationLease>,
     ) -> Result<SessionService> {
+        let resource_lease =
+            sessions::SessionResourceLease::try_acquire(&self.inner.store_path, session_id)
+                .map_err(anyhow::Error::new)?;
         let summary = self
             .list_sessions(false)
             .await?
@@ -3758,7 +3761,7 @@ impl SessionManager {
             .await?
         };
         let service = SessionService::from_orchestrator_run_config(run_config).service;
-        service.acquire_sandbox_resource_lease()?;
+        service.adopt_sandbox_resource_lease(resource_lease);
         Ok(service)
     }
 
@@ -3770,6 +3773,13 @@ impl SessionManager {
         bool,
         Option<sessions::SessionOperationLease>,
     )> {
+        // Shared resource authority must precede snapshot loading and any
+        // observer-side Podman inspection/materialization. A concurrent
+        // deletion then either wins before this point or remains excluded
+        // through row revalidation and service publication.
+        let resource_lease =
+            sessions::SessionResourceLease::try_acquire(&self.inner.store_path, session_id)
+                .map_err(anyhow::Error::new)?;
         let summary = self
             .list_sessions(false)
             .await?
@@ -3793,7 +3803,7 @@ impl SessionManager {
             )
             .await?;
         let service = SessionService::from_orchestrator_run_config(run_config).service;
-        service.acquire_sandbox_resource_lease()?;
+        service.adopt_sandbox_resource_lease(resource_lease);
         Ok((service, cacheable, operation_lease))
     }
 
@@ -8225,6 +8235,9 @@ mod tests {
             ("get", "/sessions/{session_id}/config", "400"),
             ("post", "/sessions/{session_id}/compact", "400"),
             ("delete", "/mcp_library/servers/{server_name}", "400"),
+            ("get", "/mcp_library/servers", "409"),
+            ("delete", "/mcp_library/servers/{server_name}", "409"),
+            ("post", "/mcp_library/servers/test", "409"),
         ] {
             assert!(
                 document["paths"][path][method]["responses"][status].is_object(),
@@ -13846,6 +13859,50 @@ thread_timeout_secs = 7200
         let second = manager.attach_session("session").await.unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(first.config_version(), Some(0));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn attachment_takes_resource_lease_before_sandbox_materialization() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("attachment_resource_lease_order");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "server-test-key") };
+        let mut snapshot = sessions::new_snapshot(
+            "session".to_string(),
+            root.clone(),
+            "claude-sonnet-4-6-20251001".to_string(),
+            "https://api.anthropic.com/v1".to_string(),
+            BackendKind::AnthropicMessages,
+            Some(ReasoningEffort::High),
+            None,
+            None,
+            Vec::new(),
+            Some("ANTHROPIC_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        nac_core::test_support::set_default_sandbox_spec(&mut snapshot);
+        snapshot.behavior = sessions::SessionBehavior::Direct;
+        let store_path = root.join("store.db");
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let mutation =
+            sessions::SessionResourceMutationLease::try_acquire(&store_path, "session").unwrap();
+        let manager = test_manager(&root);
+
+        let error = match manager.attach_session("session").await {
+            Ok(_) => panic!("exclusive deletion authority must precede Podman inspection"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("busy with an active operation"));
+        assert!(!manager
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .contains_key("session"));
+
+        drop(mutation);
         let _ = std::fs::remove_dir_all(root);
     }
 
