@@ -57,6 +57,16 @@ Protected initial state verified on 2026-08-25:
    NO-GO. The active repair covers the accepted shell-assignment, fresh and
    resumed Podman lifecycle, equal-content MCP ABA/recovery UX, read-only
    config import, OpenAPI, and ledger findings before another exact candidate.
+   Evidence successor `d9bfe356f78ab6268c683b69bd753c49aa1254f2`
+   then passed all four exact gates (`make ci`: catalog 2+7+24, core 1141/9
+   ignored, server 142, binary 21, frontend 175; durability 10/10; assets
+   fresh; production Playwright 10/10). Its detached-clean review session
+   `2ba70a6e-c49e-4556-9bdb-9ca994172e2c`, run
+   `0264512b-b57b-4914-af6d-1e2f1a822438`, satisfied the exact four-name,
+   two-episode topology and returned NO-GO. The active repair addresses its
+   four accepted blockers: stateful loader-variable assignments, launch-owned
+   Podman rollback identity, post-commit worktree deletion, and legacy
+   identity-free MCP conflict recovery.
 
 ### Finding map
 
@@ -721,6 +731,18 @@ Non-negotiable invariants:
 
 ## Known problems and blockers
 
+- Exact candidate `d9bfe356f78ab6268c683b69bd753c49aa1254f2`
+  passed every release gate but its valid immutable review is NO-GO. Session
+  `2ba70a6e-c49e-4556-9bdb-9ca994172e2c`, run
+  `0264512b-b57b-4914-af6d-1e2f1a822438`, retained exactly two episodes for
+  each of exactly `authority`, `durability`, `product`, and `adversarial` in a
+  clean detached checkout. Accepted blockers are Linux `LD_LIBRARY_PATH` plus
+  stateful `export`/`declare`/`typeset` loader assignments; cancelled Podman
+  creator cleanup targeting a peer's deterministic container name; attached
+  deletion removing the worktree before fallible durable row deletion; and a
+  legacy identity-free Conflict journal rejecting the documented distinct-
+  canonical-content recovery choice. The ledger wording itself was demoted to
+  expected post-review bookkeeping, and no Podman-backed QA pass was claimed.
 - Exact candidate `872f8b9f0a8aef061bba4b31f6d469352637ad92`
   passed every release gate but its valid immutable review is NO-GO. Session
   `3572e4aa-da71-45b8-83c7-6f3be6d7d9fe`, run
@@ -781,9 +803,35 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit this exact `88fd04f` gate evidence, repeat all
-four gates on that evidence successor, then run the required detached-clean
+Closure is still active. Complete and commit the four `d9bfe35` review repairs,
+run all four exact gates on the coherent successor, record the evidence without
+claiming unavailable Podman-backed QA, and obtain another detached-clean
 four-lane/two-episode NAC review while preserving
 `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
 the ignored local decision notebook. Only a fresh detached-clean four-lane,
 two-episode NAC GO may advance to final browser smoke and status audit.
+
+## Exact `d9bfe35` review
+
+Candidate `d9bfe356f78ab6268c683b69bd753c49aa1254f2` passed all four
+exact release gates: `make ci` (catalog 2+7+24, core 1141/9 ignored, server
+142, binary 21, frontend 175), deterministic durability 10/10, committed-asset
+freshness, and production-embedded Playwright 10/10. Detached clean review
+session `2ba70a6e-c49e-4556-9bdb-9ca994172e2c`, run
+`0264512b-b57b-4914-af6d-1e2f1a822438`, used only `authority`, `durability`,
+`product`, and `adversarial`, retained exactly two episodes for each, and
+reconfirmed the exact SHA plus empty porcelain in every episode. It returned
+NO-GO with four accepted blockers.
+
+The active repair hard-denies `LD_LIBRARY_PATH` and loader/rsync hook
+assignments performed by stateful Bash assignment builtins without scanning
+ordinary post-command data. Each `podman run` now receives a unique cidfile;
+cancellation cleanup waits for that exact task and removes only the emitted
+container ID, while a duplicate-name loser with no cidfile cannot touch the
+winner. Explicit sandbox destruction removes the container but preserves its
+registered checkout until durable row deletion commits, after which both
+attached and uncached paths perform best-effort worktree cleanup. Legacy
+identity-free Conflict journals retain fail-closed content verification while
+allowing an operator's distinct complete canonical save to resolve the
+conflict. Focused regressions cover all four seams; broad exact gates and a new
+immutable review remain required.

@@ -3569,10 +3569,12 @@ impl SessionManager {
         suppression_rollback.disarm();
         self.inner.active_sessions.write().await.remove(session_id);
         sandbox_lease_rollback.disarm();
-        if service.is_none() {
-            if let Some(worktree) = persisted_worktree {
-                runtime::cleanup_session_worktree(&worktree);
-            }
+        // Workspace removal is deliberately after the durable row commit for
+        // both attached and uncached sessions. If SQLite deletion fails, the
+        // registered checkout and all uncommitted/untracked work remain
+        // available for a retry or resumed sandbox.
+        if let Some(worktree) = persisted_worktree {
+            runtime::cleanup_session_worktree(&worktree);
         }
         Ok(())
     }

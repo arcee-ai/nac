@@ -636,7 +636,18 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
                 // current canonical document.
                 return clear_transaction(path);
             }
-            if temp_revision != DocumentRevision::recorded(displaced_revision, displaced_identity) {
+            let displaced = DocumentRevision::recorded(displaced_revision, displaced_identity);
+            let preserved_matches = if displaced_identity.is_some() {
+                temp_revision == displaced
+            } else {
+                // Journals written before file identity was recorded cannot
+                // prove which inode is preserved. Retain their fail-closed
+                // conflict state, but allow the documented explicit recovery
+                // action once the operator atomically saves distinct complete
+                // canonical content.
+                temp_revision.same_content(displaced)
+            };
+            if !preserved_matches {
                 return Err(unresolved_transaction_error(path, &temp));
             }
             if !current.same_content(candidate) {
@@ -1277,6 +1288,40 @@ mod tests {
         transaction.candidate_identity = None;
         persist_transaction(&path, &transaction).unwrap();
         exchange_paths(&temp, &path).unwrap();
+
+        assert!(matches!(
+            read_mcp_configuration_consistently(&path).unwrap_err(),
+            McpServerConfigurationStoreError::RecoveryRequired { .. }
+        ));
+        let replacement = path.with_extension("toml.operator-resolution");
+        std::fs::write(&replacement, "model = \"chosen\"\n").unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        assert_eq!(
+            read_mcp_configuration_consistently(&path).unwrap(),
+            "model = \"chosen\"\n"
+        );
+        assert!(!temp.exists());
+        assert!(!transaction_path(&path).exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn legacy_identity_free_conflict_accepts_distinct_canonical_recovery() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "model = \"a\"\n").unwrap();
+        let expected = current_document_revision(&path).unwrap().digest.unwrap();
+        let (temp, mut transaction) =
+            prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
+        exchange_paths(&temp, &path).unwrap();
+        let displaced_revision = current_document_revision(&temp).unwrap().digest.unwrap();
+        transaction.expected_identity = None;
+        transaction.candidate_identity = None;
+        transaction.phase = PublicationPhase::Conflict {
+            displaced_revision,
+            displaced_identity: None,
+        };
+        persist_transaction(&path, &transaction).unwrap();
 
         assert!(matches!(
             read_mcp_configuration_consistently(&path).unwrap_err(),
