@@ -134,6 +134,7 @@ impl ProcessTreeGuard {
             let root_pid = child.id().map(|pid| pid as libc::pid_t);
             #[cfg(target_os = "linux")]
             let root_start_time = root_pid.and_then(process_start_time);
+            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
             let mut guard = Self {
                 root_pid,
                 #[cfg(target_os = "linux")]
