@@ -592,7 +592,8 @@ mod tests {
         }
         .into();
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(error.message.contains("preserved both"));
+        assert!(error.message.contains("removes the preserved file"));
+        assert!(error.message.contains("byte-identical"));
     }
 
     #[test]
