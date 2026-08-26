@@ -1748,6 +1748,51 @@ mod discovery_tool_definition_tests {
             .all(|resource| resource.hard_denial.is_none()));
         let _ = std::fs::remove_dir_all(directory);
     }
+
+    #[tokio::test]
+    async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
+        let directory =
+            std::env::temp_dir().join(format!("nac-worker-hard-denial-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = directory.clone();
+        runtime.store_path = directory.join("store.db");
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &directory);
+        assert!(runtime.permission_broker.is_none());
+        let client = crate::model::ModelClient::new_for_test();
+        let services = kernel::ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+        let registry = worker_tool_registry(false).unwrap();
+        let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+        let context = kernel::ToolCallContext {
+            call_id: Some("call-worker-denied".to_string()),
+            thread_name: Some("worker".to_string()),
+        };
+
+        for (tool, input, denial) in [
+            (
+                "write_stdin",
+                serde_json::json!({"session_id":"shell-test", "chars":"help<RET>"}),
+                "nonempty terminal input is blocked",
+            ),
+            (
+                "exec_command",
+                serde_json::json!({"cmd":"bash", "tty":true}),
+                "interactive opaque commands and broad interpreters are blocked",
+            ),
+        ] {
+            let result = snapshot.invoke(tool, input, services, &context).await;
+            assert!(result.is_error, "{tool} unexpectedly executed");
+            assert!(
+                result.content.to_string().contains(denial),
+                "{tool}: {}",
+                result.content
+            );
+        }
+        let _ = std::fs::remove_dir_all(directory);
+    }
 }
 
 // ------------------------------------------------------------------

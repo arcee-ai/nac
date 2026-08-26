@@ -1177,6 +1177,7 @@ fn hard_shell_denial_inner(
         "chrt"
             | "daemon"
             | "daemonize"
+            | "flock"
             | "ionice"
             | "numactl"
             | "parallel"
@@ -2448,9 +2449,12 @@ fn opaque_hard_shell_denial(
                 .to_string(),
         );
     }
-    if segments.iter().any(|tokens| dynamic_rm_command(tokens)) {
+    if segments
+        .iter()
+        .any(|tokens| dynamic_deletion_command(tokens))
+    {
         return Some(
-            "dynamic rm operands are blocked because protected deletion targets cannot be resolved before execution"
+            "dynamic deletion operands are blocked because protected targets cannot be resolved before execution"
                 .to_string(),
         );
     }
@@ -2475,8 +2479,8 @@ fn opaque_hard_shell_denial(
                 .to_string(),
         );
     }
-    for index in 0..tokens.len() {
-        if let Some(reason) = hard_shell_denial(&tokens[index..], cwd, backend) {
+    for segment in &segments {
+        if let Some(reason) = hard_shell_denial(segment, cwd, backend) {
             return Some(reason);
         }
     }
@@ -2491,7 +2495,7 @@ fn dynamic_shell_command_name(token: &str) -> bool {
         || token.contains('[') && token != "[" && !token.starts_with("[[")
 }
 
-fn dynamic_rm_command(tokens: &[String]) -> bool {
+fn dynamic_deletion_command(tokens: &[String]) -> bool {
     let mut effective = effective_command_tokens(tokens);
     if effective
         .first()
@@ -2510,11 +2514,12 @@ fn dynamic_rm_command(tokens: &[String]) -> bool {
         .and_then(|command| command.rsplit('/').next())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if command == "rm"
-        && effective
-            .iter()
-            .skip(1)
-            .any(|token| token.contains('$') || token.contains('`'))
+    if matches!(command.as_str(), "rm" | "rmdir" | "unlink")
+        && effective.iter().skip(1).any(|token| {
+            token
+                .chars()
+                .any(|character| matches!(character, '$' | '`' | '*' | '?' | '[' | '{' | '}'))
+        })
     {
         return true;
     }
@@ -2522,16 +2527,16 @@ fn dynamic_rm_command(tokens: &[String]) -> bool {
         return xargs_command_tokens(effective)
             .ok()
             .flatten()
-            .is_some_and(dynamic_rm_command);
+            .is_some_and(dynamic_deletion_command);
     }
-    if command == "find" && find_exec_commands(effective).any(dynamic_rm_command) {
+    if command == "find" && find_exec_commands(effective).any(dynamic_deletion_command) {
         return true;
     }
     if matches!(command.as_str(), "bash" | "dash" | "fish" | "sh" | "zsh") {
         if let Some(body) = literal_shell_command_body(effective) {
             return opaque_shell_segments(body)
                 .iter()
-                .any(|tokens| dynamic_rm_command(tokens));
+                .any(|tokens| dynamic_deletion_command(tokens));
         }
     }
     false
@@ -3145,6 +3150,7 @@ mod tests {
             "rg --pre=sudo needle .",
             "script -q /dev/null rm -rf .",
             "script -q -c 'rm -rf .' /dev/null",
+            "flock Cargo.lock unlink .git/config",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
             "sh -c 'unlink .git/config'",
@@ -3179,6 +3185,9 @@ mod tests {
             "eval 'rm -rf .'",
             "{rm,-rf} .",
             "[r]m -rf .",
+            "rm -rf .g*",
+            "unlink .g*/config",
+            "rmdir .g*/empty",
             "x=; c=r${x}m; \"$c\" -rf .",
         ] {
             assert!(
@@ -3211,6 +3220,8 @@ mod tests {
             "env -a harmless printf '%s' 'rm -rf $PWD'",
             "nice --adjustment 0 printf '%s' 'rm -rf $PWD'",
             "[ -f file ]",
+            "printf '%s\\n' {rm,-rf} .",
+            "printf '%s\\n' .g*",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
