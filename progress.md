@@ -632,10 +632,11 @@ Non-negotiable invariants:
   nonempty-input plus retain authorization; native Local ancestor-swap TOCTOU;
   peer-owned managed-orchestrator steering; total portable identity-inspection
   uncertainty; and point-in-time workspace mutation admission.
-- The active repair has focused passing regressions for all seven seams. Full
-  crate validation also passes: nac-core 1115 passed/9 ignored and nac-server
-  135 plus binary 21 passed. Exact full release gates remain pending until the
-  repair and this tracked evidence are committed.
+- Exact repair `e282d18df68cbd30f5afde9c83c7e88508929fff` closes all seven
+  `d6960ae` findings. Its four exact-commit release gates pass: `make ci`
+  (catalog 2+7+24, core 1116 passed/9 ignored, server 135, binary 21,
+  frontend 173), `make test-durability` (10/10), `make test-assets` with no
+  committed-bundle drift, and production-embedded Playwright 10/10.
 
 ## Completed commits
 
@@ -651,14 +652,15 @@ Non-negotiable invariants:
 - `3e728d5 feat(core): add managed orchestrator control`.
 - `9b4125c close terminal authority and cleanup seams`.
 - `d6960ae close final authority review gaps`.
+- `e282d18 close remaining authority gaps`.
 
 ## Known problems and blockers
 
-- The seven `d6960ae` P1s are implemented but have not yet passed immutable-SHA
-  release gates or a fresh detached-clean review. Retained terminals now hold a
-  shared cross-process checkout lease; branch/commit admission takes its
-  exclusive twin plus every same-checkout session operation lease through the
-  Git mutation.
+- The seven `d6960ae` P1s are implemented and have passed immutable-SHA release
+  gates at `e282d18`; a fresh detached-clean review is still required. Retained
+  terminals now hold a shared cross-process checkout lease; branch/commit
+  admission takes its exclusive twin plus every same-checkout session operation
+  lease through the Git mutation.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -666,9 +668,9 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Audit and commit the seven-finding `d6960ae` review
-repair plus this tracked ledger, preserving `.gitignore`, untracked
-`AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and the ignored local
-decision notebook. Then run all four release gates at that exact SHA and obtain
-a fresh detached-clean acyclic four-lane NAC verdict. A GO must be followed by
-the final production browser smoke and ledger/status audit before completion.
+Closure is still active. Commit this evidence-only ledger successor while
+preserving `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`,
+`demo_review.md`, and the ignored local decision notebook. Run all four release
+gates again at that exact successor SHA, then obtain a fresh detached-clean
+acyclic four-lane NAC verdict. A GO must be followed by the final production
+browser smoke and ledger/status audit before completion.
