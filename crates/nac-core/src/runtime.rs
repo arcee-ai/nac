@@ -1012,9 +1012,13 @@ async fn build_run_config_inner(
     let session_id = Uuid::new_v4().to_string();
     let paths = PathContext::new(&workspace_cwd);
     let mut worktree_rollback: session_worktree::RollbackGuard;
-    let sandbox =
-        build_sandbox_session_inner(&sandbox_options, &workspace_cwd, Some(session_id.clone()))
-            .await?;
+    let sandbox = build_sandbox_session_inner(
+        &sandbox_options,
+        &workspace_cwd,
+        Some(session_id.clone()),
+        Some(store_path.clone()),
+    )
+    .await?;
     worktree_rollback = session_worktree::RollbackGuard::new(
         sandbox
             .as_ref()
@@ -1119,7 +1123,7 @@ async fn build_run_config_inner(
                 // Disable fire-and-forget Drop cleanup before performing the
                 // checked rollback. Every in-process failure after successful
                 // `podman run` now settles removal before launch returns.
-                sandbox.retain_for_durable_session();
+                sandbox.disable_drop_cleanup();
                 if let Err(cleanup) = sandbox.destroy().await {
                     return Err(error.context(format!(
                         "fresh sandbox launch also failed to roll back its container: {cleanup:#}"
@@ -1762,13 +1766,14 @@ pub async fn build_sandbox_session(
     options: &EffectiveSandboxOptions,
     cwd: &Path,
 ) -> Result<Option<SandboxSession>> {
-    build_sandbox_session_inner(options, cwd, None).await
+    build_sandbox_session_inner(options, cwd, None, None).await
 }
 
 async fn build_sandbox_session_inner(
     options: &EffectiveSandboxOptions,
     cwd: &Path,
     owned_session_key: Option<String>,
+    durable_store_path: Option<PathBuf>,
 ) -> Result<Option<SandboxSession>> {
     validate_sandbox_options(options)?;
     if !options.sandbox {
@@ -1864,7 +1869,14 @@ async fn build_sandbox_session_inner(
         .clone()
         .filter(|key| !key.is_empty() && key.len() <= 128)
         .unwrap_or_else(|| session_key.clone());
-    let session = session_worktree::launch_session(spec, session_key, owner, activity_key).await?;
+    let session = session_worktree::launch_session(
+        spec,
+        session_key,
+        owner,
+        activity_key,
+        durable_store_path,
+    )
+    .await?;
     Ok(Some(session))
 }
 

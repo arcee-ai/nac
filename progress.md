@@ -803,14 +803,33 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Coherent repair commit
-`5d3fdc0026b33f0ee7320935761f595eaa0e198e` has passed all four exact gates.
-Commit this evidence-only ledger update, repeat the four gates on that exact
-code-identical successor, and obtain another detached-clean four-lane/two-
-episode NAC review while preserving
+Closure is still active. Evidence successor
+`62368f82a56625eaba8f96373b01e12c44cedd63` passed all four exact gates, but
+review session `884c2806-838d-4207-851f-99dabf10d132` (run
+`74334946-c324-48b7-953a-e43fef096f6c`) is both structurally invalid and
+NO-GO: its adversarial continuation was rejected by the provider content
+filter, leaving retained topology 2/2/2/1 rather than the required two
+episodes in every lane. The completed episodes independently confirmed two P1
+blockers: stateful Bash `set -a` plus `let`/`read` can create exported loader
+hooks across separately authorized segments, reopening NAC-REV-003; and a
+process loss after successful `podman run` but before the session-row commit
+can orphan a detached container after its creation record is removed.
+
+The active repair hard-denies the allexport state transition and direct
+protected-hook targets for `let` and `read` across local, Podman, and SSH
+classification. Fresh durable Podman creation now keeps a private, locked,
+store- and session-bound ID/token record from before `run` through the durable
+row commit. Server startup reconciles abandoned records: active locks are
+skipped, committed rows retain their containers, absent or malformed authority
+is preserved fail-closed, and uncommitted full IDs are removed only after
+matching the per-launch label; failures remain retryable. Focused permission,
+creation-barrier, cancellation, cleanup-retry, and committed-row regressions,
+crate checks, and the complete core suite (1157 tests including 9 ignored)
+pass. A coherent commit, all four exact gates, an evidence successor with
+repeated exact gates, and a fresh valid detached-clean four-lane/two-episode
+NAC GO remain required before final browser smoke and status audit. Preserve
 `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
-the ignored local decision notebook. Only a fresh detached-clean four-lane,
-two-episode NAC GO may advance to final browser smoke and status audit.
+the ignored local decision notebook throughout.
 
 ## Exact `d9bfe35` review
 

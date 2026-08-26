@@ -1,11 +1,15 @@
 use std::ffi::OsString;
-use std::path::Path;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Stdio as StdStdio;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use fs2::FileExt;
 use portable_pty::CommandBuilder as PtyCommandBuilder;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -13,6 +17,14 @@ use tokio::time::timeout;
 
 use super::{MountSpec, SandboxAvailability, SandboxAvailabilityStatus, SandboxSpec};
 use crate::workspace::first_stderr_line;
+
+fn podman_program() -> OsString {
+    #[cfg(test)]
+    if let Some(program) = std::env::var_os("NAC_TEST_PODMAN_PROGRAM") {
+        return program;
+    }
+    OsString::from("podman")
+}
 
 /// Probes whether podman can be used on this host right now: first the binary
 /// (`podman --version`), then the runtime (`podman info`, which fails while a
@@ -286,6 +298,24 @@ pub(crate) struct PodmanSession {
     /// one was sent, else the session key. Keyed per launch so concurrent
     /// launches do not clobber each other's reported phase.
     activity_key: String,
+    /// Present only while a fresh durable launch has created its container but
+    /// has not yet transferred ownership to the committed session row.
+    creation_store_path: Option<PathBuf>,
+    creation_record: Mutex<Option<CreationRecordAuthority>>,
+}
+
+struct CreationRecordAuthority {
+    cidfile: PathBuf,
+    lock_file: File,
+}
+
+impl CreationRecordAuthority {
+    fn remove(self) {
+        let cidfile = self.cidfile.clone();
+        let _ = FileExt::unlock(&self.lock_file);
+        drop(self);
+        remove_creation_record(&cidfile);
+    }
 }
 
 /// Owns an in-flight `podman run` until it is known to have settled. If the
@@ -294,14 +324,23 @@ pub(crate) struct PodmanSession {
 /// registration.
 struct PendingContainerCreation {
     task: Option<tokio::task::JoinHandle<std::io::Result<std::process::Output>>>,
-    cidfile: std::path::PathBuf,
+    record: Option<CreationRecordAuthority>,
     settled: bool,
 }
 
 impl PendingContainerCreation {
     fn disarm(&mut self) {
         self.task = None;
-        remove_creation_record(&self.cidfile);
+        if let Some(record) = self.record.take() {
+            record.remove();
+        }
+    }
+
+    fn transfer_record(&mut self) -> CreationRecordAuthority {
+        self.task = None;
+        self.record
+            .take()
+            .expect("successful creation retains its ownership record")
     }
 }
 
@@ -310,7 +349,9 @@ impl Drop for PendingContainerCreation {
         let Some(task) = self.task.take() else {
             return;
         };
-        let cidfile = self.cidfile.clone();
+        let Some(record) = self.record.take() else {
+            return;
+        };
         let settled = self.settled;
         tokio::spawn(async move {
             if settled {
@@ -318,7 +359,8 @@ impl Drop for PendingContainerCreation {
             } else {
                 let _ = task.await;
             }
-            if let Err(error) = destroy_created_container(&cidfile).await {
+            let cidfile = record.cidfile.clone();
+            if let Err(error) = destroy_created_container_record(record).await {
                 eprintln!(
                     "nac: failed to roll back cancelled sandbox creation recorded in '{}': {error:#}",
                     cidfile.display()
@@ -331,11 +373,23 @@ impl Drop for PendingContainerCreation {
 /// Removes only the container identity emitted by this exact `podman run`.
 /// A failed duplicate-name creator has no cidfile and therefore cannot delete
 /// the peer container that won the shared deterministic name.
+#[cfg(test)]
 async fn destroy_created_container(cidfile: &Path) -> Result<()> {
+    destroy_created_container_only(cidfile).await?;
+    remove_creation_record(cidfile);
+    Ok(())
+}
+
+async fn destroy_created_container_record(record: CreationRecordAuthority) -> Result<()> {
+    destroy_created_container_only(&record.cidfile).await?;
+    record.remove();
+    Ok(())
+}
+
+async fn destroy_created_container_only(cidfile: &Path) -> Result<()> {
     let container_id = match tokio::fs::read_to_string(cidfile).await {
         Ok(container_id) => container_id.trim().to_string(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            remove_creation_record(cidfile);
             return Ok(());
         }
         Err(error) => {
@@ -371,7 +425,7 @@ async fn destroy_created_container(cidfile: &Path) -> Result<()> {
         );
     }
 
-    let inspection = Command::new("podman")
+    let inspection = Command::new(podman_program())
         .args([
             "inspect",
             "--type",
@@ -399,7 +453,7 @@ async fn destroy_created_container(cidfile: &Path) -> Result<()> {
         );
     }
 
-    let output = Command::new("podman")
+    let output = Command::new(podman_program())
         .args(["rm", "--ignore", "-f", "--", &container_id])
         .output()
         .await
@@ -412,13 +466,15 @@ async fn destroy_created_container(cidfile: &Path) -> Result<()> {
             cidfile.display()
         );
     }
-    remove_creation_record(cidfile);
     Ok(())
 }
 
 fn remove_creation_record(cidfile: &Path) {
     let _ = std::fs::remove_file(cidfile);
     let _ = std::fs::remove_file(creation_token_path(cidfile));
+    let _ = std::fs::remove_file(creation_session_path(cidfile));
+    let _ = std::fs::remove_file(creation_store_path(cidfile));
+    let _ = std::fs::remove_file(creation_lock_path(cidfile));
     if let Some(directory) = cidfile.parent() {
         let _ = std::fs::remove_dir(directory);
     }
@@ -426,6 +482,215 @@ fn remove_creation_record(cidfile: &Path) {
 
 fn creation_token_path(cidfile: &Path) -> std::path::PathBuf {
     cidfile.with_file_name("ownership.token")
+}
+
+fn creation_session_path(cidfile: &Path) -> PathBuf {
+    cidfile.with_file_name("session.key")
+}
+
+fn creation_store_path(cidfile: &Path) -> PathBuf {
+    cidfile.with_file_name("store.path")
+}
+
+fn creation_lock_path(cidfile: &Path) -> PathBuf {
+    cidfile.with_file_name("ownership.lock")
+}
+
+fn write_private_record(path: &Path, contents: &[u8]) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to create private record '{}'", path.display()))?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn create_creation_record(
+    session_key: &str,
+    store_path: Option<&Path>,
+    ownership_token: &str,
+) -> Result<CreationRecordAuthority> {
+    let directory = std::env::temp_dir().join(format!(
+        "nac-podman-create-{}-{}",
+        sanitize_name(session_key),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&directory).with_context(|| {
+        format!(
+            "failed to create private Podman creation record directory '{}'",
+            directory.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+    }
+
+    let cidfile = directory.join("container.cid");
+    let result = (|| -> Result<CreationRecordAuthority> {
+        write_private_record(
+            &creation_token_path(&cidfile),
+            format!("{ownership_token}\n").as_bytes(),
+        )?;
+        write_private_record(
+            &creation_session_path(&cidfile),
+            format!("{session_key}\n").as_bytes(),
+        )?;
+        if let Some(store_path) = store_path {
+            let canonical_store = store_path.canonicalize().with_context(|| {
+                format!(
+                    "failed to canonicalize durable store '{}' for Podman creation ownership",
+                    store_path.display()
+                )
+            })?;
+            write_private_record(
+                &creation_store_path(&cidfile),
+                &serde_json::to_vec(&canonical_store)?,
+            )?;
+        }
+        let lock_path = creation_lock_path(&cidfile);
+        write_private_record(&lock_path, b"")?;
+        let lock_file = OpenOptions::new().read(true).write(true).open(&lock_path)?;
+        FileExt::lock_exclusive(&lock_file)?;
+        #[cfg(unix)]
+        File::open(&directory)?.sync_all()?;
+        Ok(CreationRecordAuthority { cidfile, lock_file })
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+    result
+}
+
+/// On server startup, settle private creation records that outlived their
+/// creating process. The held lock distinguishes an active launch from an
+/// abandoned one. A committed row wins ownership; otherwise removal remains
+/// bound to the full container ID and per-launch Podman label.
+pub(crate) async fn reconcile_creation_records(store_path: &Path) -> Result<()> {
+    let canonical_store = store_path.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize durable store '{}' before reconciling Podman creation ownership",
+            store_path.display()
+        )
+    })?;
+    let entries = match std::fs::read_dir(std::env::temp_dir()) {
+        Ok(entries) => entries,
+        Err(error) => return Err(error).context("failed to scan Podman creation records"),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                eprintln!("nac: failed to inspect a Podman creation record: {error}");
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("nac-podman-create-") {
+            continue;
+        }
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                eprintln!(
+                    "nac: failed to inspect Podman creation record '{}': {error}",
+                    entry.path().display()
+                );
+                continue;
+            }
+        };
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        let cidfile = entry.path().join("container.cid");
+        let recorded_store: PathBuf = match std::fs::read(creation_store_path(&cidfile))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        {
+            Some(recorded_store) => recorded_store,
+            None => continue,
+        };
+        if recorded_store != canonical_store {
+            continue;
+        }
+        let lock_file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(creation_lock_path(&cidfile))
+        {
+            Ok(lock_file) => lock_file,
+            Err(error) => {
+                eprintln!(
+                    "nac: Podman creation record '{}' has no usable ownership lock: {error}; cleanup authority was preserved",
+                    cidfile.display()
+                );
+                continue;
+            }
+        };
+        match FileExt::try_lock_exclusive(&lock_file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+            Err(error) => {
+                eprintln!(
+                    "nac: failed to claim abandoned Podman creation record '{}': {error}",
+                    cidfile.display()
+                );
+                continue;
+            }
+        }
+        let record = CreationRecordAuthority { cidfile, lock_file };
+        // The creator may have died while its detached `podman run` child was
+        // still registering the container. An absent cidfile is therefore
+        // uncertainty, not proof that no container can appear after this
+        // scan. Keep the record for a later reconciliation pass.
+        if !record.cidfile.exists() {
+            eprintln!(
+                "nac: abandoned Podman creation record '{}' has no container ID yet; cleanup authority was preserved for retry",
+                record.cidfile.display()
+            );
+            continue;
+        }
+        let session_key = match std::fs::read_to_string(creation_session_path(&record.cidfile)) {
+            Ok(session_key) => session_key.trim().to_string(),
+            Err(error) => {
+                eprintln!(
+                    "nac: Podman creation record '{}' has no usable session identity: {error}; cleanup authority was preserved",
+                    record.cidfile.display()
+                );
+                continue;
+            }
+        };
+        if uuid::Uuid::parse_str(&session_key).is_err() {
+            eprintln!(
+                "nac: Podman creation record '{}' has an invalid session identity; cleanup authority was preserved",
+                record.cidfile.display()
+            );
+            continue;
+        }
+        match crate::sessions::session_exists(store_path, &session_key) {
+            Ok(true) => record.remove(),
+            Ok(false) => {
+                if let Err(error) = destroy_created_container_record(record).await {
+                    eprintln!(
+                        "nac: failed to reconcile abandoned Podman creation: {error:#}"
+                    );
+                }
+            }
+            Err(error) => eprintln!(
+                "nac: failed to check durable ownership for Podman creation record '{}': {error:#}; cleanup authority was preserved",
+                record.cidfile.display()
+            ),
+        }
+    }
+    Ok(())
 }
 
 pub(crate) async fn destroy_owned_container(session_key: &str) -> Result<()> {
@@ -459,7 +724,21 @@ impl PodmanSession {
             cleanup_on_drop: AtomicBool::new(owner),
             container_name,
             activity_key,
+            creation_store_path: None,
+            creation_record: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn new_for_durable_launch(
+        spec: SandboxSpec,
+        session_key: String,
+        owner: bool,
+        activity_key: String,
+        store_path: PathBuf,
+    ) -> Self {
+        let mut session = Self::new(spec, session_key, owner, activity_key);
+        session.creation_store_path = Some(store_path);
+        session
     }
 
     pub(crate) fn spec(&self) -> &SandboxSpec {
@@ -467,6 +746,21 @@ impl PodmanSession {
     }
 
     pub(crate) fn retain_for_durable_session(&self) {
+        self.cleanup_on_drop.store(false, Ordering::Release);
+        if let Some(record) = self
+            .creation_record
+            .lock()
+            .expect("Podman creation record lock poisoned")
+            .take()
+        {
+            record.remove();
+        }
+    }
+
+    /// Checked launch rollback owns cleanup from this point, but the durable
+    /// creation record remains until that removal succeeds so process loss can
+    /// still be reconciled on a later startup.
+    pub(crate) fn disable_drop_cleanup(&self) {
         self.cleanup_on_drop.store(false, Ordering::Release);
     }
 
@@ -779,55 +1073,30 @@ impl PodmanSession {
     }
 
     async fn create_container(&self) -> Result<()> {
-        let record_directory = std::env::temp_dir().join(format!(
-            "nac-podman-create-{}-{}",
-            sanitize_name(&self.session_key),
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir(&record_directory).with_context(|| {
-            format!(
-                "failed to create private Podman creation record directory '{}'",
-                record_directory.display()
-            )
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&record_directory, std::fs::Permissions::from_mode(0o700))?;
-        }
-        let cidfile = record_directory.join("container.cid");
         let ownership_token = uuid::Uuid::new_v4().to_string();
-        let token_path = creation_token_path(&cidfile);
-        let token_file = std::fs::File::create(&token_path).with_context(|| {
-            format!(
-                "failed to create Podman ownership token '{}'",
-                token_path.display()
-            )
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))?;
-        }
-        std::fs::write(&token_path, format!("{ownership_token}\n"))?;
-        token_file.sync_all()?;
+        let record = create_creation_record(
+            &self.session_key,
+            self.creation_store_path.as_deref(),
+            &ownership_token,
+        )?;
+        let cidfile = record.cidfile.clone();
         let args = match self
             .create_container_args_with_cidfile(Some((&cidfile, ownership_token.as_str())))
         {
             Ok(args) => args,
             Err(error) => {
-                remove_creation_record(&cidfile);
+                record.remove();
                 return Err(error);
             }
         };
         let task = tokio::spawn(async move {
-            let mut command = Command::new("podman");
+            let mut command = Command::new(podman_program());
             command.args(args);
             command.output().await
         });
         let mut pending = PendingContainerCreation {
             task: Some(task),
-            cidfile,
+            record: Some(record),
             settled: false,
         };
         let result = pending.task.as_mut().expect("creation task is armed").await;
@@ -843,7 +1112,17 @@ impl PodmanSession {
             ))
             .await);
         }
-        pending.disarm();
+        if self.creation_store_path.is_some() {
+            let record = pending.transfer_record();
+            let replaced = self
+                .creation_record
+                .lock()
+                .expect("Podman creation record lock poisoned")
+                .replace(record);
+            debug_assert!(replaced.is_none());
+        } else {
+            pending.disarm();
+        }
         Ok(())
     }
 
@@ -936,7 +1215,16 @@ impl PodmanSession {
     /// `Arc` references. `--ignore` makes absence idempotent while every real
     /// runtime failure remains visible to the lifecycle caller.
     pub(crate) async fn destroy(&self) -> Result<()> {
-        destroy_owned_container(&self.session_key).await
+        destroy_owned_container(&self.session_key).await?;
+        if let Some(record) = self
+            .creation_record
+            .lock()
+            .expect("Podman creation record lock poisoned")
+            .take()
+        {
+            record.remove();
+        }
+        Ok(())
     }
 }
 
@@ -946,7 +1234,7 @@ impl Drop for PodmanSession {
             return;
         }
 
-        match StdCommand::new("podman")
+        let removed = match StdCommand::new("podman")
             .arg("rm")
             .arg("--ignore")
             .arg("-f")
@@ -955,15 +1243,31 @@ impl Drop for PodmanSession {
             .stderr(StdStdio::null())
             .status()
         {
-            Ok(status) if status.success() => {}
-            Ok(status) => eprintln!(
-                "nac: failed to roll back fresh sandbox container '{}' (status {status})",
-                self.container_name
-            ),
-            Err(error) => eprintln!(
-                "nac: failed to execute rollback for fresh sandbox container '{}': {error}",
-                self.container_name
-            ),
+            Ok(status) if status.success() => true,
+            Ok(status) => {
+                eprintln!(
+                    "nac: failed to roll back fresh sandbox container '{}' (status {status})",
+                    self.container_name
+                );
+                false
+            }
+            Err(error) => {
+                eprintln!(
+                    "nac: failed to execute rollback for fresh sandbox container '{}': {error}",
+                    self.container_name
+                );
+                false
+            }
+        };
+        if removed {
+            if let Some(record) = self
+                .creation_record
+                .get_mut()
+                .expect("Podman creation record lock poisoned")
+                .take()
+            {
+                record.remove();
+            }
         }
     }
 }
@@ -1678,6 +1982,214 @@ exit 99
                 ("NAC_TEST_RM_STATUS", original_status),
                 ("NAC_TEST_RM_ARGUMENTS", original_arguments),
             ] {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn durable_creation_record_spans_run_success_until_session_commit() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-durable-creation-barrier-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("sessions.db");
+        crate::store::initialize(&store_path).unwrap();
+        let podman = root.join("podman");
+        std::fs::write(
+            &podman,
+            r#"#!/bin/sh
+if [ "$1" = run ]; then
+  shift
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = --cidfile ]; then
+      printf '%064d\n' 0 > "$2"
+      exit 0
+    fi
+    shift
+  done
+fi
+exit 99
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_program = std::env::var_os("NAC_TEST_PODMAN_PROGRAM");
+        unsafe { std::env::set_var("NAC_TEST_PODMAN_PROGRAM", &podman) };
+
+        let session = PodmanSession::new_for_durable_launch(
+            SandboxSpec::default(),
+            uuid::Uuid::new_v4().to_string(),
+            true,
+            "durable-barrier".to_string(),
+            store_path,
+        );
+        session.create_container().await.unwrap();
+        let cidfile = session
+            .creation_record
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("successful durable creation must retain cleanup authority")
+            .cidfile
+            .clone();
+        assert!(cidfile.exists());
+        assert!(creation_token_path(&cidfile).exists());
+        assert!(creation_session_path(&cidfile).exists());
+        assert!(creation_store_path(&cidfile).exists());
+        session.retain_for_durable_session();
+        assert!(session.creation_record.lock().unwrap().is_none());
+        assert!(!cidfile.exists());
+
+        unsafe {
+            match original_program {
+                Some(program) => std::env::set_var("NAC_TEST_PODMAN_PROGRAM", program),
+                None => std::env::remove_var("NAC_TEST_PODMAN_PROGRAM"),
+            }
+        }
+        drop(session);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn startup_reconciliation_skips_live_launches_preserves_rows_and_retries_cleanup() {
+        use std::collections::BTreeMap;
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-startup-reconcile-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("sessions.db");
+        crate::store::initialize(&store_path).unwrap();
+        let podman = root.join("podman");
+        let arguments = root.join("rm-arguments");
+        std::fs::write(
+            &podman,
+            r#"#!/bin/sh
+if [ "$1" = inspect ]; then
+  printf '%s\n' "$NAC_TEST_INSPECT_TOKEN"
+  exit 0
+fi
+if [ "$1" = rm ]; then
+  printf '%s\n' "$@" > "$NAC_TEST_RM_ARGUMENTS"
+  exit "$NAC_TEST_RM_STATUS"
+fi
+exit 99
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let originals = [
+            (
+                "NAC_TEST_PODMAN_PROGRAM",
+                std::env::var_os("NAC_TEST_PODMAN_PROGRAM"),
+            ),
+            (
+                "NAC_TEST_INSPECT_TOKEN",
+                std::env::var_os("NAC_TEST_INSPECT_TOKEN"),
+            ),
+            ("NAC_TEST_RM_STATUS", std::env::var_os("NAC_TEST_RM_STATUS")),
+            (
+                "NAC_TEST_RM_ARGUMENTS",
+                std::env::var_os("NAC_TEST_RM_ARGUMENTS"),
+            ),
+        ];
+        unsafe {
+            std::env::set_var("NAC_TEST_PODMAN_PROGRAM", &podman);
+            std::env::set_var("NAC_TEST_INSPECT_TOKEN", "owned-token");
+            std::env::set_var("NAC_TEST_RM_STATUS", "23");
+            std::env::set_var("NAC_TEST_RM_ARGUMENTS", &arguments);
+        }
+        let container_id = "a".repeat(64);
+
+        // A killed parent can release its lock before the surviving `podman
+        // run` child writes the cidfile. That uncertainty remains retryable.
+        let settling_session = uuid::Uuid::new_v4().to_string();
+        let settling =
+            create_creation_record(&settling_session, Some(&store_path), "owned-token").unwrap();
+        let settling_cidfile = settling.cidfile.clone();
+        drop(settling);
+        reconcile_creation_records(&store_path).await.unwrap();
+        assert!(settling_cidfile.parent().unwrap().exists());
+        assert!(!arguments.exists());
+        std::fs::write(&settling_cidfile, format!("{container_id}\n")).unwrap();
+        unsafe { std::env::set_var("NAC_TEST_RM_STATUS", "0") };
+        reconcile_creation_records(&store_path).await.unwrap();
+        assert!(!settling_cidfile.exists());
+        std::fs::remove_file(&arguments).unwrap();
+        unsafe { std::env::set_var("NAC_TEST_RM_STATUS", "23") };
+
+        // A held exclusive lock proves that the creating process is still in
+        // the pre-commit window, so startup must not inspect or remove it.
+        let active_session = uuid::Uuid::new_v4().to_string();
+        let active =
+            create_creation_record(&active_session, Some(&store_path), "owned-token").unwrap();
+        std::fs::write(&active.cidfile, format!("{container_id}\n")).unwrap();
+        reconcile_creation_records(&store_path).await.unwrap();
+        assert!(active.cidfile.exists());
+        assert!(!arguments.exists());
+        active.remove();
+
+        // Simulated process loss releases the lock but leaves authority on
+        // disk. Failed removal is retained and the next startup retries it.
+        let abandoned_session = uuid::Uuid::new_v4().to_string();
+        let abandoned =
+            create_creation_record(&abandoned_session, Some(&store_path), "owned-token").unwrap();
+        let abandoned_cidfile = abandoned.cidfile.clone();
+        std::fs::write(&abandoned_cidfile, format!("{container_id}\n")).unwrap();
+        drop(abandoned);
+        reconcile_creation_records(&store_path).await.unwrap();
+        assert!(abandoned_cidfile.exists());
+        assert!(arguments.exists());
+        unsafe { std::env::set_var("NAC_TEST_RM_STATUS", "0") };
+        reconcile_creation_records(&store_path).await.unwrap();
+        assert!(!abandoned_cidfile.exists());
+        std::fs::remove_file(&arguments).unwrap();
+
+        // If the row committed before process loss, durable lifecycle
+        // ownership wins: startup drops only the transfer record.
+        let committed_session = uuid::Uuid::new_v4().to_string();
+        crate::sessions::create_session(
+            &store_path,
+            &crate::sessions::new_snapshot(
+                committed_session.clone(),
+                root.clone(),
+                "test-model".to_string(),
+                "https://example.invalid/v1".to_string(),
+                crate::model::BackendKind::TogetherChat,
+                None,
+                None,
+                None,
+                Vec::new(),
+                None,
+                BTreeMap::new(),
+            ),
+        )
+        .unwrap();
+        let committed =
+            create_creation_record(&committed_session, Some(&store_path), "owned-token").unwrap();
+        let committed_cidfile = committed.cidfile.clone();
+        std::fs::write(&committed_cidfile, format!("{container_id}\n")).unwrap();
+        drop(committed);
+        reconcile_creation_records(&store_path).await.unwrap();
+        assert!(!committed_cidfile.exists());
+        assert!(!arguments.exists());
+
+        unsafe {
+            for (name, value) in originals {
                 match value {
                     Some(value) => std::env::set_var(name, value),
                     None => std::env::remove_var(name),

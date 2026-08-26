@@ -1776,6 +1776,7 @@ fn valid_environment_name(name: &str) -> bool {
 /// assignment-looking string.
 fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
     const INDIRECT_ASSIGNMENT: &str = "indirect stateful shell assignment";
+    const STATEFUL_EXPORT: &str = "stateful shell environment export";
     const HOOKS: &[&str] = &[
         "RSYNC_RSH",
         "RSYNC_CONNECT_PROG",
@@ -1843,6 +1844,61 @@ fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
             }
         }
         return None;
+    }
+
+    // `set -a` / `set -o allexport` changes the meaning of later simple
+    // commands in the same `bash -c`: assignment-capable builtins such as
+    // `let` and `read` can then create an exported loader hook without any
+    // assignment syntax in the `set` segment. Authorization intentionally
+    // tokenizes shell segments, so reject the state transition itself instead
+    // of pretending later segments can be judged without prior shell state.
+    if command == "set" {
+        let operands = &effective[1..];
+        if operands.iter().any(|operand| {
+            operand
+                .strip_prefix('-')
+                .filter(|flags| !flags.is_empty() && *flags != "-")
+                .is_some_and(|flags| flags.contains('a'))
+        }) || operands
+            .windows(2)
+            .any(|pair| pair[0] == "-o" && pair[1].eq_ignore_ascii_case("allexport"))
+        {
+            return Some(STATEFUL_EXPORT);
+        }
+        return None;
+    }
+
+    // These Bash builtins assign in the current shell without needing a
+    // leading NAME=value token. Block direct writes to protected hook names
+    // even when an earlier export attribute is not visible in this segment.
+    if command == "let" {
+        return effective[1..]
+            .iter()
+            .filter_map(|operand| shell_environment_assignment_name(operand))
+            .find(|name| HOOKS.contains(name));
+    }
+    if command == "read" {
+        let mut index = 1;
+        while let Some(operand) = effective.get(index) {
+            if operand == "--" {
+                index += 1;
+                break;
+            }
+            if matches!(
+                operand.as_str(),
+                "-a" | "-d" | "-i" | "-n" | "-N" | "-p" | "-t" | "-u"
+            ) {
+                index = (index + 2).min(effective.len());
+            } else if operand.starts_with('-') {
+                index += 1;
+            } else {
+                break;
+            }
+        }
+        return effective[index..]
+            .iter()
+            .find(|name| HOOKS.contains(&name.as_str()))
+            .map(String::as_str);
     }
 
     if !matches!(
@@ -3658,11 +3714,16 @@ mod tests {
                 "command printf -vLD_AUDIT %s ./payload.so; /bin/true",
                 "declare -n p=LD_LIBRARY_PATH; p=./payload; export LD_LIBRARY_PATH; /bin/true",
                 "builtin typeset -xn p=LD_PRELOAD; p=./payload.so; /bin/true",
+                "set -a; let LD_LIBRARY_PATH=1; ls",
+                "set -o allexport; read LD_PRELOAD; ls",
+                "shopt -s lastpipe; set -a; printf %s 1 | read LD_LIBRARY_PATH; ls",
+                "read -r LD_PRELOAD; ls",
+                "let 'LD_LIBRARY_PATH=1'; ls",
             ] {
                 assert!(
-                    shell_resources(command, Path::new("/workspace"), &backend)[0]
-                        .hard_denial
-                        .is_some(),
+                    shell_resources(command, Path::new("/workspace"), &backend)
+                        .iter()
+                        .any(|resource| resource.hard_denial.is_some()),
                     "{name} backend admitted concealed command: {command}"
                 );
             }
@@ -3670,6 +3731,8 @@ mod tests {
                 "printf '%s\\n' RSYNC_RSH=literal",
                 "printf '%s\\n' RSYNC_CONNECT_PROG=literal",
                 "printf '%s\\n' LD_PRELOAD=literal",
+                "set +a; printf '%s\\n' LD_PRELOAD=literal",
+                "printf '%s\\n' 'set -a; let LD_LIBRARY_PATH=1; ls'",
             ] {
                 assert!(
                     shell_resources(command, Path::new("/workspace"), &backend)[0]
