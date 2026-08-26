@@ -43,7 +43,7 @@ pub fn write_stdin_definition() -> ToolDefinition {
                 "type": "object",
                 "properties": {
                     "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
-                    "chars": { "type": "string", "description": "Must be empty; polls output without sending terminal input" },
+                    "chars": { "type": "string", "description": "Empty polls output without mutation. Nonempty input is sent only after a separate once-only approval bound to this exact terminal handle; key tokens such as <RET> are supported." },
                     "retain": { "type": "boolean", "description": "Explicitly retain this live terminal across direct run boundaries (default: false)" },
                     "yield_time_ms": { "type": "number", "description": "Maximum poll duration in milliseconds (default: 500, max: 3600000)" },
                     "max_output_chars": { "type": "number", "description": "Concise preview budget (default: 8000)" }
@@ -128,7 +128,15 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
 
     let session_name = manager.next_session_name();
     manager
-        .create(session_name.clone(), &cmd, cwd, 120, 40, &runtime.backend)
+        .create_with_cancellation(
+            session_name.clone(),
+            &cmd,
+            cwd,
+            120,
+            40,
+            &runtime.backend,
+            Some(&runtime.command_cancellation),
+        )
         .await?;
     let output = manager
         .write_stdin(
@@ -518,6 +526,10 @@ mod tests {
             read_command_output_definition().function.name,
             "read_command_output"
         );
+        let write_stdin = write_stdin_definition();
+        let chars = &write_stdin.function.parameters["properties"]["chars"]["description"];
+        assert!(chars.as_str().unwrap().contains("Nonempty input"));
+        assert!(!chars.as_str().unwrap().contains("Must be empty"));
     }
 
     #[test]

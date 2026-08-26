@@ -135,6 +135,7 @@ impl TerminalManager {
         }
     }
 
+    #[cfg(test)]
     pub async fn create(
         &self,
         name: String,
@@ -143,6 +144,21 @@ impl TerminalManager {
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
+    ) -> Result<TerminalInfo> {
+        self.create_with_cancellation(name, command, cwd, cols, rows, backend, None)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_with_cancellation(
+        &self,
+        name: String,
+        command: &str,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        backend: &Arc<ExecutionBackend>,
+        cancellation: Option<&ThreadCancellation>,
     ) -> Result<TerminalInfo> {
         // Capacity accounting, replacement, and insertion form one admission
         // transaction. Cleanup may await a remote backend, so a dedicated
@@ -214,17 +230,38 @@ impl TerminalManager {
         // is no cancellation point between acquiring the PTY/process and
         // transferring it into durable manager ownership.
         let mut sessions = self.sessions.lock().await;
-        let session = TerminalSession::spawn(
-            name.clone(),
-            command,
-            cwd,
-            cols,
-            rows,
-            backend,
-            self.output_registry.clone(),
-        )?;
-        let info = self.session_info(&name, &session);
-        sessions.insert(name, session);
+        let info = match cancellation {
+            Some(cancellation) => cancellation
+                .run_if_active(|| {
+                    let session = TerminalSession::spawn(
+                        name.clone(),
+                        command,
+                        cwd,
+                        cols,
+                        rows,
+                        backend,
+                        self.output_registry.clone(),
+                    )?;
+                    let info = self.session_info(&name, &session);
+                    sessions.insert(name.clone(), session);
+                    Ok::<_, anyhow::Error>(info)
+                })
+                .ok_or_else(|| anyhow!("terminal command cancelled before PTY spawn"))??,
+            None => {
+                let session = TerminalSession::spawn(
+                    name.clone(),
+                    command,
+                    cwd,
+                    cols,
+                    rows,
+                    backend,
+                    self.output_registry.clone(),
+                )?;
+                let info = self.session_info(&name, &session);
+                sessions.insert(name, session);
+                info
+            }
+        };
         Ok(info)
     }
 
@@ -281,24 +318,30 @@ impl TerminalManager {
                 wall_time_ms: start.elapsed().as_millis() as u64,
             });
         }
-        let (output_id, start_cursor, notify) = {
-            let mut sessions = self.sessions.lock().await;
-            let session = sessions
-                .get_mut(name)
-                .ok_or_else(|| self.missing_session_error(name))?;
-            session.refresh_status();
-            if !session.is_alive() && !bytes.is_empty() {
-                return Err(anyhow!("terminal session '{name}' has already exited"));
-            }
-            if !bytes.is_empty() {
-                session.write(&bytes)?;
-            }
-            (
-                session.output_id().to_string(),
-                session.preview_cursor(),
-                session.output_notify().clone(),
-            )
-        };
+        let (output_id, start_cursor, notify) =
+            {
+                let mut sessions = self.sessions.lock().await;
+                let session = sessions
+                    .get_mut(name)
+                    .ok_or_else(|| self.missing_session_error(name))?;
+                session.refresh_status();
+                if !session.is_alive() && !bytes.is_empty() {
+                    return Err(anyhow!("terminal session '{name}' has already exited"));
+                }
+                if !bytes.is_empty() {
+                    match cancellation {
+                        Some(cancellation) => cancellation
+                            .run_if_active(|| session.write(&bytes))
+                            .ok_or_else(|| anyhow!("terminal command cancelled before input"))??,
+                        None => session.write(&bytes)?,
+                    }
+                }
+                (
+                    session.output_id().to_string(),
+                    session.preview_cursor(),
+                    session.output_notify().clone(),
+                )
+            };
 
         if !bytes.is_empty() {
             sleep(Duration::from_millis(50)).await;
@@ -2224,6 +2267,89 @@ mod tests {
             "cancelled create spawned outside manager ownership"
         );
         assert!(manager.sessions.lock().await.is_empty());
+        let _ = std::fs::remove_file(marker);
+    }
+
+    #[tokio::test]
+    async fn cancellation_wins_while_create_waits_before_final_spawn() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let cancellation = ThreadCancellation::default();
+        let marker =
+            std::env::temp_dir().join(format!("nac-cancelled-create-{}", uuid::Uuid::new_v4()));
+        let held_admission = manager.create_gate.lock().await;
+        let create_manager = manager.clone();
+        let create_backend = backend.clone();
+        let create_cancellation = cancellation.clone();
+        let command = format!("printf spawned > {}; sleep 30", marker.display());
+        let create = tokio::spawn(async move {
+            create_manager
+                .create_with_cancellation(
+                    "cancelled-before-spawn".to_string(),
+                    &command,
+                    None,
+                    120,
+                    40,
+                    &create_backend,
+                    Some(&create_cancellation),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        cancellation.cancel();
+        drop(held_admission);
+
+        let error = create.await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("cancelled before PTY spawn"));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!marker.exists(), "cancelled PTY created its marker");
+        assert!(manager.sessions.lock().await.is_empty());
+        let _ = std::fs::remove_file(marker);
+    }
+
+    #[tokio::test]
+    async fn cancellation_wins_while_terminal_input_waits_for_final_ownership() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let cancellation = ThreadCancellation::default();
+        let marker =
+            std::env::temp_dir().join(format!("nac-cancelled-input-{}", uuid::Uuid::new_v4()));
+        let command = format!("read value; printf %s \"$value\" > {}", marker.display());
+        manager
+            .create(
+                "cancelled-input".to_string(),
+                &command,
+                None,
+                120,
+                40,
+                &backend,
+            )
+            .await
+            .unwrap();
+
+        let held_sessions = manager.sessions.lock().await;
+        let input_manager = manager.clone();
+        let input_cancellation = cancellation.clone();
+        let input = tokio::spawn(async move {
+            input_manager
+                .write_stdin(
+                    "cancelled-input",
+                    "must-not-arrive<RET>",
+                    50,
+                    8_000,
+                    Some(&input_cancellation),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        cancellation.cancel();
+        drop(held_sessions);
+
+        let error = input.await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("cancelled before input"));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!marker.exists(), "cancelled input reached the PTY process");
+        manager.remove_all().await.unwrap();
         let _ = std::fs::remove_file(marker);
     }
 

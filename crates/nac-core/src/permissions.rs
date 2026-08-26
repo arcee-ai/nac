@@ -862,12 +862,31 @@ pub(crate) fn shell_resources(
                 }
                 resources.push(resource);
                 if is_broad_command(&tokens) {
+                    let authority = match backend {
+                        ExecutionBackend::Local { .. } => "trusted arbitrary code execution on the unsandboxed Local backend for this invocation; parser protected-path rules cannot constrain code inside it",
+                        ExecutionBackend::Ssh(_) => "trusted arbitrary code execution on the unsandboxed SSH backend for this invocation; parser protected-path rules cannot constrain code inside it",
+                        ExecutionBackend::Sandbox(_) => "arbitrary code execution for this invocation within the selected Podman confinement boundary",
+                    };
                     resources.push(
                         PermissionResource::new("execute_broad", canonical_command(&tokens))
-                            .with_display(format!("broad interpreter or shell: {display}")),
+                            .with_display(format!(
+                                "broad interpreter or shell: {display}; {authority}"
+                            )),
                     );
                 }
-                resources.extend(shell_path_resources(&tokens, &cwd, backend));
+                let mut path_resources = shell_path_resources(&tokens, &cwd, backend);
+                if !is_broad_command(&tokens) {
+                    for resource in &mut path_resources {
+                        if resource.shell_binding.is_some() {
+                            resource.hard_denial = Some(
+                                "direct shell path arguments are blocked because pathname text cannot remain bound across concurrent ancestor replacement; use NAC's native file/search tools, a path-free command with workdir, or explicitly approve a broad interpreter as trusted arbitrary code"
+                                    .to_string(),
+                            );
+                            resource.save_resource = None;
+                        }
+                    }
+                }
+                resources.extend(path_resources);
             }
         }
         ParsedShell::Opaque => {
@@ -881,7 +900,11 @@ pub(crate) fn shell_resources(
             resources.push(resource);
             resources.push(
                 PermissionResource::new("execute_opaque", format!("opaque:sha256:{digest:x}"))
-                    .with_display("unsupported shell syntax requires explicit approval"),
+                    .with_display(match backend {
+                        ExecutionBackend::Local { .. } => "unsupported shell syntax requires explicit approval as trusted arbitrary code execution on the unsandboxed Local backend for this invocation; parser protected-path rules cannot constrain code inside it",
+                        ExecutionBackend::Ssh(_) => "unsupported shell syntax requires explicit approval as trusted arbitrary code execution on the unsandboxed SSH backend for this invocation; parser protected-path rules cannot constrain code inside it",
+                        ExecutionBackend::Sandbox(_) => "unsupported shell syntax requires explicit approval as arbitrary code execution for this invocation within the selected Podman confinement boundary",
+                    }),
             );
         }
     }
@@ -3900,6 +3923,15 @@ mod tests {
         assert!(broad
             .iter()
             .any(|resource| resource.action == "execute_broad"));
+        assert!(broad.iter().any(|resource| {
+            resource.action == "execute_broad"
+                && resource
+                    .display
+                    .contains("trusted arbitrary code execution")
+                && resource
+                    .display
+                    .contains("parser protected-path rules cannot constrain code inside it")
+        }));
         assert_eq!(
             broad[0].save_resource.as_deref(),
             Some(broad[0].resource.as_str())
@@ -4101,6 +4133,42 @@ mod tests {
             .as_deref()
             .expect("env split-string should have an exact save resource")
             .ends_with('*'));
+    }
+
+    #[test]
+    fn direct_shell_path_arguments_fail_closed_against_ancestor_replacement() {
+        let backend = local(Path::new("/workspace"));
+        for command in [
+            "rm safe/config",
+            "rg needle ./safe",
+            "cargo test --manifest-path ./safe/Cargo.toml",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            let path = resources
+                .iter()
+                .find(|resource| resource.shell_binding.is_some())
+                .unwrap_or_else(|| panic!("{command} did not project a shell path"));
+            assert!(path.hard_denial.as_deref().is_some_and(|reason| {
+                reason.contains("cannot remain bound across concurrent ancestor replacement")
+            }));
+            assert!(path.save_resource.is_none());
+        }
+
+        let broad = shell_resources(
+            "python3 ./safe/script.py",
+            Path::new("/workspace"),
+            &backend,
+        );
+        assert!(broad
+            .iter()
+            .filter(|resource| resource.shell_binding.is_some())
+            .all(|resource| resource.hard_denial.is_none()));
+        assert!(broad.iter().any(|resource| {
+            resource.action == "execute_broad"
+                && resource
+                    .display
+                    .contains("trusted arbitrary code execution")
+        }));
     }
 
     #[tokio::test]

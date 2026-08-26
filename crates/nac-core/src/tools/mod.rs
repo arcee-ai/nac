@@ -54,26 +54,50 @@ impl ToolResult {
     }
 }
 
+#[derive(Default)]
+struct ThreadCancellationState {
+    cancelled: AtomicBool,
+    activity: Notify,
+    mutation_gate: StdMutex<()>,
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct ThreadCancellation {
-    cancelled: Arc<AtomicBool>,
-    activity: Arc<Notify>,
+    state: Arc<ThreadCancellationState>,
 }
 
 impl ThreadCancellation {
     pub(crate) fn cancel(&self) {
-        if !self.cancelled.swap(true, Ordering::AcqRel) {
-            self.activity.notify_waiters();
+        // Synchronous process creation and terminal writes take this same
+        // short-lived gate for their final check plus mutation. Whichever side
+        // acquires it first defines the boundary: after cancellation wins, no
+        // new PTY or terminal input can pass an earlier observation.
+        let _mutation = self
+            .state
+            .mutation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.state.cancelled.swap(true, Ordering::AcqRel) {
+            self.state.activity.notify_waiters();
         }
     }
 
     pub(crate) fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
+        self.state.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn run_if_active<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
+        let _mutation = self
+            .state
+            .mutation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (!self.is_cancelled()).then(operation)
     }
 
     pub(crate) async fn cancelled(&self) {
         loop {
-            let notified = self.activity.notified();
+            let notified = self.state.activity.notified();
             if self.is_cancelled() {
                 return;
             }
@@ -1103,7 +1127,9 @@ fn legacy_permission_resources(
                 };
                 let resource = kernel::PermissionResource::new("terminal_input", session_id)
                     .with_display(format!(
-                        "send input to exact terminal handle '{session_id}' on the {backend} backend; the running process may interpret these bytes as commands"
+                        "send exact input {} to terminal handle '{session_id}' on the {backend} backend; the running process may interpret these bytes as commands",
+                        serde_json::to_string(chars)
+                            .expect("a Rust string always has a JSON string representation")
                     ));
                 if runtime.permission_broker.is_none() {
                     resource.with_hard_denial(
@@ -1891,6 +1917,7 @@ mod discovery_tool_definition_tests {
                     assert_eq!(request.resources[0].action, "terminal_input");
                     assert_eq!(request.resources[0].resource, handle);
                     assert!(request.resources[0].display.contains("local backend"));
+                    assert!(request.resources[0].display.contains("\"answer<RET>\""));
                     assert!(request.resources[0].save_resource.is_none());
                     broker
                         .reply(&request.id, crate::permissions::PermissionReply::Always)
@@ -1946,6 +1973,44 @@ mod discovery_tool_definition_tests {
             std::fs::read_to_string(root.join(".git/config")).unwrap(),
             "original\n"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn brokerless_direct_shell_path_fails_before_process_side_effects() {
+        let root = std::env::temp_dir().join(format!(
+            "nac-worker-shell-path-denial-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(root.join("safe")).unwrap();
+        let target = root.join("safe/config");
+        std::fs::write(&target, "original\n").unwrap();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.store_path = root.join("store.db");
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+        let client = crate::model::ModelClient::new_for_test();
+        let services = kernel::ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+        let registry = worker_tool_registry(false).unwrap();
+        let result = registry
+            .snapshot(super::WORKER_TOOL_NAMES)
+            .unwrap()
+            .invoke(
+                "exec_command",
+                serde_json::json!({"cmd":"rm safe/config"}),
+                services,
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+        assert!(result.is_error, "direct shell path unexpectedly executed");
+        assert!(result
+            .content
+            .to_string()
+            .contains("concurrent ancestor replacement"));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original\n");
         let _ = std::fs::remove_dir_all(root);
     }
 }

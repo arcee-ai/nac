@@ -44,7 +44,8 @@ thread_timeout_secs = 3600
 # supplies an output_id once the process starts. read_command_output pages
 # combined (emission order), stdout, or stderr; PTY is combined-only.
 # Empty write_stdin polls (and explicit retention) advance a preview cursor
-# without deleting retained bytes; nonempty model-driven terminal input is blocked.
+# without deleting retained bytes. Nonempty input requires a separate once-only
+# approval that displays the exact input and binds it to the terminal handle.
 # Oldest bytes roll over; reads report overflowed and the retained range.
 # Output IDs expire when the dispatch ends (including error or cancel).
 # Short commands fit in their previews and need no follow-up read.

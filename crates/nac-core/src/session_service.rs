@@ -2840,9 +2840,9 @@ impl SessionService {
             cancelling_run.command_cancellation.cancel();
             // Terminal handles are session-owned and can be idle while the
             // model is between tool calls. Start settlement immediately, then
-            // repeat it after the run task has stopped: a tool can pass its
-            // pre-spawn cancellation check and insert a PTY while this first
-            // pass is in progress.
+            // repeat it after the run task has stopped. PTY spawn and input
+            // share the cancellation token's final mutation gate, so neither
+            // can cross this cancellation boundary after it wins.
             let _ = self.terminal_manager.settle_run().await;
         }
 

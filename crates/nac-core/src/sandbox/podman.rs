@@ -169,11 +169,6 @@ process_identity() {
   [ -n "$command_signature" ] || return 1
   printf 'ps:%s:%s' "$started" "$command_signature"
 }
-identity_matches() {
-  [ -n "$pid" ] && [ -n "$expected_identity" ] || return 1
-  actual_identity=$(process_identity "$pid") || return 1
-  [ "$actual_identity" = "$expected_identity" ]
-}
 process_is_live() {
   state=$(ps -ww -o stat= -p "$1" 2>/dev/null) || return 1
   state=$(printf '%s' "$state" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -183,7 +178,27 @@ process_is_live() {
     *) return 0 ;;
   esac
 }
-if identity_matches; then
+identity_state() {
+  [ -n "$pid" ] && [ -n "$expected_identity" ] || {
+    printf 'uncertain'
+    return 0
+  }
+  actual_identity=$(process_identity "$pid") || {
+    if process_is_live "$pid"; then
+      printf 'uncertain'
+    else
+      printf 'gone'
+    fi
+    return 0
+  }
+  if [ "$actual_identity" = "$expected_identity" ]; then
+    printf 'match'
+  else
+    printf 'mismatch'
+  fi
+}
+root_identity_state=$(identity_state)
+if [ "$root_identity_state" = match ]; then
   process_table=
   if [ ! -r "/proc/$pid/stat" ]; then
     process_table=$(ps -eo pid=,ppid= 2>/dev/null || ps -ax -o pid= -o ppid= 2>/dev/null) || exit 1
@@ -220,7 +235,7 @@ if identity_matches; then
     return 1
   }
   pids=$(descendants "$pid")
-  if identity_matches; then
+  if [ "$(identity_state)" = match ]; then
     uncertain=0
     verified_descendants=
     for child in $pids; do
@@ -250,15 +265,22 @@ if identity_matches; then
     done <<NAC_DESCENDANTS
 $verified_descendants
 NAC_DESCENDANTS
-    if identity_matches; then
-      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || {
-        process_is_live "$pid" && uncertain=1
-      }
-    elif process_is_live "$pid"; then
-      uncertain=1
-    fi
+    case "$(identity_state)" in
+      match)
+        kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || {
+          process_is_live "$pid" && uncertain=1
+        }
+        ;;
+      uncertain) uncertain=1 ;;
+      gone|mismatch) ;;
+    esac
     [ "$uncertain" -eq 0 ] || exit 1
   fi
+elif [ "$root_identity_state" = uncertain ]; then
+  # Inspection failure is not proof that the recorded process disappeared or
+  # that its PID was reused. Preserve the pidfile as retry authority and report
+  # incomplete cleanup to the caller.
+  exit 1
 fi
 rm -f "$pidfile""#;
 
@@ -1159,7 +1181,9 @@ mod tests {
         assert!(!SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
         assert!(SANDBOX_KILL_WRAPPER.contains("expected_identity"));
-        assert!(SANDBOX_KILL_WRAPPER.contains("identity_matches()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("identity_state()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("gone|mismatch"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("exit 1"));
         assert!(SANDBOX_KILL_WRAPPER.contains("/proc/$target/stat"));
         assert!(SANDBOX_KILL_WRAPPER.contains("ps -eo pid=,ppid="));
         assert!(SANDBOX_KILL_WRAPPER.contains("$2 == parent"));
@@ -1376,6 +1400,64 @@ mod tests {
         assert!(
             child.try_wait().unwrap().is_none(),
             "same-second portable identity collision killed the unrelated process"
+        );
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_identity_inspection_failure_retains_retry_authority() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-wrapper-portable-uncertain-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let pidfile = root.join("wrapper.pid");
+        let fake_ps = root.join("ps");
+        std::fs::write(
+            &fake_ps,
+            b"#!/bin/sh\ncase \"$*\" in\n  *stat=*) printf 'S\\n'; exit 0 ;;\n  *lstart=*) exit 1 ;;\n  *) exec /bin/ps \"$@\" ;;\nesac\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&fake_ps).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_ps, permissions).unwrap();
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        std::fs::write(
+            &pidfile,
+            format!("{}\tps:recorded-start:12345\n", child.id()),
+        )
+        .unwrap();
+        let no_proc_wrapper = SANDBOX_KILL_WRAPPER.replace("/proc/", "/nac-no-proc/");
+        let path = format!("{}:/usr/bin:/bin", root.display());
+        let output = std::process::Command::new("bash")
+            .env("PATH", path)
+            .arg("-c")
+            .arg(no_proc_wrapper)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .output()
+            .unwrap();
+
+        assert!(
+            !output.status.success(),
+            "uncertain cleanup reported success"
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "identity inspection failure killed the live process"
+        );
+        assert!(
+            pidfile.exists(),
+            "uncertain cleanup discarded retry authority"
         );
         child.kill().unwrap();
         child.wait().unwrap();

@@ -433,14 +433,14 @@ async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
             )
             .await
             .unwrap_err(),
-        independent
-            .update_session_config("session", UpdateConfigRequest::default())
-            .await
-            .unwrap_err(),
         independent.delete_session("session").await.unwrap_err(),
     ] {
         assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
     }
+    independent
+        .update_session_config("session", UpdateConfigRequest::default())
+        .await
+        .expect("empty PATCH is a universal no-op even during compaction");
 
     let before = sessions::load_session(&root.join("store.db"), "session").unwrap();
     let patch_error = tokio::time::timeout(

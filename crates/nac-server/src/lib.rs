@@ -3293,6 +3293,15 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        self.require_primary_operation_session(session_id)?;
+        self.delete_session_cascade(session_id).await
+    }
+
+    /// Parent-owned deletion path. Once a primary session has passed the
+    /// public ownership check, its delegated descendants must be removed as
+    /// part of the same lifecycle operation without pretending that they are
+    /// independently user-controllable sessions.
+    async fn delete_session_cascade(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
         // Submission, config changes, and deletion share this gate. The
         // operation lease extends the exclusion to independent processes and
@@ -3342,12 +3351,12 @@ impl SessionManager {
         let orchestrators =
             nac_core::store::list_managed_orchestrators(&self.inner.store_path, session_id)?;
         for orchestrator in orchestrators {
-            Box::pin(self.delete_session(&orchestrator.orchestrator_session_id)).await?;
+            Box::pin(self.delete_session_cascade(&orchestrator.orchestrator_session_id)).await?;
         }
         let children =
             nac_core::store::list_traditional_children(&self.inner.store_path, session_id)?;
         for child in children {
-            Box::pin(self.delete_session(&child.child_session_id)).await?;
+            Box::pin(self.delete_session_cascade(&child.child_session_id)).await?;
         }
         let persisted_worktree = sessions::load_session(&self.inner.store_path, session_id)
             .ok()
@@ -3405,21 +3414,10 @@ impl SessionManager {
     ) -> Result<()> {
         let request_empty = request.is_empty();
         if request_empty {
-            if let Some(service) = self
-                .inner
-                .active_sessions
-                .read()
-                .await
-                .get(session_id)
-                .cloned()
-            {
-                if service.has_active_operation() {
-                    return Err(anyhow!(
-                        "session is busy with an active operation; wait for it before updating config"
-                    ));
-                }
-                return Ok(());
-            }
+            // An empty PATCH carries no caller intent. It must be a universal,
+            // store-free no-op: no cache-dependent busy result, legacy config
+            // repair, revision increment, credential lookup, or ownership read.
+            return Ok(());
         }
         self.require_primary_operation_session(session_id)?;
 
@@ -3452,9 +3450,6 @@ impl SessionManager {
         self.require_primary_operation_session(session_id)?;
 
         let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
-        if request_empty && !managed_config_needs_repair(&current) {
-            return Ok(());
-        }
         let mut prospective = current.clone();
         // The light model needs the credential destination policy, which the
         // plain field patch does not, so it is settled here instead.
@@ -7107,18 +7102,6 @@ fn apply_raw_config_patch(
     }
     config.diagnostics.clear();
     Ok(())
-}
-
-fn managed_config_needs_repair(config: &sessions::RawSessionConfig) -> bool {
-    let Some(backend) = config
-        .backend
-        .as_deref()
-        .and_then(|raw| raw.trim().parse::<BackendKind>().ok())
-    else {
-        return false;
-    };
-    managed_backend_base_url(backend).is_some()
-        && (config.base_url.trim().is_empty() || config.api_key_env.is_some())
 }
 
 fn parse_prospective_model_config(
@@ -11620,6 +11603,7 @@ mod tests {
             "https://api.openai.com/v1".to_string(),
         );
         let manager = test_manager(&root);
+        let store_path = root.join("store.db");
         let child = manager
             .create_traditional_child_session("parent-a", "general", "owned child")
             .await
@@ -11715,6 +11699,11 @@ mod tests {
                 manager.compact_session(delegated).await.unwrap_err(),
                 CompactSessionError::NotFound
             );
+            let delete_error = manager.delete_session(delegated).await.unwrap_err();
+            assert!(delete_error
+                .to_string()
+                .contains("accept work only through their parent"));
+            assert!(sessions::session_exists(&store_path, delegated).unwrap());
         }
 
         let app = router(manager.clone());
@@ -11757,6 +11746,19 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(cancel.status(), StatusCode::CONFLICT);
+            let delete = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("DELETE")
+                        .uri(format!("/sessions/{delegated}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(delete.status(), StatusCode::CONFLICT);
+            assert!(sessions::session_exists(&store_path, delegated).unwrap());
             for action in ["revert", "regenerate"] {
                 let response = app
                     .clone()
@@ -13730,7 +13732,7 @@ model = "gpt-5.2"
     }
 
     #[tokio::test]
-    async fn patch_repairs_absent_managed_bases_with_the_same_materialized_urls() {
+    async fn empty_patch_never_repairs_or_revisions_uncached_managed_config() {
         let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root = temp_root("managed_base_patch_repair");
         let nac_home = root.join("nac-home");
@@ -13781,33 +13783,18 @@ model = "gpt-5.2"
                 reasoning_effort: None,
             });
             sessions::update_session_config(&store_path, &incomplete).unwrap();
+            let before = sessions::load_session(&store_path, session_id).unwrap();
 
             manager
                 .update_session_config(session_id, UpdateConfigRequest::default())
                 .await
-                .expect("empty repair PATCH should materialize the managed tuple");
-            let repaired = sessions::load_session(&store_path, session_id).unwrap();
-            assert_eq!(repaired.base_url, expected_base);
-            assert_eq!(repaired.api_key_env, None);
-            assert_eq!(
-                repaired
-                    .light_model
-                    .as_ref()
-                    .and_then(|light| light.api_key_env.as_deref()),
-                None
-            );
-            let rehydrated = manager.session_config(session_id).unwrap();
-            assert_eq!(rehydrated.base_url, expected_base);
-            assert_eq!(rehydrated.api_key_env, None);
-            assert_eq!(
-                rehydrated
-                    .light_model
-                    .as_ref()
-                    .and_then(|light| light.api_key_env.as_deref()),
-                None
-            );
-            let resumed = manager.snapshot(session_id).await.unwrap();
-            assert_eq!(resumed.metadata.base_url, expected_base);
+                .expect("empty PATCH is a no-op even when legacy managed config needs repair");
+            let after = sessions::load_session(&store_path, session_id).unwrap();
+            assert_eq!(after.base_url, before.base_url);
+            assert_eq!(after.api_key_env, before.api_key_env);
+            assert_eq!(after.light_model, before.light_model);
+            assert_eq!(after.config_version, before.config_version);
+            assert_eq!(after.updated_at, before.updated_at);
         }
 
         let _ = std::fs::remove_dir_all(root);

@@ -50,3 +50,15 @@ nonempty input is a separate one-time approval because the running process may
 interpret it as commands. That approval is bound to the handle's originating
 session/backend and cannot create a reusable grant. Podman confinement remains
 the non-bypassable filesystem and network boundary for commands that need it.
+On unsandboxed Local and SSH backends, approving a broad shell, interpreter, or
+opaque command authorizes trusted arbitrary code execution for that invocation.
+The approval surface states this explicitly: parser-derived protected-path
+denials cannot constrain code inside the approved program. Selecting Podman
+preserves its stronger confinement boundary for the same invocation.
+For the current portable MVP, directly parsed shell path arguments fail closed:
+a pathname string cannot stay bound if another process replaces an ancestor
+between authorization and OS path resolution. Use NAC's native file/search
+tools, select the intended working directory and run a path-free command, or—
+only when that authority is appropriate—approve a broad interpreter under the
+trusted-code rule above. This conservative restriction applies on every backend
+and avoids presenting pathname revalidation as object-level confinement.

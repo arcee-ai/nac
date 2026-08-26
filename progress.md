@@ -240,22 +240,42 @@ Protected initial state verified on 2026-08-25:
   complete gate set with catalog 2+7+24, core 1097 passed/9 ignored, server
   134, binary 21, frontend 172, and all 10 production-embedded Playwright
   journeys. The exact `d645781` review evidence is recorded above.
-- Current focused evidence passes for the output-lease/live-PTY cap, opaque
-  redirection on all backends plus brokerless symlink execution, once-only
-  direct PTY input with no persisted grant, delegated manager/HTTP config
-  rejection, and portable non-`/proc` identity/cancellation behavior. Full
-  pre-commit release gates pass: `make ci` (catalog 2+7+24, core 1104 passed
-  with 9 environment-dependent ignores, server 134, binary 21, frontend 172),
-  `make test-durability` (10/10 focused cases), `make test-assets`, and
-  production-embedded Playwright 10/10. A no-op PATCH gate regression exposed
-  and then verified the intended boundary: an attached empty request remains
-  store-free, while every nonempty delegated config mutation is rejected.
-- Next action: commit the repair without protected local state, run the four
-  required gates at the exact successor SHA, and obtain another detached-clean
-  four-lane verdict. Proceed to production browser smoke and the final
-  cleanup/state audit only after GO.
-  Proceed to production browser smoke and the final cleanup/state audit only
-  after GO.
+- Exact successor `9b4125c` passed all four post-commit gates: `make ci`
+  (catalog 2+7+24, core 1104 passed with 9 environment-dependent ignores,
+  server 134, binary 21, frontend 172, plus formatting, warning-denied lint,
+  typecheck, docs, and production build), `make test-durability` (10/10),
+  `make test-assets` with no drift, and production-embedded Playwright 10/10.
+  Its detached-clean acyclic four-lane review (session
+  `7c8d9315-8ae6-45ff-8de8-8882ff08544f`, run
+  `1d006f38-f84d-47f7-ad89-0cfdfde827b7`) returned NO-GO with nine P1s:
+  delegated public DELETE; cache-dependent mutating empty PATCH; pathname
+  ancestor-swap TOCTOU; undisclosed terminal-input bytes; understated trusted
+  Local/SSH interpreter authority; stale `write_stdin.chars` schema/docs;
+  PTY spawn/input crossing cancellation; portable identity-inspection
+  uncertainty losing retry authority; and this stale tracked ledger.
+- The active successor repair makes delegated DELETE primary-only while
+  retaining internal parent cascade; makes every empty PATCH universally
+  store-free; displays exact JSON-escaped terminal input; presents broad/opaque
+  Local/SSH approval as trusted arbitrary code and Podman as the stronger
+  boundary; corrects the model schema/docs; serializes cancellation with final
+  PTY spawn/input mutation; treats portable identity inspection as a tri-state
+  and retains pidfiles on uncertainty; and conservatively hard-denies directly
+  parsed shell path arguments because portable pathname text cannot survive a
+  concurrent ancestor swap. Native file/search tools and path-free commands
+  remain available; a broad interpreter requires the objective's explicit
+  trusted-code approval.
+- Current focused regressions pass for both cancellation barriers, portable
+  cleanup uncertainty, exact terminal-input presentation, broad authority
+  presentation, conservative path admission, delegated manager/HTTP DELETE,
+  parent cascade, cached/uncached empty PATCH, and frontend permission display.
+  The integrated precommit `make ci` gate also passes: catalog 2+7+24, core
+  1109 passed/9 environment-dependent ignored, server 134, binary 21, frontend
+  173, plus formatting, warning-denied lint, typecheck, docs, and production
+  build.
+- Next action: finish the full regression audit, commit only tracked product
+  and progress files, run all four gates at the exact successor SHA, then obtain
+  a new detached-clean acyclic four-lane verdict. Production browser smoke and
+  final cleanup/state audit remain gated on GO.
 - Exact evidence successor `d645781` passed `make ci`, `make test-durability`,
   `make test-assets`, and production-embedded Playwright 10/10 after commit.
   Its detached-clean four-lane review (session
@@ -620,8 +640,9 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Complete the `d645781` review repair, run focused and
-full-crate verification, commit only tracked product/progress files, repeat all
-four required release gates at the exact successor SHA, and obtain another
-detached-clean four-lane NAC verdict. Preserve `.gitignore`, untracked
-`AGENTS.md`, `demo_ext_managed.md`, and the local notebooks.
+Closure is still active. Complete the nine-finding `9b4125c` review repair, run
+focused and full-crate verification, commit only tracked product/progress
+files, repeat all four required release gates at the exact successor SHA, and
+obtain another detached-clean acyclic four-lane NAC verdict. Preserve
+`.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, and the local
+notebooks.
