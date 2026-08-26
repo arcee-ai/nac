@@ -292,6 +292,12 @@ rm -f "$pidfile""#;
 pub(crate) struct PodmanSession {
     spec: SandboxSpec,
     session_key: String,
+    /// Whether this attachment may create the stable container when it is
+    /// absent. Ordinary worker attachments inherit the parent-owned container
+    /// and must not recreate it; durable-session resume is an explicit
+    /// lifecycle owner even though it never receives destructive Drop
+    /// authority.
+    create_if_missing: bool,
     cleanup_on_drop: AtomicBool,
     container_name: String,
     /// Key setup activity is reported under: a client-supplied launch id when
@@ -721,6 +727,7 @@ impl PodmanSession {
         Self {
             spec,
             session_key,
+            create_if_missing: owner,
             cleanup_on_drop: AtomicBool::new(owner),
             container_name,
             activity_key,
@@ -738,6 +745,16 @@ impl PodmanSession {
     ) -> Self {
         let mut session = Self::new(spec, session_key, owner, activity_key);
         session.creation_store_path = Some(store_path);
+        session
+    }
+
+    pub(crate) fn new_for_durable_resume(
+        spec: SandboxSpec,
+        session_key: String,
+        activity_key: String,
+    ) -> Self {
+        let mut session = Self::new(spec, session_key, false, activity_key);
+        session.create_if_missing = true;
         session
     }
 
@@ -778,6 +795,12 @@ impl PodmanSession {
             Err(error) => return Err(explain_runtime_failure(error).await),
         };
         if !exists {
+            if !self.create_if_missing {
+                bail!(
+                    "sandbox session '{}' is not available; start the parent nac process first",
+                    self.session_key
+                );
+            }
             self.ensure_image().await?;
             super::report_activity(&self.activity_key, "starting the sandbox container");
             self.create_container().await?;
@@ -796,7 +819,7 @@ impl PodmanSession {
     /// what lets the slow phase be reported and streamed instead of looking
     /// frozen.
     async fn ensure_image(&self) -> Result<()> {
-        let exists = Command::new("podman")
+        let exists = Command::new(podman_program())
             .arg("image")
             .arg("exists")
             .arg(&self.spec.image)
@@ -1045,7 +1068,7 @@ impl PodmanSession {
     }
 
     async fn container_exists(&self) -> Result<bool> {
-        let output = Command::new("podman")
+        let output = Command::new(podman_program())
             .arg("container")
             .arg("exists")
             .arg(&self.container_name)
@@ -1426,6 +1449,132 @@ mod tests {
             ImageCheck::Failed(detail) => assert_eq!(detail, "no details reported"),
             _ => panic!("signal termination must be a check failure"),
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn observer_does_not_recreate_a_missing_parent_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-observer-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let arguments = root.join("arguments");
+        std::fs::write(
+            &podman,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$NAC_TEST_PODMAN_ARGUMENTS"
+if [ "$1" = container ] && [ "$2" = exists ]; then
+  exit 1
+fi
+exit 99
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_program = std::env::var_os("NAC_TEST_PODMAN_PROGRAM");
+        let original_arguments = std::env::var_os("NAC_TEST_PODMAN_ARGUMENTS");
+        unsafe {
+            std::env::set_var("NAC_TEST_PODMAN_PROGRAM", &podman);
+            std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
+        }
+        let session = PodmanSession::new(
+            SandboxSpec::default(),
+            "parent-session".to_string(),
+            false,
+            "observer".to_string(),
+        );
+        let error = session.ensure_ready().await.unwrap_err();
+        unsafe {
+            match original_program {
+                Some(program) => std::env::set_var("NAC_TEST_PODMAN_PROGRAM", program),
+                None => std::env::remove_var("NAC_TEST_PODMAN_PROGRAM"),
+            }
+            match original_arguments {
+                Some(path) => std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", path),
+                None => std::env::remove_var("NAC_TEST_PODMAN_ARGUMENTS"),
+            }
+        }
+        assert!(error
+            .to_string()
+            .contains("start the parent nac process first"));
+        assert_eq!(
+            std::fs::read_to_string(&arguments).unwrap(),
+            "container exists nac-parent-session\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn durable_resume_recreates_a_missing_container_without_drop_cleanup() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-durable-resume-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let arguments = root.join("arguments");
+        std::fs::write(
+            &podman,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$NAC_TEST_PODMAN_ARGUMENTS"
+if [ "$1" = container ] && [ "$2" = exists ]; then
+  exit 1
+fi
+if [ "$1" = image ] && [ "$2" = exists ]; then
+  exit 0
+fi
+if [ "$1" = run ]; then
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = --cidfile ]; then
+      printf '%064d\n' 0 > "$2"
+      exit 0
+    fi
+    shift
+  done
+fi
+exit 99
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_program = std::env::var_os("NAC_TEST_PODMAN_PROGRAM");
+        let original_arguments = std::env::var_os("NAC_TEST_PODMAN_ARGUMENTS");
+        unsafe {
+            std::env::set_var("NAC_TEST_PODMAN_PROGRAM", &podman);
+            std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", &arguments);
+        }
+        let session = PodmanSession::new_for_durable_resume(
+            SandboxSpec::default(),
+            "durable-session".to_string(),
+            "resume".to_string(),
+        );
+        session.ensure_ready().await.unwrap();
+        drop(session);
+        unsafe {
+            match original_program {
+                Some(program) => std::env::set_var("NAC_TEST_PODMAN_PROGRAM", program),
+                None => std::env::remove_var("NAC_TEST_PODMAN_PROGRAM"),
+            }
+            match original_arguments {
+                Some(path) => std::env::set_var("NAC_TEST_PODMAN_ARGUMENTS", path),
+                None => std::env::remove_var("NAC_TEST_PODMAN_ARGUMENTS"),
+            }
+        }
+        let arguments = std::fs::read_to_string(&arguments).unwrap();
+        assert!(arguments.contains("container exists nac-durable-session\n"));
+        assert!(arguments.contains("image exists python:3.13-bookworm\n"));
+        assert!(arguments.contains("run "));
+        assert!(!arguments.contains("rm --ignore -f nac-durable-session"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

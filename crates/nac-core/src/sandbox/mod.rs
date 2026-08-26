@@ -324,6 +324,25 @@ impl SandboxSession {
         Ok(session)
     }
 
+    pub(crate) async fn create_for_durable_resume(
+        spec: SandboxSpec,
+        session_key: String,
+        activity_key: String,
+    ) -> Result<Self> {
+        let session = match spec.backend {
+            SandboxBackendType::Podman => {
+                let inner = Arc::new(podman::PodmanSession::new_for_durable_resume(
+                    spec,
+                    session_key,
+                    activity_key,
+                ));
+                inner.ensure_ready().await?;
+                Self::Podman(inner)
+            }
+        };
+        Ok(session)
+    }
+
     pub fn workdir_display(&self) -> String {
         self.spec().workdir.display().to_string()
     }

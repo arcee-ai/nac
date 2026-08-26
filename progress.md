@@ -801,39 +801,47 @@ Non-negotiable invariants:
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
   this is not a QA pass and does not replace the root-owned release gates.
 
-## Exact next action
+## Final `d01a066` acceptance status
 
-Closure is still active. Evidence successor
-`62368f82a56625eaba8f96373b01e12c44cedd63` passed all four exact gates, but
-review session `884c2806-838d-4207-851f-99dabf10d132` (run
-`74334946-c324-48b7-953a-e43fef096f6c`) is both structurally invalid and
-NO-GO: its adversarial continuation was rejected by the provider content
-filter, leaving retained topology 2/2/2/1 rather than the required two
-episodes in every lane. The completed episodes independently confirmed two P1
-blockers: stateful Bash `set -a` plus `let`/`read` can create exported loader
-hooks across separately authorized segments, reopening NAC-REV-003; and a
-process loss after successful `podman run` but before the session-row commit
-can orphan a detached container after its creation record is removed.
+Exact code candidate `d01a06662bd36e8256f4b18742c2316866e8ca05`
+passed all four release gates without requiring a code-identical evidence
+successor: `make ci` (catalog 2+7+24, core 1148/9 ignored, server 143, binary
+21, frontend 175), `make test-durability` (10/10), `make test-assets` with no
+committed-bundle drift, and production-embedded `make test-e2e` (10/10).
+Rootless Podman remains unavailable, so the repository `qa` skill is
+infrastructure-blocked and no live-Podman QA pass is claimed.
 
-The active repair hard-denies the allexport state transition and direct
-protected-hook targets for `let` and `read` across local, Podman, and SSH
-classification. Fresh durable Podman creation now keeps a private, locked,
-store- and session-bound ID/token record from before `run` through the durable
-row commit. Server startup reconciles abandoned records: active locks are
-skipped, committed rows retain their containers, absent or malformed authority
-is preserved fail-closed, and uncommitted full IDs are removed only after
-matching the per-launch label; failures remain retryable. Focused permission,
-creation-barrier, cancellation, cleanup-retry, and committed-row regressions,
-crate checks, and the complete core suite (1157 tests including 9 ignored)
-pass. Coherent repair commit
-`d01a06662bd36e8256f4b18742c2316866e8ca05` also passes all four exact gates:
-`make ci` (catalog 2+7+24, core 1148/9 ignored, server 143, binary 21,
-frontend 175), all 10 deterministic durability checks, committed-asset
-freshness, and all 10 production-embedded Playwright journeys. An evidence
-successor with repeated exact gates and a fresh valid detached-clean four-lane,
-two-episode NAC GO remain required before final browser smoke and status audit. Preserve
-`.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
-the ignored local decision notebook throughout.
+The one final detached-clean review used session
+`af5fc459-fe79-4423-a91a-b20b6d1d4013`, run
+`84e9480d-404d-45ce-b597-7e060ae5e945`, at the exact candidate SHA. It was
+structurally valid and read-only: exactly `authority`, `durability`, `product`,
+and `adversarial`, exactly two retained episodes per name, no additional names,
+and all eight episodes independently reported the exact SHA and empty
+porcelain. The aggregate verdict was **NO-GO** with one new P1 lifecycle
+blocker.
+
+The concrete supported sequence is a Podman creation whose NAC parent dies
+after spawning `podman run --cidfile` but before the child writes the cidfile
+or the session row commits. A replacement server can perform its sole startup
+reconciliation before the surviving child writes that cidfile; the record is
+preserved, but no current-generation retry is scheduled. The child can then
+leave a detached container with no session row or live cleanup owner until an
+unrelated future restart. This violates the settled crash-recoverable Podman
+creation/lifecycle contract. The exact missing invariant is: every unresolved
+creation record observed at startup must remain attached to a live
+reconciliation obligation until a committed session row assumes ownership or
+the exact full-ID and launch-label-bound container is removed and the record is
+cleared.
+
+Per the acceptance stop rule, no repair or new gate/review cycle was started,
+and the final embedded-browser acceptance smoke was not run after NO-GO. The
+four exact gates above remain authoritative evidence for `d01a066`; browser
+smoke is intentionally deferred pending human adjudication of this P1. Shell
+parser/executor-wrapper variants, live-Podman coverage, stale wording, stronger
+host-reboot storage, and other defense-in-depth work remain non-blocking
+follow-ups. No evidence-only commit is required. Preserve `.gitignore`,
+untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and the ignored
+local decision notebook throughout.
 
 ## Exact `d9bfe35` review
 
@@ -914,3 +922,28 @@ ignored, server 143, binary 21, frontend 175), all 10 deterministic durability
 checks, committed-asset freshness, and all 10 production-embedded Playwright
 journeys. This is exact implementation evidence only. The tracked evidence
 successor must repeat the same four gates before the required immutable review.
+
+## Human-adjudicated Podman closure
+
+Human adjudication supersedes the final `d01a066` review's late-cidfile P1
+classification for MVP acceptance. Podman is optional, direct local and SSH
+sessions do not depend on it, and no live Podman runtime is available here.
+The residual sequence remains documented: if `podman run` publishes its
+cidfile only after replacement startup's sole reconciliation scan, its private
+record and uncommitted container may remain until a later nac restart retries
+exact full-ID/launch-label cleanup or an operator performs verified cleanup.
+Closing every timing variation needs a persistent reconciliation owner or
+larger lifecycle redesign; this bounded closure does not add one.
+
+Read-only comparison found upstream clean `main` `0a016de` and this branch's
+pre-expansion baseline `61b1709` use byte-identical Podman code. Their ordinary
+non-owner worker refuses to recreate a missing parent container. The expansion
+introduced stable durable identity, explicit lifecycle cleanup, durable resume,
+peer/resource ownership, cancellation settlement, private creation records,
+full-ID/label validation, and startup reconciliation; all are retained. One
+localized regression is repaired: `create_if_missing` is now distinct from
+destructive Drop cleanup, so ordinary worker attachments regain the inherited
+refusal while durable resume may recreate without gaining Drop cleanup
+authority. Deterministic fake-Podman tests cover both sides. Focused exact
+tests pass; full gates on the final code commit and embedded-product browser
+smoke remain pending. No further NAC review cycle is required.
