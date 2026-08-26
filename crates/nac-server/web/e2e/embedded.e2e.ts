@@ -256,6 +256,51 @@ test("steers an active direct run from the ordinary composer", async ({
   expect(JSON.stringify(steeredRequest?.body)).toContain("change course safely");
 });
 
+test("queues, edits, cancels pending input, and stops an active direct run", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const boundary = new ScriptGate();
+  harness.provider.enqueue(
+    "queue-stop-boundary",
+    { token: "E2E_QUEUE_STOP_TOKEN" },
+    { kind: "text", text: "must be cancelled", stream: true },
+    boundary,
+  );
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+
+  const composer = page.getByRole("combobox", { name: "Message" });
+  await composer.fill("E2E_QUEUE_STOP_TOKEN");
+  await page.getByRole("button", { name: "Send" }).click();
+  await boundary.accepted;
+
+  await composer.fill("queued follow-up");
+  await page.getByRole("button", { name: "Queue Next" }).click();
+  const pending = page.getByLabel("Pending messages");
+  await expect(pending).toContainText("queue");
+  await expect(pending).toContainText("queued follow-up");
+  await pending.getByRole("button", { name: "Change to steer" }).click();
+  await expect(pending).toContainText("steer");
+  await pending.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByLabel("Pending messages")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Stop run" }).click();
+  await waitForRunIdle(request, harness, sessionId);
+  const inbox = await request.get(`${harness.baseUrl}/sessions/${sessionId}/inbox`);
+  expect(inbox.ok()).toBe(true);
+  expect(await inbox.json()).toEqual([
+    expect.objectContaining({
+      delivery: "steer",
+      prompt: "queued follow-up",
+      status: "cancelled",
+    }),
+  ]);
+  boundary.release();
+  harness.provider.assertConsumed();
+});
+
 test("interprets literal goal commands before launching goal continuation", async ({
   harness,
   page,
@@ -286,8 +331,124 @@ test("interprets literal goal commands before launching goal continuation", asyn
   expect(harness.provider.requests[0]?.matchedStep).toBe("goal-continuation");
   expect(JSON.stringify(harness.provider.requests[0]?.body)).toContain("<nac_goal_continuation");
 
+  // The run attaches durable accounting after goal creation. Reload so the
+  // versioned controls exercise the current post-attachment record.
+  await page.reload();
   await page.getByRole("button", { name: "Goal: active" }).click();
   await expect(page.getByRole("dialog")).toContainText("ship the embedded MVP");
+  await page.getByRole("button", { name: "Pause" }).click();
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      return ((await response.json()) as { status?: string } | null)?.status;
+    })
+    .toBe("paused");
+  await page.getByRole("button", { name: "Resume" }).click();
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      return ((await response.json()) as { status?: string } | null)?.status;
+    })
+    .toBe("active");
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      return await response.json();
+    })
+    .toBeNull();
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Stop run" }).click();
+  await waitForRunIdle(request, harness, sessionId);
+  continuation.release();
+  harness.provider.assertConsumed();
+});
+
+test("replaces a completed durable goal from the production dialog", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const original = new ScriptGate();
+  const replacement = new ScriptGate();
+  harness.provider.enqueue(
+    "inspect-original-goal",
+    {
+      token: "Continue autonomously pursuing this durable goal",
+      requiredTools: ["get_goal", "update_goal"],
+    },
+    {
+      kind: "function_call",
+      name: "get_goal",
+      callId: "get-original-goal",
+      arguments: {},
+      stream: true,
+    },
+    original,
+  );
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  const composer = page.getByRole("combobox", { name: "Message" });
+  await composer.fill("/goal original objective");
+  await composer.press("Enter");
+  await original.accepted;
+
+  const currentResponse = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+  const current = (await currentResponse.json()) as {
+    goal_id: string;
+  };
+  harness.provider.enqueue(
+    "complete-original-goal",
+    { functionOutputCallId: "get-original-goal" },
+    {
+      kind: "function_call",
+      name: "update_goal",
+      callId: "complete-original-goal",
+      arguments: { goal_id: current.goal_id, status: "complete" },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "finish-original-goal",
+    { functionOutputCallId: "complete-original-goal" },
+    { kind: "text", text: "original goal completed", stream: true },
+  );
+  original.release();
+  await harness.provider.waitForRequestCount(3);
+  await waitForRunIdle(request, harness, sessionId);
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      return ((await response.json()) as { status?: string } | null)?.status;
+    })
+    .toBe("complete");
+
+  harness.provider.enqueue(
+    "replacement-goal",
+    { token: "replacement objective" },
+    { kind: "text", text: "replacement goal response", stream: true },
+    replacement,
+  );
+
+  await expect(page.getByRole("button", { name: "Goal: complete" })).toBeVisible();
+  await page.getByRole("button", { name: "Goal: complete" }).click();
+  await page.getByPlaceholder("Describe the concrete outcome").fill("replacement objective");
+  await page.getByRole("button", { name: "Replace and start" }).click();
+  await replacement.accepted;
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      return (await response.json()) as { goal_id?: string; objective?: string } | null;
+    })
+    .toMatchObject({ objective: "replacement objective" });
+  const replacedResponse = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+  const replaced = (await replacedResponse.json()) as { goal_id: string };
+  expect(replaced.goal_id).not.toBe(current.goal_id);
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Stop run" }).click();
+  await waitForRunIdle(request, harness, sessionId);
+  replacement.release();
+  harness.provider.assertConsumed();
 });
 
 test("navigates to read-only child and managed-orchestrator transcripts", async ({
