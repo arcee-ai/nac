@@ -387,10 +387,20 @@ pub(super) async fn run_worker(
             if let Ok(wait_result) = timeout(COOPERATIVE_CLEANUP_GRACE, child.wait()).await {
                 let status = wait_result?;
                 process_tree.mark_leader_reaped();
-                cooperatively_cancelled = true;
-                if !status.success() {
-                    cooperative_cleanup_error =
-                        Some(format!("worker cleanup exited with {status}"));
+                if status.success() {
+                    cooperatively_cancelled = true;
+                } else {
+                    // A worker panic or non-zero exit after cancel ack is not
+                    // proof that command descendants are still running. Reap
+                    // leftovers and fail closed only when that cannot finish.
+                    match process_tree.terminate(&mut child).await {
+                        Ok(()) => cooperatively_cancelled = true,
+                        Err(error) => {
+                            cooperatively_cancelled = true;
+                            cooperative_cleanup_error =
+                                Some(format!("worker cleanup incomplete: {error}"));
+                        }
+                    }
                 }
             }
         }

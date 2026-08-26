@@ -175,12 +175,36 @@ if [ -n "$pid" ]; then
     kill -KILL "$child" 2>/dev/null || true
   done
   kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  is_live() {
+    target=$1
+    [ -r "/proc/$target/stat" ] || return 1
+    rest=$(sed 's/^.*) //' "/proc/$target/stat" 2>/dev/null) || return 1
+    set -- $rest
+    case "${1:-}" in
+      Z*) return 1 ;;
+    esac
+    return 0
+  }
+  group_has_live() {
+    pgid=$1
+    for stat in /proc/[0-9]*/stat; do
+      [ -r "$stat" ] || continue
+      rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
+      set -- $rest
+      [ "${3:-}" = "$pgid" ] || continue
+      case "${1:-}" in
+        Z*) continue ;;
+      esac
+      return 0
+    done
+    return 1
+  }
   attempts=0
   while :; do
     alive=0
-    kill -0 "-$pid" 2>/dev/null && alive=1
+    group_has_live "$pid" && alive=1
     for target in $pid $pids; do
-      kill -0 "$target" 2>/dev/null && alive=1
+      is_live "$target" && alive=1
     done
     [ "$alive" -eq 0 ] && break
     attempts=$((attempts + 1))
@@ -1055,7 +1079,9 @@ mod tests {
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
-        assert!(SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
+        assert!(SANDBOX_KILL_WRAPPER.contains("is_live()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("group_has_live()"));
+        assert!(!SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("[ \"$attempts\" -ge 20 ] && exit 1"));
         assert!(
             SANDBOX_KILL_TIMEOUT > Duration::from_millis(20 * 50 * 2),

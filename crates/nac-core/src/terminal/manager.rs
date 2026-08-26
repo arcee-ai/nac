@@ -343,10 +343,7 @@ impl TerminalManager {
         let spawned = if self.isolate_process_groups {
             ProcessTreeGuard::spawn_supervised(&mut command)
         } else {
-            command.spawn().map(|child| {
-                let process_tree = ProcessTreeGuard::for_child(&child);
-                (child, process_tree)
-            })
+            ProcessTreeGuard::spawn_tracked(&mut command)
         };
         let (mut child, mut process_tree) = match spawned {
             Ok(spawned) => spawned,

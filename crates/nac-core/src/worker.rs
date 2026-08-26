@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::io::BufRead;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use crate::tools::ThreadCancellation;
+use crate::tools::{ActiveToolRegistry, ThreadCancellation};
 use anyhow::Result;
 
 use crate::agent::Agent;
@@ -91,6 +92,7 @@ async fn commit_managed_worker_episode(
 
 fn spawn_cancellation_listener(
     command_cancellation: ThreadCancellation,
+    active_tools: Option<Arc<ActiveToolRegistry>>,
     #[cfg(test)] ready: Option<std::sync::mpsc::Sender<()>>,
 ) {
     std::thread::spawn(move || {
@@ -107,6 +109,9 @@ fn spawn_cancellation_listener(
             if line.trim() == "cancel" {
                 eprintln!("{MANAGED_WORKER_CANCEL_ACK}");
                 command_cancellation.cancel();
+                if let Some(active_tools) = active_tools {
+                    active_tools.cancel_abortable();
+                }
                 break;
             }
         }
@@ -125,12 +130,15 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
     let cancellation = agent.command_cancellation();
     spawn_cancellation_listener(
         cancellation.clone(),
+        Some(agent.active_tools_handle()),
         #[cfg(test)]
         None,
     );
     let send_result = agent.send(&action).await;
     if cancellation.is_cancelled() {
-        agent.confirm_command_shutdown().await?;
+        if let Err(error) = agent.confirm_command_shutdown().await {
+            eprintln!("nac: worker command shutdown incomplete: {error:#}");
+        }
         return Ok(());
     }
     let response = send_result?;
@@ -169,7 +177,7 @@ mod tests {
         };
         let cancellation = ThreadCancellation::default();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        spawn_cancellation_listener(cancellation.clone(), Some(ready_tx));
+        spawn_cancellation_listener(cancellation.clone(), None, Some(ready_tx));
         ready_rx
             .recv_timeout(Duration::from_secs(2))
             .expect("cancellation listener did not start reading");
