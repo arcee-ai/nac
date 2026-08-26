@@ -54,8 +54,9 @@ Protected initial state verified on 2026-08-25:
    peer-sandbox, external-MCP-edit, mobile
    delegated-branch, and orchestrator-goal seams. Focused tests, complete core
    and server suites, and all 174 frontend tests plus typecheck/lint/format are
-   green. Exact release gates, fresh review GO, final browser smoke, and the
-   final state audit remain required.
+   green. Exact candidate `54612fc` passes all four release gates. Its tracked
+   evidence successor must pass them again before fresh review GO; final
+   browser smoke and the final state audit then remain required.
 
 ### Finding map
 
@@ -192,7 +193,12 @@ Protected initial state verified on 2026-08-25:
   passes 174 tests across 27 files plus typecheck, warning-denied lint, and
   formatting. Deterministic durability passes 10/10; the corrected mobile
   delegated-transcript Playwright journey passes against the embedded binary.
-  Exact-commit release gates have not yet run for this repair.
+- Exact candidate `54612fc19f57d21998f0ac8573ef4839b7417630`
+  passes all four release gates: `make ci` (catalog 2+7+24, core 1129 passed/9
+  ignored, server 140, binary 21, frontend 174), `make test-durability`
+  (10/10), `make test-assets` with no bundle drift, and production-embedded
+  Playwright 10/10. The worktree afterward contained only protected local/user
+  state.
 - Baseline `make check`: passed.
 - Milestone 1 implementation: exact-command PTYs on Local/Podman/SSH; canonical
   local and remote authorization targets; opaque/broad/wrapper and path-bearing
@@ -701,13 +707,15 @@ Non-negotiable invariants:
 - `e8aefaa close cancelled lifecycle authority gaps`.
 - `9ec0417 protect concurrent MCP config edits`.
 - `31a0d70 hide unsupported delegated controls`.
+- `54612fc record immutable review repair status`.
 
 ## Known problems and blockers
 
 - The accepted `a1e93f8` finding set is implemented in the candidate commits,
   its production assets are rebuilt, and its focused and broad crate/frontend
-  tests pass. It still needs all four exact-SHA gates and a fresh detached
-  four-lane GO before release readiness can be claimed.
+  tests and exact candidate gates pass. The tracked evidence successor still
+  needs the same four exact-SHA gates and a fresh detached four-lane GO before
+  release readiness can be claimed.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -715,10 +723,9 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Run all four release gates at the exact current
-candidate SHA while preserving `.gitignore`, untracked `AGENTS.md`,
-`demo_ext_managed.md`, `demo_review.md`, and the ignored local decision
-notebook. Record the evidence in a tracked successor, run the same four gates
-at that successor, then obtain a fresh detached-clean acyclic four-lane NAC
-verdict. A GO must be followed by final browser smoke and the final
-ledger/status audit.
+Closure is still active. This tracked evidence successor must receive all four
+release gates at its exact SHA while preserving `.gitignore`, untracked
+`AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and the ignored local
+decision notebook, followed without another source change by a fresh
+detached-clean acyclic four-lane NAC verdict. A GO must be followed by final
+browser smoke and the final ledger/status audit.
