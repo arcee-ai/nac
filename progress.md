@@ -248,6 +248,9 @@ Protected initial state verified on 2026-08-25:
   precommit gates pass: catalog 2+7+24, core 1097 passed/9 ignored, server 134,
   binary 21, frontend 172, formatting, warning-denied lint, typecheck,
   durability, asset freshness, and production-embedded Playwright 10/10.
+- Exact repair `66af4e1` passed that complete gate set again with the same
+  counts and all 10 production-embedded Playwright journeys. Its tracked
+  evidence successor must receive the same gates before immutable review.
 
 ## Objective and invariants
 
@@ -587,6 +590,7 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit the four-finding repair, repeat every required
-gate at its exact SHA, and obtain another detached-clean four-lane NAC verdict.
-Preserve `.gitignore`, untracked `AGENTS.md`, and the local notebooks.
+Closure is still active. Commit this evidence-only successor to exact repair
+`66af4e1`, repeat every required gate at the successor SHA, and obtain another
+detached-clean four-lane NAC verdict. Preserve `.gitignore`, untracked
+`AGENTS.md`, and the local notebooks.
