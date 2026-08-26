@@ -46,10 +46,11 @@ pub mod ssh_configurations {
 /// the file when a worker launches.
 pub mod mcp_configurations {
     pub use crate::mcp::{
-        delete_mcp_server_configuration, embedded_library_entries, fetch_smithery_library_entries,
-        insert_mcp_server_configuration, list_mcp_server_configurations,
-        load_mcp_server_configuration, mcp_config_path, merge_library_entries, probe_mcp_server,
-        update_mcp_server_configuration, McpLibraryAuth, McpLibraryEntry, McpProbedTool,
+        acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
+        embedded_library_entries, fetch_smithery_library_entries, insert_mcp_server_configuration,
+        list_mcp_server_configurations, load_mcp_server_configuration, mcp_config_path,
+        merge_library_entries, probe_mcp_server, update_mcp_server_configuration,
+        McpConfigurationWriteLease, McpLibraryAuth, McpLibraryEntry, McpProbedTool,
         McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
         McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
     };
@@ -65,6 +66,7 @@ pub mod permissions;
 mod process;
 pub mod runtime;
 mod sandbox;
+pub use sandbox::destroy_persisted_container;
 pub mod session_service;
 pub mod sessions;
 mod skills;
@@ -96,6 +98,10 @@ pub mod test_support {
 
     pub use fixture_sessions as sessions;
     pub use fixture_store as store;
+
+    pub fn set_default_sandbox_spec(snapshot: &mut crate::sessions::SessionSnapshot) {
+        snapshot.sandbox_spec = Some(crate::sandbox::SandboxSpec::default());
+    }
 }
 
 #[cfg(test)]

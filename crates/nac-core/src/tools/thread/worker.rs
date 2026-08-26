@@ -528,7 +528,7 @@ wait
         runtime.worker_executable = Some(executable);
         crate::store::initialize(&runtime.store_path).unwrap();
         crate::store::insert_test_session(&runtime.store_path, "session");
-        assert!(runtime.active_threads.begin_run());
+        assert!(runtime.active_threads.begin_run("run-1"));
         assert!(runtime.active_threads.mark("a", "dispatch-a"));
         assert!(runtime.active_threads.mark("b", "dispatch-b"));
         let cancellation_a = runtime.active_threads.start("a", "dispatch-a").unwrap();

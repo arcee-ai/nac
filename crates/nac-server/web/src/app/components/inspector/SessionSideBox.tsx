@@ -100,12 +100,14 @@ function SideBoxFooter({
   workspace,
   revision,
   compact,
+  readOnly,
 }: {
   sessionId: string;
   workspace: WorkspaceSnapshot | null;
   revision: number | null;
   /** Phone width: the chips give up room so the diff total stays visible. */
   compact: boolean;
+  readOnly: boolean;
 }) {
   const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
   const branch = workspace?.branch ?? null;
@@ -125,7 +127,10 @@ function SideBoxFooter({
     >
       <div className={cn("flex flex-1 min-w-0 items-center", compact ? "gap-1" : "gap-[10px]")}>
         {repo ? <FooterChip iconName={IconName.Folder} label={repo} compact={compact} /> : null}
-        {branch ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
+        {branch && !readOnly ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
+        {branch && readOnly ? (
+          <FooterChip iconName={IconName.Scheme} label={branch} compact={compact} />
+        ) : null}
         <RevisionPicker sessionId={sessionId} selected={revision} onSelect={selectRevision} />
       </div>
       {additions || deletions ? (
@@ -172,7 +177,12 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
   const body = (
     <>
       {active === "files" ? (
-        <FilesView sessionId={sessionId} snapshot={snapshot} revision={selectedRevision} />
+        <FilesView
+          sessionId={sessionId}
+          snapshot={snapshot}
+          revision={selectedRevision}
+          readOnly={delegatedTranscript}
+        />
       ) : null}
       {active === "delegated" && direct && !delegatedTranscript ? (
         <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
@@ -259,6 +269,7 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
         workspace={snapshot?.workspace ?? null}
         revision={selectedRevision}
         compact={isTablet}
+        readOnly={delegatedTranscript}
       />
     </div>
   );

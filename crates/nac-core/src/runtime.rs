@@ -933,7 +933,13 @@ async fn build_run_config_inner(
             .ssh
             .connection(&config_paths)
             .expect("a trimmed ssh host yields a connection");
-        let remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
+        let requested_remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
+        let requested_remote_cwd_text = requested_remote_cwd
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("remote working directory is not valid UTF-8"))?;
+        let remote_cwd =
+            canonical_remote_session_cwd(&connection, requested_remote_cwd_text, &config_paths)
+                .await?;
         let working_directory = directory_display(&remote_cwd);
         let workspace_git = GitTarget::ssh(connection.clone(), remote_cwd.clone(), &config_cwd);
         let session_id = Uuid::new_v4().to_string();
@@ -1002,9 +1008,12 @@ async fn build_run_config_inner(
     }
 
     let workspace_cwd = options.workspace_cwd;
+    let session_id = Uuid::new_v4().to_string();
     let paths = PathContext::new(&workspace_cwd);
     let mut worktree_rollback: session_worktree::RollbackGuard;
-    let sandbox = build_sandbox_session(&sandbox_options, &workspace_cwd).await?;
+    let sandbox =
+        build_sandbox_session_inner(&sandbox_options, &workspace_cwd, Some(session_id.clone()))
+            .await?;
     worktree_rollback = session_worktree::RollbackGuard::new(
         sandbox
             .as_ref()
@@ -1034,7 +1043,6 @@ async fn build_run_config_inner(
     let agents_md_message = agents_md.system_message();
     let agents_md_status = agents_md.status_text();
 
-    let session_id = Uuid::new_v4().to_string();
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
@@ -1536,7 +1544,7 @@ async fn build_resume_config_from_snapshot(
                     )?,
                     None => false,
                 };
-                let session_key = Uuid::new_v4().to_string();
+                let session_key = snapshot.session_id.clone();
                 let session =
                     SandboxSession::create(spec, session_key.clone(), true, session_key).await?;
                 if materialize {
@@ -1700,19 +1708,48 @@ fn remote_cwd_or_home(cwd: PathBuf) -> PathBuf {
     }
 }
 
+async fn canonical_remote_session_cwd(
+    connection: &SshConnection,
+    requested: &str,
+    paths: &PathContext,
+) -> Result<PathBuf> {
+    // The login home spelling is already stable for one canonical connection
+    // identity and intentionally remains portable across hosts.
+    if requested == "~" {
+        return Ok(PathBuf::from("~"));
+    }
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os("NAC_TEST_CANONICAL_REMOTE_CWD") {
+        return Ok(PathBuf::from(path));
+    }
+    Ok(PathBuf::from(
+        crate::sandbox::browse_remote_directory(connection, Some(requested), false, paths)
+            .await
+            .map_err(anyhow::Error::new)?
+            .path,
+    ))
+}
+
 pub async fn build_sandbox_session(
     options: &EffectiveSandboxOptions,
     cwd: &Path,
+) -> Result<Option<SandboxSession>> {
+    build_sandbox_session_inner(options, cwd, None).await
+}
+
+async fn build_sandbox_session_inner(
+    options: &EffectiveSandboxOptions,
+    cwd: &Path,
+    owned_session_key: Option<String>,
 ) -> Result<Option<SandboxSession>> {
     validate_sandbox_options(options)?;
     if !options.sandbox {
         return Ok(None);
     }
 
-    let owner = options.sandbox_session_key.is_none();
-    let session_key = options
-        .sandbox_session_key
-        .clone()
+    let owner = owned_session_key.is_some() || options.sandbox_session_key.is_none();
+    let session_key = owned_session_key
+        .or_else(|| options.sandbox_session_key.clone())
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // Everything between the fork (inside `cwd_mount`) and `launch_session`
@@ -4014,6 +4051,7 @@ X-Config = "yes"
         let _guard = TEST_ENV_LOCK.lock().unwrap();
 
         let original_api_key = std::env::var_os("OPENAI_API_KEY");
+        let original_remote_cwd = std::env::var_os("NAC_TEST_CANONICAL_REMOTE_CWD");
         unsafe {
             std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
         }
@@ -4025,6 +4063,9 @@ X-Config = "yes"
         let store_path = store_root.join("store.db");
         let remote_cwd = PathBuf::from(format!("/remote/workspace/create-{}", unique));
         assert!(!remote_cwd.exists());
+        unsafe {
+            std::env::set_var("NAC_TEST_CANONICAL_REMOTE_CWD", &remote_cwd);
+        }
 
         store::initialize(&store_path).unwrap();
 
@@ -4093,6 +4134,7 @@ X-Config = "yes"
 
         let _ = std::fs::remove_dir_all(&store_root);
         restore_env("OPENAI_API_KEY", original_api_key);
+        restore_env("NAC_TEST_CANONICAL_REMOTE_CWD", original_remote_cwd);
     }
 
     #[tokio::test]
@@ -4101,6 +4143,7 @@ X-Config = "yes"
         let original_api_key = std::env::var_os("OPENAI_API_KEY");
         let original_nac_home = std::env::var_os("NAC_HOME");
         let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let original_remote_cwd = std::env::var_os("NAC_TEST_CANONICAL_REMOTE_CWD");
         unsafe {
             std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
             std::env::remove_var("XDG_CONFIG_HOME");
@@ -4118,6 +4161,7 @@ X-Config = "yes"
         assert!(!remote_cwd.exists());
         unsafe {
             std::env::set_var("NAC_HOME", &nac_home_rel);
+            std::env::set_var("NAC_TEST_CANONICAL_REMOTE_CWD", &remote_cwd);
         }
 
         let run_config = build_run_config(
@@ -4186,6 +4230,7 @@ X-Config = "yes"
         restore_env("OPENAI_API_KEY", original_api_key);
         restore_env("NAC_HOME", original_nac_home);
         restore_env("XDG_CONFIG_HOME", original_xdg);
+        restore_env("NAC_TEST_CANONICAL_REMOTE_CWD", original_remote_cwd);
     }
 
     #[tokio::test]

@@ -121,6 +121,7 @@ struct ActiveThreadState {
     dispatches: HashMap<String, ActiveThreadDispatch>,
     cancellation: ThreadCancellation,
     accepting: bool,
+    run_id: Option<String>,
 }
 
 impl Default for ActiveThreadState {
@@ -129,6 +130,7 @@ impl Default for ActiveThreadState {
             dispatches: HashMap::new(),
             cancellation: ThreadCancellation::default(),
             accepting: true,
+            run_id: None,
         }
     }
 }
@@ -156,13 +158,14 @@ impl ActiveThreadRegistry {
         self.lock().dispatches.contains_key(thread_name)
     }
 
-    pub fn begin_run(&self) -> bool {
+    pub fn begin_run(&self, run_id: &str) -> bool {
         let mut state = self.lock();
         if !state.dispatches.is_empty() {
             return false;
         }
         state.cancellation = ThreadCancellation::default();
         state.accepting = true;
+        state.run_id = Some(run_id.to_string());
         true
     }
 
@@ -202,8 +205,12 @@ impl ActiveThreadRegistry {
         session_id: &str,
         thread_name: &str,
         instruction: &str,
+        expected_run_id: Option<&str>,
     ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
         let state = self.lock();
+        if expected_run_id.is_some() && state.run_id.as_deref() != expected_run_id {
+            return Ok(None);
+        }
         let Some(dispatch) = state.dispatches.get(thread_name) else {
             return Ok(None);
         };
@@ -279,6 +286,7 @@ impl ActiveThreadRegistry {
             }
             notified.await;
         }
+        self.lock().run_id = None;
 
         match steering_error {
             Some(error) => Err(error),
@@ -314,6 +322,7 @@ impl ActiveThreadRegistry {
                 state.dispatches.remove(&name);
             }
         }
+        state.run_id = None;
         drop(state);
         self.activity.notify_waiters();
         Ok(expired)
@@ -333,7 +342,7 @@ mod active_thread_registry_tests {
     #[tokio::test]
     async fn cancellation_drains_running_dispatches_and_rejects_pending_work() {
         let registry = Arc::new(ActiveThreadRegistry::default());
-        assert!(registry.begin_run());
+        assert!(registry.begin_run("run-1"));
         assert!(registry.mark("a", "dispatch-a"));
         assert!(registry.mark("b", "dispatch-b"));
         assert!(registry.mark("dependent", "dispatch-c"));
@@ -374,20 +383,55 @@ mod active_thread_registry_tests {
     #[test]
     fn stale_close_cannot_remove_same_name_replacement() {
         let registry = ActiveThreadRegistry::default();
-        assert!(registry.begin_run());
+        assert!(registry.begin_run("run-1"));
         assert!(registry.mark("worker", "dispatch-old"));
         let missing = Path::new("/store/does/not/exist");
         assert!(registry
             .close(missing, "session", "worker", "dispatch-old")
             .is_err());
 
-        assert!(registry.begin_run());
+        assert!(registry.begin_run("run-2"));
         assert!(registry.mark("worker", "dispatch-new"));
         assert!(registry
             .close(missing, "session", "worker", "dispatch-old")
             .unwrap()
             .is_empty());
         assert!(registry.is_active("worker"));
+    }
+
+    #[tokio::test]
+    async fn stale_run_cannot_steer_same_name_replacement() {
+        let root =
+            std::env::temp_dir().join(format!("nac-thread-generation-{}", uuid::Uuid::new_v4()));
+        let store = root.join("store.db");
+        crate::store::initialize(&store).unwrap();
+        crate::store::insert_test_session(&store, "session");
+        let registry = ActiveThreadRegistry::default();
+
+        assert!(registry.begin_run("run-1"));
+        assert!(registry.mark("worker", "dispatch-1"));
+        registry
+            .close(&store, "session", "worker", "dispatch-1")
+            .unwrap();
+        registry.cancel_and_drain(None).await.unwrap();
+        assert!(registry.begin_run("run-2"));
+        assert!(registry.mark("worker", "dispatch-2"));
+
+        assert!(registry
+            .queue(
+                &store,
+                "session",
+                "worker",
+                "belongs to run one",
+                Some("run-1")
+            )
+            .unwrap()
+            .is_none());
+        assert!(crate::store::list_thread_steering(&store, "session")
+            .unwrap()
+            .is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1762,6 +1806,8 @@ mod discovery_tool_definition_tests {
                 .collect::<Vec<_>>(),
             vec![
                 "command:[git][status][--short]".to_string(),
+                "command:[git][status][--short]".to_string(),
+                "command:[cargo][test][-p][nac-core]".to_string(),
                 "command:[cargo][test][-p][nac-core]".to_string(),
                 directory.canonicalize().unwrap().display().to_string(),
             ]
@@ -1890,7 +1936,7 @@ mod discovery_tool_definition_tests {
         assert!(bounded_pty
             .permission_resources()
             .iter()
-            .all(|resource| resource.hard_denial.is_none()));
+            .any(|resource| resource.hard_denial.is_some()));
         let _ = std::fs::remove_dir_all(directory);
     }
 

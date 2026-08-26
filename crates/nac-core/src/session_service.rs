@@ -809,6 +809,10 @@ impl SessionService {
                 target.lease_identity(),
             );
         }
+        if let Some(session_id) = metadata.session_id.clone() {
+            terminal_manager
+                .configure_session_resource_authority(metadata.store_path.clone(), session_id);
+        }
         let goal_runtime = run_config.agent.goal_runtime();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
@@ -973,23 +977,21 @@ impl SessionService {
     }
 
     /// Explicitly destroy the sandbox (if any) associated with this session.
-    /// Best-effort: errors are logged but not propagated.  This is used
-    /// during session deletion to ensure the container/VM is torn down
-    /// even if other `Arc` references (e.g. from SSE handlers) keep the
-    /// `SessionService` alive.
-    pub async fn destroy_sandbox(&self) {
+    /// Explicit deletion cleanup, including when other `Arc` references (for
+    /// example SSE handlers) keep the `SessionService` alive. Failures remain
+    /// visible so the caller retains durable retry authority.
+    pub async fn destroy_sandbox(&self) -> Result<()> {
         let sandbox = {
             let agent = self.agent.lock().await;
             agent.sandbox_session()
         };
         if let Some(sandbox) = sandbox {
-            if let Err(error) = sandbox.destroy().await {
-                eprintln!("nac: failed to destroy sandbox during deletion: {error:#}");
-            }
+            sandbox.destroy().await?;
             if let Some(worktree) = &sandbox.spec().worktree {
                 crate::sandbox::session_worktree::cleanup_session_worktree(worktree);
             }
         }
+        Ok(())
     }
 
     /// Terminates every session-owned terminal, including explicitly retained
@@ -1010,6 +1012,16 @@ impl SessionService {
         thread_name: &str,
         instruction: &str,
     ) -> Result<crate::store::ThreadSteeringRecord> {
+        self.queue_thread_steering_for_run(thread_name, instruction, None)
+            .await
+    }
+
+    pub async fn queue_thread_steering_for_run(
+        &self,
+        thread_name: &str,
+        instruction: &str,
+        expected_run_id: Option<&str>,
+    ) -> Result<crate::store::ThreadSteeringRecord> {
         let session_id = self
             .metadata
             .session_id
@@ -1025,6 +1037,7 @@ impl SessionService {
                 session_id,
                 thread_name,
                 instruction,
+                expected_run_id,
             )?
             .ok_or_else(|| {
                 anyhow::anyhow!("thread '{thread_name}' is not active in this session")
@@ -3179,7 +3192,8 @@ impl SessionService {
             }
         }
 
-        if !self.active_threads.begin_run() {
+        let run_id = SessionRunId::new();
+        if !self.active_threads.begin_run(run_id.as_str()) {
             return Err(SessionSubmitError::Coordination {
                 message: SessionCoordinationError::local_agent_busy(),
             });
@@ -3200,7 +3214,6 @@ impl SessionService {
                     .begin_run_cancellation()
             };
 
-        let run_id = SessionRunId::new();
         let submitted_at_epoch_ms = now_epoch_ms();
         let submitted_user_message = (!goal_continuation).then(|| SubmittedUserMessageSnapshot {
             run_id: run_id.clone(),

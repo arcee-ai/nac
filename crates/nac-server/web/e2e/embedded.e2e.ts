@@ -510,6 +510,8 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Back to Parent" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
@@ -522,4 +524,6 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     page.getByText("Managed NAC orchestrator · Coordinate the compatibility audit"),
   ).toBeVisible();
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
 });
