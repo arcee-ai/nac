@@ -456,7 +456,10 @@ fn shared_workspace_gate(runtime: &ToolRuntime) -> Arc<SharedWorkspaceGate> {
     shared_workspace_gate_for(&runtime.store_path, &runtime.workspace_cwd)
 }
 
-fn shared_workspace_gate_for(store_path: &Path, workspace_cwd: &Path) -> Arc<SharedWorkspaceGate> {
+pub fn shared_workspace_gate_for(
+    store_path: &Path,
+    workspace_cwd: &Path,
+) -> Arc<tokio::sync::RwLock<()>> {
     let key = (store_path.to_path_buf(), workspace_cwd.to_path_buf());
     let mut gates = SHARED_WORKSPACE_GATES
         .lock()
@@ -706,6 +709,7 @@ fn bind_legacy_authorized_resources(
                 .next()
                 .ok_or_else(|| invalid("authorized mutation target is missing"))?;
             object.insert("path".to_string(), Value::String(path));
+            object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
         }
         3 => {
             let root = canonical("glob")
@@ -969,6 +973,19 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
             required_string(object, "session_id")?;
             optional_string(object, "chars")?;
             optional_bool(object, "retain")?;
+            if object
+                .get("chars")
+                .and_then(Value::as_str)
+                .is_some_and(|chars| !chars.is_empty())
+                && object
+                    .get("retain")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            {
+                return Err(invalid(
+                    "'retain=true' requires empty 'chars'; send input and retain in separate calls",
+                ));
+            }
             optional_u64(object, "yield_time_ms", 0, 3_600_000)?;
             optional_u64(object, "max_output_chars", 0, usize::MAX as u64)?;
         }
@@ -1619,6 +1636,86 @@ mod discovery_tool_definition_tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn approved_mutation_rejects_an_ancestor_swap_after_resource_binding() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-bound-authorized-swap-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        let safe = workspace.join("safe");
+        let git = workspace.join(".git");
+        std::fs::create_dir_all(&safe).unwrap();
+        std::fs::create_dir_all(&git).unwrap();
+        let target = safe.canonicalize().unwrap().join("result.txt");
+        let (entered, release) =
+            crate::tools::mutation::gate_before_bound_local_open(target.clone());
+
+        let store_path = root.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session-a");
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            store_path.clone(),
+            "session-a".to_string(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [crate::permissions::PermissionRule::new(
+                "edit",
+                "*",
+                crate::permissions::PermissionEffect::Ask,
+            )],
+        ));
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = workspace.clone();
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace);
+        runtime.store_path = store_path;
+        runtime.session_id = Some("session-a".to_string());
+        runtime.permission_broker = Some(Arc::clone(&broker));
+        let client = crate::model::ModelClient::new_for_test();
+
+        let attack_broker = Arc::clone(&broker);
+        let attack_workspace = workspace.clone();
+        let attack_safe = safe.clone();
+        let attack_git = git.clone();
+        let attack = std::thread::spawn(move || {
+            let request = loop {
+                if let Some(request) = attack_broker.pending().pop() {
+                    break request;
+                }
+                std::thread::yield_now();
+            };
+            attack_broker
+                .reply(&request.id, crate::permissions::PermissionReply::Once)
+                .unwrap();
+            entered.recv().unwrap();
+            std::fs::rename(&attack_safe, attack_workspace.join("safe-before-swap")).unwrap();
+            symlink(&attack_git, &attack_safe).unwrap();
+            release.send(()).unwrap();
+        });
+        let result = super::execute_tool(
+            "write",
+            serde_json::json!({
+                "path":"safe/result.txt",
+                "content":"must not escape\n",
+                "expected_revision":null
+            }),
+            &runtime,
+            &client,
+        )
+        .await;
+        attack.join().unwrap();
+        assert!(result.is_error, "{}", result.content);
+        assert!(!git.join("result.txt").exists());
+        assert!(!workspace.join("safe-before-swap/result.txt").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn prepared_builtin_calls_project_validated_correlated_permission_resources() {
         let directory =
@@ -1700,6 +1797,14 @@ mod discovery_tool_definition_tests {
             (
                 "write_stdin",
                 serde_json::json!({"session_id":"shell-test", "retain":"yes"}),
+            ),
+            (
+                "write_stdin",
+                serde_json::json!({
+                    "session_id":"shell-test",
+                    "chars":"answer<RET>",
+                    "retain":true
+                }),
             ),
             (
                 "read_command_output",

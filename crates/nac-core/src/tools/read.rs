@@ -4,9 +4,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
-use crate::tools::mutation::{
-    argument_error, execute_remote, read_error, read_mounted, read_opened_file,
-};
+#[cfg(not(unix))]
+use crate::tools::mutation::read_opened_file;
+use crate::tools::mutation::{argument_error, execute_remote, read_error, read_mounted};
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
 use crate::types::{FunctionDef, ToolDefinition};
 
@@ -17,6 +17,7 @@ pub struct ReadInput {
     path: String,
     offset: usize,
     limit: usize,
+    authorized_path_bound: bool,
 }
 
 impl ReadInput {
@@ -26,6 +27,7 @@ impl ReadInput {
             path: path.into(),
             offset: 0,
             limit: DEFAULT_LIMIT,
+            authorized_path_bound: false,
         }
     }
 
@@ -41,6 +43,7 @@ impl ReadInput {
             path: path.into(),
             offset,
             limit,
+            authorized_path_bound: false,
         })
     }
 
@@ -50,6 +53,7 @@ impl ReadInput {
 
     pub(crate) fn bind_authorized_path(&mut self, path: &str) {
         self.path = path.to_string();
+        self.authorized_path_bound = true;
     }
 }
 
@@ -111,6 +115,7 @@ pub async fn execute_native(
         path,
         offset,
         limit,
+        authorized_path_bound,
     } = input;
 
     if runtime.backend.file_io() == FileIoMode::RemoteExec {
@@ -148,14 +153,12 @@ pub async fn execute_native(
         .await;
     }
 
-    read_local(
-        resolve_workspace_path(runtime, PathBuf::from(&path)),
-        path,
-        offset,
-        limit,
-        image_read,
-    )
-    .await
+    let local_path = resolve_workspace_path(runtime, PathBuf::from(&path));
+    if authorized_path_bound {
+        read_local_bound(local_path, path, offset, limit, image_read).await
+    } else {
+        read_local(local_path, path, offset, limit, image_read).await
+    }
 }
 
 async fn read_local(
@@ -165,22 +168,66 @@ async fn read_local(
     limit: usize,
     image_read: bool,
 ) -> ToolResult {
-    let display_for_task = path_display.clone();
-    match tokio::task::spawn_blocking(move || {
-        let file = std::fs::File::open(path)?;
-        Ok::<_, std::io::Error>(read_opened_file(
-            file,
-            display_for_task,
-            offset,
-            limit,
-            image_read,
-        ))
+    let bound = match tokio::task::spawn_blocking(move || {
+        crate::tools::mutation::resolve_target_path(&path)
     })
     .await
     {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) => read_error(&path_display, error),
-        Err(error) => argument_error(format!("file read task failed for {path_display}: {error}")),
+        Ok(Ok(path)) => path,
+        Ok(Err(error)) => return read_error(&path_display, error),
+        Err(error) => return argument_error(format!("file path resolution failed: {error}")),
+    };
+    read_local_bound(bound, path_display, offset, limit, image_read).await
+}
+
+async fn read_local_bound(
+    path: PathBuf,
+    path_display: String,
+    offset: usize,
+    limit: usize,
+    image_read: bool,
+) -> ToolResult {
+    #[cfg(unix)]
+    {
+        let relative = match path.strip_prefix(std::path::Path::new("/")) {
+            Ok(relative) if !relative.as_os_str().is_empty() => relative.to_path_buf(),
+            _ => {
+                return argument_error(format!(
+                    "safe local file reads require an absolute file path: {path_display}"
+                ))
+            }
+        };
+        read_mounted(
+            PathBuf::from("/"),
+            relative,
+            path_display,
+            offset,
+            limit,
+            image_read,
+        )
+        .await
+    }
+    #[cfg(not(unix))]
+    {
+        let display_for_task = path_display.clone();
+        match tokio::task::spawn_blocking(move || {
+            let file = std::fs::File::open(path)?;
+            Ok::<_, std::io::Error>(read_opened_file(
+                file,
+                display_for_task,
+                offset,
+                limit,
+                image_read,
+            ))
+        })
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => read_error(&path_display, error),
+            Err(error) => {
+                argument_error(format!("file read task failed for {path_display}: {error}"))
+            }
+        }
     }
 }
 

@@ -614,6 +614,7 @@ struct ActiveRunState {
     command_cancellation: crate::tools::ThreadCancellation,
     inbox_item_id: Option<i64>,
     _operation_lease: Option<sessions::SessionOperationLease>,
+    _workspace_activity_lease: Option<sessions::WorkspaceActivityLease>,
 }
 
 #[derive(Default)]
@@ -802,6 +803,12 @@ impl SessionService {
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
         let terminal_manager = run_config.agent.terminal_manager();
+        if let Some(target) = workspace_git.as_ref() {
+            terminal_manager.configure_workspace_authority(
+                metadata.store_path.clone(),
+                target.lease_identity(),
+            );
+        }
         let goal_runtime = run_config.agent.goal_runtime();
         // The restored transcript is exactly the store transcript (blob ++
         // log tail) at construction, so the initial scan is an in-memory
@@ -3122,6 +3129,17 @@ impl SessionService {
         } else {
             None
         };
+        let workspace_activity_lease = if enforce_coordination {
+            self.terminal_manager
+                .acquire_workspace_activity_lease()
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to acquire workspace run authority: {error:#}"
+                    )),
+                })?
+        } else {
+            None
+        };
 
         if enforce_coordination {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
@@ -3275,6 +3293,7 @@ impl SessionService {
             command_cancellation,
             inbox_item_id,
             _operation_lease: operation_lease,
+            _workspace_activity_lease: workspace_activity_lease,
         }));
         drop(guard);
 
@@ -5966,6 +5985,52 @@ pub(super) mod tests {
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 
+    #[test]
+    fn run_admission_and_workspace_mutation_are_cross_process_exclusive() {
+        let session_id = "session-workspace-run-authority";
+        let (parts, store_path) = test_direct_active_service(
+            "workspace_run_authority",
+            session_id,
+            ModelClient::new_for_test(),
+        );
+        let identity = crate::workspace::GitTarget::local("/repo").lease_identity();
+        let mutation = sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity)
+            .expect("workspace mutation lease");
+        let operation = sessions::SessionOperationLease::try_acquire(&store_path, session_id)
+            .expect("session operation lease");
+        let error = parts
+            .service
+            .try_begin_run_with_lease(
+                None,
+                "must wait for branch mutation",
+                Some(operation),
+                RunAdmissionKind::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(error, SessionSubmitError::Coordination { .. }));
+        assert!(!parts.service.has_active_operation());
+        drop(mutation);
+
+        let operation = sessions::SessionOperationLease::try_acquire(&store_path, session_id)
+            .expect("failed admission must release the session lease");
+        let active = parts
+            .service
+            .try_begin_run_with_lease(
+                None,
+                "run after branch mutation",
+                Some(operation),
+                RunAdmissionKind::default(),
+            )
+            .unwrap();
+        assert!(matches!(
+            sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        assert_eq!(parts.service.active_run().unwrap().run_id, active.run_id);
+        drop(parts);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn cleanup_failure_blocks_run_terminalization_and_remains_retryable() {
@@ -6629,6 +6694,7 @@ pub(super) mod tests {
                 command_cancellation: crate::tools::ThreadCancellation::default(),
                 inbox_item_id: None,
                 _operation_lease: None,
+                _workspace_activity_lease: None,
             }));
         let inactive = service
             .queue_thread_steering("impl/ui", "make the layout denser")

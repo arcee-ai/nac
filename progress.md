@@ -617,6 +617,25 @@ Non-negotiable invariants:
   warning-denied Clippy/frontend lint, 1025 core tests with 9 ignored, 124
   server tests, 21 CLI tests, doc tests, frontend typecheck/build, and committed
   production-asset integrity all passed.
+- Exact repair `9b4125ca0562d892b217a2828b0f8953a5216cda` passed `make
+  ci` (core 1104 passed/9 ignored, server 134, binary 21, frontend 172),
+  `make test-durability` (10/10), `make test-assets`, and production-embedded
+  Playwright (10/10).
+- Exact successor `d6960ae708aef5efb234f33f2a10f02385433d27` passed the same
+  four release gates: `make ci` (core 1109 passed/9 ignored, server 134,
+  binary 21, frontend 173), durability 10/10, committed-asset freshness, and
+  production-embedded Playwright 10/10.
+- The detached-clean acyclic four-lane review of `d6960ae` (session
+  `ca678807-6fdf-49fe-9bc9-623df4eac7eb`, run
+  `ba93a284-3898-4e39-a6d8-c29f293b2eee`) returned NO-GO with seven accepted
+  P1s: final one-shot spawn and retention cancellation windows; compound
+  nonempty-input plus retain authorization; native Local ancestor-swap TOCTOU;
+  peer-owned managed-orchestrator steering; total portable identity-inspection
+  uncertainty; and point-in-time workspace mutation admission.
+- The active repair has focused passing regressions for all seven seams. Full
+  crate validation also passes: nac-core 1115 passed/9 ignored and nac-server
+  135 plus binary 21 passed. Exact full release gates remain pending until the
+  repair and this tracked evidence are committed.
 
 ## Completed commits
 
@@ -630,19 +649,26 @@ Non-negotiable invariants:
 - `63ccd2c feat(core): add durable direct goals`.
 - `adcf1c0 feat(core): add durable traditional children`.
 - `3e728d5 feat(core): add managed orchestrator control`.
+- `9b4125c close terminal authority and cleanup seams`.
+- `d6960ae close final authority review gaps`.
 
 ## Known problems and blockers
 
-- Retained/background processes can mutate after the tool invocation releases
-  the process-local shared-workspace gate, and separate NAC processes do not
-  share that gate. Revision checks/conflict reporting remain authoritative;
-  the UI/docs tell callers not to assign overlapping mutations.
+- The seven `d6960ae` P1s are implemented but have not yet passed immutable-SHA
+  release gates or a fresh detached-clean review. Retained terminals now hold a
+  shared cross-process checkout lease; branch/commit admission takes its
+  exclusive twin plus every same-checkout session operation lease through the
+  Git mutation.
+- The repository `qa` skill remains infrastructure-blocked because its required
+  rootless Podman runtime is unavailable. Setup session
+  `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
+  this is not a QA pass and does not replace the root-owned release gates.
 
 ## Exact next action
 
-Closure is still active. Complete the nine-finding `9b4125c` review repair, run
-focused and full-crate verification, commit only tracked product/progress
-files, repeat all four required release gates at the exact successor SHA, and
-obtain another detached-clean acyclic four-lane NAC verdict. Preserve
-`.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, and the local
-notebooks.
+Closure is still active. Audit and commit the seven-finding `d6960ae` review
+repair plus this tracked ledger, preserving `.gitignore`, untracked
+`AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and the ignored local
+decision notebook. Then run all four release gates at that exact SHA and obtain
+a fresh detached-clean acyclic four-lane NAC verdict. A GO must be followed by
+the final production browser smoke and ledger/status audit before completion.

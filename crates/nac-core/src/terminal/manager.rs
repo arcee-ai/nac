@@ -25,6 +25,7 @@ const PIPE_CHUNK_BYTES: usize = 16 * 1024;
 const PIPE_CHANNEL_CHUNKS: usize = 16;
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
+type WorkspaceAuthority = Option<(PathBuf, Vec<u8>)>;
 
 const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
@@ -37,12 +38,15 @@ pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pending_remote_cleanups: Arc<StdMutex<HashMap<String, Arc<PendingRemoteCleanup>>>>,
     create_gate: Arc<Mutex<()>>,
+    #[cfg(test)]
+    one_shot_spawn_gate: Arc<Mutex<()>>,
     completed_sessions: Arc<Mutex<VecDeque<(String, CompletedTerminal)>>>,
     max_sessions: usize,
     isolate_process_groups: bool,
     output_registry: OutputRegistry,
     preserve_retained_on_settlement: bool,
     instance_id: Arc<str>,
+    workspace_authority: Arc<StdMutex<WorkspaceAuthority>>,
 }
 
 #[derive(Clone)]
@@ -105,13 +109,47 @@ impl TerminalManager {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_remote_cleanups: Arc::new(StdMutex::new(HashMap::new())),
             create_gate: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            one_shot_spawn_gate: Arc::new(Mutex::new(())),
             completed_sessions: Arc::new(Mutex::new(VecDeque::new())),
             max_sessions: 16,
             isolate_process_groups,
             output_registry: OutputRegistry::new(limits)?,
             preserve_retained_on_settlement,
             instance_id: Arc::from(uuid::Uuid::new_v4().to_string()),
+            workspace_authority: Arc::new(StdMutex::new(None)),
         })
+    }
+
+    pub(crate) fn configure_workspace_authority(
+        &self,
+        store_path: PathBuf,
+        workspace_identity: Vec<u8>,
+    ) {
+        *self
+            .workspace_authority
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some((store_path, workspace_identity));
+    }
+
+    pub(crate) fn acquire_workspace_activity_lease(
+        &self,
+    ) -> Result<Option<crate::sessions::WorkspaceActivityLease>> {
+        let authority = self
+            .workspace_authority
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        authority
+            .map(|(store_path, workspace_identity)| {
+                crate::sessions::WorkspaceActivityLease::try_acquire(
+                    &store_path,
+                    &workspace_identity,
+                )
+                .map_err(anyhow::Error::new)
+            })
+            .transpose()
     }
 
     pub fn next_session_name(&self) -> String {
@@ -484,29 +522,51 @@ impl TerminalManager {
         };
         let output_id = output_lease.output_id().to_string();
 
-        // Register before spawning so this ownership guard outlives every
-        // child/process-tree local on task cancellation. There is no await in
-        // the registration/spawn window, so settlement cannot observe the
-        // entry until either spawn has succeeded or the failure path removes it.
-        let remote_transport = pidfile.as_deref().map(|pidfile| {
-            let cleanup = Arc::new(PendingRemoteCleanup {
-                backend: Arc::clone(backend),
-                transport_active: AtomicBool::new(true),
-            });
-            self.pending_remote_cleanups
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .insert(pidfile.to_string(), Arc::clone(&cleanup));
-            RemoteTransportOwnership { cleanup }
-        });
+        #[cfg(test)]
+        let _one_shot_spawn = self.one_shot_spawn_gate.lock().await;
 
-        let spawned = if self.isolate_process_groups {
-            ProcessTreeGuard::spawn_supervised(&mut command)
-        } else {
-            command.spawn().map(|child| {
-                let guard = ProcessTreeGuard::for_child(&child);
-                (child, guard)
-            })
+        // Registration and spawn are one synchronous cancellation mutation.
+        // If cancellation takes the shared gate first, neither a local process
+        // nor a remote transport/pidfile owner can appear afterward.
+        let mut spawn = || {
+            let remote_transport = pidfile.as_deref().map(|pidfile| {
+                let cleanup = Arc::new(PendingRemoteCleanup {
+                    backend: Arc::clone(backend),
+                    transport_active: AtomicBool::new(true),
+                });
+                self.pending_remote_cleanups
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(pidfile.to_string(), Arc::clone(&cleanup));
+                RemoteTransportOwnership { cleanup }
+            });
+            let spawned = if self.isolate_process_groups {
+                ProcessTreeGuard::spawn_supervised(&mut command)
+            } else {
+                command.spawn().map(|child| {
+                    let guard = ProcessTreeGuard::for_child(&child);
+                    (child, guard)
+                })
+            };
+            (spawned, remote_transport)
+        };
+        let admitted = match cancellation {
+            Some(cancellation) => cancellation.run_if_active(spawn),
+            None => Some(spawn()),
+        };
+        let Some((spawned, remote_transport)) = admitted else {
+            return CommandOutput {
+                status: CommandStatus::Cancelled,
+                exit_code: None,
+                wall_time_ms: start.elapsed().as_millis() as u64,
+                stdout_preview: String::new(),
+                stderr_preview: String::new(),
+                output_id: None,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                truncated: false,
+                overflowed: false,
+            };
         };
         let (mut child, mut process_tree) = match spawned {
             Ok(spawned) => spawned,
@@ -933,7 +993,16 @@ impl TerminalManager {
             .len()
     }
 
+    #[cfg(test)]
     pub async fn retain(&self, name: &str) -> Result<TerminalInfo> {
+        self.retain_with_cancellation(name, None).await
+    }
+
+    pub(crate) async fn retain_with_cancellation(
+        &self,
+        name: &str,
+        cancellation: Option<&ThreadCancellation>,
+    ) -> Result<TerminalInfo> {
         let mut sessions = self.sessions.lock().await;
         let session = sessions
             .get_mut(name)
@@ -942,7 +1011,13 @@ impl TerminalManager {
         if !session.is_alive() {
             return Err(anyhow!("terminal session '{name}' has already exited"));
         }
-        session.retain();
+        let workspace_activity = self.acquire_workspace_activity_lease()?;
+        match cancellation {
+            Some(cancellation) => cancellation
+                .run_if_active(|| session.retain(workspace_activity))
+                .ok_or_else(|| anyhow!("terminal command cancelled before retention"))?,
+            None => session.retain(workspace_activity),
+        }
         Ok(self.session_info(name, session))
     }
 
@@ -2156,6 +2231,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancellation_wins_while_one_shot_waits_before_final_spawn() {
+        let manager = TerminalManager::new();
+        let cancellation = ThreadCancellation::default();
+        let marker = std::env::temp_dir().join(format!(
+            "nac-command-cancelled-final-spawn-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let held_spawn = manager.one_shot_spawn_gate.lock().await;
+        let task_manager = manager.clone();
+        let task_backend = backend();
+        let task_cancellation = cancellation.clone();
+        let command = format!("printf late > {}", marker.display());
+        let task = tokio::spawn(async move {
+            task_manager
+                .exec_one_shot(
+                    &command,
+                    None,
+                    120,
+                    40,
+                    5_000,
+                    8_000,
+                    &task_backend,
+                    Some(&task_cancellation),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        cancellation.cancel();
+        drop(held_spawn);
+
+        let output = task.await.unwrap();
+        assert_eq!(output.status, CommandStatus::Cancelled);
+        assert_eq!(output.output_id, None);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!marker.exists(), "cancelled one-shot command was spawned");
+        assert_eq!(manager.pending_remote_cleanup_count(), 0);
+        let _ = std::fs::remove_file(marker);
+    }
+
+    #[tokio::test]
     async fn pty_cancellation_stops_waiting_and_late_side_effects() {
         let manager = TerminalManager::new();
         let backend = backend();
@@ -2209,6 +2324,41 @@ mod tests {
         assert!(manager.get(&foreground).await.is_none());
         assert!(manager.get(&retained).await.unwrap().retained);
         manager.remove_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retained_terminal_holds_cross_process_workspace_authority() {
+        let root = std::env::temp_dir().join(format!(
+            "nac-retained-workspace-authority-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        let identity = crate::workspace::GitTarget::local(root.clone()).lease_identity();
+        let manager = TerminalManager::for_direct();
+        manager.configure_workspace_authority(store_path.clone(), identity.clone());
+        let name = manager.next_session_name();
+        manager
+            .create(
+                name.clone(),
+                "bash",
+                Some(root.clone()),
+                120,
+                40,
+                &backend(),
+            )
+            .await
+            .unwrap();
+        manager.retain(&name).await.unwrap();
+
+        assert!(matches!(
+            crate::sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity),
+            Err(crate::sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        manager.remove_all().await.unwrap();
+        drop(crate::sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity).unwrap());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -2351,6 +2501,36 @@ mod tests {
         assert!(!marker.exists(), "cancelled input reached the PTY process");
         manager.remove_all().await.unwrap();
         let _ = std::fs::remove_file(marker);
+    }
+
+    #[tokio::test]
+    async fn cancellation_wins_while_retention_waits_for_final_ownership() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let cancellation = ThreadCancellation::default();
+        let name = manager.next_session_name();
+        manager
+            .create(name.clone(), "sleep 30", None, 120, 40, &backend)
+            .await
+            .unwrap();
+
+        let held_sessions = manager.sessions.lock().await;
+        let retain_manager = manager.clone();
+        let retain_name = name.clone();
+        let retain_cancellation = cancellation.clone();
+        let retain = tokio::spawn(async move {
+            retain_manager
+                .retain_with_cancellation(&retain_name, Some(&retain_cancellation))
+                .await
+        });
+        tokio::task::yield_now().await;
+        cancellation.cancel();
+        drop(held_sessions);
+
+        let error = retain.await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("cancelled before retention"));
+        manager.settle_run().await.unwrap();
+        assert!(manager.get(&name).await.is_none());
     }
 
     #[tokio::test]

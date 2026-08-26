@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, execute_remote, permission_error, required_string, write_local, write_mounted,
+    argument_error, execute_remote, permission_error, required_string, write_local,
+    write_local_bound, write_mounted,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
 use crate::types::{FunctionDef, ToolDefinition};
@@ -94,13 +95,27 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await;
     }
 
-    write_local(
-        resolve_workspace_path(runtime, PathBuf::from(&path)),
-        path,
-        content,
-        expected_revision,
-    )
-    .await
+    if args
+        .get("_nac_authorized_path_bound")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        write_local_bound(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            content,
+            expected_revision,
+        )
+        .await
+    } else {
+        write_local(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            content,
+            expected_revision,
+        )
+        .await
+    }
 }
 
 fn parse_expected_revision(args: &Value) -> Result<Option<String>, ToolResult> {

@@ -44,6 +44,17 @@ pub fn queue_thread_steering(
     dispatch_id: &str,
     instruction: &str,
 ) -> Result<ThreadSteeringRecord> {
+    let conn = open_runtime_connection(path)?;
+    queue_thread_steering_with_connection(&conn, session_id, thread_name, dispatch_id, instruction)
+}
+
+pub(super) fn queue_thread_steering_with_connection(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    thread_name: &str,
+    dispatch_id: &str,
+    instruction: &str,
+) -> Result<ThreadSteeringRecord> {
     let instruction = instruction.trim();
     if session_id.trim().is_empty() {
         return Err(anyhow!("session id is empty"));
@@ -58,9 +69,8 @@ pub fn queue_thread_steering(
         return Err(anyhow!("steering instruction is empty"));
     }
 
-    let conn = open_runtime_connection(path)?;
     let created_at = now_utc();
-    conn.execute(
+    connection.execute(
         "INSERT INTO thread_steering
          (session_id, thread_name, dispatch_id, instruction, status, created_at)
          VALUES (?1, ?2, ?3, ?4, 'queued', ?5)",
@@ -73,7 +83,7 @@ pub fn queue_thread_steering(
         ],
     )?;
     Ok(ThreadSteeringRecord {
-        id: conn.last_insert_rowid(),
+        id: connection.last_insert_rowid(),
         session_id: session_id.to_string(),
         thread_name: thread_name.to_string(),
         dispatch_id: dispatch_id.to_string(),

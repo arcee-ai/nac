@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 
 /// A process-wide, crash-safe exclusive lease for one persisted session operation.
 ///
@@ -25,6 +26,19 @@ pub struct SessionRelationshipLease {
     _file: File,
 }
 
+/// Shared authority retained for the lifetime of an explicitly retained
+/// terminal. Branch/commit mutations take the exclusive twin.
+#[derive(Debug)]
+pub struct WorkspaceActivityLease {
+    _file: File,
+}
+
+/// Cross-process exclusion for a checkout-wide branch or commit mutation.
+#[derive(Debug)]
+pub struct WorkspaceMutationLease {
+    _file: File,
+}
+
 impl Drop for SessionRelationshipLease {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self._file);
@@ -32,6 +46,18 @@ impl Drop for SessionRelationshipLease {
 }
 
 impl Drop for SessionOperationLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for WorkspaceActivityLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for WorkspaceMutationLease {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self._file);
     }
@@ -158,6 +184,57 @@ impl SessionRelationshipLease {
             )),
         }
     }
+}
+
+impl WorkspaceActivityLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        workspace_identity: &[u8],
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let file = open_workspace_lock_file(store_path, workspace_identity)?;
+        match FileExt::try_lock_shared(&file) {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(
+                SessionOperationLeaseError::Busy("workspace mutation".to_string()),
+            ),
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock workspace activity lease"),
+            )),
+        }
+    }
+}
+
+impl WorkspaceMutationLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        workspace_identity: &[u8],
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let file = open_workspace_lock_file(store_path, workspace_identity)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(
+                SessionOperationLeaseError::Busy("retained workspace terminal".to_string()),
+            ),
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock workspace mutation lease"),
+            )),
+        }
+    }
+}
+
+fn open_workspace_lock_file(
+    store_path: &Path,
+    workspace_identity: &[u8],
+) -> Result<File, SessionOperationLeaseError> {
+    let canonical_store = canonical_store(store_path).map_err(store_error)?;
+    let digest = Sha256::digest(workspace_identity);
+    let key = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let lock_path =
+        secure_lock_path_with_suffix(&canonical_store, &key, ".workspace").map_err(store_error)?;
+    secure_open_lock_file(&lock_path).map_err(store_error)
 }
 
 fn canonical_store(store_path: &Path) -> anyhow::Result<PathBuf> {

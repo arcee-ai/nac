@@ -18,7 +18,7 @@ pub(crate) mod worktree;
 pub use git::GitTarget;
 pub use revisions::{capture, forget, restore, rewind_ref, RevisionCapture};
 
-pub(crate) use git::{first_stderr_line, WorktreeRead};
+pub(crate) use git::{first_stderr_line, workspace_lease_identity, WorktreeRead};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

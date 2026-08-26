@@ -523,6 +523,8 @@ impl Agent {
         }
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
+        let workspace_lease_identity =
+            crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
             config.ssh,
             config.sandbox,
@@ -536,6 +538,8 @@ impl Agent {
             AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
             AgentMode::Direct => crate::terminal::TerminalManager::for_direct(),
         };
+        terminal_manager
+            .configure_workspace_authority(config.store_path.clone(), workspace_lease_identity);
         let allowed_tools = Arc::new(
             tool_defs
                 .iter()
