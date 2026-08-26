@@ -72,6 +72,7 @@ pub mod store;
 mod terminal;
 mod tool_content;
 mod tools;
+pub use tools::shared_workspace_gate_for;
 pub mod traditional_children;
 pub mod types;
 pub mod upgrade;

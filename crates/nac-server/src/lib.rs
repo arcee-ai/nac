@@ -275,6 +275,13 @@ impl ServerTraditionalChildController {
 /// as another user is another machine as far as a checkout is concerned.
 type GitTargetKey = (Option<String>, PathBuf);
 
+struct WorkspaceMutationAdmission {
+    target: GitTarget,
+    _workspace_gate: tokio::sync::OwnedRwLockWriteGuard<()>,
+    _workspace_lease: sessions::WorkspaceMutationLease,
+    _session_leases: Vec<sessions::SessionOperationLease>,
+}
+
 fn git_target_key(target: &GitTarget) -> GitTargetKey {
     (
         target
@@ -2896,29 +2903,88 @@ impl SessionManager {
     /// be quiet, not just this one — and "the same checkout" means the same
     /// directory *on the same machine*, which is what keeps two sessions on one
     /// remote path from moving each other's branch.
-    async fn idle_workspace_root(&self, session_id: &str) -> Result<GitTarget> {
-        let sessions = self.list_sessions(false).await?;
-        let summary = sessions
+    async fn idle_workspace_root(&self, session_id: &str) -> Result<WorkspaceMutationAdmission> {
+        let initial_sessions = self.list_sessions(false).await?;
+        let summary = initial_sessions
             .iter()
             .find(|entry| entry.summary.session_id == session_id)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
         let target = self.git_target(&summary.summary)?;
-        let key = git_target_key(&target);
+        let workspace_gate =
+            nac_core::shared_workspace_gate_for(&self.inner.store_path, target.root())
+                .write_owned()
+                .await;
+        let workspace_lease = match sessions::WorkspaceMutationLease::try_acquire(
+            &self.inner.store_path,
+            &target.lease_identity(),
+        ) {
+            Ok(lease) => lease,
+            Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                return Err(anyhow!(
+                    "workspace is busy: a retained terminal may still mutate the checkout"
+                ));
+            }
+            Err(error) => return Err(anyhow::Error::new(error)),
+        };
 
-        if let Some(busy) = sessions.iter().find(|entry| {
-            entry.active_run.is_some()
-                && self
-                    .git_target(&entry.summary)
+        // Re-read after taking the same process-wide gate used by native file,
+        // shell, and terminal-input tools. Then acquire every same-checkout
+        // session operation lease in stable order and retain them through Git.
+        // This turns the idle observation into an admission boundary: an
+        // already-running peer makes acquisition fail, and a new run cannot
+        // establish ownership until the branch/commit operation is finished.
+        let sessions = self.list_sessions(false).await?;
+        let current = sessions
+            .iter()
+            .find(|entry| entry.summary.session_id == session_id)
+            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let current_target = self.git_target(&current.summary)?;
+        if git_target_key(&current_target) != git_target_key(&target) {
+            return Err(anyhow!("workspace changed during mutation admission"));
+        }
+        let key = git_target_key(&target);
+        let mut session_ids = sessions
+            .iter()
+            .filter(|entry| {
+                self.git_target(&entry.summary)
                     .is_ok_and(|other| git_target_key(&other) == key)
+            })
+            .map(|entry| entry.summary.session_id.clone())
+            .collect::<Vec<_>>();
+        session_ids.sort();
+
+        let cached = self.inner.active_sessions.read().await;
+        if let Some(retained) = session_ids.iter().find(|candidate| {
+            cached
+                .get(candidate.as_str())
+                .is_some_and(|service| service.has_retained_terminals())
         }) {
             return Err(anyhow!(
-                "workspace is busy: session '{}' has a run in flight",
-                busy.summary.session_id
+                "workspace is busy: session '{retained}' owns a retained terminal"
             ));
+        }
+        drop(cached);
+
+        let mut session_leases = Vec::with_capacity(session_ids.len());
+        for candidate in session_ids {
+            match sessions::SessionOperationLease::try_acquire(&self.inner.store_path, &candidate) {
+                Ok(lease) => session_leases.push(lease),
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                    return Err(anyhow!(
+                        "workspace is busy: session '{candidate}' has an operation in flight"
+                    ));
+                }
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
         }
 
         self.ensure_git_ready(&target).await?;
-        Ok(target)
+        Ok(WorkspaceMutationAdmission {
+            target,
+            _workspace_gate: workspace_gate,
+            _workspace_lease: workspace_lease,
+            _session_leases: session_leases,
+        })
     }
 
     /// The checkout of a session, for read-only inspection.
@@ -3051,7 +3117,8 @@ impl SessionManager {
         session_id: &str,
         request: SwitchBranchRequest,
     ) -> Result<workspace::BranchList> {
-        let target = self.idle_workspace_root(session_id).await?;
+        let admission = self.idle_workspace_root(session_id).await?;
+        let target = admission.target.clone();
 
         tokio::task::spawn_blocking(move || {
             if request.create {
@@ -3078,7 +3145,8 @@ impl SessionManager {
         session_id: &str,
         request: CommitWorkspaceRequest,
     ) -> Result<workspace::CommitOutcome> {
-        let target = self.idle_workspace_root(session_id).await?;
+        let admission = self.idle_workspace_root(session_id).await?;
+        let target = admission.target.clone();
 
         tokio::task::spawn_blocking(move || workspace::commit_all(&target, &request.message))
             .await
@@ -3212,6 +3280,25 @@ impl SessionManager {
     ) -> Result<OrchestratorSteeringResponse> {
         let service = self.attach_session(session_id).await?;
         let record = service.queue_orchestrator_steering(&request.instruction)?;
+        Ok(OrchestratorSteeringResponse {
+            steering_id: record.id,
+            status: record.status,
+            instruction_preview: record.instruction.chars().take(160).collect(),
+        })
+    }
+
+    fn queue_managed_orchestrator_steering(
+        &self,
+        parent_session_id: &str,
+        orchestrator_session_id: &str,
+        instruction: &str,
+    ) -> Result<OrchestratorSteeringResponse> {
+        let record = nac_core::store::queue_managed_orchestrator_steering(
+            &self.inner.store_path,
+            parent_session_id,
+            orchestrator_session_id,
+            instruction,
+        )?;
         Ok(OrchestratorSteeringResponse {
             steering_id: record.id,
             status: record.status,
@@ -3676,6 +3763,16 @@ impl SessionManager {
         orchestrator_session_id: &str,
         generation: u64,
     ) -> Result<ManagedOrchestratorRecord> {
+        self.monitor_managed_orchestrator_with_lease(orchestrator_session_id, generation, None)
+            .await
+    }
+
+    async fn monitor_managed_orchestrator_with_lease(
+        &self,
+        orchestrator_session_id: &str,
+        generation: u64,
+        mut initial_lease: Option<sessions::SessionOperationLease>,
+    ) -> Result<ManagedOrchestratorRecord> {
         loop {
             let record = nac_core::store::load_managed_orchestrator(
                 &self.inner.store_path,
@@ -3716,18 +3813,21 @@ impl SessionManager {
             // A busy operation lease is positive evidence that another
             // process still owns the generation. Never synthesize an
             // interruption merely because this process has no active task.
-            let operation_lease = match sessions::SessionOperationLease::try_acquire(
-                &self.inner.store_path,
-                orchestrator_session_id,
-            ) {
-                Ok(lease) => lease,
-                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                    #[cfg(test)]
-                    self.inner.managed_monitor_peer_observed.notify_one();
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    continue;
-                }
-                Err(error) => return Err(anyhow::Error::new(error)),
+            let operation_lease = match initial_lease.take() {
+                Some(lease) => lease,
+                None => match sessions::SessionOperationLease::try_acquire(
+                    &self.inner.store_path,
+                    orchestrator_session_id,
+                ) {
+                    Ok(lease) => lease,
+                    Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                        #[cfg(test)]
+                        self.inner.managed_monitor_peer_observed.notify_one();
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                    Err(error) => return Err(anyhow::Error::new(error)),
+                },
             };
             let gate = self.lifecycle_gate(orchestrator_session_id);
             let _lifecycle = gate.lock().await;
@@ -4190,22 +4290,39 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     relation.description
                 ));
             }
-            let service = manager.attach_session(&orchestrator_session_id).await?;
             if relation.status == ManagedOrchestratorStatus::Running {
+                let service = manager.attach_session(&orchestrator_session_id).await?;
                 if service.active_run().is_some() {
-                    manager
-                        .queue_orchestrator_steering_unchecked(
-                            &orchestrator_session_id,
-                            OrchestratorSteeringRequest {
-                                instruction: request.prompt,
-                            },
-                        )
-                        .await?;
+                    manager.queue_managed_orchestrator_steering(
+                        &request.parent_session_id,
+                        &orchestrator_session_id,
+                        &request.prompt,
+                    )?;
                     return Ok(relation);
                 }
-                relation = manager
-                    .monitor_managed_orchestrator(&orchestrator_session_id, relation.generation)
-                    .await?;
+                match sessions::SessionOperationLease::try_acquire(
+                    &manager.inner.store_path,
+                    &orchestrator_session_id,
+                ) {
+                    Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                        manager.queue_managed_orchestrator_steering(
+                            &request.parent_session_id,
+                            &orchestrator_session_id,
+                            &request.prompt,
+                        )?;
+                        return Ok(relation);
+                    }
+                    Err(error) => return Err(anyhow::Error::new(error)),
+                    Ok(lease) => {
+                        relation = manager
+                            .monitor_managed_orchestrator_with_lease(
+                                &orchestrator_session_id,
+                                relation.generation,
+                                Some(lease),
+                            )
+                            .await?;
+                    }
+                }
             }
             if relation.status == ManagedOrchestratorStatus::Running {
                 return Err(anyhow!("managed orchestrator is still running"));
@@ -4268,14 +4385,11 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     )
                     .await?;
             } else {
-                manager
-                    .queue_orchestrator_steering_unchecked(
-                        orchestrator_session_id,
-                        OrchestratorSteeringRequest {
-                            instruction: instruction.to_string(),
-                        },
-                    )
-                    .await?;
+                manager.queue_managed_orchestrator_steering(
+                    parent_session_id,
+                    orchestrator_session_id,
+                    instruction,
+                )?;
             }
             manager.managed_orchestrator(parent_session_id, orchestrator_session_id)
         })
@@ -11910,6 +12024,18 @@ mod tests {
         }
         assert!(ready_path.exists(), "peer helper never acquired the lease");
 
+        let steering = manager
+            .queue_managed_orchestrator_steering(
+                "delegating",
+                &orchestrator,
+                "steer the peer-owned generation",
+            )
+            .expect("peer ownership must not block durable steering");
+        let claimed =
+            nac_core::store::claim_thread_steering(&store_path, &orchestrator, "peer-run").unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].id, steering.steering_id);
+
         let peer_observed = manager.inner.managed_monitor_peer_observed.notified();
         let monitor_manager = manager.clone();
         let monitor_orchestrator = orchestrator.clone();
@@ -12012,6 +12138,69 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(direct_root);
         let _ = std::fs::remove_dir_all(managed_root);
+    }
+
+    #[tokio::test]
+    async fn workspace_mutation_admission_holds_every_shared_session_lease() {
+        let root = temp_root("workspace_mutation_leases");
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.name", "NAC Test"]);
+        git(&["config", "user.email", "nac@example.invalid"]);
+        std::fs::write(root.join("tracked.txt"), b"base\n").unwrap();
+        git(&["add", "tracked.txt"]);
+        git(&["commit", "-m", "base"]);
+        seed_direct_session(&root, "session-a");
+        seed_direct_session(&root, "session-b");
+        let manager = test_manager(&root);
+
+        let admission = manager.idle_workspace_root("session-a").await.unwrap();
+        assert_eq!(
+            admission.target.root().canonicalize().unwrap(),
+            root.canonicalize().unwrap()
+        );
+        let workspace_identity = admission.target.lease_identity();
+        assert!(matches!(
+            sessions::WorkspaceActivityLease::try_acquire(
+                &root.join("store.db"),
+                &workspace_identity
+            ),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        for session_id in ["session-a", "session-b"] {
+            assert!(matches!(
+                sessions::SessionOperationLease::try_acquire(&root.join("store.db"), session_id),
+                Err(sessions::SessionOperationLeaseError::Busy(_))
+            ));
+        }
+        drop(admission);
+        drop(
+            sessions::WorkspaceActivityLease::try_acquire(
+                &root.join("store.db"),
+                &workspace_identity,
+            )
+            .unwrap(),
+        );
+        for session_id in ["session-a", "session-b"] {
+            drop(
+                sessions::SessionOperationLease::try_acquire(&root.join("store.db"), session_id)
+                    .unwrap(),
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

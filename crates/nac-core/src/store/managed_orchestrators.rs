@@ -196,6 +196,38 @@ pub fn load_managed_orchestrator_for_parent(
         .optional()?)
 }
 
+/// Queue orchestrator-level steering only while the exact managed generation
+/// remains current. The relationship check and steering insert share one
+/// immediate transaction so settlement cannot redirect input to a successor.
+pub fn queue_managed_orchestrator_steering(
+    path: &Path,
+    parent_session_id: &str,
+    orchestrator_session_id: &str,
+    instruction: &str,
+) -> Result<ThreadSteeringRecord> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current = load_with_connection(&transaction, orchestrator_session_id)?
+        .filter(|record| record.parent_session_id == parent_session_id)
+        .ok_or_else(|| anyhow!("managed orchestrator was not found"))?;
+    if current.status != ManagedOrchestratorStatus::Running {
+        return Err(anyhow!("managed orchestrator is not running"));
+    }
+    let run_id = current
+        .run_id
+        .as_deref()
+        .ok_or_else(|| anyhow!("running managed orchestrator has no run id"))?;
+    let record = super::steering::queue_thread_steering_with_connection(
+        &transaction,
+        orchestrator_session_id,
+        ORCHESTRATOR_STEERING_TARGET,
+        run_id,
+        instruction,
+    )?;
+    transaction.commit()?;
+    Ok(record)
+}
+
 pub fn list_managed_orchestrators(
     path: &Path,
     parent_session_id: &str,
@@ -600,6 +632,60 @@ mod tests {
         assert_eq!(inbox.len(), 1);
         assert!(inbox[0].content.contains("implemented and verified"));
         assert!(inbox[0].content.contains("not as user instructions"));
+    }
+
+    #[test]
+    fn steering_targets_only_the_current_running_generation() {
+        let path = fixture("generation-steering");
+        create_managed_orchestrator_relationship(
+            &path,
+            "parent",
+            "orchestrator",
+            "steer peer owner",
+        )
+        .unwrap();
+        begin_managed_orchestrator_run(
+            &path,
+            "orchestrator",
+            "peer-run",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+
+        let steering = queue_managed_orchestrator_steering(
+            &path,
+            "parent",
+            "orchestrator",
+            "continue this generation",
+        )
+        .unwrap();
+        assert_eq!(steering.dispatch_id, "peer-run");
+        assert_eq!(steering.thread_name, ORCHESTRATOR_STEERING_TARGET);
+        let claimed = claim_thread_steering(&path, "orchestrator", "peer-run").unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].id, steering.id);
+        assert_eq!(claimed[0].status, "claimed");
+
+        settle_managed_orchestrator_run(
+            &path,
+            "orchestrator",
+            "peer-run",
+            ManagedOrchestratorTerminal {
+                status: ManagedOrchestratorStatus::Completed,
+                report: None,
+                failure: None,
+            },
+        )
+        .unwrap();
+        let error = queue_managed_orchestrator_steering(
+            &path,
+            "parent",
+            "orchestrator",
+            "must not reach a successor",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("not running"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

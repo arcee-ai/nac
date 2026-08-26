@@ -350,6 +350,23 @@ pub(crate) async fn edit_local(
     .await
 }
 
+pub(crate) async fn edit_local_bound(
+    path: PathBuf,
+    path_display: String,
+    expected_revision: String,
+    edits: Vec<EditSpec>,
+) -> ToolResult {
+    mutate_local_bound(
+        path,
+        path_display,
+        MutationRequest::Edit {
+            expected_revision,
+            edits,
+        },
+    )
+    .await
+}
+
 pub(crate) async fn write_local(
     path: PathBuf,
     path_display: String,
@@ -357,6 +374,23 @@ pub(crate) async fn write_local(
     expected_revision: Option<String>,
 ) -> ToolResult {
     mutate_local(
+        path,
+        path_display,
+        MutationRequest::Write {
+            expected_revision,
+            content,
+        },
+    )
+    .await
+}
+
+pub(crate) async fn write_local_bound(
+    path: PathBuf,
+    path_display: String,
+    content: String,
+    expected_revision: Option<String>,
+) -> ToolResult {
+    mutate_local_bound(
         path,
         path_display,
         MutationRequest::Write {
@@ -542,7 +576,7 @@ enum MutationRequest {
 }
 
 async fn mutate_local(path: PathBuf, path_display: String, request: MutationRequest) -> ToolResult {
-    let target = match tokio::task::spawn_blocking(move || resolve_target_path(&path)).await {
+    let bound = match tokio::task::spawn_blocking(move || resolve_target_path(&path)).await {
         Ok(Ok(path)) => path,
         Ok(Err(error)) => return error_tool_result(MutationError::io(&path_display, error)),
         Err(error) => {
@@ -552,19 +586,47 @@ async fn mutate_local(path: PathBuf, path_display: String, request: MutationRequ
             ))
         }
     };
-    let lock = match acquire_path_lock(&target).await {
-        Ok(lock) => lock,
-        Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
-    };
-    match tokio::task::spawn_blocking(move || mutate_locked(target, path_display, request, lock))
-        .await
+    mutate_local_bound(bound, path_display, request).await
+}
+
+async fn mutate_local_bound(
+    path: PathBuf,
+    path_display: String,
+    request: MutationRequest,
+) -> ToolResult {
+    #[cfg(test)]
+    wait_at_bound_local_open_gate(&path);
+    #[cfg(unix)]
     {
-        Ok(Ok(result)) => success_tool_result(&result),
-        Ok(Err(error)) => error_tool_result(error),
-        Err(error) => error_tool_result(MutationError::precondition(
-            "io_error",
-            format!("file mutation task failed: {error}"),
-        )),
+        let relative = match path.strip_prefix(Path::new("/")) {
+            Ok(relative) if !relative.as_os_str().is_empty() => relative.to_path_buf(),
+            _ => {
+                return argument_error(format!(
+                    "safe local file mutations require an absolute file path: {path_display}"
+                ))
+            }
+        };
+        mutate_mounted(PathBuf::from("/"), relative, path_display, request).await
+    }
+    #[cfg(not(unix))]
+    {
+        let target = path;
+        let lock = match acquire_path_lock(&target).await {
+            Ok(lock) => lock,
+            Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
+        };
+        match tokio::task::spawn_blocking(move || {
+            mutate_locked(target, path_display, request, lock)
+        })
+        .await
+        {
+            Ok(Ok(result)) => success_tool_result(&result),
+            Ok(Err(error)) => error_tool_result(error),
+            Err(error) => error_tool_result(MutationError::precondition(
+                "io_error",
+                format!("file mutation task failed: {error}"),
+            )),
+        }
     }
 }
 
@@ -892,6 +954,7 @@ impl Drop for AtTempCleanup {
     }
 }
 
+#[cfg(any(test, not(unix)))]
 fn mutate_locked(
     target: PathBuf,
     path_display: String,
@@ -1089,6 +1152,45 @@ struct PublishGate {
 }
 
 #[cfg(test)]
+static BOUND_LOCAL_OPEN_GATES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, PublishGate>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(test)]
+pub(crate) fn gate_before_bound_local_open(
+    path: PathBuf,
+) -> (
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::SyncSender<()>,
+) {
+    let (entered_sender, entered_receiver) = std::sync::mpsc::sync_channel(1);
+    let (release_sender, release_receiver) = std::sync::mpsc::sync_channel(1);
+    BOUND_LOCAL_OPEN_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(
+            path,
+            PublishGate {
+                entered: entered_sender,
+                release: release_receiver,
+            },
+        );
+    (entered_receiver, release_sender)
+}
+
+#[cfg(test)]
+fn wait_at_bound_local_open_gate(path: &Path) {
+    let gate = BOUND_LOCAL_OPEN_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(path);
+    if let Some(gate) = gate {
+        let _ = gate.entered.send(());
+        let _ = gate.release.recv();
+    }
+}
+
+#[cfg(test)]
 static PUBLISH_GATES: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<PathBuf, PublishGate>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -1127,6 +1229,7 @@ fn wait_at_publish_gate(path: &Path) {
     }
 }
 
+#[cfg(any(test, not(unix)))]
 fn publish(
     target: &Path,
     old_bytes: Option<&[u8]>,
@@ -1251,10 +1354,12 @@ fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
     file.set_permissions(metadata.permissions())
 }
 
+#[cfg(any(test, not(unix)))]
 struct TempCleanup {
     path: Option<PathBuf>,
 }
 
+#[cfg(any(test, not(unix)))]
 impl TempCleanup {
     fn new(path: PathBuf) -> Self {
         Self { path: Some(path) }
@@ -1265,6 +1370,7 @@ impl TempCleanup {
     }
 }
 
+#[cfg(any(test, not(unix)))]
 impl Drop for TempCleanup {
     fn drop(&mut self) {
         if let Some(path) = self.path.take() {

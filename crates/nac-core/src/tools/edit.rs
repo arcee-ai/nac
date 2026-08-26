@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, edit_local, edit_mounted, execute_remote, permission_error, required_string,
-    EditSpec,
+    argument_error, edit_local, edit_local_bound, edit_mounted, execute_remote, permission_error,
+    required_string, EditSpec,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
 use crate::types::{FunctionDef, ToolDefinition};
@@ -104,13 +104,27 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await;
     }
 
-    edit_local(
-        resolve_workspace_path(runtime, PathBuf::from(&path)),
-        path,
-        expected_revision,
-        edits,
-    )
-    .await
+    if args
+        .get("_nac_authorized_path_bound")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        edit_local_bound(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            expected_revision,
+            edits,
+        )
+        .await
+    } else {
+        edit_local(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            expected_revision,
+            edits,
+        )
+        .await
+    }
 }
 
 fn parse_edits(args: &Value) -> Result<Vec<EditSpec>, ToolResult> {

@@ -175,7 +175,10 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
             )
             .await?;
         if retain && output.session_name.is_some() {
-            runtime.terminal_manager.retain(&session_id).await?;
+            runtime
+                .terminal_manager
+                .retain_with_cancellation(&session_id, Some(&runtime.command_cancellation))
+                .await?;
             output.retained = true;
         }
         Ok(output)

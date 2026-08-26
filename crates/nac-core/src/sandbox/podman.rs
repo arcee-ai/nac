@@ -170,9 +170,14 @@ process_identity() {
   printf 'ps:%s:%s' "$started" "$command_signature"
 }
 process_is_live() {
-  state=$(ps -ww -o stat= -p "$1" 2>/dev/null) || return 1
+  if [ -r /proc/1/stat ] || [ -r /proc/self/stat ]; then
+    [ -r "/proc/$1/stat" ] || return 1
+  fi
+  # This predicate deliberately means "not proven gone". Portable ps failure
+  # is inspection uncertainty, not evidence that the recorded PID disappeared.
+  state=$(ps -ww -o stat= -p "$1" 2>/dev/null) || return 0
   state=$(printf '%s' "$state" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  [ -n "$state" ] || return 1
+  [ -n "$state" ] || return 0
   case "$state" in
     Z*) return 1 ;;
     *) return 0 ;;
@@ -1458,6 +1463,60 @@ mod tests {
         assert!(
             pidfile.exists(),
             "uncertain cleanup discarded retry authority"
+        );
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn total_portable_identity_inspection_failure_retains_retry_authority() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-wrapper-portable-total-uncertainty-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let pidfile = root.join("wrapper.pid");
+        let fake_ps = root.join("ps");
+        std::fs::write(&fake_ps, b"#!/bin/sh\nexit 1\n").unwrap();
+        let mut permissions = std::fs::metadata(&fake_ps).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_ps, permissions).unwrap();
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        std::fs::write(
+            &pidfile,
+            format!("{}\tps:recorded-start:12345\n", child.id()),
+        )
+        .unwrap();
+        let no_proc_wrapper = SANDBOX_KILL_WRAPPER.replace("/proc/", "/nac-no-proc/");
+        let path = format!("{}:/usr/bin:/bin", root.display());
+        let output = std::process::Command::new("bash")
+            .env("PATH", path)
+            .arg("-c")
+            .arg(no_proc_wrapper)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .output()
+            .unwrap();
+
+        assert!(
+            !output.status.success(),
+            "total inspection uncertainty reported successful cleanup"
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "total inspection uncertainty killed the live process"
+        );
+        assert!(
+            pidfile.exists(),
+            "total inspection uncertainty discarded retry authority"
         );
         child.kill().unwrap();
         child.wait().unwrap();

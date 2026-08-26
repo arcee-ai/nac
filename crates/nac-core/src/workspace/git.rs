@@ -229,6 +229,17 @@ impl GitTarget {
         }
     }
 
+    pub fn lease_identity(&self) -> Vec<u8> {
+        match self {
+            Self::Local { root } => workspace_lease_identity(None, root),
+            Self::Ssh {
+                connection,
+                remote_cwd,
+                ..
+            } => workspace_lease_identity(Some(connection), remote_cwd),
+        }
+    }
+
     /// The checkout as a local path, which only a local target has. Callers
     /// that hand paths to something other than git need this.
     pub fn local_path(&self) -> Option<&Path> {
@@ -534,6 +545,22 @@ impl GitTarget {
             }
         }
     }
+}
+
+pub(crate) fn workspace_lease_identity(connection: Option<&SshConnection>, root: &Path) -> Vec<u8> {
+    let mut identity = match connection {
+        Some(connection) => format!("ssh:{}", connection.identity()).into_bytes(),
+        None => b"local".to_vec(),
+    };
+    identity.push(0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        identity.extend_from_slice(root.as_os_str().as_bytes());
+    }
+    #[cfg(not(unix))]
+    identity.extend_from_slice(root.to_string_lossy().as_bytes());
+    identity
 }
 
 fn local_worktree(repo_root: &Path, relpath: &str, limit: u64) -> Result<WorktreeRead> {
