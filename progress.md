@@ -12,10 +12,10 @@ launch, browser-E2E, and deterministic durability coverage.
 
 Protected initial state verified on 2026-08-25:
 
-- HEAD is `2dbcb4e` on `allison-demo`. The original implementation range is
-  `61b1709..d3e3fc0`; post-review closure now extends through `2dbcb4e` with
-  immutable reviews at `02c58aa`, `dd897a4`, `40f3619`, `fceb0fd`, `7cd1787`,
-  and `2dbcb4e`.
+- HEAD contains implementation commit `efeffa3` plus this tracked evidence
+  update on `allison-demo`. The original implementation range is
+  `61b1709..d3e3fc0`; immutable reviews exist at `02c58aa`, `dd897a4`,
+  `40f3619`, `fceb0fd`, `7cd1787`, and `2dbcb4e`.
 - `.gitignore` is modified, `AGENTS.md` and `demo_review.md` are untracked, and
   `demo_decisions.md` is intentionally ignored. These are user-owned/local and
   must not be staged or committed.
@@ -49,10 +49,10 @@ Protected initial state verified on 2026-08-25:
 5. **In progress — closure and integrated review.** Commit `2dbcb4e` closed the
    eleven `7cd1787` findings and passed every exact-commit gate. Its four-lane
    review returned NO-GO with seven remaining command-admission, PTY-input,
-   session-remount, Podman process-identity, and ledger blockers. The current
-   uncommitted repair candidate addresses all seven with focused regressions;
-   complete gates, a new immutable NAC review, production browser smoke, and
-   final state audit remain.
+   session-remount, Podman process-identity, and ledger blockers. Commit
+   `efeffa3` addresses all seven and passed every root-owned exact-commit gate.
+   The ledger-only successor still needs its exact gates and immutable NAC
+   review; production browser smoke and final state audit then remain.
 
 ### Finding map
 
@@ -129,6 +129,11 @@ Protected initial state verified on 2026-08-25:
   Podman cleanup, and this stale ledger. The current candidate blocks opaque
   executable bodies/wrappers and all nonempty model-driven PTY input, remounts
   the full session page by id, and validates PID plus process birth identity.
+- Exact implementation commit `efeffa3` closes those seven findings. Its root
+  gates pass: `make ci` (catalog 2+7+24, core 1089 passed/9 ignored, server
+  134, binary 21, frontend 172), `make test-durability`, `make test-assets`, and
+  production-embedded Playwright 10/10. This evidence update is the only change
+  in the successor that will be reviewed.
 
 ### Current verification and next action
 
@@ -196,18 +201,17 @@ Protected initial state verified on 2026-08-25:
   1088 passed/9 ignored, server 134, binary 21, and frontend 171; `make
   test-durability`, `make test-assets`, and production-embedded Playwright
   10/10 also passed.
-- Current repair evidence: focused regressions reject brace-expanded command
-  names, split-string/shell/preprocessor executable bodies, and `script`
-  wrappers; nonempty model-driven `write_stdin` is hard denied while empty
+- Exact `efeffa3` repair evidence: focused regressions reject brace-expanded
+  command names, split-string/shell/preprocessor executable bodies, and
+  `script` wrappers; nonempty model-driven `write_stdin` is hard denied while empty
   poll/retain remain available; a route-id transition remounts the complete
   session page; and Podman cancellation refuses a live PID whose birth identity
-  differs from the pidfile. The complete precommit candidate gates pass: core
-  1089 passed/9 ignored, server 134, binary 21, frontend 172, formatting,
-  warning-denied lint, typecheck, and the durability lane. The embedded
-  production bundle has been rebuilt. These are precommit results, not
-  substitutes for the required exact-commit gates.
-- Next action: commit only the candidate and tracked evidence, rerun every
-  exact-commit closure gate, and obtain a fresh four-lane NAC review before
+  differs from the pidfile. Its complete exact-commit gates pass: core 1089
+  passed/9 ignored, server 134, binary 21, frontend 172, formatting,
+  warning-denied lint, typecheck, durability, asset freshness, and
+  production-embedded Playwright 10/10.
+- Next action: commit this tracked evidence-only update, rerun every closure gate
+  at that exact successor, and obtain a fresh four-lane NAC review before
   product smoke and final cleanup/state audit.
 
 ## Objective and invariants
@@ -548,7 +552,7 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Complete and commit the seven-finding `2dbcb4e`
-repair, rerun all exact-commit gates, then obtain a fresh detached-clean
-four-lane NAC verdict. Preserve `.gitignore`, untracked `AGENTS.md`, and the
-local review notebooks throughout.
+Closure is still active. Gate the ledger-only successor to exact implementation
+commit `efeffa3`, then obtain a fresh detached-clean four-lane NAC verdict.
+Preserve `.gitignore`, untracked `AGENTS.md`, and the local review notebooks
+throughout.
