@@ -264,6 +264,11 @@ pub struct Agent {
     /// into `messages`. Tokio task abort cannot cancel that transaction, so
     /// terminal normalization must reload rather than delete this exact tail.
     direct_inbox_append_start: Option<u64>,
+    /// Set before an atomic steering transcript/ack commit is submitted and
+    /// cleared only after its result is adopted. If the run task is aborted,
+    /// cancellation waits on the transcript writer and reloads whichever
+    /// durable outcome actually won.
+    steering_append_pending: bool,
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
@@ -580,6 +585,7 @@ impl Agent {
             transcript_log,
             committed_log_len,
             direct_inbox_append_start: None,
+            steering_append_pending: false,
             transcript_recovery_warning: None,
             interrupted_run_recovery: None,
             last_usage: None,
@@ -1534,7 +1540,9 @@ impl Agent {
     /// Both terminal paths treat a normalization error as best-effort: the
     /// next restore re-normalizes the stale tail.
     pub async fn normalize_dangling_tail(&mut self) -> Result<()> {
-        if self.direct_inbox_append_start.take().is_some() {
+        if self.direct_inbox_append_start.take().is_some()
+            || std::mem::take(&mut self.steering_append_pending)
+        {
             return self.reload_transcript_from_store().await;
         }
         if self.durable_log_has_rows_past_own_commits().await? {
@@ -1563,7 +1571,9 @@ impl Agent {
     /// path so the chat can retain dispatched thread cards and their persisted
     /// logs while the resulting transcript remains valid provider history.
     pub async fn append_cancellation_marker_preserving_tools(&mut self) -> Result<()> {
-        if self.direct_inbox_append_start.take().is_some() {
+        if self.direct_inbox_append_start.take().is_some()
+            || std::mem::take(&mut self.steering_append_pending)
+        {
             // A direct steer delivery transaction may have committed after
             // the run task was aborted. Its User row and delivered inbox state
             // are one durable fact; adopt the row before adding cancellation.
@@ -1786,17 +1796,18 @@ impl Agent {
         Ok(())
     }
 
-    /// Commit the already-staged steering tail and its delivery statuses in
-    /// one SQLite transaction. The vector is staged first, but neither the
-    /// canonical transcript nor acknowledgement can become durable alone.
+    /// Commit a proposed steering tail and its delivery statuses in one SQLite
+    /// transaction. The in-memory vector is adopted only after this returns,
+    /// preserving the log-first invariant even if the run is cancelled while
+    /// the blocking transaction is pending.
     async fn commit_staged_steering(
         &mut self,
         from_idx: usize,
         steering_ids: &[i64],
+        staged: &[Message],
         session_id: &str,
         dispatch_id: &str,
     ) -> Result<()> {
-        let staged = self.messages[from_idx..].to_vec();
         let Some(sink) = &self.transcript_log else {
             return crate::store::acknowledge_thread_steering_batch(
                 &self.tool_runtime.store_path,
@@ -1815,7 +1826,9 @@ impl Agent {
         let batch_len = staged.len() as u64;
         let pre_submission_committed = self.committed_log_len;
         self.committed_log_len = self.committed_log_len.max(from_idx as u64 + batch_len);
-        let committed = tokio::task::spawn_blocking(move || {
+        let staged = staged.to_vec();
+        self.steering_append_pending = true;
+        let joined = tokio::task::spawn_blocking(move || {
             writer.append_claimed_thread_steering(
                 &sink_session_id,
                 &dispatch_id,
@@ -1824,8 +1837,10 @@ impl Agent {
                 &staged,
             )
         })
-        .await
-        .map_err(|error| anyhow!("steering transcript commit task failed: {error}"))?;
+        .await;
+        self.steering_append_pending = false;
+        let committed =
+            joined.map_err(|error| anyhow!("steering transcript commit task failed: {error}"))?;
         match committed {
             Ok(()) => {
                 self.event_sink
@@ -1893,34 +1908,36 @@ impl Agent {
 
         let message_checkpoint = self.messages.len();
         let mut staged_ids = Vec::new();
+        let mut staged_messages = Vec::new();
         for record in &records {
-            if self.appended_steering_ids.insert(record.id) {
+            if !self.appended_steering_ids.contains(&record.id) {
                 staged_ids.push(record.id);
                 if thread_name.is_some() {
-                    self.messages.push(Message::User {
+                    staged_messages.push(Message::User {
                         content: format!(
                             "Steering instruction received for this worker thread. Apply it before continuing:\n\n{}",
                             record.instruction
                         ),
                     });
                 } else {
-                    self.messages.push(Message::User {
+                    staged_messages.push(Message::User {
                         content: record.instruction.clone(),
                     });
                 }
             }
         }
 
-        if let Err(error) = self
-            .commit_staged_steering(message_checkpoint, &staged_ids, &session_id, &dispatch_id)
-            .await
-        {
-            self.messages.truncate(message_checkpoint);
-            for id in &staged_ids {
-                self.appended_steering_ids.remove(id);
-            }
-            return Err(error);
-        }
+        self.commit_staged_steering(
+            message_checkpoint,
+            &staged_ids,
+            &staged_messages,
+            &session_id,
+            &dispatch_id,
+        )
+        .await?;
+        self.messages.extend(staged_messages);
+        self.appended_steering_ids
+            .extend(staged_ids.iter().copied());
 
         for record in records
             .into_iter()

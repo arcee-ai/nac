@@ -2317,6 +2317,9 @@ impl SessionManager {
     }
 
     async fn wake_direct_inbox(&self, service: &SessionService) -> Result<()> {
+        if let Some(parent_session_id) = service.metadata().session_id.as_deref() {
+            self.repair_orphaned_completion_suppressions(parent_session_id)?;
+        }
         let child = service.reconcile_traditional_child_terminal().await?;
         if child.is_none() {
             let metadata = service.metadata();
@@ -2355,6 +2358,62 @@ impl SessionManager {
         }
         if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
             service.start_next_direct_inbox_item().await?;
+        }
+        Ok(())
+    }
+
+    /// `completion_suppressed=1` is itself the durable rollback obligation for
+    /// a deletion that did not commit. An active deletion owns the child's
+    /// relationship lease and wins; after process death or a failed in-memory
+    /// rollback the lease is free, so parent attachment restores delivery and
+    /// synthesizes any terminal completion that settlement omitted.
+    fn repair_orphaned_completion_suppressions(&self, parent_session_id: &str) -> Result<()> {
+        let store_path = &self.inner.store_path;
+        for (child_session_id, generation) in
+            nac_core::store::list_suppressed_traditional_child_generations(
+                store_path,
+                parent_session_id,
+            )?
+        {
+            let lease = match sessions::SessionRelationshipLease::try_acquire(
+                store_path,
+                &child_session_id,
+            ) {
+                Ok(lease) => lease,
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => continue,
+                Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
+            };
+            if sessions::load_session(store_path, &child_session_id).is_ok() {
+                nac_core::store::restore_traditional_child_completion(
+                    store_path,
+                    &child_session_id,
+                    generation,
+                )?;
+            }
+            drop(lease);
+        }
+        for (orchestrator_session_id, generation) in
+            nac_core::store::list_suppressed_managed_orchestrator_generations(
+                store_path,
+                parent_session_id,
+            )?
+        {
+            let lease = match sessions::SessionRelationshipLease::try_acquire(
+                store_path,
+                &orchestrator_session_id,
+            ) {
+                Ok(lease) => lease,
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => continue,
+                Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
+            };
+            if sessions::load_session(store_path, &orchestrator_session_id).is_ok() {
+                nac_core::store::restore_managed_orchestrator_completion(
+                    store_path,
+                    &orchestrator_session_id,
+                    generation,
+                )?;
+            }
+            drop(lease);
         }
         Ok(())
     }
@@ -11348,6 +11407,134 @@ mod tests {
         let inbox = nac_core::store::list_session_inbox(&store_path, "direct").unwrap();
         assert_eq!(inbox.len(), 1);
         assert_eq!(child.completion_inbox_id, Some(inbox[0].id));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn parent_repair_recovers_suppression_after_deletion_owner_disappears() {
+        let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("completion_suppression_restart_repair");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("suppression-repair-key"));
+        seed_direct_session(&root, "direct");
+        seed_direct_with_orchestrator_session_with_base_url(
+            &root,
+            "delegating",
+            "https://api.openai.com/v1".to_string(),
+        );
+        let store_path = root.join("store.db");
+        let manager = test_manager(&root);
+
+        let child_session_id = manager
+            .create_traditional_child_session("direct", "general", "repair child delivery")
+            .await
+            .unwrap();
+        nac_core::store::begin_traditional_child_run(
+            &store_path,
+            &child_session_id,
+            "child-run",
+            TraditionalChildExecutionMode::Background,
+        )
+        .unwrap();
+        let child =
+            nac_core::store::suppress_traditional_child_completion(&store_path, &child_session_id)
+                .unwrap();
+        nac_core::store::settle_traditional_child_run(
+            &store_path,
+            &child_session_id,
+            "child-run",
+            nac_core::store::TraditionalChildTerminal {
+                status: nac_core::store::TraditionalChildStatus::Cancelled,
+                report: None,
+                failure: Some("deletion interrupted".to_string()),
+                change_summary: None,
+                verification_summary: None,
+            },
+        )
+        .unwrap();
+        assert!(nac_core::store::list_session_inbox(&store_path, "direct")
+            .unwrap()
+            .is_empty());
+        let child_lease =
+            sessions::SessionRelationshipLease::try_acquire(&store_path, &child_session_id)
+                .unwrap();
+        manager
+            .repair_orphaned_completion_suppressions("direct")
+            .unwrap();
+        assert!(nac_core::store::list_session_inbox(&store_path, "direct")
+            .unwrap()
+            .is_empty());
+        drop(child_lease);
+        manager
+            .repair_orphaned_completion_suppressions("direct")
+            .unwrap();
+        manager
+            .repair_orphaned_completion_suppressions("direct")
+            .unwrap();
+        let child_inbox = nac_core::store::list_session_inbox(&store_path, "direct").unwrap();
+        assert_eq!(child_inbox.len(), 1);
+        assert_eq!(
+            nac_core::store::load_traditional_child(&store_path, &child_session_id)
+                .unwrap()
+                .unwrap()
+                .completion_inbox_id,
+            Some(child_inbox[0].id)
+        );
+        assert_eq!(child.generation, 1);
+
+        let orchestrator_session_id = manager
+            .create_managed_orchestrator_session("delegating", "repair orchestrator delivery")
+            .await
+            .unwrap();
+        nac_core::store::begin_managed_orchestrator_run(
+            &store_path,
+            &orchestrator_session_id,
+            "orchestrator-run",
+            ManagedOrchestratorExecutionMode::Background,
+        )
+        .unwrap();
+        nac_core::store::suppress_managed_orchestrator_completion(
+            &store_path,
+            &orchestrator_session_id,
+        )
+        .unwrap();
+        nac_core::store::settle_managed_orchestrator_run(
+            &store_path,
+            &orchestrator_session_id,
+            "orchestrator-run",
+            nac_core::store::ManagedOrchestratorTerminal {
+                status: ManagedOrchestratorStatus::Cancelled,
+                report: None,
+                failure: Some("deletion interrupted".to_string()),
+            },
+        )
+        .unwrap();
+        let orchestrator_lease =
+            sessions::SessionRelationshipLease::try_acquire(&store_path, &orchestrator_session_id)
+                .unwrap();
+        manager
+            .repair_orphaned_completion_suppressions("delegating")
+            .unwrap();
+        assert!(
+            nac_core::store::list_session_inbox(&store_path, "delegating")
+                .unwrap()
+                .is_empty()
+        );
+        drop(orchestrator_lease);
+        manager
+            .repair_orphaned_completion_suppressions("delegating")
+            .unwrap();
+        manager
+            .repair_orphaned_completion_suppressions("delegating")
+            .unwrap();
+        assert_eq!(
+            nac_core::store::list_session_inbox(&store_path, "delegating")
+                .unwrap()
+                .len(),
+            1
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

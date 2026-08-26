@@ -336,6 +336,25 @@ pub fn list_traditional_children(
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+/// Durable rollback obligations left by an interrupted session deletion.
+/// Callers must fence each child with its relationship lease before restoring
+/// one, so an active peer deletion cannot be undone.
+pub fn list_suppressed_traditional_child_generations(
+    path: &Path,
+    parent_session_id: &str,
+) -> Result<Vec<(String, u64)>> {
+    let connection = open_runtime_connection(path)?;
+    let mut statement = connection.prepare(
+        "SELECT child_session_id, generation FROM traditional_children
+         WHERE parent_session_id = ?1 AND completion_suppressed = 1
+         ORDER BY child_session_id",
+    )?;
+    let rows = statement.query_map(params![parent_session_id], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 pub fn begin_traditional_child_run(
     path: &Path,
     child_session_id: &str,

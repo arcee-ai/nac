@@ -265,12 +265,6 @@ impl TerminalSession {
     }
 
     pub async fn kill(&mut self) -> Result<()> {
-        let backend_cleanup = if let Some((backend, pidfile)) = &self.backend_cleanup {
-            backend.terminal_pipe_kill(pidfile).await
-        } else {
-            Ok(())
-        };
-
         self.refresh_status();
         #[cfg(unix)]
         let descendant_result = if self.exit_code.is_none() {
@@ -283,6 +277,13 @@ impl TerminalSession {
 
         self.reap_child().await;
         self.alive.store(false, Ordering::SeqCst);
+        // A missing remote pidfile is safe only after the local transport is
+        // dead and therefore cannot start the wrapper later.
+        let backend_cleanup = if let Some((backend, pidfile)) = &self.backend_cleanup {
+            backend.terminal_pipe_kill(pidfile).await
+        } else {
+            Ok(())
+        };
         #[cfg(unix)]
         descendant_result?;
         backend_cleanup.context("remote terminal cleanup incomplete")?;

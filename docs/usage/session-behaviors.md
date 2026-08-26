@@ -43,7 +43,9 @@ dropping it.
 Direct-tool approval authorizes one prepared operation on the session's already
 selected execution backend; it is not a sandbox and never changes that backend.
 Literal nested shell command bodies receive the same non-overridable checks as
-top-level commands, but an approved general-purpose shell or interpreter still
-carries the authority of that process. Input sent later to a retained terminal
-continues inside that already-approved process, so use Podman confinement when
-commands must remain inside a non-bypassable filesystem or network boundary.
+top-level commands. Direct sessions reject opaque commands and broad shells or
+interpreters when `tty=true`, because input sent later to a retained terminal
+cannot be analyzed before that process executes it. Use a bounded interactive
+program for a PTY and one-shot commands for explicit shell scripts. Podman
+confinement remains the non-bypassable filesystem and network boundary for
+commands that need it.

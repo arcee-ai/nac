@@ -894,6 +894,17 @@ pub(crate) fn shell_resources(
     resources
 }
 
+/// A PTY can receive additional bytes after initial command authorization.
+/// Opaque commands and broad interpreters can turn those bytes into a second,
+/// unanalyzed program, so direct sessions must not expose them as interactive
+/// terminals until follow-up input has an equally strong policy boundary.
+pub(crate) fn unbounded_interactive_input(command: &str) -> bool {
+    match parse_shell(command) {
+        ParsedShell::Supported(segments) => segments.iter().any(|tokens| is_broad_command(tokens)),
+        ParsedShell::Opaque => true,
+    }
+}
+
 fn is_store_path(path: &Path, store_path: &Path) -> bool {
     let store = crate::tools::mutation::resolve_target_path(store_path)
         .unwrap_or_else(|_| lexical_normalize(store_path));
@@ -1166,6 +1177,11 @@ fn hard_shell_denial_inner(
     }
     let tokens = effective_command_tokens(tokens);
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
+    if command == "eval" {
+        return Some(
+            "shell eval is blocked because quoted data can become a protected command".to_string(),
+        );
+    }
     if depth >= 8 && embedded_command_body(tokens).is_some() {
         return Some("nested executable wrapper depth exceeds the safety limit".to_string());
     }
@@ -1580,10 +1596,22 @@ fn effective_command_tokens(tokens: &[String]) -> &[String] {
                     }
                     if matches!(
                         option.as_str(),
-                        "-u" | "--unset" | "-C" | "--chdir" | "-S" | "--split-string"
+                        "-u" | "--unset"
+                            | "-C"
+                            | "--chdir"
+                            | "-S"
+                            | "--split-string"
+                            | "-a"
+                            | "--argv0"
                     ) {
                         index = (index + 2).min(tokens.len());
-                    } else if option.starts_with('-') || is_environment_assignment(option) {
+                    } else if option.starts_with("--unset=")
+                        || option.starts_with("--chdir=")
+                        || option.starts_with("--split-string=")
+                        || option.starts_with("--argv0=")
+                        || option.starts_with('-')
+                        || is_environment_assignment(option)
+                    {
                         index += 1;
                     } else {
                         break;
@@ -1592,15 +1620,41 @@ fn effective_command_tokens(tokens: &[String]) -> &[String] {
             }
             "nice" => {
                 index += 1;
-                if tokens.get(index).is_some_and(|token| token == "-n") {
-                    index = (index + 2).min(tokens.len());
-                } else {
-                    while tokens
-                        .get(index)
-                        .is_some_and(|token| token.starts_with('-'))
+                while let Some(option) = tokens.get(index) {
+                    if option == "--" {
+                        index += 1;
+                        break;
+                    }
+                    if matches!(option.as_str(), "-n" | "--adjustment") {
+                        index = (index + 2).min(tokens.len());
+                    } else if option.starts_with("--adjustment=") || option.starts_with('-') {
+                        index += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            "timeout" => {
+                index += 1;
+                while let Some(option) = tokens.get(index) {
+                    if option == "--" {
+                        index += 1;
+                        break;
+                    }
+                    if matches!(option.as_str(), "-k" | "--kill-after" | "-s" | "--signal") {
+                        index = (index + 2).min(tokens.len());
+                    } else if option.starts_with("--kill-after=")
+                        || option.starts_with("--signal=")
+                        || option.starts_with('-')
                     {
                         index += 1;
+                    } else {
+                        break;
                     }
+                }
+                // GNU timeout requires one duration operand before COMMAND.
+                if index < tokens.len() {
+                    index += 1;
                 }
             }
             "time" => {
@@ -3025,8 +3079,13 @@ mod tests {
             "command -- sudo make install",
             "env MODE=test sudo make install",
             "env -u SAFE sudo make install",
+            "env -a nac-rm rm -rf .",
+            "env --argv0=nac-rm rm -rf .",
             "exec -a installer sudo make install",
             "nice -n 1 sudo make install",
+            "nice --adjustment 0 rm -rf .",
+            "timeout 30 rm -rf .",
+            "timeout --kill-after 1 30 rm -rf .",
             "busybox rm -rf /workspace",
             "sudo make install > /tmp/result",
             "git checkout .",
@@ -3084,6 +3143,7 @@ mod tests {
             "find . -delete",
             "xargs rm -rf .git",
             "sh -c 'rm -rf .git'",
+            "eval 'rm -rf .'",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
@@ -3111,6 +3171,9 @@ mod tests {
             "!foo rm -rf $PWD",
             "printf '%s' 'rm -rf $PWD'",
             "/usr/bin/time -o /tmp/nac-time printf '%s' 'rm -rf $PWD'",
+            "timeout 30 printf '%s' 'rm -rf $PWD'",
+            "env -a harmless printf '%s' 'rm -rf $PWD'",
+            "nice --adjustment 0 printf '%s' 'rm -rf $PWD'",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]

@@ -621,6 +621,19 @@ describe("direct inbox and goal journeys", () => {
     await waitFor(() => expect(fakes.cancelActiveRun).toHaveBeenCalledWith("session"));
   });
 
+  it("keeps Stop available when both ownership projections are unavailable", async () => {
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working",
+      started_at_epoch_ms: Date.now(),
+    });
+    composer({ behavior: "direct", entryAvailable: false, snapshotAvailable: false }, false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+
+    await waitFor(() => expect(fakes.cancelActiveRun).toHaveBeenCalledWith("session"));
+  });
+
   it("shows pending durable input and permits delivery edits and cancellation", async () => {
     composer({ behavior: "direct", inboxItems: [inbox()] });
 
