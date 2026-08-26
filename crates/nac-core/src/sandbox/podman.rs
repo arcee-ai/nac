@@ -301,7 +301,7 @@ struct PendingContainerCreation {
 impl PendingContainerCreation {
     fn disarm(&mut self) {
         self.task = None;
-        let _ = std::fs::remove_file(&self.cidfile);
+        remove_creation_record(&self.cidfile);
     }
 }
 
@@ -334,7 +334,10 @@ impl Drop for PendingContainerCreation {
 async fn destroy_created_container(cidfile: &Path) -> Result<()> {
     let container_id = match tokio::fs::read_to_string(cidfile).await {
         Ok(container_id) => container_id.trim().to_string(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            remove_creation_record(cidfile);
+            return Ok(());
+        }
         Err(error) => {
             return Err(error).with_context(|| {
                 format!(
@@ -344,24 +347,85 @@ async fn destroy_created_container(cidfile: &Path) -> Result<()> {
             });
         }
     };
-    if container_id.is_empty() {
-        let _ = tokio::fs::remove_file(cidfile).await;
-        bail!("Podman creation cidfile '{}' was empty", cidfile.display());
+    if container_id.len() != 64 || !container_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!(
+            "Podman creation cidfile '{}' did not contain a full container ID; cleanup authority was preserved",
+            cidfile.display()
+        );
     }
+
+    let token_path = creation_token_path(cidfile);
+    let ownership_token = tokio::fs::read_to_string(&token_path)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to read Podman creation ownership token '{}'; cleanup authority was preserved",
+                token_path.display()
+            )
+        })?;
+    let ownership_token = ownership_token.trim();
+    if ownership_token.is_empty() {
+        bail!(
+            "Podman creation ownership token '{}' was empty; cleanup authority was preserved",
+            token_path.display()
+        );
+    }
+
+    let inspection = Command::new("podman")
+        .args([
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{ index .Config.Labels \"io.nac.creation-token\" }}",
+            "--",
+            &container_id,
+        ])
+        .output()
+        .await
+        .context("failed to verify Podman sandbox creation ownership")?;
+    if !inspection.status.success() {
+        bail!(
+            "failed to verify newly created sandbox container '{}': {}; cleanup authority was preserved in '{}'",
+            container_id,
+            first_stderr_line(&inspection.stderr),
+            cidfile.display()
+        );
+    }
+    if String::from_utf8_lossy(&inspection.stdout).trim() != ownership_token {
+        bail!(
+            "Podman creation cidfile '{}' did not identify the container owned by this launch; refusing removal",
+            cidfile.display()
+        );
+    }
+
     let output = Command::new("podman")
-        .args(["rm", "--ignore", "-f", &container_id])
+        .args(["rm", "--ignore", "-f", "--", &container_id])
         .output()
         .await
         .context("failed to execute Podman sandbox creation rollback")?;
-    let _ = tokio::fs::remove_file(cidfile).await;
     if !output.status.success() {
         bail!(
-            "failed to remove newly created sandbox container '{}': {}",
+            "failed to remove newly created sandbox container '{}': {}; cleanup authority was preserved in '{}'",
             container_id,
-            first_stderr_line(&output.stderr)
+            first_stderr_line(&output.stderr),
+            cidfile.display()
         );
     }
+    remove_creation_record(cidfile);
     Ok(())
+}
+
+fn remove_creation_record(cidfile: &Path) {
+    let _ = std::fs::remove_file(cidfile);
+    let _ = std::fs::remove_file(creation_token_path(cidfile));
+    if let Some(directory) = cidfile.parent() {
+        let _ = std::fs::remove_dir(directory);
+    }
+}
+
+fn creation_token_path(cidfile: &Path) -> std::path::PathBuf {
+    cidfile.with_file_name("ownership.token")
 }
 
 pub(crate) async fn destroy_owned_container(session_key: &str) -> Result<()> {
@@ -715,12 +779,47 @@ impl PodmanSession {
     }
 
     async fn create_container(&self) -> Result<()> {
-        let cidfile = std::env::temp_dir().join(format!(
-            "nac-podman-create-{}-{}.cid",
+        let record_directory = std::env::temp_dir().join(format!(
+            "nac-podman-create-{}-{}",
             sanitize_name(&self.session_key),
             uuid::Uuid::new_v4()
         ));
-        let args = self.create_container_args_with_cidfile(Some(&cidfile))?;
+        std::fs::create_dir(&record_directory).with_context(|| {
+            format!(
+                "failed to create private Podman creation record directory '{}'",
+                record_directory.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&record_directory, std::fs::Permissions::from_mode(0o700))?;
+        }
+        let cidfile = record_directory.join("container.cid");
+        let ownership_token = uuid::Uuid::new_v4().to_string();
+        let token_path = creation_token_path(&cidfile);
+        let token_file = std::fs::File::create(&token_path).with_context(|| {
+            format!(
+                "failed to create Podman ownership token '{}'",
+                token_path.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        std::fs::write(&token_path, format!("{ownership_token}\n"))?;
+        token_file.sync_all()?;
+        let args = match self
+            .create_container_args_with_cidfile(Some((&cidfile, ownership_token.as_str())))
+        {
+            Ok(args) => args,
+            Err(error) => {
+                remove_creation_record(&cidfile);
+                return Err(error);
+            }
+        };
         let task = tokio::spawn(async move {
             let mut command = Command::new("podman");
             command.args(args);
@@ -771,7 +870,10 @@ impl PodmanSession {
         self.create_container_args_with_cidfile(None)
     }
 
-    fn create_container_args_with_cidfile(&self, cidfile: Option<&Path>) -> Result<Vec<OsString>> {
+    fn create_container_args_with_cidfile(
+        &self,
+        creation_record: Option<(&Path, &str)>,
+    ) -> Result<Vec<OsString>> {
         let mut args = vec![
             OsString::from("run"),
             OsString::from("-d"),
@@ -784,9 +886,13 @@ impl PodmanSession {
             OsString::from(format!("{}m", self.spec.memory_mib)),
         ];
 
-        if let Some(cidfile) = cidfile {
+        if let Some((cidfile, ownership_token)) = creation_record {
             args.push(OsString::from("--cidfile"));
             args.push(cidfile.as_os_str().to_os_string());
+            args.push(OsString::from("--label"));
+            args.push(OsString::from(format!(
+                "io.nac.creation-token={ownership_token}"
+            )));
         }
 
         if should_keep_id_userns() && self.spec.mounts.iter().any(|mount| !mount.read_only) {
@@ -1394,15 +1500,20 @@ mod tests {
         let release = root.join("release");
         let container = root.join("container");
         let removed = root.join("removed");
+        let ownership_token = root.join("ownership-token");
         std::fs::write(
             &podman,
             r#"#!/bin/sh
 if [ "$1" = run ]; then
   shift
   cidfile=
+  ownership_token=
   while [ "$#" -gt 0 ]; do
     if [ "$1" = --cidfile ]; then
       cidfile=$2
+      shift 2
+    elif [ "$1" = --label ]; then
+      ownership_token=${2#*=}
       shift 2
     else
       shift
@@ -1411,7 +1522,12 @@ if [ "$1" = run ]; then
   : > "$NAC_TEST_CREATE_STARTED"
   while [ ! -e "$NAC_TEST_CREATE_RELEASE" ]; do /bin/sleep 0.01; done
   : > "$NAC_TEST_CONTAINER"
-  printf '%s\n' owned-container-id > "$cidfile"
+  printf '%064d\n' 0 > "$cidfile"
+  printf '%s\n' "$ownership_token" > "$NAC_TEST_OWNERSHIP_TOKEN"
+  exit 0
+fi
+if [ "$1" = inspect ]; then
+  /bin/cat "$NAC_TEST_OWNERSHIP_TOKEN"
   exit 0
 fi
 if [ "$1" = rm ]; then
@@ -1431,6 +1547,7 @@ exit 0
             std::env::set_var("NAC_TEST_CREATE_RELEASE", &release);
             std::env::set_var("NAC_TEST_CONTAINER", &container);
             std::env::set_var("NAC_TEST_REMOVE_STARTED", &removed);
+            std::env::set_var("NAC_TEST_OWNERSHIP_TOKEN", &ownership_token);
         }
 
         let session = std::sync::Arc::new(PodmanSession::new(
@@ -1477,8 +1594,96 @@ exit 0
             std::env::remove_var("NAC_TEST_CREATE_RELEASE");
             std::env::remove_var("NAC_TEST_CONTAINER");
             std::env::remove_var("NAC_TEST_REMOVE_STARTED");
+            std::env::remove_var("NAC_TEST_OWNERSHIP_TOKEN");
         }
         drop(session);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn creation_rollback_validates_ownership_and_preserves_failed_cleanup_authority() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-creation-rollback-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let cidfile = root.join("container.cid");
+        let arguments = root.join("rm-arguments");
+        std::fs::write(
+            &podman,
+            r#"#!/bin/sh
+if [ "$1" = inspect ]; then
+  printf '%s\n' "$NAC_TEST_INSPECT_TOKEN"
+  exit 0
+fi
+if [ "$1" = rm ]; then
+  printf '%s\n' "$@" > "$NAC_TEST_RM_ARGUMENTS"
+  exit "$NAC_TEST_RM_STATUS"
+fi
+exit 99
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_token = std::env::var_os("NAC_TEST_INSPECT_TOKEN");
+        let original_status = std::env::var_os("NAC_TEST_RM_STATUS");
+        let original_arguments = std::env::var_os("NAC_TEST_RM_ARGUMENTS");
+        unsafe {
+            std::env::set_var("PATH", &root);
+            std::env::set_var("NAC_TEST_RM_ARGUMENTS", &arguments);
+            std::env::set_var("NAC_TEST_RM_STATUS", "23");
+        }
+        std::fs::write(creation_token_path(&cidfile), "owned-token\n").unwrap();
+
+        std::fs::write(&cidfile, "--all\n").unwrap();
+        let error = destroy_created_container(&cidfile).await.unwrap_err();
+        assert!(error.to_string().contains("full container ID"));
+        assert!(cidfile.exists());
+        assert!(!arguments.exists(), "invalid ID reached podman rm");
+
+        let container_id = "a".repeat(64);
+        std::fs::write(&cidfile, format!("{container_id}\n")).unwrap();
+        unsafe { std::env::set_var("NAC_TEST_INSPECT_TOKEN", "peer-token") };
+        let error = destroy_created_container(&cidfile).await.unwrap_err();
+        assert!(error.to_string().contains("refusing removal"));
+        assert!(cidfile.exists());
+        assert!(!arguments.exists(), "peer-owned ID reached podman rm");
+
+        unsafe { std::env::set_var("NAC_TEST_INSPECT_TOKEN", "owned-token") };
+        let error = destroy_created_container(&cidfile).await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("cleanup authority was preserved"));
+        assert!(cidfile.exists());
+        assert_eq!(
+            std::fs::read_to_string(&arguments).unwrap(),
+            format!("rm\n--ignore\n-f\n--\n{container_id}\n")
+        );
+
+        unsafe { std::env::set_var("NAC_TEST_RM_STATUS", "0") };
+        destroy_created_container(&cidfile).await.unwrap();
+        assert!(!cidfile.exists());
+        assert!(!creation_token_path(&cidfile).exists());
+
+        unsafe {
+            for (name, value) in [
+                ("PATH", original_path),
+                ("NAC_TEST_INSPECT_TOKEN", original_token),
+                ("NAC_TEST_RM_STATUS", original_status),
+                ("NAC_TEST_RM_ARGUMENTS", original_arguments),
+            ] {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 
