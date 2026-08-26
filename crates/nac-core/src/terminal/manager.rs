@@ -61,7 +61,7 @@ impl TerminalManager {
     }
 
     pub(crate) fn for_worker_with_limits(limits: CommandOutputLimits) -> Result<Self> {
-        Self::with_process_group_isolation(false, false, limits)
+        Self::with_process_group_isolation(true, false, limits)
     }
 
     #[cfg(test)]
@@ -498,7 +498,9 @@ impl TerminalManager {
         let mut force_reader_shutdown = false;
         if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
-                let _ = backend.terminal_pipe_kill(pidfile).await;
+                if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
+                    runtime_error = Some(format!("remote command cleanup incomplete: {error}"));
+                }
             }
             match process_tree.terminate(&mut child).await {
                 Ok(()) => force_reader_shutdown = true,
@@ -925,6 +927,44 @@ mod tests {
         let output = manager
             .exec_one_shot(&command, None, 120, 40, 5_000, 8_000, &backend(), None)
             .await;
+        assert_eq!(output.status, CommandStatus::Completed);
+        assert_eq!(output.exit_code, Some(0));
+        let pid = std::fs::read_to_string(&pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        for _ in 0..100 {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "descendant survived");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn worker_one_shot_does_not_hang_on_descendant_inherited_pipes() {
+        let manager =
+            TerminalManager::for_worker_with_limits(CommandOutputLimits::default()).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-worker-one-shot-pipes-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let pid_path = root.join("pid");
+        let command = format!(
+            "sh -c 'trap \"\" HUP TERM; printf %s $$ > {}; sleep 30' & while [ ! -s {} ]; do sleep 0.01; done",
+            pid_path.display(),
+            pid_path.display(),
+        );
+        let output = tokio::time::timeout(
+            Duration::from_secs(2),
+            manager.exec_one_shot(&command, None, 120, 40, 5_000, 8_000, &backend(), None),
+        )
+        .await
+        .expect("worker one-shot remained blocked on descendant-owned pipes");
         assert_eq!(output.status, CommandStatus::Completed);
         assert_eq!(output.exit_code, Some(0));
         let pid = std::fs::read_to_string(&pid_path)

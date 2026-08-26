@@ -111,8 +111,8 @@ for child in $(group_members); do
 done
 rm -f "$pidfile"
 exit "$status"'
-if command -v setsid >/dev/null 2>&1; then
-  exec setsid bash -c "$supervisor" nac-supervisor "$1" "$2"
+if command -v setsid >/dev/null 2>&1 && setsid -w true >/dev/null 2>&1; then
+  exec setsid -w bash -c "$supervisor" nac-supervisor "$1" "$2"
 else
   set -m
   bash -c "$supervisor" nac-supervisor "$1" "$2" &
@@ -426,8 +426,12 @@ impl PodmanSession {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
-        let _ = timeout(Duration::from_secs(2), command.status()).await;
-        Ok(())
+        match timeout(Duration::from_secs(2), command.status()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(status)) => bail!("Podman command cleanup exited with status {status}"),
+            Ok(Err(error)) => Err(error).context("failed to start Podman command cleanup"),
+            Err(_) => bail!("Podman command cleanup timed out"),
+        }
     }
 
     fn exec_args(
@@ -991,6 +995,35 @@ mod tests {
         assert!(debug.contains("PAGER=cat"), "expected PAGER=cat: {debug}");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminal_pipe_kill_reports_nonzero_podman_status() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root =
+            std::env::temp_dir().join(format!("nac-podman-kill-status-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        std::fs::write(&podman, "#!/bin/sh\nexit 23\n").unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", &root) };
+        let result = sample_session().terminal_pipe_kill("/tmp/unused.pid").await;
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("status"),
+            "unexpected cleanup error: {error}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn sandbox_pidfile_path_is_container_tmp_path() {
         let path = make_sandbox_pidfile();
@@ -1000,7 +1033,8 @@ mod tests {
 
     #[test]
     fn sandbox_wrappers_track_and_kill_process_group() {
-        assert!(SANDBOX_EXEC_WRAPPER.contains("exec setsid bash -c"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("setsid -w true"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("exec setsid -w bash -c"));
         assert!(
             SANDBOX_EXEC_WRAPPER.contains("nac-supervisor"),
             "exec wrapper: {SANDBOX_EXEC_WRAPPER}"

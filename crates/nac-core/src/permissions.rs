@@ -1028,16 +1028,18 @@ fn command_grant_candidate(tokens: &[String]) -> String {
     let command = effective_command_tokens(tokens)
         .first()
         .and_then(|command| command.rsplit('/').next())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let contains_banned_wrapper = tokens.iter().any(|token| {
         token
             .rsplit('/')
             .next()
-            .is_some_and(|token| BANNED.contains(&token))
+            .is_some_and(|token| BANNED.contains(&token.to_ascii_lowercase().as_str()))
     });
     if tokens.is_empty()
-        || BANNED.contains(&command)
+        || BANNED.contains(&command.as_str())
         || contains_banned_wrapper
+        || shell_control_prefix(tokens)
         || is_broad_command(tokens)
     {
         return canonical_command(tokens);
@@ -1065,6 +1067,11 @@ fn hard_shell_denial_inner(
     backend: &ExecutionBackend,
     depth: usize,
 ) -> Option<String> {
+    if shell_control_prefix(tokens) {
+        return Some(
+            "shell control syntax is blocked because it can hide protected commands".to_string(),
+        );
+    }
     if literal_env_split_string(tokens).is_some() {
         if depth >= 8 {
             return Some("nested env split-string depth exceeds the safety limit".to_string());
@@ -1129,6 +1136,11 @@ fn hard_shell_denial_inner(
             if let Some(denial) = hard_shell_denial_inner(command, cwd, backend, depth + 1) {
                 return Some(denial);
             }
+        }
+        if tokens.iter().any(|token| token == "-delete") {
+            return Some(
+                "find -delete is blocked because traversal can remove protected paths".to_string(),
+            );
         }
     }
     if matches!(
@@ -1213,10 +1225,10 @@ fn git_alias_override(tokens: &[String]) -> bool {
 
 fn git_environment_configuration_override(tokens: &[String]) -> bool {
     let effective = effective_command_tokens(tokens);
-    if effective
+    if !effective
         .first()
         .and_then(|command| command.rsplit('/').next())
-        != Some("git")
+        .is_some_and(|command| command.eq_ignore_ascii_case("git"))
     {
         return false;
     }
@@ -1252,7 +1264,7 @@ fn literal_shell_command_body(tokens: &[String]) -> Option<&str> {
 fn embedded_command_body(tokens: &[String]) -> Option<&str> {
     let effective = effective_command_tokens(tokens);
     let command = effective.first()?.rsplit('/').next()?;
-    if command != "rg" {
+    if !command.eq_ignore_ascii_case("rg") {
         return None;
     }
     effective
@@ -1572,24 +1584,46 @@ fn is_broad_command_inner(tokens: &[String], depth: usize) -> bool {
                 || command == "xargs"
                 || command == "find" && find_exec_commands(effective).next().is_some()
         });
-    command_is_broad
-        || cargo_inline_configuration(effective)
-        || embedded_command_body(effective).is_some()
+    command_is_broad || cargo_configuration(effective) || embedded_command_body(effective).is_some()
 }
 
-fn cargo_inline_configuration(tokens: &[String]) -> bool {
-    if tokens
+fn cargo_configuration(tokens: &[String]) -> bool {
+    if !tokens
         .first()
         .and_then(|command| command.rsplit('/').next())
-        != Some("cargo")
+        .is_some_and(|command| command.eq_ignore_ascii_case("cargo"))
     {
         return false;
     }
     tokens.iter().enumerate().skip(1).any(|(index, token)| {
-        token
-            .strip_prefix("--config=")
-            .is_some_and(|value| value.contains('='))
-            || index > 0 && tokens[index - 1] == "--config" && token.contains('=')
+        token.starts_with("--config=") || index > 0 && tokens[index - 1] == "--config"
+    })
+}
+
+fn shell_control_prefix(tokens: &[String]) -> bool {
+    let effective = effective_command_tokens(tokens);
+    effective.first().is_some_and(|token| {
+        matches!(
+            token.to_ascii_lowercase().as_str(),
+            "!" | "{"
+                | "}"
+                | "if"
+                | "then"
+                | "else"
+                | "elif"
+                | "fi"
+                | "for"
+                | "while"
+                | "until"
+                | "do"
+                | "done"
+                | "case"
+                | "esac"
+                | "select"
+                | "function"
+                | "[["
+                | "]]"
+        )
     })
 }
 
@@ -1638,11 +1672,12 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
     let git_command = effective
         .first()
         .and_then(|command| command.rsplit('/').next())
-        == Some("git");
+        .is_some_and(|command| command.eq_ignore_ascii_case("git"));
     let command = effective
         .first()
         .and_then(|command| command.rsplit('/').next())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let git_subcommand = git_command
         .then(|| git_subcommand_index(tokens, command_index))
         .flatten();
@@ -1684,7 +1719,7 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
         )
         && !cargo_key_value_config
         || git_global_c_value
-        || index > 0 && matches!(command, "make" | "tar") && tokens[index - 1] == "-C"
+        || index > 0 && matches!(command.as_str(), "make" | "tar") && tokens[index - 1] == "-C"
         || command == "unzip" && index > 0 && tokens[index - 1] == "-d";
     let git_global_path = git_command
         && (option
@@ -1714,7 +1749,7 @@ fn shell_path_requested_path(
     if effective
         .first()
         .and_then(|command| command.rsplit('/').next())
-        == Some("git")
+        .is_some_and(|command| command.eq_ignore_ascii_case("git"))
     {
         if git_c_path_position(tokens, command_index, index) {
             return git_effective_cwd_before(tokens, command_index, index, cwd).join(requested);
@@ -1738,10 +1773,11 @@ fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
     let command = effective
         .first()
         .and_then(|command| command.rsplit('/').next())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let writer_operand = index > command_index
         && matches!(
-            command,
+            command.as_str(),
             "chmod"
                 | "chown"
                 | "chgrp"
@@ -1758,7 +1794,7 @@ fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
         )
         && !tokens[index].starts_with('-');
     let in_place_editor = index > command_index
-        && matches!(command, "perl" | "sed")
+        && matches!(command.as_str(), "perl" | "sed")
         && tokens[command_index + 1..index].iter().any(|token| {
             token == "-i" || token.starts_with("-i") || token.starts_with("--in-place")
         });
@@ -1767,13 +1803,23 @@ fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
             .iter()
             .any(|token| token == "--extract" || token.starts_with('-') && token.contains('x'));
     let destructive_find = command == "find" && tokens.iter().any(|token| token == "-delete");
+    let cargo_output_path = command.eq_ignore_ascii_case("cargo")
+        && (matches!(option, Some("--target-dir" | "--lockfile-path"))
+            || index > 0
+                && matches!(
+                    tokens[index - 1].as_str(),
+                    "--target-dir" | "--lockfile-path"
+                ));
+    let archive_output_path = command == "unzip" && index > 0 && tokens[index - 1] == "-d";
     option == Some("--output")
-        || index > 0 && matches!(tokens[index - 1].as_str(), "--output" | "-o")
+        || index > 0 && matches!(tokens[index - 1].as_str(), "--output" | "-o" | "-O")
         || writer_operand
         || command == "dd" && tokens[index].starts_with("of=")
         || in_place_editor
         || extracts_into_path
         || destructive_find
+        || cargo_output_path
+        || archive_output_path
 }
 
 fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
@@ -1782,11 +1828,12 @@ fn bare_relative_path_position(tokens: &[String], index: usize) -> bool {
     let command = effective
         .first()
         .and_then(|command| command.rsplit('/').next())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if index <= command_index {
         return false;
     }
-    match command {
+    match command.as_str() {
         "cargo" => cargo_bare_relative_path_position(tokens, index),
         "rg" => rg_bare_relative_path_position(tokens, command_index, index),
         "git" => git_bare_relative_path_position(tokens, command_index, index),
@@ -2293,7 +2340,11 @@ fn removes_protected_root(tokens: &[String], cwd: &Path, backend: &ExecutionBack
                 lexical_normalize(&cwd.join(target))
             }
         })
-        .any(|target| target == Path::new("/") || target == workspace)
+        .any(|target| {
+            target == Path::new("/")
+                || target == workspace
+                || path_contains_component(&target, ".git")
+        })
 }
 
 #[cfg(test)]
@@ -2609,12 +2660,42 @@ mod tests {
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
             "bash -lc 'sudo make install' > /tmp/result",
+            "! git status",
+            "! git reset --hard",
+            "{ git reset --hard; }",
+            "if true; then git reset --hard; fi",
+            "find . -delete",
+            "xargs rm -rf .git",
+            "sh -c 'rm -rf .git'",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
                     .hard_denial
                     .is_some(),
                 "wrapper or opaque syntax must not bypass hard denial: {command}"
+            );
+        }
+
+        let negated_status = shell_resources("! git status", Path::new("/workspace"), &backend);
+        assert_eq!(
+            negated_status[0].save_resource.as_deref(),
+            Some("command:[%21][git][status]")
+        );
+
+        for command in [
+            "GIT_CONFIG_COUNT=1 Git status",
+            "RG --pre=sudo needle .",
+            "Cargo build --config=build.rustc-wrapper=wrapper",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            assert!(
+                resources
+                    .iter()
+                    .any(|resource| resource.hard_denial.is_some())
+                    || resources
+                        .iter()
+                        .any(|resource| resource.action == "execute_broad"),
+                "specialized authority recognition must be case-insensitive: {command}"
             );
         }
 
@@ -3098,10 +3179,41 @@ mod tests {
             .any(|resource| resource.action == "execute_broad"));
 
         for command in [
+            "cargo build --config .cargo/authority.toml",
+            "cargo build --config=.cargo/authority.toml",
+            "Cargo build --config=.cargo/authority.toml",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            assert!(
+                resources
+                    .iter()
+                    .any(|resource| resource.action == "execute_broad"),
+                "Cargo configuration files can carry executable settings: {command}"
+            );
+        }
+
+        for command in [
+            "cargo build --target-dir=.git/nac-target",
+            "cargo test --target-dir .git/nac-target",
+            "cargo build --lockfile-path=.git/nac-lock",
+            "Cargo build --target-dir=.git/nac-target",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            assert!(
+                resources.iter().any(|resource| {
+                    resource.action == "edit" && resource.hard_denial.is_some()
+                }),
+                "Cargo output paths beneath Git metadata must be blocked: {command}"
+            );
+        }
+
+        for command in [
             "tee .git/nac-owned",
             "touch .git/nac-owned",
             "dd if=/dev/null of=.git/nac-owned",
             "sed -i s/a/b/ .git/config",
+            "unzip archive.zip -d .git/hooks",
+            "wget https://example.invalid/config -O .git/config",
         ] {
             let resources = shell_resources(command, Path::new("/workspace"), &backend);
             assert!(resources
