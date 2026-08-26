@@ -4965,6 +4965,7 @@ pub async fn serve_with_policy(
     // then verify this store in place and never create a blank replacement
     // if it disappears while the process is running.
     nac_core::store::initialize(&manager.inner.store_path)?;
+    nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {}", addr))?;

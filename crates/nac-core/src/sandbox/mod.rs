@@ -301,6 +301,29 @@ impl SandboxSession {
         Ok(session)
     }
 
+    pub(crate) async fn create_for_durable_launch(
+        spec: SandboxSpec,
+        session_key: String,
+        owner: bool,
+        activity_key: String,
+        store_path: PathBuf,
+    ) -> Result<Self> {
+        let session = match spec.backend {
+            SandboxBackendType::Podman => {
+                let inner = Arc::new(podman::PodmanSession::new_for_durable_launch(
+                    spec,
+                    session_key,
+                    owner,
+                    activity_key,
+                    store_path,
+                ));
+                inner.ensure_ready().await?;
+                Self::Podman(inner)
+            }
+        };
+        Ok(session)
+    }
+
     pub fn workdir_display(&self) -> String {
         self.spec().workdir.display().to_string()
     }
@@ -328,6 +351,12 @@ impl SandboxSession {
     pub(crate) fn retain_for_durable_session(&self) {
         match self {
             Self::Podman(inner) => inner.retain_for_durable_session(),
+        }
+    }
+
+    pub(crate) fn disable_drop_cleanup(&self) {
+        match self {
+            Self::Podman(inner) => inner.disable_drop_cleanup(),
         }
     }
 
@@ -490,6 +519,12 @@ impl SandboxSession {
 /// session id as their key, so deletion after restart can still address them.
 pub async fn destroy_persisted_container(session_id: &str) -> Result<()> {
     podman::destroy_owned_container(session_id).await
+}
+
+/// Reconciles an interrupted fresh Podman launch against the durable session
+/// store before the server begins accepting requests.
+pub async fn reconcile_podman_creation_records(store_path: &Path) -> Result<()> {
+    podman::reconcile_creation_records(store_path).await
 }
 
 pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountSpec> {
