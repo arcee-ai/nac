@@ -499,6 +499,7 @@ impl WorkspaceFs {
             None => {
                 drop(fs);
                 let _ = sftp.close().await;
+                let _ = child.start_kill();
                 let _ = child.wait().await;
                 return Err(SearchError::new("search_cancelled", "search cancelled"));
             }
@@ -984,7 +985,13 @@ impl WorkspaceFs {
             if let Some(sftp) = remote.sftp.take() {
                 let _ = sftp.close().await;
             }
-            let _ = remote.child.wait().await;
+            match remote.child.try_wait() {
+                Ok(Some(_)) => {}
+                _ => {
+                    let _ = remote.child.start_kill();
+                    let _ = remote.child.wait().await;
+                }
+            }
         }
     }
 }

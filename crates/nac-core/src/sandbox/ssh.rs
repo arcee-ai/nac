@@ -3,7 +3,6 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use portable_pty::CommandBuilder as PtyCommandBuilder;
@@ -14,13 +13,13 @@ use uuid::Uuid;
 
 use crate::paths::PathContext;
 
-use super::podman::{SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER};
+use super::podman::{
+    SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_TIMEOUT, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER,
+};
 use super::ssh_command::{
     prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, shell_quote,
     shell_quote_path, SshConnection,
 };
-
-const REMOTE_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SSH_PIDFILE_DIR: &str = "~/.cache/nac/exec";
 
@@ -234,7 +233,8 @@ impl SshBackend {
         command.stdin(Stdio::null());
         command.stdout(Stdio::null());
         command.stderr(Stdio::null());
-        let status = timeout(REMOTE_KILL_TIMEOUT, command.status())
+        command.kill_on_drop(true);
+        let status = timeout(SANDBOX_KILL_TIMEOUT, command.status())
             .await
             .map_err(|_| anyhow::anyhow!("ssh command cleanup timed out"))??;
         if !status.success() {

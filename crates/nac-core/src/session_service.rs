@@ -2337,7 +2337,6 @@ impl SessionService {
             service.set_run_transcript_baseline(&task_run_id, baseline);
             let (result, usage) = {
                 let mut agent = service.agent.lock().await;
-                agent.reset_command_cancellation();
                 agent.set_event_sink(EventSink::bus_with_context(
                     event_bus.clone(),
                     Some(task_run_id.clone()),
@@ -2494,6 +2493,11 @@ impl SessionService {
                 message: SessionCoordinationError::local_agent_busy(),
             });
         }
+        // Reset here, not inside the spawned run task: a Stop that lands after
+        // admission must observe a fresh token. Resetting later can un-cancel a
+        // concurrent request_cancel and let leftover tools keep running.
+        self.command_cancellation.reset();
+        self.terminal_manager.begin_run();
 
         let run_id = SessionRunId::new();
         let submitted_at_epoch_ms = now_epoch_ms();

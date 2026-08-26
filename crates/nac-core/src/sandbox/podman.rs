@@ -14,6 +14,15 @@ use tokio::time::timeout;
 use super::{MountSpec, SandboxAvailability, SandboxAvailabilityStatus, SandboxSpec};
 use crate::workspace::first_stderr_line;
 
+/// Host-side wait for `SANDBOX_KILL_WRAPPER`.
+///
+/// The wrapper can sleep up to two seconds on its own (two 20 × 50ms polls)
+/// before exiting, then still has to scan `/proc` and deliver signals. Podman
+/// machine and SSH round-trips sit on top of that, so a 2s host deadline can
+/// fire while a successful kill is still running and report a false cleanup
+/// failure.
+pub(crate) const SANDBOX_KILL_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Probes whether podman can be used on this host right now: first the binary
 /// (`podman --version`), then the runtime (`podman info`, which fails while a
 /// macOS `podman machine` is stopped or never initialized).
@@ -448,10 +457,12 @@ impl PodmanSession {
             .arg(SANDBOX_KILL_WRAPPER)
             .arg("nac-kill")
             .arg(pidfile)
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
 
-        let status = timeout(Duration::from_secs(2), command.status())
+        let status = timeout(SANDBOX_KILL_TIMEOUT, command.status())
             .await
             .map_err(|_| anyhow!("podman command cleanup timed out"))??;
         if !status.success() {
@@ -1046,6 +1057,10 @@ mod tests {
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("[ \"$attempts\" -ge 20 ] && exit 1"));
+        assert!(
+            SANDBOX_KILL_TIMEOUT > Duration::from_millis(20 * 50 * 2),
+            "host kill deadline must outlast the wrapper's two 20×50ms wait loops"
+        );
     }
 
     #[test]

@@ -887,10 +887,6 @@ impl Agent {
     pub(crate) fn command_cancellation(&self) -> crate::tools::ThreadCancellation {
         self.tool_runtime.command_cancellation.clone()
     }
-    pub(crate) fn reset_command_cancellation(&self) {
-        self.tool_runtime.command_cancellation.reset();
-        self.tool_runtime.terminal_manager.begin_run();
-    }
 
     pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
         self.tool_runtime.terminal_manager.clone()
