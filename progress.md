@@ -12,10 +12,10 @@ launch, browser-E2E, and deterministic durability coverage.
 
 Protected initial state verified on 2026-08-25:
 
-- HEAD is `7cd1787` on `allison-demo`. The original implementation range is
-  `61b1709..d3e3fc0`; post-review closure now extends through `7cd1787` with
-  immutable reviews at `02c58aa`, `dd897a4`, `40f3619`, `fceb0fd`, and
-  `7cd1787`.
+- HEAD is `2dbcb4e` on `allison-demo`. The original implementation range is
+  `61b1709..d3e3fc0`; post-review closure now extends through `2dbcb4e` with
+  immutable reviews at `02c58aa`, `dd897a4`, `40f3619`, `fceb0fd`, `7cd1787`,
+  and `2dbcb4e`.
 - `.gitignore` is modified, `AGENTS.md` and `demo_review.md` are untracked, and
   `demo_decisions.md` is intentionally ignored. These are user-owned/local and
   must not be staged or committed.
@@ -46,13 +46,13 @@ Protected initial state verified on 2026-08-25:
    NAC-REV-010, 011, 015, and 020..023 through behavior-aware creation and
    navigation, active-run inbox UX, literal `/goal`, child ownership guards,
    documentation, and production-embedded browser tests.
-5. **In progress — closure and integrated review.** Commit `7cd1787` closed the
-   eight `fceb0fd` findings and passed every exact-commit gate. Its four-lane
-   review returned NO-GO with eleven command-admission, remote-ownership,
-   suppression-generation, retained-service, UI-scoping, pidfile, and ledger
-   blockers. The current uncommitted repair candidate addresses all eleven and
-   its focused regressions pass; complete gates, a new immutable NAC review,
-   production browser smoke, and final state audit remain.
+5. **In progress — closure and integrated review.** Commit `2dbcb4e` closed the
+   eleven `7cd1787` findings and passed every exact-commit gate. Its four-lane
+   review returned NO-GO with seven remaining command-admission, PTY-input,
+   session-remount, Podman process-identity, and ledger blockers. The current
+   uncommitted repair candidate addresses all seven with focused regressions;
+   complete gates, a new immutable NAC review, production browser smoke, and
+   final state audit remain.
 
 ### Finding map
 
@@ -119,8 +119,16 @@ Protected initial state verified on 2026-08-25:
   final-entry binding, early/forgotten remote cleanup ownership, exited
   retained-service eviction, generation rollover over crash-stranded
   completion suppression, restart-colliding Podman pidfiles, cross-session Stop
-  projection, and the stale ledger. The current uncommitted candidate addresses
-  all eleven with focused regressions passing.
+  projection, and the stale ledger. Commit `2dbcb4e` closed all eleven and
+  passed the complete exact-commit gates.
+- Exact `2dbcb4e` review `20e37702-8a89-44ab-ae3a-201e8f34b1a5`, run
+  `b3ab1b12-477e-4964-b63d-cbfdca883731` — NO-GO; all four lanes independently
+  verified the exact clean commit. It found brace-expanded command names,
+  embedded command-body and `script` wrapper escapes, the finite PTY
+  shell-escape denylist, session-page state reuse across route ids, bare-PID
+  Podman cleanup, and this stale ledger. The current candidate blocks opaque
+  executable bodies/wrappers and all nonempty model-driven PTY input, remounts
+  the full session page by id, and validates PID plus process birth identity.
 
 ### Current verification and next action
 
@@ -184,23 +192,23 @@ Protected initial state verified on 2026-08-25:
   behavior choices and default reset, direct text and native tool round trips,
   active durable steer delivery into the next provider request, literal goal
   interpretation and continuation, and read-only child/managed transcripts.
-- Exact `7cd1787` gate baseline: `make ci` passed with catalog 2+7+24, core
-  1087 passed/9 ignored, server 134, binary 21, and frontend 170; `make
+- Exact `2dbcb4e` gate baseline: `make ci` passed with catalog 2+7+24, core
+  1088 passed/9 ignored, server 134, binary 21, and frontend 171; `make
   test-durability`, `make test-assets`, and production-embedded Playwright
   10/10 also passed.
-- Current repair evidence: focused hard-policy wrapper/dynamic-name and exact
-  deletion-entry tests pass; active-settlement, cancellation, forced-abort,
-  natural-exit, retained-service, and retryable remote-cleanup tests pass;
-  suppression repair blocks both child and managed generation rollover until
-  the deletion lease is released and then delivers exactly once; UUID pidfile
-  and session-scoped Stop tests pass. The complete uncommitted candidate gates
-  pass: core 1088 passed/9 ignored, server 134, binary 21, frontend 171,
-  formatting, warning-denied lint, typecheck, and the durability lane. The
-  embedded production bundle has been rebuilt. These are pre-commit results,
-  not substitutes for the required exact-commit gates.
+- Current repair evidence: focused regressions reject brace-expanded command
+  names, split-string/shell/preprocessor executable bodies, and `script`
+  wrappers; nonempty model-driven `write_stdin` is hard denied while empty
+  poll/retain remain available; a route-id transition remounts the complete
+  session page; and Podman cancellation refuses a live PID whose birth identity
+  differs from the pidfile. The complete precommit candidate gates pass: core
+  1089 passed/9 ignored, server 134, binary 21, frontend 172, formatting,
+  warning-denied lint, typecheck, and the durability lane. The embedded
+  production bundle has been rebuilt. These are precommit results, not
+  substitutes for the required exact-commit gates.
 - Next action: commit only the candidate and tracked evidence, rerun every
-  exact-commit closure gate, obtain a fresh four-lane NAC review, then perform
-  the actual `make demo` browser smoke and final cleanup/state audit.
+  exact-commit closure gate, and obtain a fresh four-lane NAC review before
+  product smoke and final cleanup/state audit.
 
 ## Objective and invariants
 
@@ -540,6 +548,7 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Goal implementation and verification are complete. Preserve the two pieces of
-pre-existing user state (`.gitignore` and untracked `AGENTS.md`) and use this
-file plus `demo_decisions.md` as the continuation handoff for future work.
+Closure is still active. Complete and commit the seven-finding `2dbcb4e`
+repair, rerun all exact-commit gates, then obtain a fresh detached-clean
+four-lane NAC verdict. Preserve `.gitignore`, untracked `AGENTS.md`, and the
+local review notebooks throughout.

@@ -1073,7 +1073,10 @@ fn contains_opaque_shell_syntax(command: &str) -> bool {
             quote = Some(current);
             continue;
         }
-        if matches!(current, '$' | '`' | '<' | '>' | '(' | ')') {
+        if matches!(
+            current,
+            '$' | '`' | '<' | '>' | '(' | ')' | '{' | '}' | '*' | '?' | '['
+        ) {
             return true;
         }
     }
@@ -1156,18 +1159,10 @@ fn hard_shell_denial_inner(
         );
     }
     if literal_env_split_string(tokens).is_some() {
-        if depth >= 8 {
-            return Some("nested env split-string depth exceeds the safety limit".to_string());
-        }
-        let expanded = match expanded_env_split_tokens(tokens) {
-            Ok(Some(expanded)) => expanded,
-            Ok(None) => unreachable!("split-string presence changed while expanding"),
-            Err(reason) => return Some(reason.to_string()),
-        };
-        let denial = hard_shell_denial_inner(&expanded, cwd, backend, depth + 1);
-        if denial.is_some() {
-            return denial;
-        }
+        return Some(
+            "env split-string execution is blocked because embedded command paths cannot be independently authorized"
+                .to_string(),
+        );
     }
     if git_environment_configuration_override(tokens) {
         return Some(
@@ -1179,7 +1174,20 @@ fn hard_shell_denial_inner(
     let command = tokens.first()?.rsplit('/').next()?.to_ascii_lowercase();
     if matches!(
         command.as_str(),
-        "chrt" | "ionice" | "numactl" | "setsid" | "stdbuf" | "taskset"
+        "chrt"
+            | "daemon"
+            | "daemonize"
+            | "ionice"
+            | "numactl"
+            | "parallel"
+            | "runuser"
+            | "script"
+            | "setsid"
+            | "start-stop-daemon"
+            | "stdbuf"
+            | "systemd-run"
+            | "taskset"
+            | "watch"
     ) {
         return Some(format!(
             "execution wrapper '{command}' is blocked because it can conceal a protected command"
@@ -1190,35 +1198,22 @@ fn hard_shell_denial_inner(
             "shell eval is blocked because quoted data can become a protected command".to_string(),
         );
     }
-    if depth >= 8 && embedded_command_body(tokens).is_some() {
-        return Some("nested executable wrapper depth exceeds the safety limit".to_string());
-    }
-    if let Some(body) = embedded_command_body(tokens) {
-        let denial = match parse_shell(body) {
-            ParsedShell::Supported(segments) => segments
-                .into_iter()
-                .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
-            ParsedShell::Opaque => opaque_hard_shell_denial(body, cwd, backend),
-        };
-        if denial.is_some() {
-            return denial;
-        }
+    if embedded_command_body(tokens).is_some() {
+        return Some(
+            "embedded executable command bodies are blocked because their paths cannot be independently authorized"
+                .to_string(),
+        );
     }
     if command == "xargs" {
         if depth >= 8 {
             return Some("nested executable wrapper depth exceeds the safety limit".to_string());
         }
         match xargs_command_tokens(tokens) {
-            Ok(Some(command)) => {
-                if is_broad_command(command) {
-                    return Some(
-                        "xargs invocation of a broad interpreter is blocked because input can become executable arguments"
-                            .to_string(),
-                    );
-                }
-                if let Some(denial) = hard_shell_denial_inner(command, cwd, backend, depth + 1) {
-                    return Some(denial);
-                }
+            Ok(Some(_)) => {
+                return Some(
+                    "xargs command execution is blocked because streamed input can become unauthorized executable arguments"
+                        .to_string(),
+                );
             }
             Ok(None) => {}
             Err(reason) => return Some(reason.to_string()),
@@ -1228,10 +1223,11 @@ fn hard_shell_denial_inner(
         if depth >= 8 && find_exec_commands(tokens).next().is_some() {
             return Some("nested executable wrapper depth exceeds the safety limit".to_string());
         }
-        for command in find_exec_commands(tokens) {
-            if let Some(denial) = hard_shell_denial_inner(command, cwd, backend, depth + 1) {
-                return Some(denial);
-            }
+        if find_exec_commands(tokens).next().is_some() {
+            return Some(
+                "find executable actions are blocked because nested command paths cannot be independently authorized"
+                    .to_string(),
+            );
         }
         if tokens.iter().any(|token| token == "-delete") {
             return Some(
@@ -1275,16 +1271,11 @@ fn hard_shell_denial_inner(
         if depth >= 8 {
             return Some("nested shell command depth exceeds the safety limit".to_string());
         }
-        if let Some(body) = literal_shell_command_body(tokens) {
-            let denial = match parse_shell(body) {
-                ParsedShell::Supported(segments) => segments
-                    .into_iter()
-                    .find_map(|segment| hard_shell_denial_inner(&segment, cwd, backend, depth + 1)),
-                ParsedShell::Opaque => opaque_hard_shell_denial(body, cwd, backend),
-            };
-            if denial.is_some() {
-                return denial;
-            }
+        if literal_shell_command_body(tokens).is_some() {
+            return Some(
+                "nested shell command bodies are blocked because their paths cannot be independently authorized"
+                    .to_string(),
+            );
         }
     }
     None
@@ -2450,7 +2441,7 @@ fn opaque_hard_shell_denial(
     if segments.iter().any(|tokens| {
         effective_command_tokens(tokens)
             .first()
-            .is_some_and(|token| token.contains('$') || token.contains('`'))
+            .is_some_and(|token| dynamic_shell_command_name(token))
     }) {
         return Some(
             "dynamic command names are blocked because expansion can become a protected command"
@@ -2490,6 +2481,14 @@ fn opaque_hard_shell_denial(
         }
     }
     None
+}
+
+fn dynamic_shell_command_name(token: &str) -> bool {
+    let expandable_character = token
+        .chars()
+        .any(|character| matches!(character, '$' | '`' | '{' | '}' | '*' | '?'));
+    expandable_character && !matches!(token, "{" | "}")
+        || token.contains('[') && token != "[" && !token.starts_with("[[")
 }
 
 fn dynamic_rm_command(tokens: &[String]) -> bool {
@@ -3136,14 +3135,19 @@ mod tests {
             "env --split-string='sudo\\_id'",
             "env \"-Sgit\\_reset\\_--hard\"",
             "env --split-string='${PROTECTED_COMMAND} id'",
+            "env -S 'unlink .git/config'",
+            "env -S 'rmdir .git/empty'",
             "xargs -n1 sudo true",
             "xargs sh -c",
             "xargs --unknown-option value",
             "find . -exec sudo true \\;",
             "rg --pre sudo needle .",
             "rg --pre=sudo needle .",
+            "script -q /dev/null rm -rf .",
+            "script -q -c 'rm -rf .' /dev/null",
             "git re\\\nset --hard",
             "sh -c 'git reset --hard' > /tmp/result",
+            "sh -c 'unlink .git/config'",
             "bash -lc 'sudo make install' > /tmp/result",
             "! git status",
             "! git reset --hard",
@@ -3173,6 +3177,8 @@ mod tests {
             "xargs rm -rf .git",
             "sh -c 'rm -rf .git'",
             "eval 'rm -rf .'",
+            "{rm,-rf} .",
+            "[r]m -rf .",
             "x=; c=r${x}m; \"$c\" -rf .",
         ] {
             assert!(
@@ -3204,6 +3210,7 @@ mod tests {
             "timeout 30 printf '%s' 'rm -rf $PWD'",
             "env -a harmless printf '%s' 'rm -rf $PWD'",
             "nice --adjustment 0 printf '%s' 'rm -rf $PWD'",
+            "[ -f file ]",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
@@ -3241,7 +3248,7 @@ mod tests {
             &backend,
         );
         assert_ne!(harmless[0].resource, escaped[0].resource);
-        assert!(harmless[0].hard_denial.is_none());
+        assert!(harmless[0].hard_denial.is_some());
         assert!(escaped[0].hard_denial.is_some());
 
         assert!(shell_resources(
@@ -3271,7 +3278,7 @@ mod tests {
             .any(|resource| resource.action == "execute_broad"));
         assert!(preprocessor
             .iter()
-            .all(|resource| resource.hard_denial.is_none()));
+            .any(|resource| resource.hard_denial.is_some()));
         for command in [
             "env -S 'sh -c id'".to_string(),
             format!("env -S {}", shell_quote("env -S 'sh -c id'")),
