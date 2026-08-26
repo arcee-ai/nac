@@ -3421,7 +3421,7 @@ impl SessionManager {
                 return Ok(());
             }
         }
-        self.require_persisted_operation_session(session_id)?;
+        self.require_primary_operation_session(session_id)?;
 
         let backend_selected = matches!(&request.backend, RequestField::Value(_));
         let base_url_omitted = matches!(&request.base_url, RequestField::Omitted);
@@ -3449,7 +3449,7 @@ impl SessionManager {
         // local eviction, but never hold a SQLite transaction over model I/O.
         let _operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
-        self.require_persisted_operation_session(session_id)?;
+        self.require_primary_operation_session(session_id)?;
 
         let current = sessions::load_session_config(&self.inner.store_path, session_id)?;
         if request_empty && !managed_config_needs_repair(&current) {
@@ -11671,6 +11671,19 @@ mod tests {
             .contains("accept work only through their parent"));
 
         for delegated in [&child, &orchestrator] {
+            let before = manager.session_config(delegated).unwrap();
+            let config_error = manager
+                .update_session_config(
+                    delegated,
+                    serde_json::from_value(serde_json::json!({"model":"mutated-model"})).unwrap(),
+                )
+                .await
+                .unwrap_err();
+            assert!(config_error
+                .to_string()
+                .contains("accept work only through their parent"));
+            assert_eq!(manager.session_config(delegated).unwrap(), before);
+
             let steering_error = manager
                 .queue_orchestrator_steering(
                     delegated,
@@ -11706,6 +11719,19 @@ mod tests {
 
         let app = router(manager.clone());
         for delegated in [&child, &orchestrator] {
+            let config = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PATCH")
+                        .uri(format!("/sessions/{delegated}/config"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"model":"mutated-model"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(config.status(), StatusCode::CONFLICT);
             let steering = app
                 .clone()
                 .oneshot(

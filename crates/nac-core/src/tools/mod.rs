@@ -1067,14 +1067,17 @@ fn legacy_permission_resources(
                 .unwrap_or_else(|| runtime.backend.default_terminal_cwd());
             let mut resources =
                 crate::permissions::shell_resources(command, &cwd, runtime.backend.as_ref());
-            if tty && crate::permissions::unbounded_interactive_input(command) {
+            if tty
+                && crate::permissions::unbounded_interactive_input(command)
+                && runtime.permission_broker.is_none()
+            {
                 resources.push(
                     kernel::PermissionResource::new("terminal_input", "unbounded-interpreter")
                         .with_display(
-                            "interactive opaque commands and broad interpreters are unavailable",
+                            "interactive opaque commands and broad interpreters require direct-session approval",
                         )
                         .with_hard_denial(
-                            "interactive opaque commands and broad interpreters are blocked because follow-up terminal input cannot be analyzed before execution",
+                            "interactive opaque commands and broad interpreters are unavailable to brokerless workers because follow-up input requires direct-session approval",
                         ),
                 );
             }
@@ -1093,11 +1096,22 @@ fn legacy_permission_resources(
                 Some(_) => return Err(invalid("'retain' argument must be a boolean")),
             };
             let resource = if !chars.is_empty() {
-                kernel::PermissionResource::new("terminal_input", session_id)
-                    .with_display("nonempty model-driven terminal input is unavailable")
-                    .with_hard_denial(
-                        "nonempty terminal input is blocked because terminal programs can reinterpret it as unauthorized shell commands",
+                let backend = match runtime.backend.as_ref() {
+                    crate::sandbox::ExecutionBackend::Local { .. } => "local",
+                    crate::sandbox::ExecutionBackend::Sandbox(_) => "podman",
+                    crate::sandbox::ExecutionBackend::Ssh(_) => "ssh",
+                };
+                let resource = kernel::PermissionResource::new("terminal_input", session_id)
+                    .with_display(format!(
+                        "send input to exact terminal handle '{session_id}' on the {backend} backend; the running process may interpret these bytes as commands"
+                    ));
+                if runtime.permission_broker.is_none() {
+                    resource.with_hard_denial(
+                        "nonempty terminal input is unavailable to brokerless workers because it requires direct-session approval",
                     )
+                } else {
+                    resource
+                }
             } else if retain {
                 kernel::PermissionResource::new("terminal_retain", session_id)
             } else {
@@ -1775,12 +1789,12 @@ mod discovery_tool_definition_tests {
             (
                 "write_stdin",
                 serde_json::json!({"session_id":"shell-test", "chars":"help<RET>"}),
-                "nonempty terminal input is blocked",
+                "nonempty terminal input is unavailable to brokerless workers",
             ),
             (
                 "exec_command",
                 serde_json::json!({"cmd":"bash", "tty":true}),
-                "interactive opaque commands and broad interpreters are blocked",
+                "interactive opaque commands and broad interpreters are unavailable to brokerless workers",
             ),
         ] {
             let result = snapshot.invoke(tool, input, services, &context).await;
@@ -1792,6 +1806,147 @@ mod discovery_tool_definition_tests {
             );
         }
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn direct_terminal_input_requires_once_only_approval_for_the_exact_handle() {
+        let root = std::env::temp_dir().join(format!(
+            "nac-direct-terminal-input-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session-a");
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            store_path.clone(),
+            "session-a".to_string(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [
+                crate::permissions::PermissionRule::new(
+                    "execute",
+                    "*",
+                    crate::permissions::PermissionEffect::Allow,
+                ),
+                crate::permissions::PermissionRule::new(
+                    "execute_opaque",
+                    "*",
+                    crate::permissions::PermissionEffect::Allow,
+                ),
+            ],
+        ));
+        let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        broker.attach_event_bus(bus);
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.store_path = store_path;
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+        runtime.session_id = Some("session-a".to_string());
+        runtime.permission_broker = Some(Arc::clone(&broker));
+        let client = crate::model::ModelClient::new_for_test();
+        let services = kernel::ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+        let registry = worker_tool_registry(false).unwrap();
+        let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+        let context = kernel::ToolCallContext {
+            call_id: Some("call-terminal-input".to_string()),
+            thread_name: None,
+        };
+
+        let started = snapshot
+            .invoke(
+                "exec_command",
+                serde_json::json!({
+                    "cmd":"read value; printf 'got:%s\\n' \"$value\"",
+                    "tty":true,
+                    "yield_time_ms":50
+                }),
+                services,
+                &context,
+            )
+            .await;
+        assert!(!started.is_error, "{}", started.content);
+        let started: serde_json::Value =
+            serde_json::from_str(started.content.as_text().unwrap()).unwrap();
+        let handle = started["session_name"].as_str().unwrap().to_string();
+
+        let input = snapshot.invoke(
+            "write_stdin",
+            serde_json::json!({
+                "session_id":handle,
+                "chars":"answer<RET>",
+                "yield_time_ms":2_000
+            }),
+            services,
+            &context,
+        );
+        let approve = async {
+            loop {
+                if let Some(request) = broker.pending().pop() {
+                    assert_eq!(request.resources.len(), 1);
+                    assert_eq!(request.resources[0].action, "terminal_input");
+                    assert_eq!(request.resources[0].resource, handle);
+                    assert!(request.resources[0].display.contains("local backend"));
+                    assert!(request.resources[0].save_resource.is_none());
+                    broker
+                        .reply(&request.id, crate::permissions::PermissionReply::Always)
+                        .unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let (continued, ()) = tokio::join!(input, approve);
+        assert!(!continued.is_error, "{}", continued.content);
+        assert!(continued.content.to_string().contains("got:answer"));
+        assert!(broker.grants().unwrap().is_empty());
+        runtime.terminal_manager.remove_all().await.unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn brokerless_opaque_redirect_cannot_mutate_git_through_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-worker-opaque-redirect-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/config"), "original\n").unwrap();
+        symlink(root.join(".git/config"), root.join("config-link")).unwrap();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.store_path = root.join("store.db");
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+        assert!(runtime.permission_broker.is_none());
+        let client = crate::model::ModelClient::new_for_test();
+        let services = kernel::ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+        let registry = worker_tool_registry(false).unwrap();
+        let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+        let result = snapshot
+            .invoke(
+                "exec_command",
+                serde_json::json!({"cmd":"printf pwned > config-link"}),
+                services,
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+        assert!(result.is_error, "opaque redirect unexpectedly executed");
+        assert!(result.content.to_string().contains("redirection"));
+        assert_eq!(
+            std::fs::read_to_string(root.join(".git/config")).unwrap(),
+            "original\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 

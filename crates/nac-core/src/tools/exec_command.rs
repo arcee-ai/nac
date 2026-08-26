@@ -15,7 +15,7 @@ pub fn exec_command_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "exec_command".to_string(),
-            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for a bounded foreground program that needs a PTY; opaque commands and broad shells/interpreters are rejected. Model-driven follow-up terminal input is unavailable, but an accepted PTY can be polled or explicitly retained with write_stdin."
+            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for a foreground program that needs a PTY. Opaque commands and broad shells/interpreters require explicit direct-session approval. An accepted PTY can be polled, receive separately approved input on its exact handle, or be explicitly retained with write_stdin."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -37,7 +37,7 @@ pub fn write_stdin_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "write_stdin".to_string(),
-            description: "Poll a foreground terminal from exec_command tty=true with empty chars. Set retain=true to explicitly transition a live terminal into a session-owned background handle that survives the end of a direct run. Nonempty model-driven input is rejected because terminal programs can reinterpret it as unauthorized shell commands. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text."
+            description: "Continue a foreground terminal from exec_command tty=true. Empty chars only observe; nonempty chars are a separately approved mutation of the exact process-local terminal handle and may be interpreted by that process as commands. Such approval is once-only and cannot create a reusable grant. Set retain=true with empty chars to transition a live terminal into a session-owned background handle that survives the end of a direct run. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",

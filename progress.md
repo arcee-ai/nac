@@ -1,6 +1,6 @@
 # Expanded NAC harness progress
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Active post-review repair phase
 
@@ -46,15 +46,16 @@ Protected initial state verified on 2026-08-25:
    NAC-REV-010, 011, 015, and 020..023 through behavior-aware creation and
    navigation, active-run inbox UX, literal `/goal`, child ownership guards,
    documentation, and production-embedded browser tests.
-5. **In progress — closure and integrated review.** Commit `2dbcb4e` closed the
-   eleven `7cd1787` findings and passed every exact-commit gate. Its four-lane
-   review returned NO-GO with seven remaining command-admission, PTY-input,
-   session-remount, Podman process-identity, and ledger blockers. Commit
-   `efeffa3` addresses all seven and its ledger successor `3455efb` passed every
-   exact-commit gate. The exact four-lane review returned NO-GO with four
-   command-admission/kernel blockers. Exact repair commit `06ecb9f` closes all
-   four and passes every gate; its evidence successor and another immutable
-   review precede production browser smoke and the final state audit.
+5. **In progress — closure and integrated review.** The exact evidence
+   successor `d645781` passed every required gate after commit. Its recovered,
+   acyclic four-lane review (session `33d02a21-58bb-4003-b638-fda79b774ab1`,
+   run `f0dcf3d3-64da-4523-9ea4-eca7aca58ea9`) rejected both exact-gate ledger
+   objections and accepted six code blockers: opaque redirect admission,
+   portable remote cleanup identity/reparenting, useful authority-bound PTY
+   input, live-artifact eviction, and delegated config mutation. The current
+   working repair closes the directly actionable seams with focused tests;
+   complete gates, an immutable successor review, production browser smoke,
+   and the final state audit remain.
 
 ### Finding map
 
@@ -235,22 +236,51 @@ Protected initial state verified on 2026-08-25:
   hard denials and target binding; `prlimit` can conceal a protected command;
   SSH cleanup cannot find session-escaped descendants on hosts without
   `/proc`; and direct-session output artifact records are unbounded.
-- Next action: implement and test those four accepted review findings, then
-  repeat the complete gates and immutable four-lane review. Proceed to product
-  smoke and final cleanup/state audit only after GO.
-- The four-finding repair now makes canonicalization, canonical hard-denial
-  evaluation, and target binding unconditional model-boundary stages; rejects
-  `prlimit` as a concealed executor on local, Podman, and SSH policy paths;
-  discovers an escaped remote descendant from a portable `ps` snapshot when
-  `/proc` is absent; and caps output artifact records independently of bytes.
-  Focused regressions include a live session-escaped cleanup fixture and
-  repeated zero-output direct commands across settlement. The complete
-  precommit gates pass: catalog 2+7+24, core 1097 passed/9 ignored, server 134,
-  binary 21, frontend 172, formatting, warning-denied lint, typecheck,
-  durability, asset freshness, and production-embedded Playwright 10/10.
-- Exact repair `66af4e1` passed that complete gate set again with the same
-  counts and all 10 production-embedded Playwright journeys. Its tracked
-  evidence successor must receive the same gates before immutable review.
+- Exact repair `66af4e1` and its evidence successor `d645781` each passed the
+  complete gate set with catalog 2+7+24, core 1097 passed/9 ignored, server
+  134, binary 21, frontend 172, and all 10 production-embedded Playwright
+  journeys. The exact `d645781` review evidence is recorded above.
+- Current focused evidence passes for the output-lease/live-PTY cap, opaque
+  redirection on all backends plus brokerless symlink execution, once-only
+  direct PTY input with no persisted grant, delegated manager/HTTP config
+  rejection, and portable non-`/proc` identity/cancellation behavior. Full
+  pre-commit release gates pass: `make ci` (catalog 2+7+24, core 1104 passed
+  with 9 environment-dependent ignores, server 134, binary 21, frontend 172),
+  `make test-durability` (10/10 focused cases), `make test-assets`, and
+  production-embedded Playwright 10/10. A no-op PATCH gate regression exposed
+  and then verified the intended boundary: an attached empty request remains
+  store-free, while every nonempty delegated config mutation is rejected.
+- Next action: commit the repair without protected local state, run the four
+  required gates at the exact successor SHA, and obtain another detached-clean
+  four-lane verdict. Proceed to production browser smoke and the final
+  cleanup/state audit only after GO.
+  Proceed to production browser smoke and the final cleanup/state audit only
+  after GO.
+- Exact evidence successor `d645781` passed `make ci`, `make test-durability`,
+  `make test-assets`, and production-embedded Playwright 10/10 after commit.
+  Its detached-clean four-lane review (session
+  `33d02a21-58bb-4003-b638-fda79b774ab1`, run
+  `f0dcf3d3-64da-4523-9ea4-eca7aca58ea9`) recovered from an initially circular
+  cross-check plan with four sequential follow-ups and returned NO-GO. It
+  accepted six P1 findings: opaque redirection can bypass protected paths;
+  portable SSH cleanup needs stronger descendant identity and an explicit
+  reparenting boundary; blanket terminal-input denial contradicts objective
+  lines 180-184; oldest-first artifact eviction can sever a live PTY; and
+  public config PATCH can mutate delegated identities. It rejected both
+  objections based on a tracked commit being unable to attest its own
+  post-commit gate execution.
+- The current successor repair hard-denies unprojectable opaque redirection on
+  Local/Podman/SSH, with a brokerless symlink-to-`.git` execution regression;
+  gives nonempty input a non-saveable one-time approval on the exact
+  process-local handle while brokerless workers remain denied; pins output
+  artifacts until command/PTY settlement and fails before spawn when every
+  bounded slot is live; rejects config PATCH for both delegated relationship
+  kinds before and under lifecycle ownership; and strengthens portable remote
+  identity with command signatures, postorder discovery, per-child identity
+  revalidation, and uncertainty failure. Directly identifiable daemonizing
+  wrappers remain hard-denied. Deliberate daemonization inside explicitly
+  approved arbitrary interpreter code remains the objective's stated trusted
+  arbitrary-code boundary, not a parser-enforceable confinement claim.
 
 ## Objective and invariants
 
@@ -590,7 +620,8 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit this evidence-only successor to exact repair
-`66af4e1`, repeat every required gate at the successor SHA, and obtain another
+Closure is still active. Complete the `d645781` review repair, run focused and
+full-crate verification, commit only tracked product/progress files, repeat all
+four required release gates at the exact successor SHA, and obtain another
 detached-clean four-lane NAC verdict. Preserve `.gitignore`, untracked
-`AGENTS.md`, and the local notebooks.
+`AGENTS.md`, `demo_ext_managed.md`, and the local notebooks.

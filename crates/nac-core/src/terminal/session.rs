@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use portable_pty::{NativePtySystem, PtySize, PtySystem};
 use tokio::sync::Notify;
 
-use super::{ArtifactKind, OutputRegistry, OutputStream};
+use super::{ArtifactKind, OutputArtifactLease, OutputRegistry, OutputStream};
 #[cfg(all(unix, not(target_os = "linux")))]
 use crate::process::signal_descendants;
 #[cfg(target_os = "linux")]
@@ -21,6 +21,7 @@ pub struct TerminalSession {
     pub name: String,
     writer: Box<dyn Write + Send>,
     output_id: String,
+    _output_lease: OutputArtifactLease,
     preview_cursor: u64,
     output_notify: Arc<Notify>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -62,6 +63,11 @@ impl TerminalSession {
                 pixel_height: 0,
             })
             .context("Failed to open PTY pair")?;
+        // Reserve bounded output metadata before the command can exist. If
+        // every slot belongs to a live command, fail without spawning a PTY
+        // process whose output could not be retained.
+        let output_lease = output_registry.create(ArtifactKind::Pty)?;
+        let output_id = output_lease.output_id().to_string();
 
         let envs = terminal_env_owned();
         let (cmd, pidfile) = backend.terminal_pty_command(command, cwd.as_deref(), &envs);
@@ -106,7 +112,6 @@ impl TerminalSession {
 
         let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = alive.clone();
-        let output_id = output_registry.create(ArtifactKind::Pty);
         let reader_output_id = output_id.clone();
         let reader_output_registry = output_registry.clone();
         let notify = Arc::new(Notify::new());
@@ -138,6 +143,7 @@ impl TerminalSession {
             name,
             writer,
             output_id,
+            _output_lease: output_lease,
             preview_cursor: 0,
             output_notify: notify,
             child,

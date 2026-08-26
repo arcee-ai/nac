@@ -20,7 +20,7 @@ Command execution is available through exec_command, write_stdin, and read_comma
 - Use exec_command with tty=false for one-shot commands and inspect its structured status and exit code.
 - A tty=true terminal is foreground and is stopped at the run boundary unless you explicitly call write_stdin with retain=true while it is live. Retain only a process that genuinely needs to continue in the background.
 - Retained shell state is session-owned but process-local. A handle from an earlier service instance reports that it was lost instead of silently appearing usable after restart.
-- Nonempty model-driven terminal input is unavailable because a terminal program can reinterpret it as an unauthorized shell command. Use write_stdin only with empty chars to poll or explicitly retain a terminal, and read_command_output to recover retained output without rerunning the command.
+- Empty write_stdin chars only observe the exact process-local terminal handle. Nonempty chars are a separately approved mutation of that same handle because the running process may interpret them as commands; the approval is once-only and cannot create a reusable grant. Use read_command_output to recover retained output without rerunning the command.
 - Close persistent commands when they are no longer needed.
 
 NAC authorizes prepared tool operations immediately before execution. Some
