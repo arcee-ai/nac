@@ -1026,10 +1026,11 @@ impl SessionService {
         self.config_version
     }
 
-    /// Explicitly destroy the sandbox (if any) associated with this session.
-    /// Explicit deletion cleanup, including when other `Arc` references (for
-    /// example SSE handlers) keep the `SessionService` alive. Failures remain
-    /// visible so the caller retains durable retry authority.
+    /// Explicitly destroy the sandbox container (if any) associated with this
+    /// session, including when other `Arc` references keep the service alive.
+    /// The durable deletion caller owns worktree cleanup after the session row
+    /// commits; removing workspace files here would make a later database
+    /// failure retain a session whose uncommitted work had already been lost.
     pub async fn destroy_sandbox(&self) -> Result<()> {
         let sandbox = {
             let agent = self.agent.lock().await;
@@ -1037,9 +1038,6 @@ impl SessionService {
         };
         if let Some(sandbox) = sandbox {
             sandbox.destroy().await?;
-            if let Some(worktree) = &sandbox.spec().worktree {
-                crate::sandbox::session_worktree::cleanup_session_worktree(worktree);
-            }
         }
         Ok(())
     }
@@ -4884,6 +4882,159 @@ pub(super) mod tests {
             .unwrap(),
         );
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sandbox_container_destruction_preserves_worktree_until_durable_delete() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _environment = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store_path = test_store_path("destroy_preserves_worktree");
+        let repo_root = store_path.parent().unwrap().to_path_buf();
+        let scratch_root = repo_root.with_extension("scratch");
+        let worktree_path = scratch_root.join("worktree");
+        std::fs::create_dir_all(&repo_root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo_root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.name", "NAC Test"]);
+        git(&["config", "user.email", "nac@example.invalid"]);
+        std::fs::write(repo_root.join("tracked.txt"), b"tracked\n").unwrap();
+        git(&["add", "tracked.txt"]);
+        git(&["commit", "-m", "base"]);
+        let fork_point = String::from_utf8(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo_root)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        let worktree = crate::sandbox::SandboxWorktree {
+            repo_root: repo_root.clone(),
+            path: worktree_path.clone(),
+            scratch_root: scratch_root.clone(),
+            branch: "nac/destroy-preserves-worktree".to_string(),
+            fork_point,
+        };
+        crate::workspace::worktree::create(&worktree.repo_root, &worktree.path, &worktree.branch)
+            .unwrap();
+        let uncommitted = worktree.path.join("uncommitted.txt");
+        std::fs::write(&uncommitted, b"must survive database failure\n").unwrap();
+
+        let bin = repo_root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        std::fs::write(&podman, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let mut paths = vec![bin];
+        if let Some(path) = original_path.as_ref() {
+            paths.extend(std::env::split_paths(path));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+
+        let client = ModelClient::new_for_test();
+        let sandbox_spec = crate::sandbox::SandboxSpec {
+            worktree: Some(worktree.clone()),
+            ..crate::sandbox::SandboxSpec::default()
+        };
+        let agent = Agent::with_config(
+            client.clone(),
+            AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
+                mode: AgentMode::Orchestrator,
+                session_behavior: None,
+                store_path: store_path.clone(),
+                session_id: Some("destroy-preserves-worktree".to_string()),
+                orchestrator_compaction_threshold: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                dispatch_id: None,
+                event_sink: EventSink::none(),
+                workspace_cwd: worktree.path.clone(),
+                config_cwd: repo_root.clone(),
+                working_directory: worktree.path.display().to_string(),
+                worker_executable: None,
+                sandbox: Some(crate::sandbox::SandboxSession::new_for_test(sandbox_spec)),
+                ssh: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
+                permission_rules: Vec::new(),
+            },
+        )
+        .expect("agent config must be valid");
+        let snapshot = sessions::new_snapshot(
+            "destroy-preserves-worktree".to_string(),
+            worktree.path.clone(),
+            client.model.clone(),
+            client.base_url().to_string(),
+            client.backend(),
+            client.reasoning_effort(),
+            None,
+            None,
+            agent.messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        sessions::create_session(&store_path, &snapshot).unwrap();
+        let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+            agent,
+            client,
+            session: OrchestratorSession::Active {
+                session_id: "destroy-preserves-worktree".to_string(),
+                store_path: store_path.clone(),
+                snapshot,
+            },
+            sandbox_status: "on".to_string(),
+            agents_md_status: "off".to_string(),
+            workspace_display: worktree.path.display().to_string(),
+            workspace_git: Some(GitTarget::local(&worktree.path)),
+            resume_base_cwd: repo_root.clone(),
+        });
+
+        parts.service.destroy_sandbox().await.unwrap();
+        assert!(uncommitted.exists());
+        assert!(
+            crate::workspace::worktree::registered_checkout(&worktree.repo_root, &worktree.path)
+                .unwrap()
+                .is_some(),
+            "container cleanup must not unregister the worktree before durable deletion"
+        );
+
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+        drop(parts);
+        crate::sandbox::session_worktree::cleanup_session_worktree(&worktree);
+        let _ = std::fs::remove_dir_all(&scratch_root);
+        let _ = std::fs::remove_dir_all(&repo_root);
     }
 
     /// Seed the store transcript's legacy prefix: the snapshot blob (what the

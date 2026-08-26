@@ -294,12 +294,14 @@ pub(crate) struct PodmanSession {
 /// registration.
 struct PendingContainerCreation {
     task: Option<tokio::task::JoinHandle<std::io::Result<std::process::Output>>>,
-    session_key: String,
+    cidfile: std::path::PathBuf,
+    settled: bool,
 }
 
 impl PendingContainerCreation {
     fn disarm(&mut self) {
         self.task = None;
+        let _ = std::fs::remove_file(&self.cidfile);
     }
 }
 
@@ -308,17 +310,58 @@ impl Drop for PendingContainerCreation {
         let Some(task) = self.task.take() else {
             return;
         };
-        let session_key = self.session_key.clone();
+        let cidfile = self.cidfile.clone();
+        let settled = self.settled;
         tokio::spawn(async move {
-            let _ = task.await;
-            if let Err(error) = destroy_owned_container(&session_key).await {
+            if settled {
+                drop(task);
+            } else {
+                let _ = task.await;
+            }
+            if let Err(error) = destroy_created_container(&cidfile).await {
                 eprintln!(
-                    "nac: failed to roll back cancelled sandbox creation for '{}': {error:#}",
-                    session_key
+                    "nac: failed to roll back cancelled sandbox creation recorded in '{}': {error:#}",
+                    cidfile.display()
                 );
             }
         });
     }
+}
+
+/// Removes only the container identity emitted by this exact `podman run`.
+/// A failed duplicate-name creator has no cidfile and therefore cannot delete
+/// the peer container that won the shared deterministic name.
+async fn destroy_created_container(cidfile: &Path) -> Result<()> {
+    let container_id = match tokio::fs::read_to_string(cidfile).await {
+        Ok(container_id) => container_id.trim().to_string(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to read Podman creation cidfile '{}'",
+                    cidfile.display()
+                )
+            });
+        }
+    };
+    if container_id.is_empty() {
+        let _ = tokio::fs::remove_file(cidfile).await;
+        bail!("Podman creation cidfile '{}' was empty", cidfile.display());
+    }
+    let output = Command::new("podman")
+        .args(["rm", "--ignore", "-f", &container_id])
+        .output()
+        .await
+        .context("failed to execute Podman sandbox creation rollback")?;
+    let _ = tokio::fs::remove_file(cidfile).await;
+    if !output.status.success() {
+        bail!(
+            "failed to remove newly created sandbox container '{}': {}",
+            container_id,
+            first_stderr_line(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 pub(crate) async fn destroy_owned_container(session_key: &str) -> Result<()> {
@@ -672,7 +715,12 @@ impl PodmanSession {
     }
 
     async fn create_container(&self) -> Result<()> {
-        let args = self.create_container_args()?;
+        let cidfile = std::env::temp_dir().join(format!(
+            "nac-podman-create-{}-{}.cid",
+            sanitize_name(&self.session_key),
+            uuid::Uuid::new_v4()
+        ));
+        let args = self.create_container_args_with_cidfile(Some(&cidfile))?;
         let task = tokio::spawn(async move {
             let mut command = Command::new("podman");
             command.args(args);
@@ -680,13 +728,12 @@ impl PodmanSession {
         });
         let mut pending = PendingContainerCreation {
             task: Some(task),
-            session_key: self.session_key.clone(),
+            cidfile,
+            settled: false,
         };
-        let output = pending
-            .task
-            .as_mut()
-            .expect("creation task is armed")
-            .await
+        let result = pending.task.as_mut().expect("creation task is armed").await;
+        pending.settled = true;
+        let output = result
             .map_err(|error| anyhow!("Podman sandbox creation task failed: {error}"))?
             .with_context(|| "failed to execute 'podman run'")?;
         if !output.status.success() {
@@ -719,7 +766,12 @@ impl PodmanSession {
         Ok(())
     }
 
+    #[cfg(test)]
     fn create_container_args(&self) -> Result<Vec<OsString>> {
+        self.create_container_args_with_cidfile(None)
+    }
+
+    fn create_container_args_with_cidfile(&self, cidfile: Option<&Path>) -> Result<Vec<OsString>> {
         let mut args = vec![
             OsString::from("run"),
             OsString::from("-d"),
@@ -731,6 +783,11 @@ impl PodmanSession {
             OsString::from("--memory"),
             OsString::from(format!("{}m", self.spec.memory_mib)),
         ];
+
+        if let Some(cidfile) = cidfile {
+            args.push(OsString::from("--cidfile"));
+            args.push(cidfile.as_os_str().to_os_string());
+        }
 
         if should_keep_id_userns() && self.spec.mounts.iter().any(|mount| !mount.read_only) {
             args.push(OsString::from("--userns"));
@@ -1341,9 +1398,20 @@ mod tests {
             &podman,
             r#"#!/bin/sh
 if [ "$1" = run ]; then
+  shift
+  cidfile=
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = --cidfile ]; then
+      cidfile=$2
+      shift 2
+    else
+      shift
+    fi
+  done
   : > "$NAC_TEST_CREATE_STARTED"
   while [ ! -e "$NAC_TEST_CREATE_RELEASE" ]; do /bin/sleep 0.01; done
   : > "$NAC_TEST_CONTAINER"
+  printf '%s\n' owned-container-id > "$cidfile"
   exit 0
 fi
 if [ "$1" = rm ]; then
@@ -1408,6 +1476,94 @@ exit 0
             std::env::remove_var("NAC_TEST_CREATE_STARTED");
             std::env::remove_var("NAC_TEST_CREATE_RELEASE");
             std::env::remove_var("NAC_TEST_CONTAINER");
+            std::env::remove_var("NAC_TEST_REMOVE_STARTED");
+        }
+        drop(session);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_failed_creator_does_not_remove_peer_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "nac-podman-cancelled-peer-create-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let podman = root.join("podman");
+        let started = root.join("started");
+        let release = root.join("release");
+        let peer_container = root.join("peer-container");
+        let removed = root.join("removed");
+        std::fs::write(
+            &podman,
+            r#"#!/bin/sh
+if [ "$1" = run ]; then
+  : > "$NAC_TEST_CREATE_STARTED"
+  while [ ! -e "$NAC_TEST_CREATE_RELEASE" ]; do /bin/sleep 0.01; done
+  # Simulate losing the deterministic name to a peer. A failed run does not
+  # write its --cidfile.
+  exit 125
+fi
+if [ "$1" = rm ]; then
+  : > "$NAC_TEST_REMOVE_STARTED"
+  /bin/rm -f "$NAC_TEST_PEER_CONTAINER"
+  exit 0
+fi
+exit 0
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("PATH", &root);
+            std::env::set_var("NAC_TEST_CREATE_STARTED", &started);
+            std::env::set_var("NAC_TEST_CREATE_RELEASE", &release);
+            std::env::set_var("NAC_TEST_PEER_CONTAINER", &peer_container);
+            std::env::set_var("NAC_TEST_REMOVE_STARTED", &removed);
+        }
+
+        let session = std::sync::Arc::new(PodmanSession::new(
+            SandboxSpec::default(),
+            "cancelled-peer-create".to_string(),
+            false,
+            "cancelled-peer-create".to_string(),
+        ));
+        let launch = tokio::spawn({
+            let session = std::sync::Arc::clone(&session);
+            async move { session.create_container().await }
+        });
+        for _ in 0..200 {
+            if started.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(started.exists(), "fake Podman run did not start");
+        launch.abort();
+        let _ = launch.await;
+
+        std::fs::write(&peer_container, b"peer-owned").unwrap();
+        std::fs::write(&release, b"").unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !removed.exists(),
+            "failed creator cleanup targeted a peer container without an owned ID"
+        );
+        assert!(peer_container.exists(), "peer container was removed");
+
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            std::env::remove_var("NAC_TEST_CREATE_STARTED");
+            std::env::remove_var("NAC_TEST_CREATE_RELEASE");
+            std::env::remove_var("NAC_TEST_PEER_CONTAINER");
             std::env::remove_var("NAC_TEST_REMOVE_STARTED");
         }
         drop(session);

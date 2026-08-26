@@ -1777,6 +1777,7 @@ fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
         "RSYNC_CONNECT_PROG",
         "LD_PRELOAD",
         "LD_AUDIT",
+        "LD_LIBRARY_PATH",
         "DYLD_INSERT_LIBRARIES",
         "DYLD_LIBRARY_PATH",
         "DYLD_FRAMEWORK_PATH",
@@ -1796,9 +1797,33 @@ fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
     let command_index = tokens
         .len()
         .saturating_sub(effective_command_tokens(tokens).len());
-    tokens[leading..command_index]
+    if let Some(name) = tokens[leading..command_index]
         .iter()
         .filter_map(|token| environment_assignment_name(token))
+        .find(|name| HOOKS.contains(name))
+    {
+        return Some(name);
+    }
+
+    // Bash executes a semicolon-delimited command line in one stateful shell,
+    // even though authorization inspects each simple command independently.
+    // Assignment builtins can therefore seed a loader hook in one segment and
+    // have a later, otherwise-safe executable inherit it. Restrict scanning to
+    // builtin operands so assignment-looking data after ordinary commands
+    // remains harmless.
+    let effective = effective_command_tokens(tokens);
+    let command = effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())?;
+    if !matches!(
+        command.to_ascii_lowercase().as_str(),
+        "declare" | "export" | "readonly" | "typeset"
+    ) {
+        return None;
+    }
+    effective[1..]
+        .iter()
+        .filter_map(|token| shell_environment_assignment_name(token))
         .find(|name| HOOKS.contains(name))
 }
 
@@ -3570,7 +3595,15 @@ mod tests {
                 "LD_PRELOAD=./payload.so ls",
                 "env LD_PRELOAD=./payload.so ls",
                 "LD_AUDIT=./payload.so ls",
+                "LD_LIBRARY_PATH=./payload ls",
+                "LD_LIBRARY_PATH+=:./payload ls",
                 "DYLD_INSERT_LIBRARIES=./payload.dylib ls",
+                "export LD_PRELOAD=./payload.so",
+                "export LD_PRELOAD=./payload.so; /bin/true",
+                "command export LD_AUDIT=./payload.so",
+                "builtin readonly LD_LIBRARY_PATH=./payload",
+                "declare -x LD_PRELOAD+=:./payload.so",
+                "typeset -x LD_AUDIT=./payload.so",
             ] {
                 assert!(
                     shell_resources(command, Path::new("/workspace"), &backend)[0]
