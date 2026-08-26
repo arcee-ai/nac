@@ -50,9 +50,10 @@ Protected initial state verified on 2026-08-25:
    eleven `7cd1787` findings and passed every exact-commit gate. Its four-lane
    review returned NO-GO with seven remaining command-admission, PTY-input,
    session-remount, Podman process-identity, and ledger blockers. Commit
-   `efeffa3` addresses all seven and passed every root-owned exact-commit gate.
-   The ledger-only successor still needs its exact gates and immutable NAC
-   review; production browser smoke and final state audit then remain.
+   `efeffa3` addresses all seven and its ledger successor `3455efb` passed every
+   exact-commit gate. The exact four-lane review returned NO-GO with four
+   command-admission/kernel blockers. Their current repair and another immutable
+   review precede production browser smoke and the final state audit.
 
 ### Finding map
 
@@ -134,6 +135,21 @@ Protected initial state verified on 2026-08-25:
   134, binary 21, frontend 172), `make test-durability`, `make test-assets`, and
   production-embedded Playwright 10/10. This evidence update is the only change
   in the successor that will be reviewed.
+- Exact `3455efb` review `63b38891-ad88-4aad-85a0-a165d14b823e`, run
+  `f7b9c1ec-72bd-4714-844e-965a636102a6` — NO-GO; all four lanes independently
+  verified the exact detached clean SHA. It accepted four blockers: opaque
+  glob deletion operands evade protected mutation authority; `flock` conceals
+  a nested mutation; brokerless worker calls skip native hard denials; and
+  suffix scanning falsely treats brace-expanded data as a command. Durability
+  and web/release lanes found no blockers.
+- Current repair candidate — native hard denial is enforced by the model-facing
+  tool kernel with or without an approval broker; expandable operands for
+  `rm`, `rmdir`, and `unlink` fail closed; `flock` is rejected as an executable
+  wrapper; and opaque policy walks only real shell-segment command positions.
+  Focused permission/kernel/worker regressions pass. Its complete precommit
+  gates pass: formatting, warning-denied lint, Rust workspace (core 1091 passed
+  with 9 environment-dependent ignores, server 134, binary 21), web 172,
+  durability, and production-asset freshness.
 
 ### Current verification and next action
 
@@ -210,9 +226,12 @@ Protected initial state verified on 2026-08-25:
   passed/9 ignored, server 134, binary 21, frontend 172, formatting,
   warning-denied lint, typecheck, durability, asset freshness, and
   production-embedded Playwright 10/10.
-- Next action: commit this tracked evidence-only update, rerun every closure gate
-  at that exact successor, and obtain a fresh four-lane NAC review before
-  product smoke and final cleanup/state audit.
+- Exact ledger successor `3455efb` passed the same complete gate set before its
+  review. The current repair implements all four accepted blockers and passes
+  its focused and complete precommit gates.
+- Next action: commit the repair, repeat every gate at that exact commit, and
+  obtain a detached-clean four-lane review. Proceed to product smoke and final
+  cleanup/state audit only after GO.
 
 ## Objective and invariants
 
@@ -552,7 +571,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Gate the ledger-only successor to exact implementation
-commit `efeffa3`, then obtain a fresh detached-clean four-lane NAC verdict.
-Preserve `.gitignore`, untracked `AGENTS.md`, and the local review notebooks
-throughout.
+Closure is still active. Commit the four-blocker repair, repeat all gates at its
+exact SHA, and obtain another detached-clean four-lane NAC verdict. Preserve
+`.gitignore`, untracked `AGENTS.md`, and the local review notebooks.

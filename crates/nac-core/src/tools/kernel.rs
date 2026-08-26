@@ -518,6 +518,16 @@ impl ToolSnapshot {
         match self.prepare(name, input, services) {
             Ok(mut prepared) => {
                 let _admission = prepared.descriptor().admission;
+                if let Some(reason) = prepared
+                    .permission_resources()
+                    .iter()
+                    .find_map(|resource| resource.hard_denial.as_deref())
+                {
+                    return ToolResult::text(
+                        format!("Error: permission denied for {name}: {reason}"),
+                        true,
+                    );
+                }
                 if let Some(broker) = &services.runtime.permission_broker {
                     let resources = match crate::permissions::canonicalize_authorization_resources(
                         prepared.permission_resources(),
@@ -638,10 +648,12 @@ mod tests {
             input: &Self::Input,
             _services: ToolServices<'_>,
         ) -> Result<Vec<PermissionResource>, ToolResult> {
-            Ok(vec![PermissionResource::new(
-                "count",
-                input.amount.to_string(),
-            )])
+            let resource = PermissionResource::new("count", input.amount.to_string());
+            Ok(vec![if input.amount == usize::MAX {
+                resource.with_hard_denial("native count denial")
+            } else {
+                resource
+            }])
         }
 
         fn execute<'a>(
@@ -809,6 +821,40 @@ mod tests {
             .await;
         assert!(!result.is_error);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn native_hard_denial_blocks_brokerless_model_invocation() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = ToolRegistry::builder()
+            .register(CountTool {
+                calls: Arc::clone(&calls),
+                name: "count",
+            })
+            .finish()
+            .unwrap();
+        let snapshot = registry.snapshot(["count"]).unwrap();
+        let runtime = crate::tools::test_runtime();
+        assert!(runtime.permission_broker.is_none());
+        let client = crate::model::ModelClient::new_for_test();
+        let result = snapshot
+            .invoke(
+                "count",
+                json!({"amount": usize::MAX}),
+                ToolServices {
+                    runtime: &runtime,
+                    client: &client,
+                },
+                &ToolCallContext {
+                    call_id: Some("call-1".into()),
+                    thread_name: Some("worker".into()),
+                },
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.content.to_string().contains("native count denial"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
