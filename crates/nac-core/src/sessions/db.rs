@@ -205,8 +205,28 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         ));
     }
     if let Some(run_id) = update.finished_run_id.as_deref() {
+        if let Some(goal) = update.goal_settlement.as_ref() {
+            crate::store::settle_session_goal_run_with_connection(
+                &tx,
+                &update.session_id,
+                &goal.run_id,
+                goal.final_billable_tokens,
+                goal.terminal_at_epoch_ms,
+                goal.disposition,
+            )?;
+        }
         crate::store::clear_active_run(&tx, &update.session_id, run_id)?;
     } else if let Some(run_id) = update.failed_run_id.as_deref() {
+        if let Some(goal) = update.goal_settlement.as_ref() {
+            crate::store::settle_session_goal_run_with_connection(
+                &tx,
+                &update.session_id,
+                &goal.run_id,
+                goal.final_billable_tokens,
+                goal.terminal_at_epoch_ms,
+                goal.disposition,
+            )?;
+        }
         crate::store::mark_active_run_failed(&tx, &update.session_id, run_id)?;
     }
     tx.commit()?;

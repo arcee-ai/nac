@@ -42,6 +42,14 @@ pub struct PermissionResource {
     /// A non-configurable denial produced by the native operation. Neither a
     /// configured allow nor a remembered grant may override it.
     pub hard_denial: Option<String>,
+    /// Path substituted into a prepared shell command after authorization.
+    /// This is internal execution metadata: policy continues to match
+    /// `resource`, which is the resolved semantic target.
+    pub(crate) shell_binding: Option<String>,
+    /// Preserve the final path component when producing `shell_binding`.
+    /// Deletion commands must remove a final symlink itself rather than the
+    /// symlink target that policy conservatively authorized.
+    pub(crate) preserve_final_component: bool,
 }
 
 impl PermissionResource {
@@ -53,6 +61,8 @@ impl PermissionResource {
             resource,
             save_resource: None,
             hard_denial: None,
+            shell_binding: None,
+            preserve_final_component: false,
         }
     }
 
@@ -68,6 +78,16 @@ impl PermissionResource {
 
     pub fn with_hard_denial(mut self, reason: impl Into<String>) -> Self {
         self.hard_denial = Some(reason.into());
+        self
+    }
+
+    pub(crate) fn with_shell_binding(
+        mut self,
+        path: impl Into<String>,
+        preserve_final_component: bool,
+    ) -> Self {
+        self.shell_binding = Some(path.into());
+        self.preserve_final_component = preserve_final_component;
         self
     }
 }

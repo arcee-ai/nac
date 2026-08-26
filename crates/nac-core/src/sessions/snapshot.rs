@@ -160,6 +160,9 @@ pub struct SessionRunStateUpdate {
     /// Matching durable active run to retain as a content-free failed terminal
     /// outcome. Mutually exclusive with `finished_run_id`.
     pub failed_run_id: Option<String>,
+    /// Goal settlement committed in the same SQLite transaction as the run
+    /// terminal checkpoint. `None` for sessions/runs without a bound goal.
+    pub goal_settlement: Option<crate::store::GoalRunSettlement>,
     pub updated_at: String,
 }
 
@@ -182,6 +185,7 @@ impl SessionSnapshot {
             run_state,
             finished_run_id: None,
             failed_run_id: None,
+            goal_settlement: None,
             updated_at: self.updated_at.clone(),
         }
     }

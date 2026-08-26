@@ -16,6 +16,7 @@ import type {
   ManagedSessionSummary,
   SessionBehavior,
   SessionGoalRecord,
+  SessionSnapshotResponse,
   SkillCatalogEntry,
   SlashCommandDefinition,
 } from "@/app/types/api";
@@ -34,6 +35,7 @@ const fakes = {
   createGoal: vi.fn(),
   updateGoal: vi.fn(),
   clearGoal: vi.fn(),
+  cancelActiveRun: vi.fn(),
   getModelCatalog: vi.fn(),
   getStore: vi.fn(),
 };
@@ -50,6 +52,7 @@ vi.spyOn(api, "cancelInboxItem").mockImplementation((...args) => fakes.cancelInb
 vi.spyOn(api, "createGoal").mockImplementation((...args) => fakes.createGoal(...args));
 vi.spyOn(api, "updateGoal").mockImplementation((...args) => fakes.updateGoal(...args));
 vi.spyOn(api, "clearGoal").mockImplementation((...args) => fakes.clearGoal(...args));
+vi.spyOn(api, "cancelActiveRun").mockImplementation((...args) => fakes.cancelActiveRun(...args));
 vi.spyOn(api, "getModelCatalog").mockImplementation((...args) => fakes.getModelCatalog(...args));
 vi.spyOn(api, "getStore").mockImplementation((...args) => fakes.getStore(...args));
 
@@ -116,12 +119,14 @@ function composer(
     inboxItems = [],
     lineage = null,
     entryAvailable = true,
+    snapshotAvailable = false,
   }: {
     behavior?: SessionBehavior | null;
     goalState?: SessionGoalRecord | null;
     inboxItems?: InboxItem[];
     lineage?: ManagedSessionSummary["lineage"];
     entryAvailable?: boolean;
+    snapshotAvailable?: boolean;
   } = {},
   expectInput = true,
 ) {
@@ -162,12 +167,33 @@ function composer(
     },
   };
   const entry = entryAvailable ? knownEntry : null;
+  const snapshot = snapshotAvailable
+    ? ({
+        metadata: {
+          session_id: "session",
+          behavior: behavior ?? "orchestrator",
+          cwd: "/tmp/project",
+          workspace_host_path: "/tmp/project",
+          store_path: "/tmp/store.db",
+          model: "gpt-5.6-sol",
+          backend: "openai-responses",
+          sandbox_status: "off",
+          agents_md_status: "off",
+        },
+        messages: [],
+        response_timing: {
+          last_response_duration_ms: null,
+          previous_response_duration_ms: null,
+          response_durations_ms: null,
+        },
+      } as unknown as SessionSnapshotResponse)
+    : null;
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ToastProvider>
           <SessionActionsProvider>
-            <ChatInputBox sessionId="session" snapshot={null} entry={entry} />
+            <ChatInputBox sessionId="session" snapshot={snapshot} entry={entry} />
           </SessionActionsProvider>
         </ToastProvider>
       </MemoryRouter>
@@ -241,6 +267,7 @@ beforeEach(() => {
     version: 4,
   }));
   fakes.clearGoal.mockReset().mockResolvedValue(undefined);
+  fakes.cancelActiveRun.mockReset().mockResolvedValue(undefined);
   fakes.getModelCatalog.mockReset().mockImplementation(() => pending());
   fakes.getStore.mockReset().mockImplementation(() => pending());
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -579,6 +606,19 @@ describe("direct inbox and goal journeys", () => {
       expect(fakes.createInboxItem).toHaveBeenCalledWith("session", "queue", "follow-up work"),
     );
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
+  });
+
+  it("stops by session identity when the list entry is unavailable", async () => {
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working",
+      started_at_epoch_ms: Date.now(),
+    });
+    composer({ behavior: "direct", entryAvailable: false, snapshotAvailable: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+
+    await waitFor(() => expect(fakes.cancelActiveRun).toHaveBeenCalledWith("session"));
   });
 
   it("shows pending durable input and permits delivery edits and cancellation", async () => {

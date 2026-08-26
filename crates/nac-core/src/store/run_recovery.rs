@@ -263,6 +263,15 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
         // longer owns this obligation; clear it during restart reconciliation
         // so the next generation can replace the row. A still-running
         // relationship retains the marker for its monitor to settle.
+        crate::store::reconcile_session_goal_terminal_with_connection(
+            &transaction,
+            session_id,
+            &record.run_id,
+            match disposition {
+                RunTerminalDisposition::Completed => GoalRunDisposition::Completed,
+                RunTerminalDisposition::Cancelled => GoalRunDisposition::Cancelled,
+            },
+        )?;
         retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::CanonicalTerminal);
@@ -364,6 +373,15 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
     if canonical_terminal {
         let disposition = canonical_terminal_disposition(&transaction, session_id, &record)?
             .unwrap_or(RunTerminalDisposition::Completed);
+        crate::store::reconcile_session_goal_terminal_with_connection(
+            &transaction,
+            session_id,
+            &record.run_id,
+            match disposition {
+                RunTerminalDisposition::Completed => GoalRunDisposition::Completed,
+                RunTerminalDisposition::Cancelled => GoalRunDisposition::Cancelled,
+            },
+        )?;
         retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::CanonicalTerminal);
@@ -487,6 +505,7 @@ mod tests {
             run_state: crate::sessions::SessionRunState::default(),
             finished_run_id: None,
             failed_run_id: None,
+            goal_settlement: None,
             updated_at: now_utc(),
         }
     }
@@ -771,6 +790,104 @@ mod tests {
             reconcile_active_run(&path, "session-a").unwrap(),
             ActiveRunReconciliation::None
         );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn cancellation_marker_recovery_pauses_the_bound_goal_before_clearing_the_run() {
+        let path = temp_store_path("cancelled_goal_terminal");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session-a");
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'session-a'",
+                [],
+            )
+            .unwrap();
+        create_session_goal(&path, "session-a", "finish safely", None, None).unwrap();
+        bind_session_goal_run(
+            &path,
+            "session-a",
+            &GoalRunBaseline {
+                run_id: "run-1".to_string(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 10,
+                continuation: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_run_prompt("session-a", 0, &user("prompt"), "run-1")
+            .unwrap();
+        writer
+            .append(
+                "session-a",
+                1,
+                &assistant(crate::agent::RUN_CANCELLED_MARKER),
+            )
+            .unwrap();
+
+        assert_eq!(
+            reconcile_active_run(&path, "session-a").unwrap(),
+            ActiveRunReconciliation::CanonicalTerminal
+        );
+        let goal = load_session_goal(&path, "session-a").unwrap().unwrap();
+        assert_eq!(goal.status, GoalStatus::Paused);
+        assert!(goal.accounting_run_id.is_none());
+        assert!(load_run_recovery(&path, "session-a").unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn run_state_save_atomically_settles_a_bound_goal() {
+        let path = temp_store_path("atomic_goal_terminal");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session-a");
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'session-a'",
+                [],
+            )
+            .unwrap();
+        create_session_goal(&path, "session-a", "finish safely", None, None).unwrap();
+        bind_session_goal_run(
+            &path,
+            "session-a",
+            &GoalRunBaseline {
+                run_id: "run-1".to_string(),
+                billable_tokens: 5,
+                started_at_epoch_ms: 10,
+                continuation: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_run_prompt("session-a", 0, &user("prompt"), "run-1")
+            .unwrap();
+
+        let mut update = run_state_update("session-a");
+        update.finished_run_id = Some("run-1".to_string());
+        update.goal_settlement = Some(GoalRunSettlement {
+            run_id: "run-1".to_string(),
+            final_billable_tokens: 12,
+            terminal_at_epoch_ms: 110,
+            disposition: GoalRunDisposition::Cancelled,
+        });
+        crate::sessions::save_session_run_state(&path, &update).unwrap();
+
+        let goal = load_session_goal(&path, "session-a").unwrap().unwrap();
+        assert_eq!(goal.status, GoalStatus::Paused);
+        assert_eq!(goal.tokens_used, 7);
+        assert!(goal.accounting_run_id.is_none());
+        assert!(load_run_recovery(&path, "session-a").unwrap().is_none());
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

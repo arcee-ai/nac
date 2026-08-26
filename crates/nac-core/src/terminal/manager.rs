@@ -126,9 +126,11 @@ impl TerminalManager {
             .await
             .retain(|(session_name, _)| session_name != &name);
         if self.sessions.lock().await.contains_key(&name) {
-            self.kill_owned_session(&name).await.with_context(|| {
-                format!("terminal session '{name}' cleanup incomplete during replacement")
-            })?;
+            self.kill_owned_session(&name, false)
+                .await
+                .with_context(|| {
+                    format!("terminal session '{name}' cleanup incomplete during replacement")
+                })?;
         }
 
         let exited = {
@@ -143,7 +145,7 @@ impl TerminalManager {
         };
         for name in exited {
             if let Some(mut session) = self
-                .kill_owned_session(&name)
+                .kill_owned_session(&name, false)
                 .await
                 .with_context(|| format!("exited terminal session '{name}' cleanup incomplete"))?
             {
@@ -174,13 +176,17 @@ impl TerminalManager {
             let Some(oldest_key) = oldest_key else {
                 break;
             };
-            self.kill_owned_session(&oldest_key)
+            self.kill_owned_session(&oldest_key, true)
                 .await
                 .with_context(|| {
                     format!("terminal session '{oldest_key}' cleanup incomplete during eviction")
                 })?;
         }
 
+        // Take the map lock before spawning. `spawn` is synchronous, so there
+        // is no cancellation point between acquiring the PTY/process and
+        // transferring it into durable manager ownership.
+        let mut sessions = self.sessions.lock().await;
         let session = TerminalSession::spawn(
             name.clone(),
             command,
@@ -191,7 +197,7 @@ impl TerminalManager {
             self.output_registry.clone(),
         )?;
         let info = self.session_info(&name, &session);
-        self.sessions.lock().await.insert(name, session);
+        sessions.insert(name, session);
         Ok(info)
     }
 
@@ -318,7 +324,7 @@ impl TerminalManager {
 
         let (session_name, exit_code) = if ended {
             let mut session = self
-                .kill_owned_session(name)
+                .kill_owned_session(name, false)
                 .await
                 .with_context(|| format!("exited terminal session '{name}' cleanup incomplete"))?
                 .ok_or_else(|| self.missing_session_error(name))?;
@@ -654,7 +660,7 @@ impl TerminalManager {
             .collect::<Vec<_>>();
         let mut cleanup_errors = Vec::new();
         for name in names {
-            if let Err(error) = self.kill_owned_session(&name).await {
+            if let Err(error) = self.kill_owned_session(&name, false).await {
                 cleanup_errors.push(format!(
                     "terminal session '{name}' cleanup incomplete during removal: {error:#}"
                 ));
@@ -683,7 +689,7 @@ impl TerminalManager {
         };
         let mut cleanup_errors = Vec::new();
         for name in foreground {
-            if let Err(error) = self.kill_owned_session(&name).await {
+            if let Err(error) = self.kill_owned_session(&name, true).await {
                 cleanup_errors.push(format!(
                     "foreground terminal session '{name}' cleanup incomplete: {error:#}"
                 ));
@@ -699,11 +705,22 @@ impl TerminalManager {
     /// Kill a session while it remains manager-owned. Holding the map entry
     /// across every await makes dropping the cleanup future cancellation-safe:
     /// a later caller can still find the handle and retry backend cleanup.
-    async fn kill_owned_session(&self, name: &str) -> Result<Option<TerminalSession>> {
+    async fn kill_owned_session(
+        &self,
+        name: &str,
+        preserve_if_retained: bool,
+    ) -> Result<Option<TerminalSession>> {
         let mut sessions = self.sessions.lock().await;
         let Some(session) = sessions.get_mut(name) else {
             return Ok(None);
         };
+        // Selection and cleanup use different lock acquisitions so retain can
+        // win in between. Recheck under the same lock held through kill;
+        // once retain has reported success, settlement/eviction cannot kill
+        // that session.
+        if preserve_if_retained && session.is_retained() {
+            return Ok(None);
+        }
         session.kill().await?;
         Ok(sessions.remove(name))
     }
@@ -1642,6 +1659,65 @@ mod tests {
         assert!(manager.get(&foreground).await.is_none());
         assert!(manager.get(&retained).await.unwrap().retained);
         manager.remove_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn eviction_cleanup_rechecks_retention_after_selection() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let name = manager.next_session_name();
+        manager
+            .create(name.clone(), "sleep 30", None, 120, 40, &backend)
+            .await
+            .unwrap();
+
+        // Model the eviction/settlement name snapshot, then let retention win
+        // before cleanup reacquires the map lock.
+        let selected = name.clone();
+        manager.retain(&name).await.unwrap();
+        assert!(manager
+            .kill_owned_session(&selected, true)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(manager.get(&name).await.unwrap().retained);
+        manager.remove_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_create_cannot_spawn_before_manager_ownership() {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let marker =
+            std::env::temp_dir().join(format!("nac-create-ownership-{}", uuid::Uuid::new_v4()));
+        let held_map = manager.sessions.lock().await;
+        let create_manager = manager.clone();
+        let create_backend = backend.clone();
+        let command = format!("printf spawned > {}; sleep 30", marker.display());
+        let create = tokio::spawn(async move {
+            create_manager
+                .create(
+                    "ownership-window".to_string(),
+                    &command,
+                    None,
+                    120,
+                    40,
+                    &create_backend,
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        create.abort();
+        assert!(create.await.unwrap_err().is_cancelled());
+        drop(held_map);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert!(
+            !marker.exists(),
+            "cancelled create spawned outside manager ownership"
+        );
+        assert!(manager.sessions.lock().await.is_empty());
+        let _ = std::fs::remove_file(marker);
     }
 
     #[tokio::test]

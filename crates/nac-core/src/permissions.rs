@@ -776,13 +776,33 @@ pub(crate) async fn canonicalize_authorization_resources(
             let path = backend
                 .canonicalize_permission_path(Path::new(&resource.resource))
                 .await?;
-            canonical.extend(file_resources(
+            let mut projected = file_resources(
                 &resource.action,
                 path,
                 backend,
                 store_path,
                 resource.action == "edit",
-            ));
+            );
+            if let Some(requested) = resource.shell_binding.as_deref() {
+                let binding = if resource.preserve_final_component {
+                    let requested = Path::new(requested);
+                    let parent = requested.parent().ok_or_else(|| {
+                        anyhow::anyhow!("shell deletion target has no parent directory")
+                    })?;
+                    let name = requested.file_name().ok_or_else(|| {
+                        anyhow::anyhow!("shell deletion target has no final component")
+                    })?;
+                    backend
+                        .canonicalize_permission_path(parent)
+                        .await?
+                        .join(name)
+                } else {
+                    PathBuf::from(&projected[0].resource)
+                };
+                projected[0].shell_binding = Some(binding.display().to_string());
+                projected[0].preserve_final_component = resource.preserve_final_component;
+            }
+            canonical.extend(projected);
         } else if resource.action != "external_directory"
             || !projected_paths.contains(resource.resource.as_str())
         {
@@ -901,14 +921,7 @@ enum ParsedShell {
 }
 
 fn parse_shell(command: &str) -> ParsedShell {
-    if command.contains('$')
-        || command.contains('`')
-        || command.contains("<<")
-        || command.contains('<')
-        || command.contains('>')
-        || command.contains('(')
-        || command.contains(')')
-    {
+    if contains_opaque_shell_syntax(command) {
         return ParsedShell::Opaque;
     }
     let mut segments = Vec::new();
@@ -995,6 +1008,37 @@ fn parse_shell(command: &str) -> ParsedShell {
     } else {
         ParsedShell::Supported(segments)
     }
+}
+
+fn contains_opaque_shell_syntax(command: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    for current in command.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if current == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(active) = quote {
+            if current == active {
+                quote = None;
+            } else if matches!(current, '$' | '`') {
+                return true;
+            }
+            continue;
+        }
+        if matches!(current, '\'' | '"') {
+            quote = Some(current);
+            continue;
+        }
+        if matches!(current, '$' | '`' | '<' | '>' | '(' | ')') {
+            return true;
+        }
+    }
+    false
 }
 
 fn push_word(segment: &mut Vec<String>, word: &mut String, word_started: &mut bool) {
@@ -1602,11 +1646,19 @@ fn cargo_configuration(tokens: &[String]) -> bool {
 
 fn shell_control_prefix(tokens: &[String]) -> bool {
     let effective = effective_command_tokens(tokens);
-    effective.first().is_some_and(|token| {
+    let mut command = effective.first();
+    if command.is_some_and(|token| token.eq_ignore_ascii_case("time")) {
+        command = effective
+            .iter()
+            .skip(1)
+            .find(|token| !token.starts_with('-'));
+    }
+    command.is_some_and(|token| {
         matches!(
             token.to_ascii_lowercase().as_str(),
             "!" | "{"
                 | "}"
+                | "coproc"
                 | "if"
                 | "then"
                 | "else"
@@ -1632,25 +1684,38 @@ fn shell_path_resources(
     cwd: &Path,
     backend: &ExecutionBackend,
 ) -> Vec<PermissionResource> {
-    let mut paths = Vec::<(PathBuf, bool)>::new();
+    let mut paths = Vec::<(PathBuf, bool, bool)>::new();
     for index in 0..tokens.len() {
         if let Some((_, requested)) = shell_path_candidate(tokens, index) {
             let path = shell_path_requested_path(tokens, index, requested, cwd);
             let mutating = shell_path_is_mutating(tokens, index);
-            if let Some((_, existing_mutating)) =
-                paths.iter_mut().find(|(existing, _)| existing == &path)
+            let effective = effective_command_tokens(tokens);
+            let command_index = tokens.len().saturating_sub(effective.len());
+            let preserve_final_component = effective
+                .first()
+                .and_then(|command| command.rsplit('/').next())
+                .is_some_and(|command| command.eq_ignore_ascii_case("rm"))
+                && rm_operand_path_position(tokens, command_index, index);
+            if let Some((_, existing_mutating, existing_preserve_final)) =
+                paths.iter_mut().find(|(existing, _, _)| existing == &path)
             {
                 *existing_mutating |= mutating;
+                *existing_preserve_final |= preserve_final_component;
             } else {
-                paths.push((path, mutating));
+                paths.push((path, mutating, preserve_final_component));
             }
         }
     }
     paths
         .into_iter()
-        .flat_map(|(path, mutating)| {
+        .flat_map(|(path, mutating, preserve_final_component)| {
             let action = if mutating { "edit" } else { "execute_path" };
-            file_resources(action, path, backend, Path::new(""), mutating)
+            let binding = path.display().to_string();
+            let mut resources = file_resources(action, path, backend, Path::new(""), mutating);
+            resources[0] = resources[0]
+                .clone()
+                .with_shell_binding(binding, preserve_final_component);
+            resources
         })
         .collect()
 }
@@ -2102,7 +2167,12 @@ pub(crate) fn bind_authorized_shell_command(
     let mut authorized_paths = resources
         .iter()
         .filter(|resource| matches!(resource.action.as_str(), "execute_path" | "edit"))
-        .map(|resource| resource.resource.as_str());
+        .map(|resource| {
+            resource
+                .shell_binding
+                .as_deref()
+                .unwrap_or(resource.resource.as_str())
+        });
     let cwd = lexical_normalize(cwd);
     let mut replacements = Vec::<(usize, usize, String)>::new();
     for (tokens, spans) in segments.iter().zip(spans) {
@@ -2265,6 +2335,13 @@ fn opaque_hard_shell_denial(
             "shell control syntax is blocked because it can hide protected commands".to_string(),
         );
     }
+    let segments = opaque_shell_segments(command);
+    if segments.iter().any(|tokens| dynamic_rm_command(tokens)) {
+        return Some(
+            "dynamic rm operands are blocked because protected deletion targets cannot be resolved before execution"
+                .to_string(),
+        );
+    }
     let tokens = opaque_literal_tokens(command);
     if command.contains('$') && literal_env_split_string(&tokens).is_some() {
         return Some("dynamic env split-string expansion is blocked".to_string());
@@ -2294,11 +2371,141 @@ fn opaque_hard_shell_denial(
     None
 }
 
+fn dynamic_rm_command(tokens: &[String]) -> bool {
+    let mut effective = effective_command_tokens(tokens);
+    if effective
+        .first()
+        .is_some_and(|token| token.eq_ignore_ascii_case("time"))
+    {
+        effective = &effective[1..];
+        while effective
+            .first()
+            .is_some_and(|token| token.starts_with('-'))
+        {
+            effective = &effective[1..];
+        }
+    }
+    let command = effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if command == "rm"
+        && effective
+            .iter()
+            .skip(1)
+            .any(|token| token.contains('$') || token.contains('`'))
+    {
+        return true;
+    }
+    if command == "xargs" {
+        return xargs_command_tokens(effective)
+            .ok()
+            .flatten()
+            .is_some_and(dynamic_rm_command);
+    }
+    if command == "find" && find_exec_commands(effective).any(dynamic_rm_command) {
+        return true;
+    }
+    if matches!(command.as_str(), "bash" | "dash" | "fish" | "sh" | "zsh") {
+        if let Some(body) = literal_shell_command_body(effective) {
+            return opaque_shell_segments(body)
+                .iter()
+                .any(|tokens| dynamic_rm_command(tokens));
+        }
+    }
+    false
+}
+
+/// Tokenize opaque input just far enough to identify the literal command in
+/// each shell segment. Expansions remain marked in their containing word; no
+/// value is expanded and quoted data cannot become a command position.
+fn opaque_shell_segments(command: &str) -> Vec<Vec<String>> {
+    let mut segments = Vec::new();
+    let mut segment = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let chars = command.chars().collect::<Vec<_>>();
+    let mut index = 0;
+    let finish_word = |segment: &mut Vec<String>, word: &mut String| {
+        if !word.is_empty() {
+            segment.push(std::mem::take(word));
+        }
+    };
+    let finish_segment = |segments: &mut Vec<Vec<String>>, segment: &mut Vec<String>| {
+        if !segment.is_empty() {
+            segments.push(std::mem::take(segment));
+        }
+    };
+    while index < chars.len() {
+        let current = chars[index];
+        if escaped {
+            if current != '\n' {
+                word.push(current);
+            }
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        if current == '\\' && quote != Some('\'') {
+            escaped = true;
+            index += 1;
+            continue;
+        }
+        if let Some(active) = quote {
+            if current == active {
+                quote = None;
+            } else {
+                word.push(current);
+            }
+            index += 1;
+            continue;
+        }
+        if matches!(current, '\'' | '"') {
+            quote = Some(current);
+            index += 1;
+            continue;
+        }
+        if current == '#' && word.is_empty() {
+            while index < chars.len() && chars[index] != '\n' {
+                index += 1;
+            }
+            finish_segment(&mut segments, &mut segment);
+            continue;
+        }
+        if current.is_whitespace() {
+            finish_word(&mut segment, &mut word);
+            if current == '\n' {
+                finish_segment(&mut segments, &mut segment);
+            }
+            index += 1;
+            continue;
+        }
+        if matches!(current, ';' | '|' | '&') {
+            finish_word(&mut segment, &mut word);
+            finish_segment(&mut segments, &mut segment);
+            index += 1;
+            if index < chars.len() && chars[index] == current {
+                index += 1;
+            }
+            continue;
+        }
+        word.push(current);
+        index += 1;
+    }
+    finish_word(&mut segment, &mut word);
+    finish_segment(&mut segments, &mut segment);
+    segments
+}
+
 fn raw_shell_control_syntax(command: &str) -> bool {
     fn is_control_keyword(word: &str) -> bool {
         matches!(
             word.to_ascii_lowercase().as_str(),
-            "if" | "then"
+            "coproc"
+                | "if"
+                | "then"
                 | "else"
                 | "elif"
                 | "fi"
@@ -2316,14 +2523,19 @@ fn raw_shell_control_syntax(command: &str) -> bool {
         )
     }
 
-    fn finish_word(word: &mut String, command_position: &mut bool) -> bool {
+    fn finish_word(word: &mut String, command_position: &mut bool, time_prefix: &mut bool) -> bool {
         if word.is_empty() {
             return false;
         }
         let control = *command_position && is_control_keyword(word);
         // `time` is itself shell grammar and leaves the following word in a
-        // command position, including a following `!` reserved word.
-        *command_position = *command_position && word.eq_ignore_ascii_case("time");
+        // command position, including options and a following `!` word.
+        if *command_position && word.eq_ignore_ascii_case("time") {
+            *time_prefix = true;
+        } else if !(*command_position && *time_prefix && word.starts_with('-')) {
+            *command_position = false;
+            *time_prefix = false;
+        }
         word.clear();
         control
     }
@@ -2333,6 +2545,7 @@ fn raw_shell_control_syntax(command: &str) -> bool {
     let mut quote = None;
     let mut escaped = false;
     let mut command_position = true;
+    let mut time_prefix = false;
     while let Some(current) = chars.next() {
         if escaped {
             if current != '\n' {
@@ -2366,31 +2579,34 @@ fn raw_shell_control_syntax(command: &str) -> bool {
             return true;
         }
         if current == '#' && word.is_empty() {
-            if finish_word(&mut word, &mut command_position) {
+            if finish_word(&mut word, &mut command_position, &mut time_prefix) {
                 return true;
             }
             for comment in chars.by_ref() {
                 if comment == '\n' {
                     command_position = true;
+                    time_prefix = false;
                     break;
                 }
             }
             continue;
         }
         if current.is_whitespace() {
-            if finish_word(&mut word, &mut command_position) {
+            if finish_word(&mut word, &mut command_position, &mut time_prefix) {
                 return true;
             }
             if current == '\n' {
                 command_position = true;
+                time_prefix = false;
             }
             continue;
         }
         if matches!(current, ';' | '|' | '&') {
-            if finish_word(&mut word, &mut command_position) {
+            if finish_word(&mut word, &mut command_position, &mut time_prefix) {
                 return true;
             }
             command_position = true;
+            time_prefix = false;
             continue;
         }
         if matches!(current, '(' | ')') {
@@ -2408,7 +2624,7 @@ fn raw_shell_control_syntax(command: &str) -> bool {
         }
         word.push(current);
     }
-    finish_word(&mut word, &mut command_position)
+    finish_word(&mut word, &mut command_position, &mut time_prefix)
 }
 
 fn opaque_literal_tokens(command: &str) -> Vec<String> {
@@ -2812,6 +3028,11 @@ mod tests {
             "# harmless\n! rm -rf $PWD",
             ": && ! rm -rf $PWD",
             "time ! rm -rf $PWD",
+            "time -p ! rm -rf $PWD",
+            "coproc rm -rf /workspace",
+            "rm -rf \"$PWD\"",
+            "env MODE=test rm -rf \"$PWD\"",
+            "sh -c 'rm -rf \"$PWD\"'",
             "\\\n! rm -rf $PWD",
             "true; { rm -rf $PWD; }",
             "( ! rm -rf $PWD )",
@@ -2846,6 +3067,7 @@ mod tests {
             "[[x --help",
             "casefold --help",
             "!foo rm -rf $PWD",
+            "printf '%s' 'rm -rf $PWD'",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
@@ -2961,6 +3183,46 @@ mod tests {
             resource.action == "external_directory"
                 && resource.resource == outside.canonicalize().unwrap().display().to_string()
         }));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rm_binding_preserves_a_final_symlink_instead_of_deleting_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("nac-rm-final-link-{}", uuid::Uuid::new_v4()));
+        let workspace = base.join("workspace");
+        let external = base.join("external");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        symlink(&external, workspace.join("link")).unwrap();
+        let backend = local(&workspace);
+        let command = "rm -rf link";
+        let projected = shell_resources(command, &workspace, &backend);
+        let authorized = canonicalize_authorization_resources(
+            &projected,
+            &backend,
+            Path::new("/unrelated/store.db"),
+        )
+        .await
+        .unwrap();
+        assert!(authorized.iter().any(|resource| {
+            resource.action == "edit"
+                && resource.resource == external.canonicalize().unwrap().display().to_string()
+        }));
+        let bound =
+            bind_authorized_shell_command(command, &workspace.canonicalize().unwrap(), &authorized)
+                .unwrap();
+        assert_eq!(
+            bound,
+            format!(
+                "rm -rf {}",
+                workspace.canonicalize().unwrap().join("link").display()
+            )
+        );
+        assert!(!bound.ends_with(external.canonicalize().unwrap().to_str().unwrap()));
+
         let _ = std::fs::remove_dir_all(base);
     }
 

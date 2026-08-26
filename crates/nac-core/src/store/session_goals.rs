@@ -90,6 +90,14 @@ pub enum GoalRunDisposition {
     Cancelled,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalRunSettlement {
+    pub run_id: String,
+    pub final_billable_tokens: u64,
+    pub terminal_at_epoch_ms: u64,
+    pub disposition: GoalRunDisposition,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UserGoalUpdate {
     pub objective: Option<String>,
@@ -421,8 +429,28 @@ pub fn settle_session_goal_run(
     let mut connection = open_runtime_connection(path)?;
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    require_direct_session(&transaction, session_id)?;
-    let Some(current) = load_with_connection(&transaction, session_id)? else {
+    let goal = settle_session_goal_run_with_connection(
+        &transaction,
+        session_id,
+        run_id,
+        final_billable_tokens,
+        terminal_at_epoch_ms,
+        disposition,
+    )?;
+    transaction.commit()?;
+    Ok(goal)
+}
+
+pub(crate) fn settle_session_goal_run_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    run_id: &str,
+    final_billable_tokens: u64,
+    terminal_at_epoch_ms: u64,
+    disposition: GoalRunDisposition,
+) -> Result<Option<SessionGoalRecord>> {
+    require_direct_session(connection, session_id)?;
+    let Some(current) = load_with_connection(connection, session_id)? else {
         return Ok(None);
     };
     if current.accounting_run_id.as_deref() != Some(run_id) {
@@ -450,7 +478,7 @@ pub fn settle_session_goal_run(
     {
         status = GoalStatus::BudgetLimited;
     }
-    transaction.execute(
+    connection.execute(
         "UPDATE session_goals
          SET status = ?1, tokens_used = ?2, time_used_ms = ?3,
              accounting_run_id = NULL, accounting_token_baseline = NULL,
@@ -467,9 +495,47 @@ pub fn settle_session_goal_run(
             run_id
         ],
     )?;
-    let goal = load_with_connection(&transaction, session_id)?;
-    transaction.commit()?;
-    Ok(goal)
+    load_with_connection(connection, session_id)
+}
+
+/// Recover only the terminal disposition when a crash happened after the
+/// transcript's canonical terminal marker but before ordinary goal
+/// settlement. Usage deltas are intentionally left unchanged because the
+/// process-local final usage sample is unavailable after restart.
+pub(crate) fn reconcile_session_goal_terminal_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    run_id: &str,
+    disposition: GoalRunDisposition,
+) -> Result<()> {
+    let Some(current) = load_with_connection(connection, session_id)? else {
+        return Ok(());
+    };
+    if current.accounting_run_id.as_deref() != Some(run_id) {
+        return Ok(());
+    }
+    let status = match disposition {
+        GoalRunDisposition::Completed => current.status,
+        GoalRunDisposition::Failed if current.status.is_unfinished() => GoalStatus::Blocked,
+        GoalRunDisposition::Cancelled if current.status.is_unfinished() => GoalStatus::Paused,
+        GoalRunDisposition::Failed | GoalRunDisposition::Cancelled => current.status,
+    };
+    connection.execute(
+        "UPDATE session_goals
+         SET status = ?1, accounting_run_id = NULL,
+             accounting_token_baseline = NULL,
+             accounting_started_at_epoch_ms = NULL,
+             continuation_run_id = NULL, updated_at = ?2, version = version + 1
+         WHERE session_id = ?3 AND goal_id = ?4 AND accounting_run_id = ?5",
+        params![
+            status.as_str(),
+            now_utc(),
+            session_id,
+            current.goal_id,
+            run_id
+        ],
+    )?;
+    Ok(())
 }
 
 /// Clear a stale run claim after the caller has acquired the session operation
