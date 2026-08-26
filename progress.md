@@ -716,6 +716,7 @@ Non-negotiable invariants:
 - `f42f2b5 record exact final repair gates`.
 - `a7b0693 close final lifecycle review gaps`.
 - `872f8b9 make persisted sandbox and MCP recovery durable`.
+- `a39766d close recovery and cancellation review gaps`.
 
 ## Known problems and blockers
 
@@ -754,6 +755,17 @@ Non-negotiable invariants:
   check and all 175 frontend tests also pass. This is implementation evidence
   only; the coherent commit, exact candidate gates, and a new immutable review
   remain required.
+- The first exact `make ci` on repair commit
+  `a39766d8880624a618c11822ee95ee49fa753a05` is explicitly failed evidence,
+  not a pass. Formatting, lint, and core completed successfully (1141 passed,
+  9 ignored), then server testing found a stale recovery-message assertion and
+  showed that eagerly taking a resource lease for ordinary unsandboxed
+  attachments violated their no-sidecar contract; the first panic poisoned the
+  shared server test environment and produced secondary failures. The recovery
+  assertion now checks the truthful operator choices, while resource authority
+  is acquired only for a summary proven sandboxed and still precedes snapshot/
+  Podman materialization. Both regressions and the sandbox ordering proof pass
+  focused tests. A committed successor and all four exact gates remain required.
 - The repository `qa` skill remains infrastructure-blocked because its required
   rootless Podman runtime is unavailable. Setup session
   `6681388a-8133-4f73-a27a-6a25a8a27f37` stopped without dispatching workers;
@@ -761,8 +773,8 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit only the intended tracked `872f8b9` repair and
-ledger files, then repeat all four exact-SHA release gates while preserving
+Closure is still active. Commit the focused `a39766d` gate repairs and ledger,
+then repeat all four exact-SHA release gates while preserving
 `.gitignore`, untracked `AGENTS.md`, `demo_ext_managed.md`, `demo_review.md`, and
 the ignored local decision notebook. Only a fresh detached-clean four-lane,
 two-episode NAC GO may advance to final browser smoke and status audit.

@@ -3724,9 +3724,6 @@ impl SessionManager {
         session_id: &str,
         operation_lease: Option<&sessions::SessionOperationLease>,
     ) -> Result<SessionService> {
-        let resource_lease =
-            sessions::SessionResourceLease::try_acquire(&self.inner.store_path, session_id)
-                .map_err(anyhow::Error::new)?;
         let summary = self
             .list_sessions(false)
             .await?
@@ -3734,6 +3731,13 @@ impl SessionManager {
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        let resource_lease = summary
+            .sandboxed
+            .then(|| {
+                sessions::SessionResourceLease::try_acquire(&self.inner.store_path, session_id)
+                    .map_err(anyhow::Error::new)
+            })
+            .transpose()?;
         let config_cwd = if summary.ssh_host.is_some() {
             &self.inner.root_cwd
         } else {
@@ -3761,7 +3765,9 @@ impl SessionManager {
             .await?
         };
         let service = SessionService::from_orchestrator_run_config(run_config).service;
-        service.adopt_sandbox_resource_lease(resource_lease);
+        if let Some(resource_lease) = resource_lease {
+            service.adopt_sandbox_resource_lease(resource_lease);
+        }
         Ok(service)
     }
 
@@ -3773,13 +3779,6 @@ impl SessionManager {
         bool,
         Option<sessions::SessionOperationLease>,
     )> {
-        // Shared resource authority must precede snapshot loading and any
-        // observer-side Podman inspection/materialization. A concurrent
-        // deletion then either wins before this point or remains excluded
-        // through row revalidation and service publication.
-        let resource_lease =
-            sessions::SessionResourceLease::try_acquire(&self.inner.store_path, session_id)
-                .map_err(anyhow::Error::new)?;
         let summary = self
             .list_sessions(false)
             .await?
@@ -3787,6 +3786,18 @@ impl SessionManager {
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
             .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+        // For a sandbox row, shared resource authority must precede snapshot
+        // loading and any observer-side Podman inspection/materialization. A
+        // concurrent deletion either wins before this acquisition (so the
+        // subsequent row load fails) or remains excluded through service
+        // publication. Ordinary sessions create no resource lock sidecar.
+        let resource_lease = summary
+            .sandboxed
+            .then(|| {
+                sessions::SessionResourceLease::try_acquire(&self.inner.store_path, session_id)
+                    .map_err(anyhow::Error::new)
+            })
+            .transpose()?;
         let config_cwd = if summary.ssh_host.is_some() {
             &self.inner.root_cwd
         } else {
@@ -3803,7 +3814,9 @@ impl SessionManager {
             )
             .await?;
         let service = SessionService::from_orchestrator_run_config(run_config).service;
-        service.adopt_sandbox_resource_lease(resource_lease);
+        if let Some(resource_lease) = resource_lease {
+            service.adopt_sandbox_resource_lease(resource_lease);
+        }
         Ok((service, cacheable, operation_lease))
     }
 
