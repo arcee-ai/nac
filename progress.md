@@ -52,7 +52,8 @@ Protected initial state verified on 2026-08-25:
    session-remount, Podman process-identity, and ledger blockers. Commit
    `efeffa3` addresses all seven and its ledger successor `3455efb` passed every
    exact-commit gate. The exact four-lane review returned NO-GO with four
-   command-admission/kernel blockers. Their current repair and another immutable
+   command-admission/kernel blockers. Exact repair commit `06ecb9f` closes all
+   four and passes every gate; its evidence successor and another immutable
    review precede production browser smoke and the final state audit.
 
 ### Finding map
@@ -142,14 +143,14 @@ Protected initial state verified on 2026-08-25:
   a nested mutation; brokerless worker calls skip native hard denials; and
   suffix scanning falsely treats brace-expanded data as a command. Durability
   and web/release lanes found no blockers.
-- Current repair candidate — native hard denial is enforced by the model-facing
+- Exact repair commit `06ecb9f` — native hard denial is enforced by the model-facing
   tool kernel with or without an approval broker; expandable operands for
   `rm`, `rmdir`, and `unlink` fail closed; `flock` is rejected as an executable
   wrapper; and opaque policy walks only real shell-segment command positions.
-  Focused permission/kernel/worker regressions pass. Its complete precommit
-  gates pass: formatting, warning-denied lint, Rust workspace (core 1091 passed
-  with 9 environment-dependent ignores, server 134, binary 21), web 172,
-  durability, and production-asset freshness.
+  Focused permission/kernel/worker regressions pass. Its complete exact gates
+  pass: `make ci` (core 1091 passed with 9 environment-dependent ignores,
+  server 134, binary 21, frontend 172), `make test-durability`, `make
+  test-assets`, and production-embedded Playwright 10/10.
 
 ### Current verification and next action
 
@@ -227,11 +228,11 @@ Protected initial state verified on 2026-08-25:
   warning-denied lint, typecheck, durability, asset freshness, and
   production-embedded Playwright 10/10.
 - Exact ledger successor `3455efb` passed the same complete gate set before its
-  review. The current repair implements all four accepted blockers and passes
-  its focused and complete precommit gates.
-- Next action: commit the repair, repeat every gate at that exact commit, and
-  obtain a detached-clean four-lane review. Proceed to product smoke and final
-  cleanup/state audit only after GO.
+  review. Exact repair `06ecb9f` implements all four accepted blockers and
+  passes every exact-commit closure gate.
+- Next action: commit this evidence-only ledger successor, repeat every gate at
+  its exact SHA, and obtain a detached-clean four-lane review. Proceed to
+  product smoke and final cleanup/state audit only after GO.
 
 ## Objective and invariants
 
@@ -571,6 +572,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit the four-blocker repair, repeat all gates at its
-exact SHA, and obtain another detached-clean four-lane NAC verdict. Preserve
-`.gitignore`, untracked `AGENTS.md`, and the local review notebooks.
+Closure is still active. Commit the evidence-only successor to exact repair
+`06ecb9f`, gate that exact SHA, and obtain another detached-clean four-lane NAC
+verdict. Preserve `.gitignore`, untracked `AGENTS.md`, and the local notebooks.
