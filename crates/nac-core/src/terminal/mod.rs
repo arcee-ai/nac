@@ -5,8 +5,8 @@ mod session;
 
 pub use manager::TerminalManager;
 pub use output::{
-    ArtifactKind, CommandOutputLimits, OutputPage, OutputRegistry, OutputStream,
-    DEFAULT_COMMAND_OUTPUT_MAX_BYTES, DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES,
+    ArtifactKind, CommandOutputLimits, OutputArtifactLease, OutputPage, OutputRegistry,
+    OutputStream, DEFAULT_COMMAND_OUTPUT_MAX_BYTES, DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES,
     DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
 };
 

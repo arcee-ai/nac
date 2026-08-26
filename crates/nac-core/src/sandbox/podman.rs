@@ -102,10 +102,14 @@ process_identity() {
     printf '\''proc:%s'\'' "${20}"
     return 0
   fi
-  started=$(ps -o lstart= -p "$target" 2>/dev/null) || return 1
+  started=$(ps -ww -o lstart= -p "$target" 2>/dev/null) || return 1
   started=$(printf '\''%s'\'' "$started" | sed '\''s/^[[:space:]]*//;s/[[:space:]]*$//'\'')
   [ -n "$started" ] || return 1
-  printf '\''ps:%s'\'' "$started"
+  command_line=$(ps -ww -o command= -p "$target" 2>/dev/null) || return 1
+  command_signature=$(printf '\''%s'\'' "$command_line" | cksum 2>/dev/null) || return 1
+  command_signature=${command_signature%% *}
+  [ -n "$command_signature" ] || return 1
+  printf '\''ps:%s:%s'\'' "$started" "$command_signature"
 }
 identity=$(process_identity "$$") || exit 125
 printf '\''%s\t%s\n'\'' "$$" "$identity" > "$pidfile"
@@ -156,15 +160,28 @@ process_identity() {
     printf 'proc:%s' "${20}"
     return 0
   fi
-  started=$(ps -o lstart= -p "$target" 2>/dev/null) || return 1
+  started=$(ps -ww -o lstart= -p "$target" 2>/dev/null) || return 1
   started=$(printf '%s' "$started" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   [ -n "$started" ] || return 1
-  printf 'ps:%s' "$started"
+  command_line=$(ps -ww -o command= -p "$target" 2>/dev/null) || return 1
+  command_signature=$(printf '%s' "$command_line" | cksum 2>/dev/null) || return 1
+  command_signature=${command_signature%% *}
+  [ -n "$command_signature" ] || return 1
+  printf 'ps:%s:%s' "$started" "$command_signature"
 }
 identity_matches() {
   [ -n "$pid" ] && [ -n "$expected_identity" ] || return 1
   actual_identity=$(process_identity "$pid") || return 1
   [ "$actual_identity" = "$expected_identity" ]
+}
+process_is_live() {
+  state=$(ps -ww -o stat= -p "$1" 2>/dev/null) || return 1
+  state=$(printf '%s' "$state" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$state" ] || return 1
+  case "$state" in
+    Z*) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 if identity_matches; then
   process_table=
@@ -181,24 +198,66 @@ if identity_matches; then
         rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
         set -- $rest
         [ "${2:-}" = "$parent" ] || continue
-        printf '%s\n' "$child"
         descendants "$child"
+        printf '%s\n' "$child"
       done
     else
       for child in $(printf '%s\n' "$process_table" | awk -v parent="$parent" '$2 == parent { print $1 }'); do
-        printf '%s\n' "$child"
         descendants "$child"
+        printf '%s\n' "$child"
       done
     fi
   }
+  is_current_descendant() {
+    candidate=$1
+    while [ -n "$candidate" ] && [ "$candidate" -gt 1 ] 2>/dev/null; do
+      parent=$(ps -ww -o ppid= -p "$candidate" 2>/dev/null) || return 1
+      parent=$(printf '%s' "$parent" | tr -d ' ')
+      [ -n "$parent" ] || return 1
+      [ "$parent" = "$pid" ] && return 0
+      candidate=$parent
+    done
+    return 1
+  }
   pids=$(descendants "$pid")
   if identity_matches; then
+    uncertain=0
+    verified_descendants=
     for child in $pids; do
-      kill -KILL "$child" 2>/dev/null || true
+      if [ ! -r "/proc/$pid/stat" ] && ! is_current_descendant "$child"; then
+        continue
+      fi
+      child_identity=$(process_identity "$child") || {
+        process_is_live "$child" && uncertain=1
+        continue
+      }
+      verified_descendants="${verified_descendants}${child}|${child_identity}
+"
     done
+    while IFS='|' read -r child child_expected_identity; do
+      [ -n "$child" ] || continue
+      child_actual_identity=$(process_identity "$child") || {
+        process_is_live "$child" && uncertain=1
+        continue
+      }
+      if [ "$child_actual_identity" != "$child_expected_identity" ]; then
+        uncertain=1
+        continue
+      fi
+      kill -KILL "$child" 2>/dev/null || {
+        process_is_live "$child" && uncertain=1
+      }
+    done <<NAC_DESCENDANTS
+$verified_descendants
+NAC_DESCENDANTS
     if identity_matches; then
-      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || {
+        process_is_live "$pid" && uncertain=1
+      }
+    elif process_is_live "$pid"; then
+      uncertain=1
     fi
+    [ "$uncertain" -eq 0 ] || exit 1
   fi
 fi
 rm -f "$pidfile""#;
@@ -1091,6 +1150,8 @@ mod tests {
         assert!(SANDBOX_EXEC_WRAPPER.contains("group_members()"));
         assert!(SANDBOX_EXEC_WRAPPER.contains("/proc/$target/stat"));
         assert!(SANDBOX_EXEC_WRAPPER.contains("${20:-}"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("ps -ww -o command="));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("cksum"));
         assert!(SANDBOX_EXEC_WRAPPER.contains("%s\\t%s\\n"));
         assert!(SANDBOX_EXEC_WRAPPER.contains("kill -KILL \"$child\""));
         assert_eq!(SANDBOX_PTY_WRAPPER, SANDBOX_EXEC_WRAPPER);
@@ -1102,6 +1163,9 @@ mod tests {
         assert!(SANDBOX_KILL_WRAPPER.contains("/proc/$target/stat"));
         assert!(SANDBOX_KILL_WRAPPER.contains("ps -eo pid=,ppid="));
         assert!(SANDBOX_KILL_WRAPPER.contains("$2 == parent"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("is_current_descendant()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("child_actual_identity"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("uncertain=1"));
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
@@ -1117,6 +1181,43 @@ mod tests {
         assert!(session > 0, "failed to create escaped descendant session");
         std::fs::write(pid_path, unsafe { libc::getpid() }.to_string()).unwrap();
         std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[cfg(unix)]
+    fn portable_ps_identity(pid: u32) -> String {
+        use std::io::Write as _;
+
+        let started = std::process::Command::new("ps")
+            .args(["-ww", "-o", "lstart=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        assert!(started.status.success());
+        let started = String::from_utf8(started.stdout).unwrap();
+        let started = started.trim();
+        assert!(!started.is_empty());
+        let command_line = std::process::Command::new("ps")
+            .args(["-ww", "-o", "command=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        assert!(command_line.status.success());
+        let mut cksum = std::process::Command::new("cksum")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let command_line = String::from_utf8(command_line.stdout).unwrap();
+        let command_line = command_line.trim_end_matches(['\r', '\n']);
+        cksum
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(command_line.as_bytes())
+            .unwrap();
+        let checksum = cksum.wait_with_output().unwrap();
+        assert!(checksum.status.success());
+        let checksum = String::from_utf8(checksum.stdout).unwrap();
+        let checksum = checksum.split_whitespace().next().unwrap();
+        format!("ps:{started}:{checksum}")
     }
 
     #[cfg(unix)]
@@ -1162,23 +1263,19 @@ mod tests {
             .parse::<libc::pid_t>()
             .unwrap();
         let supervisor_pid = supervisor.id();
-        let started = std::process::Command::new("ps")
-            .args(["-o", "lstart=", "-p", &supervisor_pid.to_string()])
-            .output()
-            .unwrap();
-        assert!(started.status.success());
-        let started = String::from_utf8(started.stdout).unwrap();
-        let started = started.trim();
-        assert!(!started.is_empty());
         std::fs::write(
             &wrapper_pidfile,
-            format!("{supervisor_pid}\tps:{started}\n"),
+            format!(
+                "{supervisor_pid}\t{}\n",
+                portable_ps_identity(supervisor_pid)
+            ),
         )
         .unwrap();
 
         // Make both identity and descendant discovery take their production
         // non-/proc branches while keeping the rest of the wrapper identical.
         let no_proc_wrapper = SANDBOX_KILL_WRAPPER.replace("/proc/", "/nac-no-proc/");
+        let cleanup_started = std::time::Instant::now();
         let output = std::process::Command::new("bash")
             .arg("-c")
             .arg(no_proc_wrapper)
@@ -1186,6 +1283,10 @@ mod tests {
             .arg(&wrapper_pidfile)
             .output()
             .unwrap();
+        assert!(
+            cleanup_started.elapsed() < Duration::from_secs(5),
+            "portable cleanup waited for the descendant to exit naturally"
+        );
         assert!(
             output.status.success(),
             "kill wrapper failed: {}",
@@ -1237,6 +1338,45 @@ mod tests {
             "identity mismatch killed the process"
         );
         assert!(!pidfile.exists());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_identity_rejects_same_start_time_with_a_different_command_signature() {
+        let root = std::env::temp_dir().join(format!(
+            "nac-wrapper-portable-identity-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let pidfile = root.join("wrapper.pid");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let actual = portable_ps_identity(child.id());
+        let started = actual.rsplit_once(':').unwrap().0;
+        std::fs::write(&pidfile, format!("{}\t{started}:0\n", child.id())).unwrap();
+
+        let no_proc_wrapper = SANDBOX_KILL_WRAPPER.replace("/proc/", "/nac-no-proc/");
+        let output = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(no_proc_wrapper)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "kill wrapper failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "same-second portable identity collision killed the unrelated process"
+        );
         child.kill().unwrap();
         child.wait().unwrap();
         let _ = std::fs::remove_dir_all(root);

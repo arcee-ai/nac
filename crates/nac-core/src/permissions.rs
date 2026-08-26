@@ -642,6 +642,7 @@ fn backend_defaults(backend: PermissionBackend) -> Vec<PermissionRule> {
         PermissionRule::new("external_directory", "*", Ask),
         PermissionRule::new("execute_opaque", "*", Ask),
         PermissionRule::new("execute_broad", "*", Ask),
+        PermissionRule::new("terminal_input", "*", Ask),
         PermissionRule::new("read", "*.env", Ask),
         PermissionRule::new("read", "*.env.*", Ask),
         PermissionRule::new("read", "*.env.example", Allow),
@@ -2434,6 +2435,12 @@ fn opaque_hard_shell_denial(
     cwd: &Path,
     backend: &ExecutionBackend,
 ) -> Option<String> {
+    if contains_unquoted_shell_redirection(command) {
+        return Some(
+            "opaque shell redirection is blocked because its path targets cannot be independently authorized"
+                .to_string(),
+        );
+    }
     if raw_shell_control_syntax(command) {
         return Some(
             "shell control syntax is blocked because it can hide protected commands".to_string(),
@@ -2486,6 +2493,35 @@ fn opaque_hard_shell_denial(
         }
     }
     None
+}
+
+fn contains_unquoted_shell_redirection(command: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    for current in command.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if current == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(active) = quote {
+            if current == active {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(current, '\'' | '"') {
+            quote = Some(current);
+            continue;
+        }
+        if matches!(current, '<' | '>') {
+            return true;
+        }
+    }
+    false
 }
 
 fn dynamic_shell_command_name(token: &str) -> bool {
@@ -3339,6 +3375,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn opaque_redirection_fails_closed_on_every_execution_backend() {
+        let sandbox = ExecutionBackend::Sandbox(crate::sandbox::SandboxSession::new_for_test(
+            crate::sandbox::SandboxSpec {
+                workdir: PathBuf::from("/workspace"),
+                ..crate::sandbox::SandboxSpec::default()
+            },
+        ));
+        let ssh = ExecutionBackend::Ssh(crate::sandbox::SshBackend::new(
+            "nobody@invalid".to_string(),
+            PathBuf::from("/workspace"),
+        ));
+        for (name, backend) in [
+            ("local", local(Path::new("/workspace"))),
+            ("podman", sandbox),
+            ("ssh", ssh),
+        ] {
+            for command in [
+                "printf pwned > config-link",
+                "printf pwned 2>> store-link",
+                "cat < input-link",
+            ] {
+                let resources = shell_resources(command, Path::new("/workspace"), &backend);
+                assert!(
+                    resources.iter().any(|resource| {
+                        resource
+                            .hard_denial
+                            .as_deref()
+                            .is_some_and(|reason| reason.contains("redirection"))
+                    }),
+                    "{name} did not reject opaque redirection: {command}"
+                );
+            }
+        }
+
+        let quoted = shell_resources(
+            "printf '%s' 'literal>a<value'",
+            Path::new("/workspace"),
+            &local(Path::new("/workspace")),
+        );
+        assert!(quoted.iter().all(|resource| resource.hard_denial.is_none()));
     }
 
     #[cfg(unix)]

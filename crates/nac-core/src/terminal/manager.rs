@@ -285,7 +285,7 @@ impl TerminalManager {
             let mut sessions = self.sessions.lock().await;
             let session = sessions
                 .get_mut(name)
-                .with_context(|| format!("terminal session '{name}' not found"))?;
+                .ok_or_else(|| self.missing_session_error(name))?;
             session.refresh_status();
             if !session.is_alive() && !bytes.is_empty() {
                 return Err(anyhow!("terminal session '{name}' has already exited"));
@@ -419,6 +419,28 @@ impl TerminalManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // Reserve bounded output metadata before a process exists. The lease
+        // stays active for the full command future (including cancellation)
+        // and becomes evictable only after every reader has settled.
+        let output_lease = match self.output_registry.create(ArtifactKind::Command) {
+            Ok(lease) => lease,
+            Err(error) => {
+                return CommandOutput {
+                    status: CommandStatus::SpawnError,
+                    exit_code: None,
+                    wall_time_ms: start.elapsed().as_millis() as u64,
+                    stdout_preview: String::new(),
+                    stderr_preview: error.to_string(),
+                    output_id: None,
+                    stdout_bytes: 0,
+                    stderr_bytes: 0,
+                    truncated: false,
+                    overflowed: false,
+                };
+            }
+        };
+        let output_id = output_lease.output_id().to_string();
+
         // Register before spawning so this ownership guard outlives every
         // child/process-tree local on task cancellation. There is no await in
         // the registration/spawn window, so settlement cannot observe the
@@ -468,7 +490,6 @@ impl TerminalManager {
         };
         let stdout = child.stdout.take().expect("piped stdout is present");
         let stderr = child.stderr.take().expect("piped stderr is present");
-        let output_id = self.output_registry.create(ArtifactKind::Command);
         let (sender, mut receiver) = mpsc::channel(PIPE_CHANNEL_CHUNKS);
         let reader_shutdown = ThreadCancellation::default();
         let stdout_reader = tokio::spawn(read_chunks(
@@ -1126,6 +1147,90 @@ mod tests {
         assert!(manager
             .read_output(output_ids.last().unwrap(), OutputStream::Combined, 0, 32)
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn retained_live_pty_output_stays_pinned_at_the_artifact_limit() {
+        let mut manager = TerminalManager::for_direct();
+        manager.output_registry =
+            OutputRegistry::with_artifact_limit_for_test(CommandOutputLimits::default(), 2)
+                .unwrap();
+        let first = manager.next_session_name();
+        manager
+            .create(
+                first.clone(),
+                "printf live; while :; do sleep 1; done",
+                None,
+                120,
+                40,
+                &backend(),
+            )
+            .await
+            .unwrap();
+        manager.retain(&first).await.unwrap();
+        let initial = manager
+            .write_stdin(&first, "", 100, 8_000, None)
+            .await
+            .unwrap();
+        let live_output_id = initial.output_id;
+
+        for _ in 0..3 {
+            let output = manager
+                .exec_one_shot("true", None, 120, 40, 5_000, 8_000, &backend(), None)
+                .await;
+            assert_eq!(output.status, CommandStatus::Completed);
+            assert!(manager
+                .read_output(&live_output_id, OutputStream::Combined, 0, 32)
+                .is_ok());
+        }
+
+        let second = manager.next_session_name();
+        manager
+            .create(
+                second,
+                "while :; do sleep 1; done",
+                None,
+                120,
+                40,
+                &backend(),
+            )
+            .await
+            .unwrap();
+        let marker_root =
+            std::env::temp_dir().join(format!("nac-output-cap-no-spawn-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&marker_root).unwrap();
+        let marker = marker_root.join("spawned");
+        let third = manager.next_session_name();
+        let create_error = manager
+            .create(
+                third,
+                "printf spawned > spawned; while :; do sleep 1; done",
+                Some(marker_root.clone()),
+                120,
+                40,
+                &backend(),
+            )
+            .await
+            .unwrap_err();
+        assert!(create_error
+            .to_string()
+            .contains("all 2 artifacts are still active"));
+        assert!(
+            !marker.exists(),
+            "rejected PTY command unexpectedly spawned"
+        );
+        let rejected = manager
+            .exec_one_shot("exit 99", None, 120, 40, 5_000, 8_000, &backend(), None)
+            .await;
+        assert_eq!(rejected.status, CommandStatus::SpawnError);
+        assert!(rejected
+            .stderr_preview
+            .contains("all 2 artifacts are still active"));
+        assert!(manager
+            .read_output(&live_output_id, OutputStream::Combined, 0, 32)
+            .is_ok());
+        manager.remove_all().await.unwrap();
+        let _ = std::fs::remove_dir_all(marker_root);
     }
 
     #[cfg(unix)]
@@ -2216,6 +2321,33 @@ mod tests {
             .missing_session_error(&current.next_session_name())
             .to_string()
             .contains("closed or expired"));
+    }
+
+    #[tokio::test]
+    async fn terminal_handle_cannot_cross_manager_authority() {
+        let owner = TerminalManager::for_direct();
+        let handle = owner.next_session_name();
+        owner
+            .create(
+                handle.clone(),
+                "while :; do sleep 1; done",
+                None,
+                120,
+                40,
+                &backend(),
+            )
+            .await
+            .unwrap();
+        let foreign = TerminalManager::for_direct();
+        let error = foreign
+            .write_stdin(&handle, "input<RET>", 10, 100, None)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("belonged to a previous nac service instance"));
+        assert!(owner.get(&handle).await.is_some());
+        owner.remove_all().await.unwrap();
     }
 
     #[tokio::test]
