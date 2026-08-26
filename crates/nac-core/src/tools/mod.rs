@@ -1050,6 +1050,11 @@ fn legacy_permission_resources(
         }
         5 => {
             let command = string(input, "cmd")?;
+            let tty = match input.get("tty") {
+                None => false,
+                Some(Value::Bool(tty)) => *tty,
+                Some(_) => return Err(invalid("'tty' argument must be a boolean")),
+            };
             let requested = match input.get("workdir") {
                 None => None,
                 Some(Value::String(workdir)) => Some(workdir.as_str()),
@@ -1060,11 +1065,20 @@ fn legacy_permission_resources(
                 .resolve_terminal_cwd(requested)
                 .map_err(|error| invalid(format!("invalid command working directory: {error}")))?
                 .unwrap_or_else(|| runtime.backend.default_terminal_cwd());
-            Ok(crate::permissions::shell_resources(
-                command,
-                &cwd,
-                runtime.backend.as_ref(),
-            ))
+            let mut resources =
+                crate::permissions::shell_resources(command, &cwd, runtime.backend.as_ref());
+            if tty && crate::permissions::unbounded_interactive_input(command) {
+                resources.push(
+                    kernel::PermissionResource::new("terminal_input", "unbounded-interpreter")
+                        .with_display(
+                            "interactive opaque commands and broad interpreters are unavailable",
+                        )
+                        .with_hard_denial(
+                            "interactive opaque commands and broad interpreters are blocked because follow-up terminal input cannot be analyzed before execution",
+                        ),
+                );
+            }
+            Ok(resources)
         }
         6 => {
             let session_id = string(input, "session_id")?;
@@ -1690,6 +1704,28 @@ mod discovery_tool_definition_tests {
             )
             .unwrap();
         assert_eq!(input.permission_resources()[0].action, "terminal_input");
+        let interactive_shell = snapshot
+            .prepare(
+                "exec_command",
+                serde_json::json!({"cmd":"bash", "tty":true}),
+                services,
+            )
+            .unwrap();
+        assert!(interactive_shell
+            .permission_resources()
+            .iter()
+            .any(|resource| resource.hard_denial.is_some()));
+        let bounded_pty = snapshot
+            .prepare(
+                "exec_command",
+                serde_json::json!({"cmd":"cargo test", "tty":true}),
+                services,
+            )
+            .unwrap();
+        assert!(bounded_pty
+            .permission_resources()
+            .iter()
+            .all(|resource| resource.hard_denial.is_none()));
         let _ = std::fs::remove_dir_all(directory);
     }
 }

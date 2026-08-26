@@ -1438,6 +1438,76 @@ async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
 }
 
 #[tokio::test]
+async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit() {
+    let store_path = test_store_path("steering_abort_failure_adoption");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let queued = crate::store::queue_thread_steering(
+        &store_path,
+        "session",
+        crate::store::ORCHESTRATOR_STEERING_TARGET,
+        "dispatch",
+        "steer while cancelling",
+    )
+    .unwrap();
+    let claimed = crate::store::claim_thread_steering(&store_path, "session", "dispatch").unwrap();
+    assert_eq!(claimed.len(), 1);
+
+    let trigger = rusqlite::Connection::open(&store_path).unwrap();
+    trigger
+        .execute_batch(
+            "CREATE TRIGGER fail_aborted_steering_log_append
+             BEFORE INSERT ON thread_events
+             WHEN NEW.event_json LIKE '%steer while cancelling%'
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected aborted steering failure');
+             END;",
+        )
+        .unwrap();
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    store_snapshot_messages(&store_path, &agent.messages);
+    agent
+        .push_and_log_for_test(user_message("current"))
+        .await
+        .unwrap();
+    let blocker = rusqlite::Connection::open(&store_path).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let from_idx = agent.messages.len();
+    let staged = vec![user_message("steer while cancelling")];
+    let ids = vec![queued.id];
+    let mut commit =
+        Box::pin(agent.commit_staged_steering(from_idx, &ids, &staged, "session", "dispatch"));
+    tokio::select! {
+        result = &mut commit => panic!("blocked steering commit completed early: {result:?}"),
+        _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+    }
+    drop(commit);
+    assert!(agent.steering_append_pending);
+    assert_eq!(agent.messages.len(), from_idx);
+
+    blocker.execute_batch("ROLLBACK").unwrap();
+    agent
+        .append_cancellation_marker_preserving_tools()
+        .await
+        .unwrap();
+    assert!(!agent.steering_append_pending);
+    assert!(agent.messages.iter().all(|message| {
+        !matches!(message, Message::User { content } if content == "steer while cancelling")
+    }));
+    assert!(matches!(
+        agent.messages.last(),
+        Some(Message::Assistant { content: Some(content), .. })
+            if content == crate::agent::RUN_CANCELLED_MARKER
+    ));
+    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
+    assert_eq!(records[0].status, "claimed");
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.last().unwrap().0 as usize, agent.messages.len() - 1);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 

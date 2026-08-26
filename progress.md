@@ -12,8 +12,9 @@ launch, browser-E2E, and deterministic durability coverage.
 
 Protected initial state verified on 2026-08-25:
 
-- HEAD is `d3e3fc0` on `allison-demo`; the reviewed implementation range is
-  `61b1709..d3e3fc0` and contains the eleven recorded milestone commits.
+- HEAD is `fceb0fd` on `allison-demo`. The original implementation range is
+  `61b1709..d3e3fc0`; post-review closure now extends through `fceb0fd` with
+  immutable reviews at `02c58aa`, `dd897a4`, `40f3619`, and `fceb0fd`.
 - `.gitignore` is modified, `AGENTS.md` and `demo_review.md` are untracked, and
   `demo_decisions.md` is intentionally ignored. These are user-owned/local and
   must not be staged or committed.
@@ -44,9 +45,11 @@ Protected initial state verified on 2026-08-25:
    NAC-REV-010, 011, 015, and 020..023 through behavior-aware creation and
    navigation, active-run inbox UX, literal `/goal`, child ownership guards,
    documentation, and production-embedded browser tests.
-5. **Pending — closure and integrated review.** Reproduce the permission-SSE
-   lag risk, close all remaining findings, run final NAC adversarial review,
-   production browser smoke, all required gates, and final state audit.
+5. **In progress — closure and integrated review.** The exact review of
+   `fceb0fd` returned NO-GO with eight concrete safety, cancellation,
+   crash-recovery, Stop-availability, and ledger blockers. Their repair set and
+   focused regressions are complete; full gates, a new immutable NAC review,
+   production browser smoke, and final state audit remain.
 
 ### Finding map
 
@@ -94,6 +97,20 @@ Protected initial state verified on 2026-08-25:
   child-goal, and goal-replacement journeys, identified the permission replay-
   gap refetch defect, and supplied the production-embedded Playwright/scripted-
   provider architecture implemented in `df9bf9d`.
+- QA-skill setup `6681388a-8133-4f73-a27a-6a25a8a27f37` — correctly stopped
+  infrastructure-blocked because the mandatory rootless Podman runtime is not
+  installed. The skill has no fallback, so this is a recorded coverage limit,
+  never a QA pass.
+- Exact `40f3619` review `baaeac64-a641-4a4f-a315-66d2493878c1` — NO-GO;
+  found seven release blockers plus a related deletion-suppression durability
+  risk. Commit `fceb0fd` closed them and passed all root-owned gates.
+- Exact `fceb0fd` review `5bec3175-f490-499d-bb65-94400abd76d7`, run
+  `b89df102-e96a-43ae-8f1e-4a971983bd70` — NO-GO; found `eval` and
+  operand-bearing wrapper bypasses, broad interactive PTY authority, remote
+  cleanup ordering, interrupted steering-result adoption, crash-stranded
+  completion suppression, double-projection Stop loss, and this stale ledger.
+  All eight are implemented in the current uncommitted candidate with focused
+  regressions passing.
 
 ### Current verification and next action
 
@@ -157,9 +174,22 @@ Protected initial state verified on 2026-08-25:
   behavior choices and default reset, direct text and native tool round trips,
   active durable steer delivery into the next provider request, literal goal
   interpretation and continuation, and read-only child/managed transcripts.
-- Next action: reproduce and repair the permission SSE replay-gap risk, obtain
-  the final independent NAC review of the committed range, run every closure
-  gate plus the actual `make demo` browser smoke, then audit cleanup/state.
+- Exact `fceb0fd` gate baseline: `make ci` passed with catalog 2+7+24, core
+  1085 passed/9 ignored, server 133, binary 21, and frontend 169; `make
+  test-durability`, `make test-assets`, and production-embedded Playwright
+  10/10 also passed.
+- Current repair evidence: hard-policy wrapper corpus, interactive-terminal
+  admission, local-before-remote cleanup ordering, interrupted atomic steering
+  adoption, deletion-owner crash repair for child and managed completion, and
+  partial-load Stop component tests pass. The current candidate's complete
+  suites pass with core 1087 passed/9 ignored, server 134, binary 21, and
+  frontend 170; format, lint, and typecheck also pass. The embedded production
+  bundle has been rebuilt, so an exact committed `make ci` remains the next
+  gate rather than claiming the expected pre-commit asset-staleness failure as
+  a pass.
+- Next action: commit the repair candidate and rebuilt bundle, run every
+  exact-commit closure gate, obtain a fresh four-lane NAC review, then perform
+  the actual `make demo` browser smoke and final cleanup/state audit.
 
 ## Objective and invariants
 

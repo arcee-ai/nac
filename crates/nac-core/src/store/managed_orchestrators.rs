@@ -209,6 +209,25 @@ pub fn list_managed_orchestrators(
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+/// Durable rollback obligations left by an interrupted session deletion.
+/// Callers must fence each orchestrator with its relationship lease before
+/// restoring one, so an active peer deletion cannot be undone.
+pub fn list_suppressed_managed_orchestrator_generations(
+    path: &Path,
+    parent_session_id: &str,
+) -> Result<Vec<(String, u64)>> {
+    let connection = open_runtime_connection(path)?;
+    let mut statement = connection.prepare(
+        "SELECT orchestrator_session_id, generation FROM managed_orchestrators
+         WHERE parent_session_id = ?1 AND completion_suppressed = 1
+         ORDER BY orchestrator_session_id",
+    )?;
+    let rows = statement.query_map(params![parent_session_id], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 pub fn begin_managed_orchestrator_run(
     path: &Path,
     orchestrator_session_id: &str,

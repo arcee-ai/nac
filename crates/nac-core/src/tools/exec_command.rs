@@ -15,7 +15,7 @@ pub fn exec_command_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "exec_command".to_string(),
-            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for an interactive foreground terminal; continue it with write_stdin and explicitly set retain=true there only when it must survive a direct run boundary."
+            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for a bounded interactive foreground program; opaque commands and broad shells/interpreters are rejected because later write_stdin input cannot be pre-authorized. Continue an accepted PTY with write_stdin and explicitly set retain=true there only when it must survive a direct run boundary."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",

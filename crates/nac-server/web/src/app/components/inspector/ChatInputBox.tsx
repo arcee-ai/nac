@@ -1064,8 +1064,19 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   if (!ownershipKnown) {
     return (
-      <div className="rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-        Loading session controls…
+      <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
+        <span className="flex-1">Loading session controls…</span>
+        {running && (
+          <Button
+            size={ButtonSize.Small}
+            variant={ButtonVariant.GhostDestructive}
+            content={ButtonContent.Text}
+            aria-label="Stop run"
+            onClick={() => void stop()}
+          >
+            Stop
+          </Button>
+        )}
       </div>
     );
   }

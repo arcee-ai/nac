@@ -504,11 +504,9 @@ impl TerminalManager {
 
         let mut force_reader_shutdown = false;
         if !process_exited {
-            if let Some(pidfile) = pidfile.as_deref() {
-                if let Err(error) = self.retry_remote_cleanup(pidfile).await {
-                    runtime_error = Some(format!("remote command cleanup incomplete: {error}"));
-                }
-            }
+            // Stop the local transport first. A remote kill that observes no
+            // pidfile is authoritative only after SSH/Podman can no longer
+            // start the wrapper and create that pidfile afterwards.
             match process_tree.terminate(&mut child).await {
                 Ok(()) => force_reader_shutdown = true,
                 Err(error) => {
@@ -517,6 +515,16 @@ impl TerminalManager {
                     runtime_error = Some(match runtime_error.take() {
                         Some(existing) => format!("{existing}\n{cleanup_error}"),
                         None => cleanup_error,
+                    });
+                }
+            }
+            if let Some(pidfile) = pidfile.as_deref() {
+                if let Err(error) = self.retry_remote_cleanup(pidfile).await {
+                    runtime_error = Some(match runtime_error.take() {
+                        Some(existing) => {
+                            format!("{existing}\nremote command cleanup incomplete: {error}")
+                        }
+                        None => format!("remote command cleanup incomplete: {error}"),
                     });
                 }
             }
@@ -1240,6 +1248,91 @@ mod tests {
         manager.settle_run().await.unwrap();
         assert_eq!(manager.pending_remote_cleanup_count(), 0);
         assert_eq!(std::fs::read_to_string(&cleanup_calls).unwrap(), "2");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remote_cleanup_observes_local_transport_already_stopped() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct RestorePath(Option<std::ffi::OsString>);
+        impl Drop for RestorePath {
+            fn drop(&mut self) {
+                unsafe {
+                    match self.0.take() {
+                        Some(path) => std::env::set_var("PATH", path),
+                        None => std::env::remove_var("PATH"),
+                    }
+                }
+            }
+        }
+
+        let _environment = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_path = std::env::var_os("PATH");
+        let _restore = RestorePath(original_path.clone());
+        let root =
+            std::env::temp_dir().join(format!("nac-remote-cleanup-order-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        let launcher_pid = root.join("launcher-pid");
+        let cleanup_overtook_transport = root.join("cleanup-overtook-transport");
+        let late_side_effect = root.join("late-side-effect");
+        std::fs::write(
+            &podman,
+            format!(
+                "#!/bin/sh\ncase \" $* \" in\n*' nac-kill '*)\n  pid=$(cat '{}' 2>/dev/null || true)\n  if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; then : > '{}'; fi\n  exit 0\n  ;;\nesac\nprintf %s \"$$\" > '{}'\nsleep 0.3\nprintf late > '{}'\nsleep 30\n",
+                launcher_pid.display(),
+                cleanup_overtook_transport.display(),
+                launcher_pid.display(),
+                late_side_effect.display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut paths = vec![bin];
+        if let Some(path) = original_path.as_ref() {
+            paths.extend(std::env::split_paths(path));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+
+        let remote_backend = crate::sandbox::execution_backend_from_sandbox(
+            Some(SandboxSession::new_for_test(SandboxSpec {
+                workdir: root.clone(),
+                ..Default::default()
+            })),
+            &root,
+        );
+        let manager = TerminalManager::new();
+        let output = manager
+            .exec_one_shot("sleep 30", None, 120, 40, 10, 8_000, &remote_backend, None)
+            .await;
+        assert_eq!(output.status, CommandStatus::TimedOut);
+        assert!(!cleanup_overtook_transport.exists());
+        sleep(Duration::from_millis(350)).await;
+        assert!(!late_side_effect.exists());
+
+        manager
+            .create("pty".to_string(), "sleep 30", None, 120, 40, &backend())
+            .await
+            .unwrap();
+        let pty_pid = manager
+            .sessions
+            .lock()
+            .await
+            .get("pty")
+            .and_then(TerminalSession::pid)
+            .unwrap();
+        std::fs::write(&launcher_pid, pty_pid.to_string()).unwrap();
+        manager
+            .set_backend_cleanup_for_test("pty", remote_backend, "/tmp/nac-order.pid".to_string())
+            .await
+            .unwrap();
+        manager.remove_all().await.unwrap();
+        assert!(!cleanup_overtook_transport.exists());
         let _ = std::fs::remove_dir_all(root);
     }
 
