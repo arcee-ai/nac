@@ -1,9 +1,9 @@
+#[cfg(target_os = "macos")]
+use std::collections::HashSet;
 #[cfg(unix)]
 use std::collections::VecDeque;
 #[cfg(target_os = "linux")]
 use std::collections::{HashMap, HashSet};
-#[cfg(target_os = "macos")]
-use std::collections::HashSet;
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 #[cfg(target_os = "macos")]
@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use tokio::process::{Child, Command};
 use tokio::time::sleep;
@@ -283,7 +285,8 @@ impl ProcessTreeGuard {
             }
             #[cfg(unix)]
             {
-                cleanup_result = first_cleanup_error(cleanup_result, self.finish_tagged_cleanup());
+                cleanup_result =
+                    first_cleanup_error(cleanup_result, self.finish_tagged_cleanup().await);
             }
             self.disarm();
             return cleanup_result;
@@ -308,7 +311,8 @@ impl ProcessTreeGuard {
         let _ = child.wait().await;
         #[cfg(unix)]
         {
-            cleanup_result = first_cleanup_error(cleanup_result, self.finish_tagged_cleanup());
+            cleanup_result =
+                first_cleanup_error(cleanup_result, self.finish_tagged_cleanup().await);
         }
         self.disarm();
         cleanup_result
@@ -340,8 +344,37 @@ impl ProcessTreeGuard {
     }
 
     #[cfg(unix)]
-    fn finish_tagged_cleanup(&mut self) -> std::io::Result<()> {
+    async fn finish_tagged_cleanup(&mut self) -> std::io::Result<()> {
+        // Freeze the Darwin census before the wait loop so newly observed
+        // PIDs cannot appear after we have already signalled the known set.
+        #[cfg(target_os = "macos")]
+        if let Some(census) = self.census.as_mut() {
+            census.stop();
+        }
         self.signal_tagged(libc::SIGKILL);
+        let deadline = Instant::now() + TERMINATE_GRACE;
+        loop {
+            let leftovers = self.live_tagged_pids();
+            if leftovers.is_empty() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::other(format!(
+                    "incomplete descendant cleanup: tagged pid(s) still alive: {}",
+                    leftovers
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+            self.signal_tagged(libc::SIGKILL);
+            sleep(EXIT_POLL_INTERVAL).await;
+        }
+    }
+
+    #[cfg(unix)]
+    fn live_tagged_pids(&self) -> Vec<libc::pid_t> {
         let mut leftovers = Vec::new();
         #[cfg(target_os = "linux")]
         {
@@ -355,29 +388,17 @@ impl ProcessTreeGuard {
             }
         }
         #[cfg(target_os = "macos")]
-        if let Some(census) = self.census.as_mut() {
+        if let Some(census) = &self.census {
             leftovers.extend(
                 census
                     .snapshot()
                     .into_iter()
                     .filter(|&pid| pid != self_pid() && process_is_live(pid)),
             );
-            census.stop();
         }
         leftovers.sort_unstable();
         leftovers.dedup();
-        if leftovers.is_empty() {
-            Ok(())
-        } else {
-            Err(std::io::Error::other(format!(
-                "incomplete descendant cleanup: tagged pid(s) still alive: {}",
-                leftovers
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )))
-        }
+        leftovers
     }
 
     #[cfg(target_os = "macos")]
@@ -459,8 +480,8 @@ fn first_cleanup_error(
 
 #[cfg(unix)]
 fn stamp_tree_env(command: &mut Command) -> (String, String) {
-    let root_id = std::env::var(PROCESS_TREE_ROOT_ENV)
-        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    let root_id =
+        std::env::var(PROCESS_TREE_ROOT_ENV).unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
     let tree_id = uuid::Uuid::new_v4().to_string();
     apply_tree_env(command, &tree_id, &root_id);
     (tree_id, root_id)
@@ -546,7 +567,13 @@ fn process_is_live(pid: libc::pid_t) -> bool {
 
 #[cfg(target_os = "macos")]
 fn process_is_live(pid: libc::pid_t) -> bool {
-    const SZOMB: u32 = 5;
+    // Live p_stat values from sys/proc.h. Treat only SRUN/SSLEEP/SSTOP as
+    // leftover work: `pbi_status != SZOMB` is too wide because Darwin can
+    // report a wait status such as 9 (SIGKILL) in this field, which made a
+    // dying orphan look alive and fail closed.
+    const SRUN: u32 = 2;
+    const SSLEEP: u32 = 3;
+    const SSTOP: u32 = 4;
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     let returned = unsafe {
@@ -562,7 +589,7 @@ fn process_is_live(pid: libc::pid_t) -> bool {
         return false;
     }
     let info = unsafe { info.assume_init() };
-    info.pbi_status != SZOMB
+    matches!(info.pbi_status, SRUN | SSLEEP | SSTOP)
 }
 
 #[cfg(target_os = "macos")]
@@ -583,11 +610,7 @@ impl MacosCensus {
             .name("nac-process-census".to_string())
             .spawn(move || macos_census_loop(root, seen_thread, stop_thread))
             .ok();
-        Self {
-            seen,
-            stop,
-            thread,
-        }
+        Self { seen, stop, thread }
     }
 
     fn snapshot(&self) -> Vec<libc::pid_t> {
