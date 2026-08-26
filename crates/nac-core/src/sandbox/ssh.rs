@@ -238,8 +238,12 @@ impl SshBackend {
         command.stdin(Stdio::null());
         command.stdout(Stdio::null());
         command.stderr(Stdio::null());
-        let _ = timeout(REMOTE_KILL_TIMEOUT, command.status()).await;
-        Ok(())
+        match timeout(REMOTE_KILL_TIMEOUT, command.status()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(status)) => bail!("SSH command cleanup exited with status {status}"),
+            Ok(Err(error)) => Err(error).context("failed to start SSH command cleanup"),
+            Err(_) => bail!("SSH command cleanup timed out"),
+        }
     }
 
     pub(crate) fn terminal_pty_command(

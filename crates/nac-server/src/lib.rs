@@ -1519,7 +1519,23 @@ impl SessionManager {
             .map(|summary| summary.session_id)
             .collect();
         for session_id in &session_ids {
-            self.delete_session(session_id).await?;
+            let still_exists = sessions::list_sessions(&self.inner.store_path)?
+                .into_iter()
+                .any(|summary| summary.session_id == *session_id);
+            if !still_exists {
+                // Deleting an earlier parent recursively deletes its delegated
+                // sessions. The original project snapshot still contains those
+                // ids, so treat their absence as successful cascade settlement.
+                continue;
+            }
+            if let Err(error) = self.delete_session(session_id).await {
+                let still_exists = sessions::list_sessions(&self.inner.store_path)?
+                    .into_iter()
+                    .any(|summary| summary.session_id == *session_id);
+                if still_exists {
+                    return Err(error);
+                }
+            }
         }
         self.delete_project(project_id)?;
         Ok(session_ids)
@@ -10860,6 +10876,54 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() {
+        let root = temp_root("project_parent_cascade_delete")
+            .canonicalize()
+            .unwrap();
+        seed_direct_with_orchestrator_session_with_base_url(
+            &root,
+            "delegating",
+            "https://api.openai.com/v1".to_string(),
+        );
+        let manager = test_manager(&root);
+        let project = manager
+            .create_project(CreateProjectRequest {
+                name: Some("Cascade delete".to_string()),
+                description: None,
+                cwd: root.clone(),
+                ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
+                default_model_config_id: None,
+            })
+            .await
+            .unwrap();
+        manager
+            .assign_session_to_project(&project.project_id, "delegating")
+            .unwrap();
+        let child_session_id = manager
+            .create_managed_orchestrator_session("delegating", "cascade with project")
+            .await
+            .unwrap();
+        manager
+            .update_session_presentation("delegating", "Pinned parent", true, 0)
+            .await
+            .unwrap();
+
+        let deleted = manager
+            .delete_project_with_sessions(&project.project_id)
+            .await
+            .unwrap();
+        assert!(deleted.contains(&"delegating".to_string()));
+        assert!(deleted.contains(&child_session_id));
+        let store_path = root.join("store.db");
+        assert!(sessions::load_session(&store_path, "delegating").is_err());
+        assert!(sessions::load_session(&store_path, &child_session_id).is_err());
+        assert!(projects::list_projects(&store_path).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
