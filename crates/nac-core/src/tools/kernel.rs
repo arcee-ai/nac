@@ -528,24 +528,33 @@ impl ToolSnapshot {
                         true,
                     );
                 }
+                let resources = match crate::permissions::canonicalize_authorization_resources(
+                    prepared.permission_resources(),
+                    services.runtime.backend.as_ref(),
+                    &services.runtime.store_path,
+                )
+                .await
+                {
+                    Ok(resources) => resources,
+                    Err(error) => {
+                        return ToolResult::text(
+                            format!(
+                                "Error: permission target resolution failed for {name}: {error:#}"
+                            ),
+                            true,
+                        );
+                    }
+                };
+                if let Some(reason) = resources
+                    .iter()
+                    .find_map(|resource| resource.hard_denial.as_deref())
+                {
+                    return ToolResult::text(
+                        format!("Error: permission denied for {name}: {reason}"),
+                        true,
+                    );
+                }
                 if let Some(broker) = &services.runtime.permission_broker {
-                    let resources = match crate::permissions::canonicalize_authorization_resources(
-                        prepared.permission_resources(),
-                        services.runtime.backend.as_ref(),
-                        &services.runtime.store_path,
-                    )
-                    .await
-                    {
-                        Ok(resources) => resources,
-                        Err(error) => {
-                            return ToolResult::text(
-                                format!(
-                                    "Error: permission target resolution failed for {name}: {error:#}"
-                                ),
-                                true,
-                            );
-                        }
-                    };
                     match broker
                         .authorize(
                             name,
@@ -588,9 +597,9 @@ impl ToolSnapshot {
                             true,
                         );
                     }
-                    if let Err(error) = prepared.bind_authorized_resources(&resources, services) {
-                        return error;
-                    }
+                }
+                if let Err(error) = prepared.bind_authorized_resources(&resources, services) {
+                    return error;
                 }
                 prepared.invoke(services, context).await
             }
@@ -618,6 +627,80 @@ mod tests {
     struct CountTool {
         calls: Arc<AtomicUsize>,
         name: &'static str,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct PathInput {
+        path: String,
+    }
+
+    struct PathTool {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl NativeTool for PathTool {
+        type Input = PathInput;
+
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                def_type: "function".into(),
+                function: FunctionDef {
+                    name: "path".into(),
+                    description: "path".into(),
+                    parameters: json!({"type":"object"}),
+                },
+            }
+        }
+
+        fn admission(&self) -> ToolAdmission {
+            ToolAdmission::Exclusive
+        }
+
+        fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+            serde_json::from_value(input)
+                .map_err(|error| ToolResult::text(format!("invalid input: {error}"), true))
+        }
+
+        fn permission_resources(
+            &self,
+            input: &Self::Input,
+            services: ToolServices<'_>,
+        ) -> Result<Vec<PermissionResource>, ToolResult> {
+            let path = services
+                .runtime
+                .backend
+                .resolve_path(&input.path)
+                .map_err(|error| ToolResult::text(error.to_string(), true))?;
+            Ok(vec![PermissionResource::new(
+                "edit",
+                path.display().to_string(),
+            )])
+        }
+
+        fn bind_authorized_resources(
+            &self,
+            input: &mut Self::Input,
+            resources: &[PermissionResource],
+            _services: ToolServices<'_>,
+        ) -> Result<(), ToolResult> {
+            let resource = resources
+                .iter()
+                .find(|resource| resource.action == "edit")
+                .ok_or_else(|| ToolResult::text("authorized edit target missing", true))?;
+            input.path.clone_from(&resource.resource);
+            Ok(())
+        }
+
+        fn execute<'a>(
+            &'a self,
+            input: Self::Input,
+            _services: ToolServices<'a>,
+            _context: &'a ToolCallContext,
+        ) -> BoxFuture<'a, ToolResult> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move { ToolResult::text(input.path, false) })
+        }
     }
 
     impl NativeTool for CountTool {
@@ -855,6 +938,75 @@ mod tests {
         assert!(result.is_error);
         assert!(result.content.to_string().contains("native count denial"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn brokerless_model_invocation_canonicalizes_denies_and_binds_paths() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-kernel-brokerless-canonical-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        let safe = workspace.join("safe");
+        std::fs::create_dir_all(workspace.join(".git")).unwrap();
+        std::fs::create_dir_all(&safe).unwrap();
+        symlink(workspace.join(".git"), workspace.join("git-alias")).unwrap();
+        symlink(&safe, workspace.join("safe-alias")).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = ToolRegistry::builder()
+            .register(PathTool {
+                calls: Arc::clone(&calls),
+            })
+            .finish()
+            .unwrap();
+        let snapshot = registry.snapshot(["path"]).unwrap();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.workspace_cwd = workspace.clone();
+        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace);
+        assert!(runtime.permission_broker.is_none());
+        let client = crate::model::ModelClient::new_for_test();
+        let services = ToolServices {
+            runtime: &runtime,
+            client: &client,
+        };
+        let context = ToolCallContext::default();
+
+        let denied = snapshot
+            .invoke(
+                "path",
+                json!({"path":"git-alias/config"}),
+                services,
+                &context,
+            )
+            .await;
+        assert!(denied.is_error, "{}", denied.content);
+        assert!(denied.content.to_string().contains("Git metadata"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let allowed = snapshot
+            .invoke(
+                "path",
+                json!({"path":"safe-alias/file"}),
+                services,
+                &context,
+            )
+            .await;
+        assert!(!allowed.is_error, "{}", allowed.content);
+        assert_eq!(
+            allowed.content.to_string(),
+            safe.canonicalize()
+                .unwrap()
+                .join("file")
+                .display()
+                .to_string()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

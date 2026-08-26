@@ -229,10 +229,25 @@ Protected initial state verified on 2026-08-25:
   production-embedded Playwright 10/10.
 - Exact ledger successor `3455efb` passed the same complete gate set before its
   review. Exact repair `06ecb9f` implements all four accepted blockers and
-  passes every exact-commit closure gate.
-- Next action: commit this evidence-only ledger successor, repeat every gate at
-  its exact SHA, and obtain a detached-clean four-lane review. Proceed to
-  product smoke and final cleanup/state audit only after GO.
+  passes every exact-commit closure gate. Evidence successor `4e6798f` passed
+  those gates again, but its detached-clean four-lane review returned NO-GO
+  with four accepted blockers: brokerless model calls skip canonical remote
+  hard denials and target binding; `prlimit` can conceal a protected command;
+  SSH cleanup cannot find session-escaped descendants on hosts without
+  `/proc`; and direct-session output artifact records are unbounded.
+- Next action: implement and test those four accepted review findings, then
+  repeat the complete gates and immutable four-lane review. Proceed to product
+  smoke and final cleanup/state audit only after GO.
+- The four-finding repair now makes canonicalization, canonical hard-denial
+  evaluation, and target binding unconditional model-boundary stages; rejects
+  `prlimit` as a concealed executor on local, Podman, and SSH policy paths;
+  discovers an escaped remote descendant from a portable `ps` snapshot when
+  `/proc` is absent; and caps output artifact records independently of bytes.
+  Focused regressions include a live session-escaped cleanup fixture and
+  repeated zero-output direct commands across settlement. The complete
+  precommit gates pass: catalog 2+7+24, core 1097 passed/9 ignored, server 134,
+  binary 21, frontend 172, formatting, warning-denied lint, typecheck,
+  durability, asset freshness, and production-embedded Playwright 10/10.
 
 ## Objective and invariants
 
@@ -572,6 +587,6 @@ Non-negotiable invariants:
 
 ## Exact next action
 
-Closure is still active. Commit the evidence-only successor to exact repair
-`06ecb9f`, gate that exact SHA, and obtain another detached-clean four-lane NAC
-verdict. Preserve `.gitignore`, untracked `AGENTS.md`, and the local notebooks.
+Closure is still active. Commit the four-finding repair, repeat every required
+gate at its exact SHA, and obtain another detached-clean four-lane NAC verdict.
+Preserve `.gitignore`, untracked `AGENTS.md`, and the local notebooks.
