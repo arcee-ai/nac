@@ -165,6 +165,11 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         &update.run_state.token_usages,
         update.run_state.unattributed_token_usage.as_ref(),
     )?;
+    if update.finished_run_id.is_some() != update.finished_run_disposition.is_some() {
+        return Err(anyhow!(
+            "run-state update must pair a finished run id with its terminal disposition"
+        ));
+    }
     if update.finished_run_id.is_some() && update.failed_run_id.is_some() {
         return Err(anyhow!(
             "run-state update cannot both clear and retain the durable recovery row"
@@ -215,7 +220,14 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
                 goal.disposition,
             )?;
         }
-        crate::store::clear_active_run(&tx, &update.session_id, run_id)?;
+        crate::store::clear_active_run(
+            &tx,
+            &update.session_id,
+            run_id,
+            update
+                .finished_run_disposition
+                .expect("validated finished run disposition"),
+        )?;
     } else if let Some(run_id) = update.failed_run_id.as_deref() {
         if let Some(goal) = update.goal_settlement.as_ref() {
             crate::store::settle_session_goal_run_with_connection(

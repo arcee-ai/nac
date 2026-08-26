@@ -1298,10 +1298,14 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        // Freeze run identity while capturing the lock-free GoalRuntime usage
-        // snapshot and committing the goal. Run finish/admission use this same
-        // guard, so a stale run id cannot be bound and then suppress wakeup.
-        let (goal, active_run_id) = {
+        let _wake = self.inbox_wake.lock().await;
+        // Freeze local run identity while capturing the lock-free GoalRuntime
+        // usage snapshot and committing the goal. If no local run exists,
+        // acquire the cross-process operation lease before creating an
+        // unbound goal: a peer-owned run cannot otherwise supply the exact
+        // mid-run token baseline and must fail closed instead of silently
+        // excluding that run from goal accounting.
+        let (goal, idle_lease) = {
             let active = self.lock_active_operation();
             let active_run_id = match active.as_ref() {
                 Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
@@ -1321,6 +1325,22 @@ impl SessionService {
                         continuation: false,
                     })
             });
+            let idle_lease = if active_run_id.is_none() {
+                Some(
+                    sessions::SessionOperationLease::try_acquire(
+                        &self.metadata.store_path,
+                        session_id,
+                    )
+                    .map_err(|error| match error {
+                        sessions::SessionOperationLeaseError::Busy(_) => anyhow::anyhow!(
+                            "cannot create a goal while session '{session_id}' is running in another process"
+                        ),
+                        sessions::SessionOperationLeaseError::Store(error) => error,
+                    })?,
+                )
+            } else {
+                None
+            };
             let goal = crate::store::create_session_goal(
                 &self.metadata.store_path,
                 session_id,
@@ -1328,10 +1348,10 @@ impl SessionService {
                 token_budget,
                 baseline.as_ref(),
             )?;
-            (goal, active_run_id)
+            (goal, idle_lease)
         };
-        if active_run_id.is_none() {
-            self.start_next_direct_inbox_item().await?;
+        if let Some(lease) = idle_lease {
+            self.start_next_direct_inbox_item_with_lease(lease)?;
         }
         Ok(goal)
     }
@@ -1398,9 +1418,21 @@ impl SessionService {
             Err(sessions::SessionOperationLeaseError::Busy(_)) => return Ok(None),
             Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
         };
+        self.start_next_direct_inbox_item_with_lease(lease)
+    }
+
+    fn start_next_direct_inbox_item_with_lease(
+        &self,
+        lease: sessions::SessionOperationLease,
+    ) -> Result<Option<SessionRunHandle>> {
         if self.has_active_operation() {
             return Ok(None);
         }
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
         crate::store::reconcile_session_goal_run(&self.metadata.store_path, session_id)?;
         if let Some(item) =
             crate::store::next_pending_session_inbox_item(&self.metadata.store_path, session_id)?
@@ -2402,6 +2434,22 @@ impl SessionService {
                         .await;
                     }
                 }
+            }
+            crate::store::ActiveRunReconciliation::Failed { run_id } => {
+                self.event_bus.emit_with_context(
+                    SessionEvent::RunFailed {
+                        message: FAILED_RUN_WARNING.to_string(),
+                    },
+                    Some(SessionRunId::from_stored(run_id.clone())),
+                    None,
+                );
+                self.settle_traditional_child_run(
+                    &SessionRunId::from_stored(run_id.clone()),
+                    crate::store::TraditionalChildStatus::Failed,
+                    None,
+                    Some(FAILED_RUN_WARNING.to_string()),
+                )
+                .await;
             }
             crate::store::ActiveRunReconciliation::Interrupted { run_id } => {
                 self.event_bus.emit_with_context(
@@ -3779,6 +3827,15 @@ impl SessionService {
         match durable_terminal {
             DurableRunTerminal::Completed | DurableRunTerminal::Cancelled => {
                 update.finished_run_id = Some(active_run.run_id.to_string());
+                update.finished_run_disposition = Some(match durable_terminal {
+                    DurableRunTerminal::Completed => {
+                        crate::store::RunTerminalDisposition::Completed
+                    }
+                    DurableRunTerminal::Cancelled => {
+                        crate::store::RunTerminalDisposition::Cancelled
+                    }
+                    DurableRunTerminal::Failed => unreachable!(),
+                });
             }
             DurableRunTerminal::Failed => {
                 update.failed_run_id = Some(active_run.run_id.to_string());
@@ -5692,6 +5749,29 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn goal_creation_fails_closed_during_peer_owned_run() {
+        let session_id = "peer-goal-session";
+        let (parts, store_path) =
+            test_direct_active_service("peer_goal", session_id, ModelClient::new_for_test());
+        let _peer_lease =
+            sessions::SessionOperationLease::try_acquire(&store_path, session_id).unwrap();
+
+        let error = parts
+            .service
+            .create_direct_goal("must not be left unbound", None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("running in another process"), "{error}");
+        assert!(crate::store::load_session_goal(&store_path, session_id)
+            .unwrap()
+            .is_none());
+
+        drop(_peer_lease);
+        let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[tokio::test]
     async fn direct_inbox_promotes_queued_prompts_one_at_a_time() {
         use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
@@ -6249,7 +6329,13 @@ pub(super) mod tests {
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .unwrap();
-        crate::store::clear_active_run(&transaction, session_id, "run-terminal").unwrap();
+        crate::store::clear_active_run(
+            &transaction,
+            session_id,
+            "run-terminal",
+            crate::store::RunTerminalDisposition::Completed,
+        )
+        .unwrap();
         transaction.commit().unwrap();
 
         let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id).unwrap();

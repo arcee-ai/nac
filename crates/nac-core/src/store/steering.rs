@@ -140,9 +140,23 @@ fn acknowledge_thread_steering_batch_once(
     }
     let mut conn = open_runtime_connection(path)?;
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    acknowledge_thread_steering_batch_with_connection(&transaction, ids, session_id, dispatch_id)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+pub(super) fn acknowledge_thread_steering_batch_with_connection(
+    connection: &Connection,
+    ids: &[i64],
+    session_id: &str,
+    dispatch_id: &str,
+) -> Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     let delivered_at = now_utc();
     for id in ids {
-        let changed = transaction.execute(
+        let changed = connection.execute(
             "UPDATE thread_steering
              SET status = 'delivered', delivered_at = ?1
              WHERE id = ?2 AND session_id = ?3 AND dispatch_id = ?4 AND status = 'claimed'",
@@ -154,7 +168,6 @@ fn acknowledge_thread_steering_batch_once(
             ));
         }
     }
-    transaction.commit()?;
     Ok(())
 }
 

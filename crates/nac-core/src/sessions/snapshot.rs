@@ -157,6 +157,10 @@ pub struct SessionRunStateUpdate {
     /// Matching durable active run to clear after a canonical completed or
     /// cancelled outcome. `None` for failed runs and non-terminal saves.
     pub finished_run_id: Option<String>,
+    /// Explicit disposition for `finished_run_id`. This must travel with the
+    /// run-state checkpoint so recovery never guesses cancellation from a
+    /// separately appended transcript marker.
+    pub finished_run_disposition: Option<crate::store::RunTerminalDisposition>,
     /// Matching durable active run to retain as a content-free failed terminal
     /// outcome. Mutually exclusive with `finished_run_id`.
     pub failed_run_id: Option<String>,
@@ -184,6 +188,7 @@ impl SessionSnapshot {
             sandbox_spec: self.sandbox_spec.clone(),
             run_state,
             finished_run_id: None,
+            finished_run_disposition: None,
             failed_run_id: None,
             goal_settlement: None,
             updated_at: self.updated_at.clone(),

@@ -713,6 +713,20 @@ pub(crate) fn file_resources(
             lexical_normalize(&resolved_path)
         }
     };
+    resolved_file_resources(action, resolved_path, backend, store_path, mutating)
+}
+
+/// Project a path that has already been resolved to the exact filesystem
+/// object the operation will affect. Deletion operands use this after
+/// canonicalizing only their parent so policy and execution both refer to the
+/// directory entry being unlinked rather than the final symlink's target.
+fn resolved_file_resources(
+    action: &str,
+    resolved_path: PathBuf,
+    backend: &ExecutionBackend,
+    store_path: &Path,
+    mutating: bool,
+) -> Vec<PermissionResource> {
     let display = resolved_path.display().to_string();
     let mut resource = PermissionResource::new(action, display.clone())
         .with_display(display.clone())
@@ -773,32 +787,46 @@ pub(crate) async fn canonicalize_authorization_resources(
     let mut canonical = Vec::new();
     for resource in resources {
         if path_actions.contains(&resource.action.as_str()) {
-            let path = backend
-                .canonicalize_permission_path(Path::new(&resource.resource))
-                .await?;
-            let mut projected = file_resources(
-                &resource.action,
-                path,
-                backend,
-                store_path,
-                resource.action == "edit",
-            );
-            if let Some(requested) = resource.shell_binding.as_deref() {
-                let binding = if resource.preserve_final_component {
-                    let requested = Path::new(requested);
-                    let parent = requested.parent().ok_or_else(|| {
-                        anyhow::anyhow!("shell deletion target has no parent directory")
-                    })?;
-                    let name = requested.file_name().ok_or_else(|| {
-                        anyhow::anyhow!("shell deletion target has no final component")
-                    })?;
-                    backend
-                        .canonicalize_permission_path(parent)
-                        .await?
-                        .join(name)
-                } else {
-                    PathBuf::from(&projected[0].resource)
-                };
+            let (mut projected, binding) = if resource.preserve_final_component {
+                let requested = Path::new(resource.shell_binding.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("shell deletion target is missing its requested path")
+                })?);
+                let parent = requested.parent().ok_or_else(|| {
+                    anyhow::anyhow!("shell deletion target has no parent directory")
+                })?;
+                let name = requested.file_name().ok_or_else(|| {
+                    anyhow::anyhow!("shell deletion target has no final component")
+                })?;
+                let binding = backend
+                    .canonicalize_permission_path(parent)
+                    .await?
+                    .join(name);
+                let projected = resolved_file_resources(
+                    &resource.action,
+                    binding.clone(),
+                    backend,
+                    store_path,
+                    resource.action == "edit",
+                );
+                (projected, Some(binding))
+            } else {
+                let path = backend
+                    .canonicalize_permission_path(Path::new(&resource.resource))
+                    .await?;
+                let projected = file_resources(
+                    &resource.action,
+                    path,
+                    backend,
+                    store_path,
+                    resource.action == "edit",
+                );
+                let binding = resource
+                    .shell_binding
+                    .as_ref()
+                    .map(|_| PathBuf::from(&projected[0].resource));
+                (projected, binding)
+            };
+            if let Some(binding) = binding {
                 projected[0].shell_binding = Some(binding.display().to_string());
                 projected[0].preserve_final_component = resource.preserve_final_component;
             }
@@ -1577,11 +1605,23 @@ fn effective_command_tokens(tokens: &[String]) -> &[String] {
             }
             "time" => {
                 index += 1;
-                while tokens
-                    .get(index)
-                    .is_some_and(|token| token.starts_with('-'))
-                {
-                    index += 1;
+                while let Some(option) = tokens.get(index) {
+                    if option == "--" {
+                        index += 1;
+                        break;
+                    }
+                    if matches!(option.as_str(), "-f" | "--format" | "-o" | "--output") {
+                        index = (index + 2).min(tokens.len());
+                    } else if option.starts_with("--format=")
+                        || option.starts_with("--output=")
+                        || option.starts_with("-f") && option.len() > 2
+                        || option.starts_with("-o") && option.len() > 2
+                        || option.starts_with('-')
+                    {
+                        index += 1;
+                    } else {
+                        break;
+                    }
                 }
             }
             "busybox" => index += 1,
@@ -3029,6 +3069,8 @@ mod tests {
             ": && ! rm -rf $PWD",
             "time ! rm -rf $PWD",
             "time -p ! rm -rf $PWD",
+            "/usr/bin/time -o /tmp/nac-time rm -rf \"$PWD\"",
+            "time --format=%e --output /tmp/nac-time rm -rf \"$PWD\"",
             "coproc rm -rf /workspace",
             "rm -rf \"$PWD\"",
             "env MODE=test rm -rf \"$PWD\"",
@@ -3068,6 +3110,7 @@ mod tests {
             "casefold --help",
             "!foo rm -rf $PWD",
             "printf '%s' 'rm -rf $PWD'",
+            "/usr/bin/time -o /tmp/nac-time printf '%s' 'rm -rf $PWD'",
         ] {
             assert!(
                 shell_resources(command, Path::new("/workspace"), &backend)[0]
@@ -3209,7 +3252,13 @@ mod tests {
         .unwrap();
         assert!(authorized.iter().any(|resource| {
             resource.action == "edit"
-                && resource.resource == external.canonicalize().unwrap().display().to_string()
+                && resource.resource
+                    == workspace
+                        .canonicalize()
+                        .unwrap()
+                        .join("link")
+                        .display()
+                        .to_string()
         }));
         let bound =
             bind_authorized_shell_command(command, &workspace.canonicalize().unwrap(), &authorized)
@@ -3222,6 +3271,48 @@ mod tests {
             )
         );
         assert!(!bound.ends_with(external.canonicalize().unwrap().to_str().unwrap()));
+
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rm_final_symlink_keeps_requested_git_path_hard_denial() {
+        use std::os::unix::fs::symlink;
+
+        let base =
+            std::env::temp_dir().join(format!("nac-rm-git-final-link-{}", uuid::Uuid::new_v4()));
+        let workspace = base.join("workspace");
+        let external = base.join("external-file");
+        std::fs::create_dir_all(workspace.join(".git")).unwrap();
+        std::fs::write(&external, "outside").unwrap();
+        symlink(&external, workspace.join(".git/escape")).unwrap();
+        let backend = local(&workspace);
+        let command = "rm -f .git/escape";
+        let projected = shell_resources(command, &workspace, &backend);
+        let authorized = canonicalize_authorization_resources(
+            &projected,
+            &backend,
+            Path::new("/unrelated/store.db"),
+        )
+        .await
+        .unwrap();
+        let requested = workspace.canonicalize().unwrap().join(".git/escape");
+        let deletion = authorized
+            .iter()
+            .find(|resource| resource.action == "edit")
+            .expect("rm deletion resource");
+        assert_eq!(deletion.resource, requested.display().to_string());
+        assert!(deletion.hard_denial.is_some());
+        assert_eq!(
+            deletion.shell_binding.as_deref(),
+            Some(requested.to_str().unwrap())
+        );
+        let bound =
+            bind_authorized_shell_command(command, &workspace.canonicalize().unwrap(), &authorized)
+                .unwrap();
+        assert_eq!(bound, format!("rm -f {}", requested.display()));
+        assert!(!bound.contains(external.canonicalize().unwrap().to_str().unwrap()));
 
         let _ = std::fs::remove_dir_all(base);
     }

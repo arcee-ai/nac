@@ -1786,11 +1786,57 @@ impl Agent {
         Ok(())
     }
 
-    /// Append the already-staged transcript tail `self.messages[from_idx..]`
-    /// to the log (steering commit point: stage→ack→append).
-    async fn log_transcript_tail(&mut self, from_idx: usize) -> Result<()> {
+    /// Commit the already-staged steering tail and its delivery statuses in
+    /// one SQLite transaction. The vector is staged first, but neither the
+    /// canonical transcript nor acknowledgement can become durable alone.
+    async fn commit_staged_steering(
+        &mut self,
+        from_idx: usize,
+        steering_ids: &[i64],
+        session_id: &str,
+        dispatch_id: &str,
+    ) -> Result<()> {
         let staged = self.messages[from_idx..].to_vec();
-        self.log_transcript_batch(from_idx as u64, &staged).await
+        let Some(sink) = &self.transcript_log else {
+            return crate::store::acknowledge_thread_steering_batch(
+                &self.tool_runtime.store_path,
+                steering_ids,
+                session_id,
+                dispatch_id,
+            );
+        };
+        if staged.is_empty() {
+            return Ok(());
+        }
+        let writer = sink.writer.clone();
+        let sink_session_id = sink.session_id.clone();
+        let dispatch_id = dispatch_id.to_string();
+        let steering_ids = steering_ids.to_vec();
+        let batch_len = staged.len() as u64;
+        let pre_submission_committed = self.committed_log_len;
+        self.committed_log_len = self.committed_log_len.max(from_idx as u64 + batch_len);
+        let committed = tokio::task::spawn_blocking(move || {
+            writer.append_claimed_thread_steering(
+                &sink_session_id,
+                &dispatch_id,
+                &steering_ids,
+                from_idx as u64,
+                &staged,
+            )
+        })
+        .await
+        .map_err(|error| anyhow!("steering transcript commit task failed: {error}"))?;
+        match committed {
+            Ok(()) => {
+                self.event_sink
+                    .emit_transcript_appended(from_idx as u64 + batch_len);
+                Ok(())
+            }
+            Err(error) => {
+                self.committed_log_len = pre_submission_committed;
+                Err(error)
+            }
+        }
     }
 
     /// Delete log rows with `idx >= from_idx` (crash/cancel normalization).
@@ -1865,13 +1911,10 @@ impl Agent {
             }
         }
 
-        let steering_ids = records.iter().map(|record| record.id).collect::<Vec<_>>();
-        if let Err(error) = crate::store::acknowledge_thread_steering_batch(
-            &store_path,
-            &steering_ids,
-            &session_id,
-            &dispatch_id,
-        ) {
+        if let Err(error) = self
+            .commit_staged_steering(message_checkpoint, &staged_ids, &session_id, &dispatch_id)
+            .await
+        {
             self.messages.truncate(message_checkpoint);
             for id in &staged_ids {
                 self.appended_steering_ids.remove(id);
@@ -1879,25 +1922,10 @@ impl Agent {
             return Err(error);
         }
 
-        // Transcript commit point (steering): stage→ack→append. The staged
-        // messages are appended to the log only after the ack is durable. On
-        // log failure they are truncated from the vec — unlike the
-        // ack-failure path above, the ids stay staged because the ack is
-        // durable: the records keep their delivered status and are never
-        // redelivered. Keeping the messages would break the log-first
-        // invariant (the vec never holds an undurable message): the next
-        // append would use `idx = messages.len()` past the unlogged rows,
-        // leaving a permanent gap in the log that fails the restore merge
-        // and store-backed reads. The acked steering is thereby lost from
-        // the transcript — accepted: a transient echo is not worth a
-        // bricked session, and the durable steering records still show the
-        // delivery.
-        if let Err(error) = self.log_transcript_tail(message_checkpoint).await {
-            self.messages.truncate(message_checkpoint);
-            return Err(error);
-        }
-
-        for record in records {
+        for record in records
+            .into_iter()
+            .filter(|record| staged_ids.contains(&record.id))
+        {
             if let Some(thread_name) = &thread_name {
                 self.emit(AgentEvent::ThreadSteeringDelivered {
                     name: thread_name.clone(),

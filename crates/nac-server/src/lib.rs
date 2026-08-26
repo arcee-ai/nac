@@ -118,6 +118,100 @@ const WORKSPACE_DIFF_ERROR_CACHE_TTL: Duration = Duration::from_secs(30);
 const WORKSPACE_DIFF_MEASURE_BUDGET: Duration = Duration::from_secs(4);
 /// How long a working git target is taken on trust before it is checked again.
 const GIT_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
+
+enum SuppressedCompletion {
+    Traditional { session_id: String, generation: u64 },
+    Managed { session_id: String, generation: u64 },
+}
+
+struct CompletionSuppressionRollback {
+    store_path: PathBuf,
+    suppressed: Vec<SuppressedCompletion>,
+    armed: bool,
+}
+
+impl CompletionSuppressionRollback {
+    fn new(store_path: PathBuf) -> Self {
+        Self {
+            store_path,
+            suppressed: Vec::new(),
+            armed: true,
+        }
+    }
+
+    fn suppress_running(&mut self, session_id: &str) -> Result<()> {
+        let managed_already = self.suppressed.iter().any(|entry| {
+            matches!(entry, SuppressedCompletion::Managed { session_id: existing, .. } if existing == session_id)
+        });
+        if !managed_already
+            && nac_core::store::load_managed_orchestrator(&self.store_path, session_id)?
+                .is_some_and(|record| record.status == ManagedOrchestratorStatus::Running)
+        {
+            let record = nac_core::store::suppress_managed_orchestrator_completion(
+                &self.store_path,
+                session_id,
+            )?;
+            self.suppressed.push(SuppressedCompletion::Managed {
+                session_id: session_id.to_string(),
+                generation: record.generation,
+            });
+        }
+
+        let child_already = self.suppressed.iter().any(|entry| {
+            matches!(entry, SuppressedCompletion::Traditional { session_id: existing, .. } if existing == session_id)
+        });
+        if !child_already
+            && nac_core::store::load_traditional_child(&self.store_path, session_id)?.is_some_and(
+                |record| record.status == nac_core::store::TraditionalChildStatus::Running,
+            )
+        {
+            let record = nac_core::store::suppress_traditional_child_completion(
+                &self.store_path,
+                session_id,
+            )?;
+            self.suppressed.push(SuppressedCompletion::Traditional {
+                session_id: session_id.to_string(),
+                generation: record.generation,
+            });
+        }
+        Ok(())
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CompletionSuppressionRollback {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        for entry in self.suppressed.drain(..).rev() {
+            let result = match entry {
+                SuppressedCompletion::Traditional {
+                    session_id,
+                    generation,
+                } => nac_core::store::restore_traditional_child_completion(
+                    &self.store_path,
+                    &session_id,
+                    generation,
+                ),
+                SuppressedCompletion::Managed {
+                    session_id,
+                    generation,
+                } => nac_core::store::restore_managed_orchestrator_completion(
+                    &self.store_path,
+                    &session_id,
+                    generation,
+                ),
+            };
+            if let Err(error) = result {
+                eprintln!("nac: failed to roll back completion suppression: {error:#}");
+            }
+        }
+    }
+}
 /// A target that failed is rechecked sooner, so bringing a host back does not
 /// mean waiting out a long cache.
 const GIT_PROBE_ERROR_CACHE_TTL: Duration = Duration::from_secs(10);
@@ -3157,27 +3251,8 @@ impl SessionManager {
             .await
             .get(session_id)
             .cloned();
-        let suppress_relationship_completion = || -> Result<()> {
-            if nac_core::store::load_managed_orchestrator(&self.inner.store_path, session_id)?
-                .is_some_and(|record| record.status == ManagedOrchestratorStatus::Running)
-            {
-                nac_core::store::suppress_managed_orchestrator_completion(
-                    &self.inner.store_path,
-                    session_id,
-                )?;
-            }
-            if nac_core::store::load_traditional_child(&self.inner.store_path, session_id)?
-                .is_some_and(|record| {
-                    record.status == nac_core::store::TraditionalChildStatus::Running
-                })
-            {
-                nac_core::store::suppress_traditional_child_completion(
-                    &self.inner.store_path,
-                    session_id,
-                )?;
-            }
-            Ok(())
-        };
+        let mut suppression_rollback =
+            CompletionSuppressionRollback::new(self.inner.store_path.clone());
         if let Some(service) = service.as_ref() {
             if service.active_compaction().is_some() {
                 return Err(anyhow!("session is busy with an active manual compaction"));
@@ -3185,7 +3260,7 @@ impl SessionManager {
             if let Some(active_run) = service.active_run() {
                 // Persist suppression before cancellation can settle the
                 // generation. This does not rewrite its admitted mode.
-                suppress_relationship_completion()?;
+                suppression_rollback.suppress_running(session_id)?;
                 if let Err(error) = service
                     .connect_client()
                     .request_cancel(&active_run.run_id)
@@ -3203,7 +3278,7 @@ impl SessionManager {
         let _operation_lease =
             sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
         self.require_persisted_operation_session(session_id)?;
-        suppress_relationship_completion()?;
+        suppression_rollback.suppress_running(session_id)?;
 
         let orchestrators =
             nac_core::store::list_managed_orchestrators(&self.inner.store_path, session_id)?;
@@ -3247,6 +3322,7 @@ impl SessionManager {
         if !deleted {
             return Err(anyhow!("session '{}' was not found", session_id));
         }
+        suppression_rollback.disarm();
         self.inner.active_sessions.write().await.remove(session_id);
         if let Some(service) = service {
             // Explicitly destroy the sandbox even if SSE handlers retained the service.
@@ -10293,9 +10369,18 @@ mod tests {
         let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-goal-test-key"));
         seed_direct_session(&root, "direct");
         seed_editable_session(&root, "orchestrator");
-        let store_path = root.join("store.db");
-        let _lease = sessions::SessionOperationLease::try_acquire(&store_path, "direct").unwrap();
-        let app = router(test_manager(&root));
+        let endpoint = point_session_at_hanging_endpoint(&root, "direct").await;
+        let manager = test_manager(&root);
+        manager
+            .submit_prompt(
+                "direct",
+                SubmitPromptRequest {
+                    prompt: "hold the local run open".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let app = router(manager.clone());
 
         let empty = get_response(app.clone(), "/sessions/direct/goal", None).await;
         assert_eq!(empty.status(), StatusCode::OK);
@@ -10382,6 +10467,8 @@ mod tests {
 
         let rejected = get_response(app, "/sessions/orchestrator/goal", None).await;
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        manager.cancel_active_run("direct").await.unwrap();
+        endpoint.abort();
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -10812,6 +10899,7 @@ mod tests {
         let mut terminal_snapshot = snapshot;
         let mut update = terminal_snapshot.apply_run_state(sessions::SessionRunState::default());
         update.finished_run_id = Some("terminal-run".to_string());
+        update.finished_run_disposition = Some(nac_core::store::RunTerminalDisposition::Completed);
         sessions::save_session_run_state(&store_path, &update).unwrap();
         assert!(
             nac_core::store::load_run_recovery(&store_path, &orchestrator)
