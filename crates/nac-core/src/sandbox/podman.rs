@@ -92,26 +92,42 @@ fn start_guidance() -> String {
     "check 'podman info' on this host for why the runtime is not responding".to_string()
 }
 
-pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
-if command -v setsid >/dev/null 2>&1; then
-  setsid bash -c "$1" &
-else
-  set -m
-  bash -c "$1" &
-fi
-pid=$!
-printf '%s' "$pid" > "$pidfile"
-wait "$pid"
-status=$?
-rm -f "$pidfile"
-exit "$status""#;
-
-pub(crate) const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$2
-printf '%s' "$$" > "$pidfile"
+pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"supervisor='pidfile=$2
+printf '\''%s'\'' "$$" > "$pidfile"
 bash -c "$1"
 status=$?
+pgid=$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '\'' '\'')
+group_members() {
+  [ -n "$pgid" ] || return 0
+  (ps -eo pid=,pgid= 2>/dev/null || ps -ax -o pid= -o pgid= 2>/dev/null) |
+    awk -v group="$pgid" -v self="$$" '\''$2 == group && $1 != self { print $1 }'\''
+}
+for child in $(group_members); do
+  kill -TERM "$child" 2>/dev/null || true
+done
+sleep 0.1
+for child in $(group_members); do
+  kill -KILL "$child" 2>/dev/null || true
+done
 rm -f "$pidfile"
-exit "$status""#;
+exit "$status"'
+if command -v setsid >/dev/null 2>&1; then
+  exec setsid bash -c "$supervisor" nac-supervisor "$1" "$2"
+else
+  set -m
+  bash -c "$supervisor" nac-supervisor "$1" "$2" &
+  supervisor_pid=$!
+  if [ "${3:-}" = pty ]; then
+    fg %1 >/dev/null 2>/dev/null
+  else
+    wait "$supervisor_pid" 2>/dev/null
+  fi
+fi"#;
+
+// PTYs use the same foreground supervisor. The requested command retains the
+// inherited terminal file descriptors, while the supervisor keeps the process
+// group identity alive until successful-exit descendant cleanup is complete.
+pub(crate) const SANDBOX_PTY_WRAPPER: &str = SANDBOX_EXEC_WRAPPER;
 
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
 pid=$(cat "$pidfile" 2>/dev/null) || exit 0
@@ -368,6 +384,7 @@ impl PodmanSession {
             "nac-pty".to_string(),
             cmd_str.to_string(),
             pidfile.clone(),
+            "pty".to_string(),
         ];
         let mut cmd = PtyCommandBuilder::new("podman");
         cmd.args(self.exec_args("bash", &pty_args, true, true, cwd, envs));
@@ -983,17 +1000,107 @@ mod tests {
 
     #[test]
     fn sandbox_wrappers_track_and_kill_process_group() {
-        assert!(SANDBOX_EXEC_WRAPPER.contains("setsid bash -c"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("exec setsid bash -c"));
         assert!(
-            SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidfile\""),
+            SANDBOX_EXEC_WRAPPER.contains("nac-supervisor"),
             "exec wrapper: {SANDBOX_EXEC_WRAPPER}"
         );
-        assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidfile\""));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("group_members()"));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("kill -KILL \"$child\""));
+        assert_eq!(SANDBOX_PTY_WRAPPER, SANDBOX_EXEC_WRAPPER);
         assert!(SANDBOX_PTY_WRAPPER.contains("bash -c \"$1\""));
         assert!(!SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn successful_wrapper_completion_kills_background_group_members() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let root =
+            std::env::temp_dir().join(format!("nac-wrapper-descendant-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let pid_path = root.join("pid");
+        let wrapper_pidfile = root.join("wrapper.pid");
+        let requested = format!(
+            "sh -c 'trap \"\" HUP TERM; printf %s $$ > {}; exec sleep 30' </dev/null >/dev/null 2>&1 & while [ ! -s {} ]; do sleep 0.01; done",
+            pid_path.display(),
+            pid_path.display(),
+        );
+        let output = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(SANDBOX_EXEC_WRAPPER)
+            .arg("nac-exec")
+            .arg(requested)
+            .arg(&wrapper_pidfile)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "wrapper failed with signal {:?}: {}",
+            output.status.signal(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "wrapper added stderr noise: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let pid = std::fs::read_to_string(&pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        for _ in 0..100 {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "descendant survived");
+        assert!(!wrapper_pidfile.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_wrapper_fallback_keeps_requested_stdio_and_status() {
+        use std::io::Write;
+
+        let root =
+            std::env::temp_dir().join(format!("nac-wrapper-pty-fallback-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let wrapper_pidfile = root.join("wrapper.pid");
+        let mut child = std::process::Command::new("bash")
+            .env("PATH", "/usr/bin:/bin")
+            .arg("-c")
+            .arg(SANDBOX_PTY_WRAPPER)
+            .arg("nac-pty")
+            .arg("read value; printf 'exact-pty:%s' \"$value\"")
+            .arg(&wrapper_pidfile)
+            .arg("pty")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(b"input\n").unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "exact-pty:input");
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!wrapper_pidfile.exists());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

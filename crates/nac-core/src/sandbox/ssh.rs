@@ -257,6 +257,7 @@ impl SshBackend {
             "nac-pty".to_string(),
             shell_quote(cmd_str),
             shell_quote_path(&pidfile),
+            "pty".to_string(),
         ];
         let remote = self.remote_command_in_dir(dir, envs, &words);
         let mut cmd = PtyCommandBuilder::new("ssh");

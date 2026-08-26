@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
 
-use crate::process::{isolate_process_group, terminate_child_tree};
+use crate::process::ProcessTreeGuard;
 use crate::sandbox::ExecutionBackend;
 use crate::tools::ThreadCancellation;
 
@@ -388,16 +388,21 @@ impl TerminalManager {
                 .map(|(key, value)| (key.to_string(), value.to_string())),
         );
         let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
-        if self.isolate_process_groups {
-            isolate_process_group(&mut command);
-        }
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = match command.spawn() {
-            Ok(child) => child,
+        let spawned = if self.isolate_process_groups {
+            ProcessTreeGuard::spawn_supervised(&mut command)
+        } else {
+            command.spawn().map(|child| {
+                let guard = ProcessTreeGuard::for_child(&child);
+                (child, guard)
+            })
+        };
+        let (mut child, mut process_tree) = match spawned {
+            Ok(spawned) => spawned,
             Err(error) => {
                 return CommandOutput {
                     status: CommandStatus::SpawnError,
@@ -495,7 +500,7 @@ impl TerminalManager {
             if let Some(pidfile) = pidfile.as_deref() {
                 let _ = backend.terminal_pipe_kill(pidfile).await;
             }
-            match terminate_child_tree(&mut child).await {
+            match process_tree.terminate(&mut child).await {
                 Ok(()) => force_reader_shutdown = true,
                 Err(error) => {
                     reader_shutdown.cancel();
@@ -507,6 +512,15 @@ impl TerminalManager {
                 }
             }
             exit_code = None;
+        } else if self.isolate_process_groups {
+            // A successful shell leader can leave background descendants.
+            // The dedicated owned group leader prevents pgid reuse while we
+            // tear down that group after reaping the requested command.
+            process_tree.mark_leader_reaped();
+            process_tree.finish().await;
+            force_reader_shutdown = true;
+        } else {
+            process_tree.disarm();
         }
 
         let preserve_status = !process_exited;
@@ -893,6 +907,38 @@ mod tests {
                 .content,
             "outerr"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn successful_one_shot_kills_background_descendants() {
+        let manager = TerminalManager::new();
+        let root =
+            std::env::temp_dir().join(format!("nac-one-shot-descendant-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let pid_path = root.join("pid");
+        let command = format!(
+            "sh -c 'trap \"\" HUP TERM; printf %s $$ > {}; exec sleep 30' </dev/null >/dev/null 2>&1 & while [ ! -s {} ]; do sleep 0.01; done",
+            pid_path.display(),
+            pid_path.display(),
+        );
+        let output = manager
+            .exec_one_shot(&command, None, 120, 40, 5_000, 8_000, &backend(), None)
+            .await;
+        assert_eq!(output.status, CommandStatus::Completed);
+        assert_eq!(output.exit_code, Some(0));
+        let pid = std::fs::read_to_string(&pid_path)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        for _ in 0..100 {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "descendant survived");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
