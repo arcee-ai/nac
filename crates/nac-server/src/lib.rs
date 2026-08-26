@@ -130,6 +130,31 @@ struct CompletionSuppressionRollback {
     armed: bool,
 }
 
+struct SandboxResourceLeaseRollback {
+    service: Option<Arc<SessionService>>,
+}
+
+impl SandboxResourceLeaseRollback {
+    fn new(service: Option<Arc<SessionService>>) -> Self {
+        Self { service }
+    }
+
+    fn disarm(&mut self) {
+        self.service = None;
+    }
+}
+
+impl Drop for SandboxResourceLeaseRollback {
+    fn drop(&mut self) {
+        let Some(service) = self.service.take() else {
+            return;
+        };
+        if let Err(error) = service.acquire_sandbox_resource_lease() {
+            eprintln!("nac: failed to restore sandbox resource ownership: {error:#}");
+        }
+    }
+}
+
 impl CompletionSuppressionRollback {
     fn new(store_path: PathBuf) -> Self {
         Self {
@@ -2216,6 +2241,7 @@ impl SessionManager {
         })?;
         let parts = SessionService::from_orchestrator_run_config(run_config);
         let service = parts.service;
+        service.acquire_sandbox_resource_lease()?;
         let snapshot = service.frontend_snapshot().await?;
         let session_id = snapshot
             .metadata
@@ -2995,6 +3021,27 @@ impl SessionManager {
         })
     }
 
+    async fn execute_workspace_mutation<T, F>(
+        admission: WorkspaceMutationAdmission,
+        task_context: &'static str,
+        operation: F,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&GitTarget) -> Result<T> + Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || {
+            // The admission owns every process-local and cross-process lease.
+            // Moving it into this uncancellable closure keeps authority alive
+            // even if the request future awaiting the JoinHandle is aborted.
+            let result = operation(&admission.target);
+            drop(admission);
+            result
+        })
+        .await
+        .with_context(|| task_context)?
+    }
+
     /// The checkout of a session, for read-only inspection.
     async fn workspace_root(&self, session_id: &str) -> Result<GitTarget> {
         let summary = self
@@ -3127,23 +3174,21 @@ impl SessionManager {
     ) -> Result<workspace::BranchList> {
         self.require_primary_operation_session(session_id)?;
         let admission = self.idle_workspace_root(session_id).await?;
-        let target = admission.target.clone();
 
-        tokio::task::spawn_blocking(move || {
+        Self::execute_workspace_mutation(admission, "branch switch task failed", move |target| {
             if request.create {
                 // A new branch takes the uncommitted work with it, which is
                 // usually the point of making one, so a dirty tree is fine.
-                return workspace::create_branch(&target, &request.name);
+                return workspace::create_branch(target, &request.name);
             }
-            if workspace::list_branches(&target)?.dirty {
+            if workspace::list_branches(target)?.dirty {
                 return Err(anyhow!(
                     "workspace has uncommitted changes; commit or stash them before switching"
                 ));
             }
-            workspace::switch_branch(&target, &request.name)
+            workspace::switch_branch(target, &request.name)
         })
         .await
-        .context("branch switch task failed")?
     }
 
     /// Commit the whole checkout on the user's behalf. Guarded like a branch
@@ -3156,11 +3201,11 @@ impl SessionManager {
     ) -> Result<workspace::CommitOutcome> {
         self.require_primary_operation_session(session_id)?;
         let admission = self.idle_workspace_root(session_id).await?;
-        let target = admission.target.clone();
 
-        tokio::task::spawn_blocking(move || workspace::commit_all(&target, &request.message))
-            .await
-            .context("commit task failed")?
+        Self::execute_workspace_mutation(admission, "commit task failed", move |target| {
+            workspace::commit_all(target, &request.message)
+        })
+        .await
     }
 
     pub async fn session_skills(
@@ -3392,7 +3437,14 @@ impl SessionManager {
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
         self.require_primary_operation_session(session_id)?;
-        self.delete_session_cascade(session_id).await
+        // Own the deletion in an independent task. Dropping an HTTP/request
+        // future must not drop lifecycle leases while an already-launched
+        // Podman removal or another destructive cleanup continues.
+        let manager = self.clone();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move { manager.delete_session_cascade(&session_id).await })
+            .await
+            .context("session deletion task failed")?
     }
 
     /// Parent-owned deletion path. Once a primary session has passed the
@@ -3441,6 +3493,13 @@ impl SessionManager {
                 return Err(anyhow!("session is busy with an active operation"));
             }
         }
+        if let Some(service) = service.as_ref() {
+            service.release_sandbox_resource_lease();
+        }
+        // Declare the rollback before the exclusive leases. On every failure,
+        // Rust drops those exclusive leases first and this guard then restores
+        // peer-visible ownership for a sandbox that remains attached.
+        let mut sandbox_lease_rollback = SandboxResourceLeaseRollback::new(service.clone());
         let _resource_lease = sessions::SessionResourceMutationLease::try_acquire(
             &self.inner.store_path,
             session_id,
@@ -3505,6 +3564,7 @@ impl SessionManager {
         }
         suppression_rollback.disarm();
         self.inner.active_sessions.write().await.remove(session_id);
+        sandbox_lease_rollback.disarm();
         if service.is_none() {
             if let Some(worktree) = persisted_worktree {
                 runtime::cleanup_session_worktree(&worktree);
@@ -3694,7 +3754,9 @@ impl SessionManager {
             )
             .await?
         };
-        Ok(SessionService::from_orchestrator_run_config(run_config).service)
+        let service = SessionService::from_orchestrator_run_config(run_config).service;
+        service.acquire_sandbox_resource_lease()?;
+        Ok(service)
     }
 
     async fn resume_session_attachment(
@@ -3727,11 +3789,9 @@ impl SessionManager {
                 Some(self.inner.worker_executable.clone()),
             )
             .await?;
-        Ok((
-            SessionService::from_orchestrator_run_config(run_config).service,
-            cacheable,
-            operation_lease,
-        ))
+        let service = SessionService::from_orchestrator_run_config(run_config).service;
+        service.acquire_sandbox_resource_lease()?;
+        Ok((service, cacheable, operation_lease))
     }
 
     async fn create_managed_orchestrator_session(
@@ -8965,6 +9025,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_delete_request_keeps_authority_until_podman_cleanup_settles() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cancelled_durable_sandbox_delete");
+        seed_editable_session(&root, "sandbox-session");
+        let store_path = root.join("store.db");
+        let mut snapshot = sessions::load_session(&store_path, "sandbox-session").unwrap();
+        nac_core::test_support::set_default_sandbox_spec(&mut snapshot);
+        sessions::save_session(&store_path, &snapshot).unwrap();
+
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        let ready = root.join("podman-ready");
+        let release = root.join("podman-release");
+        std::fs::write(
+            &podman,
+            "#!/bin/sh\n: > \"$NAC_TEST_PODMAN_READY\"\nwhile [ ! -f \"$NAC_TEST_PODMAN_RELEASE\" ]; do /bin/sleep 0.01; done\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_ready = std::env::var_os("NAC_TEST_PODMAN_READY");
+        let original_release = std::env::var_os("NAC_TEST_PODMAN_RELEASE");
+        unsafe {
+            std::env::set_var("PATH", &bin);
+            std::env::set_var("NAC_TEST_PODMAN_READY", &ready);
+            std::env::set_var("NAC_TEST_PODMAN_RELEASE", &release);
+        }
+
+        let manager = test_manager(&root);
+        let delete_manager = manager.clone();
+        let request =
+            tokio::spawn(async move { delete_manager.delete_session("sandbox-session").await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !ready.exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Podman cleanup should start");
+        request.abort();
+
+        assert!(matches!(
+            sessions::SessionResourceMutationLease::try_acquire(&store_path, "sandbox-session"),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        assert!(matches!(
+            sessions::SessionOperationLease::try_acquire(&store_path, "sandbox-session"),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+
+        std::fs::write(&release, b"release").unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while sessions::load_session(&store_path, "sandbox-session").is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("owned deletion task should finish after cleanup");
+        drop(
+            sessions::SessionResourceMutationLease::try_acquire(&store_path, "sandbox-session")
+                .unwrap(),
+        );
+
+        unsafe {
+            for (name, value) in [
+                ("PATH", original_path),
+                ("NAC_TEST_PODMAN_READY", original_ready),
+                ("NAC_TEST_PODMAN_RELEASE", original_release),
+            ] {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct ScopedModelEnv {
@@ -12354,6 +12497,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_workspace_request_keeps_leases_until_blocking_git_settles() {
+        let root = temp_root("cancelled_workspace_mutation_leases");
+        let output = std::process::Command::new("git")
+            .args(["-C", root.to_str().unwrap(), "init"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        seed_direct_session(&root, "session");
+        let manager = test_manager(&root);
+        let admission = manager.idle_workspace_root("session").await.unwrap();
+        let workspace_identity = admission.target.lease_identity();
+        let store_path = root.join("store.db");
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+
+        let request = tokio::spawn(async move {
+            SessionManager::execute_workspace_mutation(
+                admission,
+                "test workspace mutation failed",
+                move |_| {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    Ok(())
+                },
+            )
+            .await
+        });
+        started_rx.await.unwrap();
+        request.abort();
+        assert!(matches!(
+            sessions::WorkspaceActivityLease::try_acquire(&store_path, &workspace_identity),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        assert!(matches!(
+            sessions::SessionOperationLease::try_acquire(&store_path, "session"),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(workspace) =
+                    sessions::WorkspaceActivityLease::try_acquire(&store_path, &workspace_identity)
+                {
+                    drop(workspace);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("blocking mutation should eventually release its leases");
+        drop(sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn parent_deletion_excludes_late_child_relationship_commit() {
         let root = temp_root("delete_excludes_child_create");
         seed_direct_session(&root, "parent");
@@ -13689,6 +13889,56 @@ thread_timeout_secs = 7200
         let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
         assert_eq!(stored.model, "committed-model");
         assert_eq!(stored.config_version, 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn independent_manager_patch_rejects_peer_sandbox_resource_lease() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("cross_manager_sandbox_resource_lease");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+        seed_editable_session(&root, "session");
+        let store_path = root.join("store.db");
+        let held = sessions::SessionResourceLease::try_acquire(&store_path, "session")
+            .expect("peer attached sandbox lease");
+        let manager = test_manager(&root);
+
+        let conflict = manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("blocked-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect_err("peer sandbox ownership must reject config replacement");
+        assert_eq!(ApiError::from(conflict).status, StatusCode::CONFLICT);
+        assert_eq!(
+            sessions::load_session(&store_path, "session")
+                .unwrap()
+                .model,
+            "model-a"
+        );
+
+        drop(held);
+        manager
+            .update_session_config(
+                "session",
+                UpdateConfigRequest {
+                    model: RequestField::Value("committed-model".to_string()),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sessions::load_session(&store_path, "session")
+                .unwrap()
+                .model,
+            "committed-model"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
