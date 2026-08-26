@@ -1727,12 +1727,25 @@ fn shell_path_candidate(tokens: &[String], index: usize) -> Option<(Option<&str>
             || index > 0 && matches!(tokens[index - 1].as_str(), "--git-dir" | "--work-tree"));
     let explicit_command_path = index == command_index && candidate.contains('/');
     let known_bare_path = bare_relative_path_position(tokens, index);
+    let rm_operand = command == "rm" && rm_operand_path_position(tokens, command_index, index);
     (previous_takes_path
         || git_global_path
         || explicit_command_path
         || looks_like_shell_path(candidate)
-        || known_bare_path)
+        || known_bare_path
+        || rm_operand)
         .then(|| (option, Path::new(candidate)))
+}
+
+fn rm_operand_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    if index <= command_index {
+        return false;
+    }
+    let token = &tokens[index];
+    !token.starts_with('-')
+        || tokens[command_index + 1..index]
+            .iter()
+            .any(|candidate| candidate == "--")
 }
 
 fn shell_path_requested_path(
@@ -1793,7 +1806,8 @@ fn shell_path_is_mutating(tokens: &[String], index: usize) -> bool {
                 | "touch"
                 | "truncate"
         )
-        && !tokens[index].starts_with('-');
+        && (!tokens[index].starts_with('-')
+            || command == "rm" && rm_operand_path_position(tokens, command_index, index));
     let in_place_editor = index > command_index
         && matches!(command.as_str(), "perl" | "sed")
         && tokens[command_index + 1..index].iter().any(|token| {
@@ -2246,7 +2260,7 @@ fn opaque_hard_shell_denial(
     cwd: &Path,
     backend: &ExecutionBackend,
 ) -> Option<String> {
-    if raw_shell_control_prefix(command) {
+    if raw_shell_control_syntax(command) {
         return Some(
             "shell control syntax is blocked because it can hide protected commands".to_string(),
         );
@@ -2280,22 +2294,121 @@ fn opaque_hard_shell_denial(
     None
 }
 
-fn raw_shell_control_prefix(command: &str) -> bool {
-    let command = command.trim_start();
-    [
-        "!", "{", "}", "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done",
-        "case", "esac", "select", "function", "[[", "]]",
-    ]
-    .iter()
-    .any(|prefix| {
-        command.strip_prefix(prefix).is_some_and(|remainder| {
-            remainder.is_empty()
-                || remainder
-                    .chars()
-                    .next()
-                    .is_some_and(|next| next.is_whitespace() || matches!(next, ';' | '|' | '&'))
-        })
-    })
+fn raw_shell_control_syntax(command: &str) -> bool {
+    fn is_control_keyword(word: &str) -> bool {
+        matches!(
+            word.to_ascii_lowercase().as_str(),
+            "if" | "then"
+                | "else"
+                | "elif"
+                | "fi"
+                | "for"
+                | "while"
+                | "until"
+                | "do"
+                | "done"
+                | "case"
+                | "esac"
+                | "select"
+                | "function"
+                | "[["
+                | "]]"
+        )
+    }
+
+    fn finish_word(word: &mut String, command_position: &mut bool) -> bool {
+        if word.is_empty() {
+            return false;
+        }
+        let control = *command_position && is_control_keyword(word);
+        // `time` is itself shell grammar and leaves the following word in a
+        // command position, including a following `!` reserved word.
+        *command_position = *command_position && word.eq_ignore_ascii_case("time");
+        word.clear();
+        control
+    }
+
+    let mut chars = command.chars().peekable();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut command_position = true;
+    while let Some(current) = chars.next() {
+        if escaped {
+            if current != '\n' {
+                word.push(current);
+            }
+            escaped = false;
+            continue;
+        }
+        if let Some(active) = quote {
+            if current == active {
+                quote = None;
+            } else if active == '"'
+                && (current == '`' || current == '$' && chars.peek() == Some(&'('))
+            {
+                // Command substitutions remain executable inside double
+                // quotes, so opaque parsing must fail closed on them.
+                return true;
+            }
+            continue;
+        }
+        if current == '\\' {
+            escaped = true;
+            continue;
+        }
+        if matches!(current, '\'' | '"') {
+            quote = Some(current);
+            word.push('q');
+            continue;
+        }
+        if current == '$' && chars.peek() == Some(&'(') || current == '`' {
+            return true;
+        }
+        if current == '#' && word.is_empty() {
+            if finish_word(&mut word, &mut command_position) {
+                return true;
+            }
+            for comment in chars.by_ref() {
+                if comment == '\n' {
+                    command_position = true;
+                    break;
+                }
+            }
+            continue;
+        }
+        if current.is_whitespace() {
+            if finish_word(&mut word, &mut command_position) {
+                return true;
+            }
+            if current == '\n' {
+                command_position = true;
+            }
+            continue;
+        }
+        if matches!(current, ';' | '|' | '&') {
+            if finish_word(&mut word, &mut command_position) {
+                return true;
+            }
+            command_position = true;
+            continue;
+        }
+        if matches!(current, '(' | ')') {
+            // Parentheses outside quotes are shell grouping, function, or
+            // substitution syntax. All are opaque executable structure.
+            return true;
+        }
+        if matches!(current, '!' | '{' | '}') && word.is_empty() && command_position {
+            let boundary = chars.peek().is_none_or(|next| {
+                next.is_whitespace() || matches!(next, ';' | '|' | '&' | '(' | ')')
+            });
+            if boundary {
+                return true;
+            }
+        }
+        word.push(current);
+    }
+    finish_word(&mut word, &mut command_position)
 }
 
 fn opaque_literal_tokens(command: &str) -> Vec<String> {
@@ -2572,6 +2685,10 @@ mod tests {
             true,
         );
         assert!(git[0].hard_denial.is_some());
+        let rm_git_alias = shell_resources("rm -f git-link/config", &workspace, &backend);
+        assert!(rm_git_alias
+            .iter()
+            .any(|resource| { resource.action == "edit" && resource.hard_denial.is_some() }));
         let active_store =
             file_resources("edit", workspace.join("store-link"), &backend, &store, true);
         assert!(active_store[0].hard_denial.is_some());
@@ -2690,6 +2807,17 @@ mod tests {
             "if true; then git reset --hard; fi",
             "! rm -rf $PWD",
             "{ rm -rf $PWD; }",
+            "true; ! rm -rf $PWD",
+            "true\n! rm -rf $PWD",
+            "# harmless\n! rm -rf $PWD",
+            ": && ! rm -rf $PWD",
+            "time ! rm -rf $PWD",
+            "\\\n! rm -rf $PWD",
+            "true; { rm -rf $PWD; }",
+            "( ! rm -rf $PWD )",
+            ": > /tmp/nac-map; ! rm -rf $PWD",
+            "printf x | { rm -rf $PWD; }",
+            "echo $( ! rm -rf $PWD )",
             "find . -delete",
             "xargs rm -rf .git",
             "sh -c 'rm -rf .git'",
@@ -2707,6 +2835,25 @@ mod tests {
             negated_status[0].save_resource.as_deref(),
             Some("command:[%21][git][status]")
         );
+
+        for command in [
+            "ifx true",
+            "functionality --help",
+            "printf '! rm -rf $PWD'",
+            "echo '{ rm -rf $PWD; }'",
+            "printf '%s' '!'",
+            "true && printf '!'",
+            "[[x --help",
+            "casefold --help",
+            "!foo rm -rf $PWD",
+        ] {
+            assert!(
+                shell_resources(command, Path::new("/workspace"), &backend)[0]
+                    .hard_denial
+                    .is_none(),
+                "data or a keyword prefix must not be mistaken for shell control: {command}"
+            );
+        }
 
         for command in [
             "GIT_CONFIG_COUNT=1 Git status",
@@ -3246,6 +3393,19 @@ mod tests {
             assert!(resources
                 .iter()
                 .any(|resource| { resource.action == "edit" && resource.hard_denial.is_some() }));
+        }
+        for command in [
+            "rm -f Cargo.toml",
+            "rm -f src/lib.rs",
+            "rm -f -- Cargo.lock",
+            "rm README.md Cargo.toml",
+            "rm -f .gitconfig",
+        ] {
+            let resources = shell_resources(command, Path::new("/workspace"), &backend);
+            assert!(
+                resources.iter().any(|resource| resource.action == "edit"),
+                "every rm operand must project as a mutation: {command}"
+            );
         }
         assert!(shell_resources(
             "printf pwned > .git/nac-owned",

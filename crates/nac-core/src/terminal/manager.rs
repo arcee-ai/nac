@@ -34,6 +34,7 @@ const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    create_gate: Arc<Mutex<()>>,
     completed_sessions: Arc<Mutex<VecDeque<(String, CompletedTerminal)>>>,
     max_sessions: usize,
     isolate_process_groups: bool,
@@ -76,6 +77,7 @@ impl TerminalManager {
     ) -> Result<Self> {
         Ok(Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            create_gate: Arc::new(Mutex::new(())),
             completed_sessions: Arc::new(Mutex::new(VecDeque::new())),
             max_sessions: 16,
             isolate_process_groups,
@@ -115,95 +117,68 @@ impl TerminalManager {
         rows: u16,
         backend: &Arc<ExecutionBackend>,
     ) -> Result<TerminalInfo> {
+        // Capacity accounting, replacement, and insertion form one admission
+        // transaction. Cleanup may await a remote backend, so a dedicated
+        // gate keeps parallel creates from both consuming the same slot.
+        let _create = self.create_gate.lock().await;
         self.completed_sessions
             .lock()
             .await
             .retain(|(session_name, _)| session_name != &name);
-        let old = {
-            let mut sessions = self.sessions.lock().await;
-            sessions.remove(&name)
-        };
-        if let Some(mut old) = old {
-            let name = old.name.clone();
-            if let Err(error) = old.kill().await {
-                self.sessions.lock().await.insert(name.clone(), old);
-                return Err(error).with_context(|| {
-                    format!("terminal session '{name}' cleanup incomplete during replacement")
-                });
-            }
+        if self.sessions.lock().await.contains_key(&name) {
+            self.kill_owned_session(&name).await.with_context(|| {
+                format!("terminal session '{name}' cleanup incomplete during replacement")
+            })?;
         }
 
-        let exited: Vec<TerminalSession> = {
+        let exited = {
             let mut sessions = self.sessions.lock().await;
-            let names = sessions
+            sessions
                 .iter_mut()
                 .filter_map(|(name, session)| {
                     session.refresh_status();
                     (!session.is_alive()).then(|| name.clone())
                 })
-                .collect::<Vec<_>>();
-            names
-                .into_iter()
-                .filter_map(|name| sessions.remove(&name))
-                .collect()
+                .collect::<Vec<_>>()
         };
-        let mut cleanup_errors = Vec::new();
-        let mut cleanup_failed = Vec::new();
-        for mut session in exited {
-            let name = session.name.clone();
-            match session.kill().await {
-                Ok(()) => {
-                    self.remember_completed(&mut session).await;
-                }
-                Err(error) => {
-                    cleanup_errors.push(format!(
-                        "exited terminal session '{name}' cleanup incomplete: {error:#}"
-                    ));
-                    cleanup_failed.push((name, session));
-                }
+        for name in exited {
+            if let Some(mut session) = self
+                .kill_owned_session(&name)
+                .await
+                .with_context(|| format!("exited terminal session '{name}' cleanup incomplete"))?
+            {
+                self.remember_completed(&mut session).await;
             }
         }
-        if !cleanup_failed.is_empty() {
-            self.sessions.lock().await.extend(cleanup_failed);
-            return Err(anyhow!(cleanup_errors.join("; ")));
-        }
 
-        let evicted: Vec<TerminalSession> = {
-            let mut sessions = self.sessions.lock().await;
-            let mut evicted = Vec::new();
-            while sessions.len() >= self.max_sessions {
-                let oldest_key = sessions
-                    .iter()
-                    .filter(|(_, session)| !session.is_retained())
-                    .min_by_key(|(_, session)| session.created_at)
-                    .map(|(key, _)| key.clone());
-                if let Some(key) = oldest_key {
-                    if let Some(session) = sessions.remove(&key) {
-                        evicted.push(session);
-                    }
+        loop {
+            let oldest_key = {
+                let sessions = self.sessions.lock().await;
+                if sessions.len() < self.max_sessions {
+                    None
                 } else {
-                    return Err(anyhow!(
+                    let oldest_key = sessions
+                        .iter()
+                        .filter(|(_, session)| !session.is_retained())
+                        .min_by_key(|(_, session)| session.created_at)
+                        .map(|(key, _)| key.clone());
+                    if oldest_key.is_none() {
+                        return Err(anyhow!(
                         "terminal session limit reached: all {} sessions were explicitly retained",
                         self.max_sessions
                     ));
+                    }
+                    oldest_key
                 }
-            }
-            evicted
-        };
-        let mut cleanup_errors = Vec::new();
-        let mut cleanup_failed = Vec::new();
-        for mut session in evicted {
-            let name = session.name.clone();
-            if let Err(error) = session.kill().await {
-                cleanup_errors.push(format!(
-                    "terminal session '{name}' cleanup incomplete during eviction: {error:#}"
-                ));
-                cleanup_failed.push((name, session));
-            }
-        }
-        if !cleanup_failed.is_empty() {
-            self.sessions.lock().await.extend(cleanup_failed);
-            return Err(anyhow!(cleanup_errors.join("; ")));
+            };
+            let Some(oldest_key) = oldest_key else {
+                break;
+            };
+            self.kill_owned_session(&oldest_key)
+                .await
+                .with_context(|| {
+                    format!("terminal session '{oldest_key}' cleanup incomplete during eviction")
+                })?;
         }
 
         let session = TerminalSession::spawn(
@@ -326,29 +301,27 @@ impl TerminalManager {
             }
         };
 
-        let (ended_session, retained) = {
+        let (ended, retained) = {
             let mut sessions = self.sessions.lock().await;
             if let Some(session) = sessions.get_mut(name) {
                 session.set_preview_cursor(preview.end_offset);
                 session.refresh_status();
                 if session.is_alive() {
-                    (None, session.is_retained())
+                    (false, session.is_retained())
                 } else {
-                    (sessions.remove(name), false)
+                    (true, false)
                 }
             } else {
-                (None, false)
+                (false, false)
             }
         };
 
-        let (session_name, exit_code) = if let Some(mut session) = ended_session {
-            let name = session.name.clone();
-            if let Err(error) = session.kill().await {
-                self.sessions.lock().await.insert(name.clone(), session);
-                return Err(error).with_context(|| {
-                    format!("exited terminal session '{name}' cleanup incomplete")
-                });
-            }
+        let (session_name, exit_code) = if ended {
+            let mut session = self
+                .kill_owned_session(name)
+                .await
+                .with_context(|| format!("exited terminal session '{name}' cleanup incomplete"))?
+                .ok_or_else(|| self.missing_session_error(name))?;
             let exit_code = self.remember_completed(&mut session).await;
             (None, exit_code)
         } else {
@@ -655,23 +628,36 @@ impl TerminalManager {
         self.output_registry.page(output_id, stream, offset, limit)
     }
 
+    #[cfg(test)]
+    pub(crate) async fn set_backend_cleanup_for_test(
+        &self,
+        name: &str,
+        backend: Arc<ExecutionBackend>,
+        pidfile: String,
+    ) -> Result<()> {
+        self.sessions
+            .lock()
+            .await
+            .get_mut(name)
+            .ok_or_else(|| self.missing_session_error(name))?
+            .set_backend_cleanup_for_test(backend, pidfile);
+        Ok(())
+    }
+
     pub async fn remove_all(&self) -> Result<()> {
-        let sessions: Vec<TerminalSession> = self
+        let names = self
             .sessions
             .lock()
             .await
-            .drain()
-            .map(|(_, session)| session)
-            .collect();
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
         let mut cleanup_errors = Vec::new();
-        let mut cleanup_failed = Vec::new();
-        for mut session in sessions {
-            if let Err(error) = session.kill().await {
+        for name in names {
+            if let Err(error) = self.kill_owned_session(&name).await {
                 cleanup_errors.push(format!(
-                    "terminal session '{}' cleanup incomplete during removal: {error:#}",
-                    session.name
+                    "terminal session '{name}' cleanup incomplete during removal: {error:#}"
                 ));
-                cleanup_failed.push((session.name.clone(), session));
             }
         }
         if cleanup_errors.is_empty() {
@@ -679,7 +665,6 @@ impl TerminalManager {
             self.output_registry.clear();
             Ok(())
         } else {
-            self.sessions.lock().await.extend(cleanup_failed);
             Err(anyhow!(cleanup_errors.join("; ")))
         }
     }
@@ -688,35 +673,39 @@ impl TerminalManager {
         if !self.preserve_retained_on_settlement {
             return self.remove_all().await;
         }
-        let foreground: Vec<TerminalSession> = {
-            let mut sessions = self.sessions.lock().await;
-            let names = sessions
+        let foreground = {
+            let sessions = self.sessions.lock().await;
+            sessions
                 .iter()
                 .filter(|(_, session)| !session.is_retained())
                 .map(|(name, _)| name.clone())
-                .collect::<Vec<_>>();
-            names
-                .into_iter()
-                .filter_map(|name| sessions.remove(&name))
-                .collect()
+                .collect::<Vec<_>>()
         };
         let mut cleanup_errors = Vec::new();
-        let mut cleanup_failed = Vec::new();
-        for mut session in foreground {
-            if let Err(error) = session.kill().await {
+        for name in foreground {
+            if let Err(error) = self.kill_owned_session(&name).await {
                 cleanup_errors.push(format!(
-                    "foreground terminal session '{}' cleanup incomplete: {error:#}",
-                    session.name
+                    "foreground terminal session '{name}' cleanup incomplete: {error:#}"
                 ));
-                cleanup_failed.push((session.name.clone(), session));
             }
         }
         if cleanup_errors.is_empty() {
             Ok(())
         } else {
-            self.sessions.lock().await.extend(cleanup_failed);
             Err(anyhow!(cleanup_errors.join("; ")))
         }
+    }
+
+    /// Kill a session while it remains manager-owned. Holding the map entry
+    /// across every await makes dropping the cleanup future cancellation-safe:
+    /// a later caller can still find the handle and retry backend cleanup.
+    async fn kill_owned_session(&self, name: &str) -> Result<Option<TerminalSession>> {
+        let mut sessions = self.sessions.lock().await;
+        let Some(session) = sessions.get_mut(name) else {
+            return Ok(None);
+        };
+        session.kill().await?;
+        Ok(sessions.remove(name))
     }
 
     pub async fn retain(&self, name: &str) -> Result<TerminalInfo> {
@@ -1092,6 +1081,136 @@ mod tests {
         assert!(manager.sessions.lock().await.contains_key("remote"));
         manager.settle_run().await.unwrap();
         assert!(manager.sessions.lock().await.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cleanup_cancellation_preserves_ownership_and_parallel_create_keeps_capacity() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct RestorePath(Option<std::ffi::OsString>);
+        impl Drop for RestorePath {
+            fn drop(&mut self) {
+                unsafe {
+                    match self.0.take() {
+                        Some(path) => std::env::set_var("PATH", path),
+                        None => std::env::remove_var("PATH"),
+                    }
+                }
+            }
+        }
+
+        let _environment = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_path = std::env::var_os("PATH");
+        let _restore = RestorePath(original_path.clone());
+        let root =
+            std::env::temp_dir().join(format!("nac-terminal-cancel-safe-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("bin");
+        let started = root.join("cleanup-started");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        std::fs::write(
+            &podman,
+            format!(
+                "#!/bin/sh\nif [ ! -e '{}' ]; then touch '{}'; sleep 1; fi\nexit 0\n",
+                started.display(),
+                started.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut paths = vec![bin];
+        if let Some(path) = original_path.as_ref() {
+            paths.extend(std::env::split_paths(path));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+
+        let mut manager = TerminalManager::new();
+        manager.max_sessions = 1;
+        manager
+            .create("first".to_string(), "sleep 30", None, 120, 40, &backend())
+            .await
+            .unwrap();
+        let remote_backend = crate::sandbox::execution_backend_from_sandbox(
+            Some(SandboxSession::new_for_test(SandboxSpec {
+                workdir: root.clone(),
+                ..Default::default()
+            })),
+            &root,
+        );
+        manager
+            .set_backend_cleanup_for_test(
+                "first",
+                remote_backend,
+                "/tmp/nac-cancel-safe.pid".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let cleanup_manager = manager.clone();
+        let cleanup = tokio::spawn(async move { cleanup_manager.settle_run().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !started.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        cleanup.abort();
+        assert!(cleanup.await.unwrap_err().is_cancelled());
+        assert!(manager.get("first").await.is_some());
+
+        // Let the abandoned helper exit, then force the eviction cleanup in
+        // the first create to pause again while a second create arrives.
+        sleep(Duration::from_millis(1100)).await;
+        std::fs::remove_file(&started).unwrap();
+        let create_a_manager = manager.clone();
+        let local_backend = backend();
+        let create_a_backend = local_backend.clone();
+        let create_a = tokio::spawn(async move {
+            create_a_manager
+                .create(
+                    "second".to_string(),
+                    "sleep 30",
+                    None,
+                    120,
+                    40,
+                    &create_a_backend,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !started.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let create_b_manager = manager.clone();
+        let create_b_backend = local_backend;
+        let create_b = tokio::spawn(async move {
+            create_b_manager
+                .create(
+                    "third".to_string(),
+                    "sleep 30",
+                    None,
+                    120,
+                    40,
+                    &create_b_backend,
+                )
+                .await
+        });
+        create_a.await.unwrap().unwrap();
+        create_b.await.unwrap().unwrap();
+
+        let sessions = manager.sessions.lock().await;
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions.contains_key("third"));
+        drop(sessions);
+        manager.remove_all().await.unwrap();
         let _ = std::fs::remove_dir_all(root);
     }
 

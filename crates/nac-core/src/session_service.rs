@@ -631,10 +631,27 @@ struct FinishingRun {
 }
 
 struct CancellingRun {
+    service: SessionService,
     snapshot: ActiveRunSnapshot,
     task: Option<JoinHandle<()>>,
     transcript_baseline: Option<usize>,
     command_cancellation: crate::tools::ThreadCancellation,
+}
+
+impl Drop for CancellingRun {
+    fn drop(&mut self) {
+        let mut guard = self.service.lock_active_operation();
+        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
+            return;
+        };
+        if active_run.snapshot.run_id != self.snapshot.run_id {
+            return;
+        }
+        active_run.finishing = false;
+        if active_run.task.is_none() {
+            active_run.task = self.task.take();
+        }
+    }
 }
 
 enum RunOutcome {
@@ -2745,28 +2762,21 @@ impl SessionService {
                 }
             }
         }
-        let Some(cancelling_run) = self.mark_run_cancelling(run_id) else {
+        let Some(mut cancelling_run) = self.mark_run_cancelling(run_id) else {
             return Err(SessionCancelError::NotActive {
                 run_id: run_id.clone(),
             });
         };
 
-        let terminal_cleanup_error =
-            if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-                cancelling_run.command_cancellation.cancel();
-                // Terminal handles are session-owned and can be idle while the
-                // model is between tool calls. Cancellation must therefore settle
-                // foreground PTYs directly instead of relying on another terminal
-                // poll to observe the run-scoped cancellation token. Explicitly
-                // retained handles survive by the direct-session contract.
-                self.terminal_manager
-                    .settle_run()
-                    .await
-                    .err()
-                    .map(|error| format!("{error:#}"))
-            } else {
-                None
-            };
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            cancelling_run.command_cancellation.cancel();
+            // Terminal handles are session-owned and can be idle while the
+            // model is between tool calls. Start settlement immediately, then
+            // repeat it after the run task has stopped: a tool can pass its
+            // pre-spawn cancellation check and insert a PTY while this first
+            // pass is in progress.
+            let _ = self.terminal_manager.settle_run().await;
+        }
 
         let steering_store = self
             .metadata
@@ -2778,14 +2788,26 @@ impl SessionService {
             Err(error) => eprintln!("nac: failed to expire cancelled worker steering: {error:#}"),
         }
 
-        if let Some(mut task) = cancelling_run.task {
+        if let Some(task) = cancelling_run.task.as_mut() {
             let abort = self.metadata.behavior == sessions::SessionBehavior::Orchestrator
-                || tokio::time::timeout(Duration::from_secs(2), &mut task)
+                || tokio::time::timeout(Duration::from_secs(2), &mut *task)
                     .await
                     .is_err();
             if abort {
                 task.abort();
-                let _ = task.await;
+                let _ = (&mut *task).await;
+            }
+        }
+
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            if let Err(error) = self.terminal_manager.settle_run().await {
+                // Cleanup is a terminal-state admission boundary. Keep the run,
+                // its operation lease, goal/child bindings, and queued inbox
+                // successor unsettled so a later cancellation can retry.
+                return Err(SessionCancelError::Cleanup {
+                    run_id: cancelling_run.snapshot.run_id.clone(),
+                    message: format!("{error:#}"),
+                });
             }
         }
 
@@ -2867,12 +2889,6 @@ impl SessionService {
             if let Err(error) = self.start_next_direct_inbox_item().await {
                 eprintln!("nac: failed to promote direct inbox after cancellation: {error:#}");
             }
-        }
-        if let Some(message) = terminal_cleanup_error {
-            return Err(SessionCancelError::Cleanup {
-                run_id: cancelling_run.snapshot.run_id.clone(),
-                message,
-            });
         }
         Ok(())
     }
@@ -3215,6 +3231,17 @@ impl SessionService {
     }
 
     async fn finish_run_once(&self, run_id: &SessionRunId, outcome: RunOutcome) -> bool {
+        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+            if let Err(error) = self.terminal_manager.settle_run().await {
+                self.event_bus.emit_agent(AgentEvent::Error {
+                    thread_name: None,
+                    message: format!(
+                        "run {run_id} remains active because terminal cleanup is incomplete: {error:#}"
+                    ),
+                });
+                return false;
+            }
+        }
         let Some(finishing_run) = self.mark_run_finishing(run_id) else {
             return false;
         };
@@ -3568,6 +3595,7 @@ impl SessionService {
         active_run.finishing = true;
         active_run.snapshot.submitted_user_message = None;
         Some(CancellingRun {
+            service: self.clone(),
             snapshot: active_run.snapshot.clone(),
             task: active_run.task.take(),
             transcript_baseline: active_run.transcript_baseline,
@@ -5801,6 +5829,205 @@ pub(super) mod tests {
         assert!(!service.has_active_operation());
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cleanup_failure_blocks_run_terminalization_and_remains_retryable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct RestorePath(Option<std::ffi::OsString>);
+        impl Drop for RestorePath {
+            fn drop(&mut self) {
+                unsafe {
+                    match self.0.take() {
+                        Some(path) => std::env::set_var("PATH", path),
+                        None => std::env::remove_var("PATH"),
+                    }
+                }
+            }
+        }
+
+        let _environment = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_path = std::env::var_os("PATH");
+        let _restore = RestorePath(original_path.clone());
+        let root = std::env::temp_dir().join(format!(
+            "nac-session-cleanup-retry-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let bin = root.join("bin");
+        let allow_cleanup = root.join("allow-cleanup");
+        std::fs::create_dir_all(&bin).unwrap();
+        let podman = bin.join("podman");
+        std::fs::write(
+            &podman,
+            format!(
+                "#!/bin/sh\nif [ ! -e '{}' ]; then exit 23; fi\nexit 0\n",
+                allow_cleanup.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut paths = vec![bin];
+        if let Some(path) = original_path.as_ref() {
+            paths.extend(std::env::split_paths(path));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+
+        let remote_backend = crate::sandbox::execution_backend_from_sandbox(
+            Some(crate::sandbox::SandboxSession::new_for_test(
+                crate::sandbox::SandboxSpec {
+                    workdir: root.clone(),
+                    ..Default::default()
+                },
+            )),
+            &root,
+        );
+        let local_backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+
+        let (cancel_parts, cancel_store) = test_direct_active_service(
+            "cleanup_cancel_retry",
+            "session-cleanup-cancel-retry",
+            ModelClient::new_for_test(),
+        );
+        let cancel_run = cancel_parts
+            .service
+            .try_begin_run(None, "cancel with cleanup")
+            .unwrap();
+        let cancel_terminal = cancel_parts.service.terminal_manager.next_session_name();
+        cancel_parts
+            .service
+            .terminal_manager
+            .create(
+                cancel_terminal.clone(),
+                "sleep 30",
+                None,
+                120,
+                40,
+                &local_backend,
+            )
+            .await
+            .unwrap();
+        cancel_parts
+            .service
+            .terminal_manager
+            .set_backend_cleanup_for_test(
+                &cancel_terminal,
+                remote_backend.clone(),
+                "/tmp/nac-cancel.pid".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let error = cancel_parts
+            .service
+            .request_cancel(&cancel_run.run_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SessionCancelError::Cleanup { .. }));
+        assert_eq!(
+            cancel_parts.service.active_run().unwrap().run_id,
+            cancel_run.run_id
+        );
+        assert!(cancel_parts
+            .service
+            .terminal_manager
+            .get(&cancel_terminal)
+            .await
+            .is_some());
+        assert!(!cancel_parts
+            .service
+            .recent_events(None, 32)
+            .1
+            .iter()
+            .any(|event| matches!(event.event, SessionEvent::RunCancelled)));
+
+        std::fs::write(&allow_cleanup, "allow").unwrap();
+        cancel_parts
+            .service
+            .request_cancel(&cancel_run.run_id)
+            .await
+            .unwrap();
+        assert!(cancel_parts.service.active_run().is_none());
+        assert!(cancel_parts
+            .service
+            .terminal_manager
+            .get(&cancel_terminal)
+            .await
+            .is_none());
+
+        std::fs::remove_file(&allow_cleanup).unwrap();
+        let (finish_parts, finish_store) = test_direct_active_service(
+            "cleanup_finish_retry",
+            "session-cleanup-finish-retry",
+            ModelClient::new_for_test(),
+        );
+        let finish_run = finish_parts
+            .service
+            .try_begin_run(None, "finish with cleanup")
+            .unwrap();
+        let finish_terminal = finish_parts.service.terminal_manager.next_session_name();
+        finish_parts
+            .service
+            .terminal_manager
+            .create(
+                finish_terminal.clone(),
+                "sleep 30",
+                None,
+                120,
+                40,
+                &local_backend,
+            )
+            .await
+            .unwrap();
+        finish_parts
+            .service
+            .terminal_manager
+            .set_backend_cleanup_for_test(
+                &finish_terminal,
+                remote_backend,
+                "/tmp/nac-finish.pid".to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            !finish_parts
+                .service
+                .finish_run_once(
+                    &finish_run.run_id,
+                    RunOutcome::Failed("model failed".to_string(), None),
+                )
+                .await
+        );
+        assert_eq!(
+            finish_parts.service.active_run().unwrap().run_id,
+            finish_run.run_id
+        );
+        assert!(!finish_parts
+            .service
+            .recent_events(None, 32)
+            .1
+            .iter()
+            .any(|event| matches!(event.event, SessionEvent::RunFailed { .. })));
+
+        std::fs::write(&allow_cleanup, "allow").unwrap();
+        assert!(
+            finish_parts
+                .service
+                .finish_run_once(
+                    &finish_run.run_id,
+                    RunOutcome::Failed("model failed".to_string(), None),
+                )
+                .await
+        );
+        assert!(finish_parts.service.active_run().is_none());
+
+        let _ = std::fs::remove_dir_all(cancel_store.parent().unwrap());
+        let _ = std::fs::remove_dir_all(finish_store.parent().unwrap());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -8524,6 +8751,12 @@ pub(super) mod tests {
         let active_after_cancelling = parts.service.active_run().unwrap();
         assert_eq!(active_after_cancelling.run_id, active.run_id);
         assert!(active_after_cancelling.submitted_user_message.is_none());
+        drop(cancelling);
+        let retry = parts
+            .service
+            .mark_run_cancelling(&active.run_id)
+            .expect("dropping an interrupted cancellation claim must make it retryable");
+        drop(retry);
         let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
     }
 
