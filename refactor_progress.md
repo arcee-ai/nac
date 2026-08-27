@@ -814,6 +814,13 @@ Rules:
   cancellation/drain, and shared-workspace-gate regressions pass; the complete
   core test build and warning-denied Clippy are green. The tool root is now 455
   lines of contracts, native registry/capability composition, and routing.
+- The terminal manager's 1,707-line behavior suite now lives in a sibling test
+  file, leaving 1,242 production lines for the process/retention extraction.
+  Thirty-five admission, cancellation, process-tree cleanup, bounded output,
+  retention/eviction, authority, settlement, and remote-cleanup tests pass;
+  the SSH and Podman contract cases remain explicitly ignored pending their
+  optional infrastructure. The complete core test build and warning-denied
+  Clippy are green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -829,6 +836,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 tool runtime/thread-lifecycle extraction with exact-path staging.
-Then decompose terminal process/retention ownership and audit the remaining
-tool root/kernel surfaces before declaring M4/M5 complete.
+Commit the M4 terminal-manager test separation with exact-path staging. Then
+decompose process admission/lifecycle from retained-output/terminal ownership
+and audit the remaining tool root/kernel surfaces before declaring M4/M5
+complete.
