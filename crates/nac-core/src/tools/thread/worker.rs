@@ -181,6 +181,9 @@ fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
     if let Some(api_key_env) = client.api_key_env() {
         command.arg("--api-key-env").arg(api_key_env);
     }
+    if let Some(path) = client.managed_api_key_file() {
+        command.arg("--managed-api-key-file").arg(path);
+    }
 
     // Always transport the snapshot header map, including `{}`, so workers can
     // never reinterpret an empty map as permission to consult config.toml.
@@ -1123,6 +1126,42 @@ exit 0
             Some(value) => unsafe { std::env::set_var(key_name, value) },
             None => unsafe { std::env::remove_var(key_name) },
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_model_credential_transport_contains_only_the_read_only_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-managed-model-transport-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let credential = root.join("credential");
+        std::fs::write(&credential, "managed-secret-value\n").unwrap();
+        std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o400)).unwrap();
+
+        let settings = EffectiveModelSettings::new(
+            BackendKind::ArceeApi,
+            "trinity-large-thinking".to_string(),
+            "https://api.arcee.ai/api/v1".to_string(),
+            None,
+            None,
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_managed_api_key_file(Some(credential.clone()))
+        .unwrap();
+        let client = ModelClient::from_effective_settings(settings).unwrap();
+        let args = worker_model_arguments_for_test(&client);
+
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "--managed-api-key-file" && pair[1] == credential.to_string_lossy()
+        }));
+        assert!(!args.iter().any(|arg| arg == "managed-secret-value"));
+        assert!(!args.iter().any(|arg| arg == "--api-key-env"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

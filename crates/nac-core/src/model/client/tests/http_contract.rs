@@ -108,6 +108,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
         api_key_env: None,
+        managed_api_key_file: None,
         extra_headers: std::collections::BTreeMap::from([(
             "X-Arcee-Tenant".to_string(),
             "tenant-test".to_string(),
@@ -271,6 +272,7 @@ async fn custom_arcee_routes_are_exact_on_wire() {
             backend: BackendKind::ArceeApi,
             reasoning_effort: None,
             api_key_env: None,
+            managed_api_key_file: None,
             extra_headers: std::collections::BTreeMap::new(),
             arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
             cache_ttl: None,
@@ -314,6 +316,7 @@ async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_header
             backend: BackendKind::ArceeApi,
             reasoning_effort: None,
             api_key_env: None,
+            managed_api_key_file: None,
             extra_headers: std::collections::BTreeMap::from([(
                 "X-Arcee-Tenant".to_string(),
                 "sensitive-tenant-header".to_string(),
@@ -579,6 +582,7 @@ async fn arcee_multibyte_error_body_does_not_panic() {
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
         api_key_env: None,
+        managed_api_key_file: None,
         extra_headers: std::collections::BTreeMap::new(),
         arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
         cache_ttl: None,

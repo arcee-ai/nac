@@ -63,7 +63,7 @@ use nac_core::{
         list_managed_provider_models, list_provider_models, list_stored_api_keys,
         managed_backend_base_url, provider_default_base_url, provider_for_model,
         provider_uses_api_key, remove_api_key, resolve_backend_api_key, resolve_model_base_url,
-        store_api_key, validate_caller_supplied_base_url, validate_model_configuration,
+        store_api_key, validate_caller_supplied_base_url, validate_model_configuration, AuthStatus,
         BackendKind, EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError,
         ModelListing, ProviderModel, ReasoningEffort,
     },
@@ -831,6 +831,28 @@ fn apply_project_model_defaults(
     );
 }
 
+fn apply_managed_model_defaults(
+    request: &mut CreateSessionRequest,
+    managed: Option<&nac_core::managed::ManagedHostConfig>,
+) {
+    let Some(managed) = managed else {
+        return;
+    };
+    let identity_omitted = matches!(request.model, RequestField::Omitted)
+        && matches!(request.base_url, RequestField::Omitted)
+        && matches!(request.backend, RequestField::Omitted)
+        && matches!(request.api_key_env, RequestField::Omitted);
+    if !identity_omitted {
+        return;
+    }
+    request.model = RequestField::Value(managed.model_id.clone());
+    request.base_url = RequestField::Value(managed.model_endpoint.clone());
+    request.backend = RequestField::Value(managed.model_backend.as_str().to_string());
+    // Explicit absence suppresses conventional environment auto-selection;
+    // the trusted mounted file is attached after request parsing.
+    request.api_key_env = RequestField::Null;
+}
+
 /// The chat a project's model settings are read off when the project names no
 /// default configuration of its own.
 ///
@@ -1546,6 +1568,17 @@ impl SessionManager {
         );
     }
 
+    fn managed_model_credential_for_session(&self, session_id: &str) -> Result<Option<PathBuf>> {
+        let Some(managed) = self.inner.managed_host.as_ref() else {
+            return Ok(None);
+        };
+        let snapshot = sessions::load_session(&self.inner.store_path, session_id)?;
+        let uses_host_profile = snapshot.backend == managed.model_backend
+            && snapshot.base_url == managed.model_endpoint
+            && snapshot.api_key_env.is_none();
+        Ok(uses_host_profile.then(|| managed.model_credential_file.clone()))
+    }
+
     fn resolve_launch_location(
         &self,
         cwd: Option<PathBuf>,
@@ -2225,6 +2258,7 @@ impl SessionManager {
                 "invalid request: ssh_host and sandbox options cannot both be set"
             ));
         }
+        apply_managed_model_defaults(&mut request, self.inner.managed_host.as_ref());
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         let orchestrator_compaction_threshold =
             create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
@@ -2236,6 +2270,15 @@ impl SessionManager {
             request.api_key_env,
             request.extra_headers,
         )?;
+        if let Some(managed) = self.inner.managed_host.as_ref() {
+            let uses_host_profile = model.backend == Some(managed.model_backend)
+                && model.api_model.as_deref() == Some(managed.model_id.as_str())
+                && model.api_base_url.as_deref() == Some(managed.model_endpoint.as_str())
+                && matches!(model.api_key_env, OptionalModelOption::Clear);
+            if uses_host_profile {
+                model.managed_api_key_file = Some(managed.model_credential_file.clone());
+            }
+        }
         model.light_model = match request.light_model {
             RequestField::Omitted | RequestField::Null => None,
             RequestField::Value(light) => {
@@ -3847,6 +3890,7 @@ impl SessionManager {
             &summary.cwd
         };
         let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
+        let managed_api_key_file = self.managed_model_credential_for_session(session_id)?;
         let mut run_config = if let Some(operation_lease) = operation_lease {
             runtime::build_resume_config_for_session_with_lease(
                 self.inner.store_path.clone(),
@@ -3855,6 +3899,7 @@ impl SessionManager {
                 self.inner.root_cwd.clone(),
                 Some(self.inner.worker_executable.clone()),
                 operation_lease,
+                managed_api_key_file.clone(),
             )
             .await?
         } else {
@@ -3864,6 +3909,7 @@ impl SessionManager {
                 &config,
                 self.inner.root_cwd.clone(),
                 Some(self.inner.worker_executable.clone()),
+                managed_api_key_file,
             )
             .await?
         };
@@ -3908,6 +3954,7 @@ impl SessionManager {
             &summary.cwd
         };
         let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
+        let managed_api_key_file = self.managed_model_credential_for_session(session_id)?;
         let (mut run_config, cacheable, operation_lease) =
             runtime::build_resume_config_for_session_attachment(
                 self.inner.store_path.clone(),
@@ -3915,6 +3962,7 @@ impl SessionManager {
                 &config,
                 self.inner.root_cwd.clone(),
                 Some(self.inner.worker_executable.clone()),
+                managed_api_key_file,
             )
             .await?;
         self.attach_managed_command_environment(&mut run_config);
@@ -6467,8 +6515,22 @@ async fn launch_model_defaults_handler(
     tag = "models",
     responses((status = 200, description = "Success", body = ModelListing, content_type = "application/json"))
 )]
-async fn models_handler() -> Json<ModelListing> {
-    Json(nac_core::model::api_listing())
+async fn models_handler(State(manager): State<SessionManager>) -> Json<ModelListing> {
+    let mut listing = nac_core::model::api_listing();
+    if let Some(managed) = manager.managed_host() {
+        if managed.model_credential().is_ok() {
+            if let Some(provider) = listing
+                .providers
+                .iter_mut()
+                .find(|provider| provider.id == managed.model_backend)
+            {
+                provider.auth_status = AuthStatus::Ready;
+                provider.auth_hint = None;
+                provider.default_base_url = Some(managed.model_endpoint.clone());
+            }
+        }
+    }
+    Json(listing)
 }
 
 #[utoipa::path(
@@ -7561,6 +7623,7 @@ fn model_options(
         api_base_url: required_create_string(base_url, "base_url")?,
         api_model: required_create_string(model, "model")?,
         api_key_env,
+        managed_api_key_file: None,
         extra_headers,
         light_model: None,
     })
@@ -9863,7 +9926,9 @@ mod tests {
             state_root,
             home_root,
             github_client_id: "Iv1.test".to_string(),
-            model_endpoint: "https://models.example.test/v1".to_string(),
+            model_backend: BackendKind::ArceeApi,
+            model_id: "trinity-large-thinking".to_string(),
+            model_endpoint: "https://api.arcee.ai/api/v1".to_string(),
             model_credential_file: root.join("model-token"),
             model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
         };
@@ -9881,6 +9946,56 @@ mod tests {
         let lock_dir = root.join("store.db.run-locks");
         std::fs::write(&lock_dir, b"not a directory").expect("poison operation lease directory");
         lock_dir
+    }
+
+    #[tokio::test]
+    async fn managed_host_supplies_default_model_and_mounted_credential() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_model_default");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+        write_managed_credential(&root.join("model-token"), "host-model-key\n");
+        let manager = test_managed_manager(&root);
+
+        let created = manager
+            .create_session(CreateSessionRequest::default())
+            .await
+            .expect("managed host profile should launch without user model settings");
+        let session_id = created
+            .metadata
+            .session_id
+            .clone()
+            .expect("created session id");
+        let stored = sessions::load_session(&root.join("store.db"), &session_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::ArceeApi);
+        assert_eq!(stored.model, "trinity-large-thinking");
+        assert_eq!(stored.base_url, "https://api.arcee.ai/api/v1");
+        assert_eq!(stored.api_key_env, None);
+
+        manager
+            .inner
+            .active_sessions
+            .write()
+            .await
+            .remove(&session_id);
+        manager
+            .attach_session(&session_id)
+            .await
+            .expect("managed credential source should survive session resume");
+
+        let Json(listing) = models_handler(State(manager)).await;
+        let arcee = listing
+            .providers
+            .iter()
+            .find(|provider| provider.id == BackendKind::ArceeApi)
+            .unwrap();
+        assert_eq!(arcee.auth_status, AuthStatus::Ready);
+        assert_eq!(arcee.auth_hint, None);
+        assert_eq!(
+            arcee.default_base_url.as_deref(),
+            Some("https://api.arcee.ai/api/v1")
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     async fn get_response(app: Router, uri: &str, accept_encoding: Option<&str>) -> Response {

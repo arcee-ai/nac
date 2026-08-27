@@ -456,3 +456,37 @@ credential, publish on a non-3210 host port during local testing, and validate
 device authorization, repository/branch onboarding, Git/`gh`, secrets,
 restart/rescheduling, `/healthz`, `/readyz`, and `/managed/status`. Never point
 this branch binary at the published-main store or its port 3210 process.
+
+## Managed host model bootstrap and controller contract closure (2026-08-27)
+
+The local Docker dogfood exposed that mounting an Arcee credential did not
+select a NAC backend or model, while the controller branch still supplied CLI
+arguments and filesystem paths that contradicted the canonical managed image.
+This slice closes those seams without changing ordinary/unmanaged NAC:
+
+- strict managed TOML now declares the host model backend and model ID in
+  addition to its endpoint and read-only credential file;
+- managed session creation automatically uses that host profile only when the
+  request omits model identity, and resume/worker launch reuse the mounted file
+  path without copying its value into SQLite, argv, or the environment;
+- `/models` and `/managed/status` report the managed host profile and
+  credential readiness without exposing the credential, and the managed-only
+  configuration UI no longer asks users to paste the operator-supplied key;
+- the canonical image smoke mounts the model credential from a separate
+  read-only volume and proves both successful consumption and failed overwrite;
+- the controller now lets the image entrypoint own its fixed flags, renders the
+  nonsecret managed ConfigMap, mounts a narrowly referenced Secret key and all
+  canonical writable paths, and uses `/readyz` for readiness; and
+- the internal publishing workflow consumes the pinned NAC repository's own
+  Dockerfile and smoke test instead of maintaining a divergent image copy.
+
+Verification completed on the exact working candidate: all 14 embedded-browser
+journeys, all 175 frontend tests, focused managed create/resume/worker tests,
+the static image contract, the full Linux/AMD64 Docker image smoke, controller
+generation/manifests/tests/release verification, and the broad NAC Rust test,
+lint, typecheck, and production build stages passed. The first broad run hit one
+pre-existing Podman process-identity timing failure; it passed immediately in
+isolation and the complete Rust suite passed on the next run. The remaining
+`make ci` asset-cleanliness check is intentionally deferred until the rebuilt
+embedded bundle is committed because it rejects any staged or unstaged bundle
+diff by design.

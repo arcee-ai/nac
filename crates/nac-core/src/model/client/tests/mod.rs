@@ -22,6 +22,7 @@ fn test_model_client(
         backend,
         reasoning_effort: None,
         api_key_env: None,
+        managed_api_key_file: None,
         extra_headers,
         arcee_credential_source: None,
         cache_ttl: None,

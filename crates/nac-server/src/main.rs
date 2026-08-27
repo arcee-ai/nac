@@ -362,6 +362,10 @@ struct ModelArgs {
     #[arg(long = "api-key-env", hide = true)]
     api_key_env: Option<String>,
 
+    /// Trusted operator-mounted API key file transported to a managed worker.
+    #[arg(long = "managed-api-key-file", hide = true)]
+    managed_api_key_file: Option<PathBuf>,
+
     /// Internal extra headers snapshot transport (JSON object) used by managed workers.
     #[arg(
         long = "extra-headers",
@@ -700,6 +704,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .api_key_env
                 .map(OptionalModelOption::Value)
                 .unwrap_or_default(),
+            managed_api_key_file: cli.model.managed_api_key_file,
             extra_headers: cli.model.extra_headers,
             light_model: None,
         },

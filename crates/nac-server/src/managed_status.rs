@@ -94,11 +94,20 @@ pub(crate) struct ManagedHostStatusResponse {
     #[schema(value_type = String)]
     repository_root: PathBuf,
     model_ready: bool,
+    model: ManagedModelStatus,
     github_status: &'static str,
     secret_count: usize,
     project_count: usize,
     session_count: usize,
     checks: Vec<ReadinessCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub(crate) struct ManagedModelStatus {
+    backend: nac_core::model::BackendKind,
+    id: String,
+    endpoint: String,
+    display_name: &'static str,
 }
 
 #[utoipa::path(
@@ -232,6 +241,12 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         public_hostname: managed.public_hostname.clone(),
         repository_root: managed.repository_root.clone(),
         model_ready,
+        model: ManagedModelStatus {
+            backend: managed.model_backend,
+            id: managed.model_id.clone(),
+            endpoint: managed.model_endpoint.clone(),
+            display_name: "Managed Arcee",
+        },
         github_status,
         secret_count,
         project_count,
@@ -308,7 +323,9 @@ fn path_check(
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        if metadata.uid() != expected_uid || metadata.gid() != expected_gid {
+        let owner_access = metadata.uid() == expected_uid && metadata.gid() == expected_gid;
+        let kubernetes_group_access = metadata.uid() == 0 && metadata.gid() == expected_gid;
+        if !owner_access && !kubernetes_group_access {
             return ReadinessCheck::fail(
                 name,
                 format!(
@@ -360,16 +377,19 @@ fn model_credential_check(path: &Path, expected_uid: u32, expected_gid: u32) -> 
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        if metadata.uid() != expected_uid || metadata.gid() != expected_gid {
+        let owner_access = metadata.uid() == expected_uid && metadata.gid() == expected_gid;
+        let kubernetes_group_access = metadata.uid() == 0 && metadata.gid() == expected_gid;
+        if !owner_access && !kubernetes_group_access {
             return ReadinessCheck::fail(
                 "model-credential",
                 "credential file has unexpected ownership",
             );
         }
-        if metadata.permissions().mode() & 0o077 != 0 {
+        let mode = metadata.permissions().mode();
+        if mode & 0o007 != 0 || (kubernetes_group_access && mode & 0o040 == 0) {
             return ReadinessCheck::fail(
                 "model-credential",
-                "credential file permissions are not owner-only",
+                "credential file permissions do not restrict access to the runtime owner/group",
             );
         }
     }
