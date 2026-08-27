@@ -570,6 +570,14 @@ Rules:
   rendering behavior remain unchanged. OpenAPI/router parity, active steering,
   idempotent cancellation, bounded shutdown with an open stream, the full test
   build, and warning-denied Clippy pass. Server `lib.rs` is now 5,191 lines.
+- Destructive session deletion now belongs to a 154-line lifecycle application
+  service that preserves the complete authority chain: relationship gate,
+  completion suppression, operation/resource leases, recursive descendant
+  cleanup, terminal/sandbox teardown, durable deletion, revision unpinning,
+  and final worktree cleanup. The request-independent task still retains leases
+  after cancellation. Fail-closed corrupt-snapshot, cancelled-request cleanup,
+  and both durable child-topology cascade regressions plus the full test build
+  and warning-denied Clippy pass. Server `lib.rs` is now 5,054 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -585,7 +593,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the run/event delivery slice
+Inspect exact worktree/staged diffs and commit the destructive lifecycle slice
 without protected files. Then continue M2 with attachment/recovery,
-configuration, deletion, and session creation, keeping lifecycle gates,
-operation leases, and exact settlement/cleanup ordering in their coordinator.
+configuration, session creation, and their remaining HTTP delivery, keeping
+lifecycle gates, operation leases, and exact settlement ordering in their
+coordinator.

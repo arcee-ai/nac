@@ -115,7 +115,7 @@ use nac_core::{
     },
     types::Message,
     view::{self, SessionSummarySnapshot},
-    workspace::{self, GitTarget},
+    workspace::GitTarget,
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -1337,6 +1337,12 @@ impl SessionManager {
         application::session_runs::SessionRunApplication::new(self)
     }
 
+    pub(crate) fn session_lifecycle(
+        &self,
+    ) -> application::session_lifecycle::SessionLifecycleApplication<'_> {
+        application::session_lifecycle::SessionLifecycleApplication::new(self)
+    }
+
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -2353,150 +2359,7 @@ impl SessionManager {
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        self.require_primary_operation_session(session_id)?;
-        // Own the deletion in an independent task. Dropping an HTTP/request
-        // future must not drop lifecycle leases while an already-launched
-        // Podman removal or another destructive cleanup continues.
-        let manager = self.clone();
-        let session_id = session_id.to_string();
-        tokio::spawn(async move { manager.delete_session_cascade(&session_id).await })
-            .await
-            .context("session deletion task failed")?
-    }
-
-    /// Parent-owned deletion path. Once a primary session has passed the
-    /// public ownership check, its delegated descendants must be removed as
-    /// part of the same lifecycle operation without pretending that they are
-    /// independently user-controllable sessions.
-    async fn delete_session_cascade(&self, session_id: &str) -> Result<()> {
-        self.require_persisted_operation_session(session_id)?;
-        // Submission, config changes, and deletion share this gate. The
-        // operation lease extends the exclusion to independent processes and
-        // remains held through descendant enumeration and deletion. Child
-        // creation uses the same parent boundary, so no relationship can be
-        // committed after the enumeration snapshot.
-        let gate = self.lifecycle_gate(session_id);
-        let _lifecycle = gate.lock().await;
-        let _relationship_lease =
-            sessions::SessionRelationshipLease::try_acquire(&self.inner.store_path, session_id)?;
-        let service = self
-            .inner
-            .active_sessions
-            .read()
-            .await
-            .get(session_id)
-            .cloned();
-        let mut suppression_rollback =
-            CompletionSuppressionRollback::new(self.inner.store_path.clone());
-        if let Some(service) = service.as_ref() {
-            if service.active_compaction().is_some() {
-                return Err(anyhow!("session is busy with an active manual compaction"));
-            }
-            if let Some(active_run) = service.active_run() {
-                // Persist suppression before cancellation can settle the
-                // generation. This does not rewrite its admitted mode.
-                suppression_rollback.suppress_running(session_id)?;
-                if let Err(error) = service
-                    .connect_client()
-                    .request_cancel(&active_run.run_id)
-                    .await
-                {
-                    if service.active_run().is_some() {
-                        return Err(anyhow!(error.to_string()));
-                    }
-                }
-            }
-            if service.has_active_operation() {
-                return Err(anyhow!("session is busy with an active operation"));
-            }
-        }
-        // Acquire the operation lease before converting resource ownership.
-        // Every lifecycle mutation uses this order, so no peer can win the
-        // shared/exclusive transition and mutate the session before rollback.
-        // This lease is declared before the rollback guard and therefore drops
-        // after shared ownership has been restored on every failed exit.
-        let _operation_lease =
-            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
-        if let Some(service) = service.as_ref() {
-            service.release_sandbox_resource_lease();
-        }
-        let mut sandbox_lease_rollback = SandboxResourceLeaseRollback::new(service.clone());
-        let _resource_lease = sessions::SessionResourceMutationLease::try_acquire(
-            &self.inner.store_path,
-            session_id,
-        )?;
-        self.require_persisted_operation_session(session_id)?;
-        suppression_rollback.suppress_running(session_id)?;
-
-        let orchestrators =
-            nac_core::store::list_managed_orchestrators(&self.inner.store_path, session_id)?;
-        for orchestrator in orchestrators {
-            Box::pin(self.delete_session_cascade(&orchestrator.orchestrator_session_id)).await?;
-        }
-        let children =
-            nac_core::store::list_traditional_children(&self.inner.store_path, session_id)?;
-        for child in children {
-            Box::pin(self.delete_session_cascade(&child.child_session_id)).await?;
-        }
-        // Deletion must fail closed if the durable snapshot cannot be decoded.
-        // Treating a parse/store failure as an unsandboxed session would let an
-        // uncached delete commit while skipping its only container/worktree
-        // cleanup metadata and erase all retry authority.
-        let persisted_sandbox =
-            sessions::load_session(&self.inner.store_path, session_id)?.sandbox_spec;
-        let persisted_worktree = persisted_sandbox
-            .as_ref()
-            .and_then(|spec| spec.worktree.clone());
-        // The revision rows cascade with the session, but the git objects they
-        // pinned only become collectable once the ref is gone. A missing
-        // sandbox checkout must not hide the repository recorded in durable
-        // worktree metadata.
-        let revision_target = persisted_worktree
-            .as_ref()
-            .map(|worktree| GitTarget::Local {
-                root: worktree.repo_root.clone(),
-            });
-        let revision_target = match revision_target {
-            Some(target) => Some(target),
-            None => self.workspace().workspace_root(session_id).await.ok(),
-        };
-        if let Some(service) = service.as_ref() {
-            service.destroy_terminals().await?;
-        }
-
-        // Preserve the durable session row until owned container cleanup is
-        // confirmed. If Podman is unavailable or refuses removal, a later
-        // deletion retry still has the exact stable container identity.
-        if let Some(service) = service.as_ref() {
-            service.destroy_sandbox().await?;
-        } else if persisted_sandbox.is_some() {
-            nac_core::destroy_persisted_container(session_id).await?;
-        }
-
-        // Session-owned auxiliary rows cascade; legacy child rows are removed by core.
-        let deleted = view::delete_session(&self.inner.store_path, session_id)?;
-        if !deleted {
-            return Err(anyhow!("session '{}' was not found", session_id));
-        }
-        // Only unpin Git objects after every fallible cleanup has succeeded
-        // and the durable rows that referenced them are gone. A forget failure
-        // can leak a ref, but can no longer make a retained revision unreadable.
-        if let Some(target) = revision_target {
-            if let Err(error) = workspace::forget(&target, session_id) {
-                eprintln!("nac: failed to drop workspace revisions: {error:#}");
-            }
-        }
-        suppression_rollback.disarm();
-        self.inner.active_sessions.write().await.remove(session_id);
-        sandbox_lease_rollback.disarm();
-        // Workspace removal is deliberately after the durable row commit for
-        // both attached and uncached sessions. If SQLite deletion fails, the
-        // registered checkout and all uncommitted/untracked work remain
-        // available for a retry or resumed sandbox.
-        if let Some(worktree) = persisted_worktree {
-            runtime::cleanup_session_worktree(&worktree);
-        }
-        Ok(())
+        self.session_lifecycle().delete(session_id).await
     }
 
     /// Transactionally updates persisted model settings for an inactive session.
