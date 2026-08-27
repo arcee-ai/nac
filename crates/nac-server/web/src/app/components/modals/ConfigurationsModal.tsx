@@ -19,7 +19,7 @@ import {
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
-import { ManagedAuthCallout } from "@/app/components/modals/ManagedAuthCallout";
+import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
@@ -27,7 +27,7 @@ import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, MASKED_KEY, modelItems, type Validation } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { CLEAR_EFFORT, serializeExtraHeaders } from "@/app/lib/modelConfig";

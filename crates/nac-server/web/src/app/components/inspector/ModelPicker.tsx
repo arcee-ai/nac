@@ -14,7 +14,7 @@ import {
   TabButtonSize,
   TabButtonVariant,
 } from "@/app/atoms";
-import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { modelItems } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";

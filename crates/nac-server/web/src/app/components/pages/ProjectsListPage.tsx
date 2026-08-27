@@ -38,7 +38,7 @@ import { routes } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { pinGroup, targetIndexInGroup, type DropEdge } from "@/app/lib/sessionOrder";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useManagedHost } from "@/app/providers/ManagedHostProvider";
+import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {

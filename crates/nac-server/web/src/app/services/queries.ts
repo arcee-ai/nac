@@ -5,7 +5,6 @@ import { useCallback, useMemo } from "react";
 import {
   useInfiniteQuery,
   useMutation,
-  useQueries,
   useQuery,
   type InfiniteData,
   useQueryClient,
@@ -36,6 +35,17 @@ import {
   isCurrentSessionGeneration,
 } from "@/app/services/sessionRefresh";
 import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
+
+export {
+  useDeleteManagedSecret,
+  useManagedAuth,
+  useManagedGitHub,
+  useManagedHostStatus,
+  useManagedProviderModels,
+  useManagedSecrets,
+  usePutManagedSecret,
+  useReadyManagedProviderModels,
+} from "@/app/features/managed/queries";
 import type {
   BackendKind,
   BranchList,
@@ -60,14 +70,9 @@ import type {
   TraditionalChildRecord,
   ProjectList,
   ProjectRecord,
-  ProviderModel,
   ProviderModelList,
   RawSessionConfig,
-  ManagedAuthList,
   ManagedAuthProvider,
-  ManagedGitHubStatus,
-  ManagedHostStatus,
-  ManagedSecretList,
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SkillCatalogEntry,
@@ -182,59 +187,6 @@ export function useStoreInfo() {
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
     staleTime: Infinity,
-  });
-}
-
-export function useManagedHostStatus() {
-  return useQuery<ManagedHostStatus>({
-    queryKey: queryKeys.managedHostStatus,
-    queryFn: ({ signal }) => api.getManagedStatus(signal),
-    staleTime: 5_000,
-    refetchInterval: 15_000,
-    retry: false,
-  });
-}
-
-export function useManagedGitHub(enabled = true) {
-  return useQuery<ManagedGitHubStatus>({
-    queryKey: queryKeys.managedGitHub,
-    queryFn: ({ signal }) => api.getManagedGitHub(signal),
-    enabled,
-    retry: false,
-  });
-}
-
-export function useManagedSecrets(enabled = true) {
-  return useQuery<ManagedSecretList>({
-    queryKey: queryKeys.managedSecrets,
-    queryFn: ({ signal }) => api.listManagedSecrets(signal),
-    enabled,
-    retry: false,
-  });
-}
-
-export function usePutManagedSecret() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ name, value }: { name: string; value: string }) =>
-      api.putManagedSecret(name, value),
-    onSuccess: () =>
-      Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.managedSecrets }),
-        client.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
-      ]),
-  });
-}
-
-export function useDeleteManagedSecret() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) => api.deleteManagedSecret(name),
-    onSuccess: () =>
-      Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.managedSecrets }),
-        client.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
-      ]),
   });
 }
 
@@ -515,16 +467,6 @@ export function useDeleteCredential() {
  * per provider rather than per configuration, because the credential is one
  * file in NAC home that every session using that backend shares.
  */
-export function useManagedAuth(enabled = true) {
-  return useQuery<ManagedAuthList>({
-    queryKey: queryKeys.managedAuth,
-    queryFn: ({ signal }) => api.listManagedAuth(signal),
-    enabled,
-    staleTime: 30_000,
-    retry: false,
-  });
-}
-
 export function useManagedLogout() {
   const client = useQueryClient();
   return useMutation({
@@ -781,46 +723,6 @@ export function useStoredKeyProviderModels(
  * Invalidated when a login completes, which is what turns the model picker from
  * empty into populated without a reload.
  */
-export function useManagedProviderModels(backend: BackendKind | null, enabled: boolean) {
-  return useQuery<ProviderModelList>({
-    queryKey: queryKeys.managedProviderModels(backend ?? ""),
-    queryFn: () => api.listProviderModels({ backend: backend! }),
-    enabled: enabled && backend !== null,
-    retry: false,
-    staleTime: 5 * 60_000,
-  });
-}
-
-/**
- * Live model indexes for managed providers the catalog already marks ready.
- * Same `POST /providers/models` path Create New uses after login — Browse can
- * overlay these on the local catalog so Arcee/Codex show what the account can
- * actually reach. Failures leave that provider on its catalog entries.
- */
-export function useReadyManagedProviderModels(catalog: ModelCatalog | undefined) {
-  const ready = useMemo(
-    () =>
-      (catalog?.providers ?? []).filter(
-        (provider) => provider.auth_status === "ready" && provider.auth !== "api_key_env",
-      ),
-    [catalog],
-  );
-  const results = useQueries({
-    queries: ready.map((provider) => ({
-      queryKey: queryKeys.managedProviderModels(provider.id),
-      queryFn: () => api.listProviderModels({ backend: provider.id }),
-      retry: false,
-      staleTime: 5 * 60_000,
-    })),
-  });
-  const live = new Map<BackendKind, ProviderModel[]>();
-  ready.forEach((provider, index) => {
-    const models = results[index]?.data?.models;
-    if (models?.length) live.set(provider.id, models);
-  });
-  return live;
-}
-
 /**
  * The server's model catalog: context windows, prices and the efforts each
  * model accepts. It only changes when the server reloads it, and a failure is

@@ -1,5 +1,5 @@
 import { managedAuthProvider } from "@/app/lib/providers";
-import { useManagedAuth } from "@/app/services/queries";
+import { useManagedAuth } from "@/app/features/managed/queries";
 import type { BackendKind } from "@/app/types/api";
 
 /**

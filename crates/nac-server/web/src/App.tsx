@@ -7,7 +7,7 @@ import ProjectsListPage from "@/app/components/pages/ProjectsListPage";
 import SessionPage from "@/app/components/pages/SessionPage";
 import { routes } from "@/app/lib/routes";
 import { ProjectActionsProvider } from "@/app/providers/ProjectActionsProvider";
-import { ManagedHostProvider } from "@/app/providers/ManagedHostProvider";
+import { ManagedHostProvider } from "@/app/features/managed/controller/ManagedHostProvider";
 import { SessionActionsProvider } from "@/app/providers/SessionActionsProvider";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 

@@ -8,8 +8,8 @@ import {
   Loader,
   LoaderSize,
 } from "@/app/atoms";
-import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
-import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
+import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { cn } from "@/app/lib/cn";
 import { humanErrorText } from "@/app/lib/providerError";
 import { managedAuthLabel } from "@/app/lib/providers";
