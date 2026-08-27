@@ -10,3 +10,4 @@ durable direct-session work.
 - [Durable direct goals](direct-goals.md)
 - [Traditional child sessions](traditional-children.md)
 - [Managed orchestrator sessions](managed-orchestrators.md)
+- [Native web retrieval](web-retrieval.md)

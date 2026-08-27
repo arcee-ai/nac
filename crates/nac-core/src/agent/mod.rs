@@ -242,6 +242,7 @@ pub struct Agent {
     tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
     direct_primary: bool,
+    web_retrieval_eligible: bool,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
@@ -496,6 +497,14 @@ impl Agent {
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
+        let web_retrieval_eligible = mode == AgentMode::Direct && traditional_child.is_none();
+        if web_retrieval_eligible
+            && tool_defs.iter().any(|definition| {
+                tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
+            })
+        {
+            anyhow::bail!("web_search and web_fetch are reserved first-party capability names");
+        }
 
         let mut messages = vec![Message::System {
             content: system_prompt,
@@ -561,6 +570,7 @@ impl Agent {
             tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
+            web_retrieval_eligible,
             compaction,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
@@ -584,6 +594,7 @@ impl Agent {
                 host_secret_store: None,
                 managed_github: None,
                 managed_home_root: None,
+                web_credential: None,
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
             },
             event_sink: config.event_sink,
@@ -613,6 +624,48 @@ impl Agent {
         self.tool_runtime.host_secret_store = store;
         self.tool_runtime.managed_github = github;
         self.tool_runtime.managed_home_root = home_root;
+    }
+
+    /// Build one immutable model-request capability view. The Exa credential
+    /// and the tool names are replaced together before the request and the
+    /// resulting runtime is cloned into exactly that response's tool round.
+    fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
+        let credential = if self.web_retrieval_eligible {
+            crate::model::resolve_named_api_key("EXA_API_KEY")?
+        } else {
+            None
+        };
+        Ok(self.install_model_request_capabilities(credential))
+    }
+
+    fn install_model_request_capabilities(
+        &mut self,
+        credential: Option<String>,
+    ) -> Vec<ToolDefinition> {
+        let credential = credential
+            .filter(|_| self.web_retrieval_eligible)
+            .map(crate::tools::web::ExaCredential::new)
+            .map(Arc::new);
+        let mut definitions = self.tool_defs.clone();
+        if credential.is_some() {
+            definitions.extend(crate::tools::web::definitions());
+        }
+        self.tool_runtime.allowed_tools = Some(Arc::new(
+            definitions
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect(),
+        ));
+        self.tool_runtime.web_credential = credential;
+        definitions
+    }
+
+    #[cfg(test)]
+    fn model_request_capabilities_for_test(
+        &mut self,
+        credential: Option<&str>,
+    ) -> Vec<ToolDefinition> {
+        self.install_model_request_capabilities(credential.map(str::to_string))
     }
 
     #[cfg(test)]
@@ -760,12 +813,14 @@ impl Agent {
         let mut accumulated_usage = TokenUsage::default();
         loop {
             self.append_pending_guidance_checked().await?;
+            let request_tool_defs = self.refresh_model_request_capabilities()?;
             let needs_compaction_view = self
                 .compaction
                 .as_mut()
                 .is_some_and(|compaction| !compaction.is_passthrough(&self.messages));
             let provider_view = if needs_compaction_view {
-                self.prepare_provider_view(&mut accumulated_usage).await
+                self.prepare_provider_view(&mut accumulated_usage, &request_tool_defs)
+                    .await
             } else {
                 PreparedProviderView {
                     messages: self.messages.clone(),
@@ -807,7 +862,7 @@ impl Agent {
             .then_some(&push_delta);
             let turn = self
                 .client
-                .send_turn_streaming(provider_view.messages, self.tool_defs.clone(), delta_sink)
+                .send_turn_streaming(provider_view.messages, request_tool_defs, delta_sink)
                 .await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();
