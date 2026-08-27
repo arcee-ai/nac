@@ -9092,7 +9092,7 @@ async fn saved_config_managed_updates_clear_inherited_light_selectors() {
         },
     )
     .unwrap();
-    let Json(repaired) = update_model_config_handler(
+    let Json(repaired) = delivery::model_configurations::update_handler(
         State(manager.clone()),
         AxumPath("repair".to_string()),
         Ok(Json(UpdateModelConfigurationRequest::default())),
@@ -9125,7 +9125,7 @@ async fn saved_config_managed_updates_clear_inherited_light_selectors() {
         },
     )
     .unwrap();
-    let Json(switched) = update_model_config_handler(
+    let Json(switched) = delivery::model_configurations::update_handler(
         State(manager.clone()),
         AxumPath("switch".to_string()),
         Ok(Json(UpdateModelConfigurationRequest {

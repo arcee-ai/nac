@@ -15,7 +15,9 @@ pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
 };
-pub use delivery::model_configurations::ModelConfigurationList;
+pub use delivery::model_configurations::{
+    CreateModelConfigurationRequest, ModelConfigurationList, UpdateModelConfigurationRequest,
+};
 pub use delivery::projects::{
     AssignSessionRequest, CreateProjectRequest, DeleteProjectQuery, DeleteProjectResponse,
     DeleteProjectSessions, ProjectList, ReorderProjectsRequest, ReorderProjectsResponse,
@@ -75,11 +77,10 @@ use nac_core::{
     light_model::{LightModelError, LightModelSettings},
     model::{
         list_managed_provider_models, list_provider_models, managed_backend_base_url,
-        provider_default_base_url, provider_for_model, provider_uses_api_key, remove_api_key,
-        resolve_backend_api_key, resolve_model_base_url, store_api_key,
-        validate_caller_supplied_base_url, validate_model_configuration, BackendKind,
-        EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError, ModelListing,
-        ProviderModel, ReasoningEffort,
+        provider_default_base_url, provider_for_model, resolve_backend_api_key,
+        resolve_model_base_url, validate_caller_supplied_base_url, validate_model_configuration,
+        BackendKind, EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError,
+        ModelListing, ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
     permissions::{PermissionReply, PermissionRequest},
@@ -861,58 +862,6 @@ pub struct PutManagedSecretRequest {
 const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct CreateModelConfigurationRequest {
-    pub name: String,
-    pub backend: BackendKind,
-    pub model: String,
-    /// Defaults to the provider's canonical URL.
-    pub base_url: Option<String>,
-    #[schema(write_only, example = "fake-api-key")]
-    pub api_key: Option<String>,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub extra_headers: Option<BTreeMap<String, String>>,
-    /// Compaction budget sessions started from this setup inherit; absent or
-    /// zero leaves them on the 70%-of-context default.
-    pub orchestrator_compaction_threshold: Option<u64>,
-    /// Message the launch modal pre-fills when this setup is chosen.
-    pub initial_prompt: Option<String>,
-    /// Light worker model saved with this setup.
-    #[serde(default)]
-    pub light_model: Option<LightModelSettings>,
-}
-
-/// Edits a saved setup in place. Every field is tri-state: omit it to keep what
-/// is stored, send null to clear it, send a value to replace it.
-///
-/// `api_key` is the exception that cannot be read back — the secret lives in
-/// the credential store — so omitting it keeps the credential the row already
-/// points at, and sending one files a fresh credential in its place.
-#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
-pub struct UpdateModelConfigurationRequest {
-    #[serde(default)]
-    pub name: RequestField<String>,
-    #[serde(default)]
-    pub backend: RequestField<BackendKind>,
-    #[serde(default)]
-    pub model: RequestField<String>,
-    #[serde(default)]
-    pub base_url: RequestField<String>,
-    #[serde(default)]
-    #[schema(write_only, example = "fake-replacement-key")]
-    pub api_key: RequestField<String>,
-    #[serde(default)]
-    pub reasoning_effort: RequestField<ReasoningEffort>,
-    #[serde(default)]
-    pub extra_headers: RequestField<BTreeMap<String, String>>,
-    #[serde(default)]
-    pub orchestrator_compaction_threshold: RequestField<u64>,
-    #[serde(default)]
-    pub initial_prompt: RequestField<String>,
-    #[serde(default)]
-    pub light_model: RequestField<LightModelSettings>,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ModelConfigFromFileRequest {
     pub path: String,
 }
@@ -1467,9 +1416,7 @@ impl SessionManager {
     pub(crate) fn model_configurations(
         &self,
     ) -> application::model_configurations::ModelConfigurationApplication<'_> {
-        application::model_configurations::ModelConfigurationApplication::new(
-            &self.inner.store_path,
-        )
+        application::model_configurations::ModelConfigurationApplication::new(self)
     }
 
     pub(crate) fn ssh_configurations(
@@ -4662,7 +4609,7 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(provider_models_handler))
         .routes(routes!(
             delivery::model_configurations::list_handler,
-            create_model_config_handler
+            delivery::model_configurations::create_handler
         ))
         .routes(routes!(
             delivery::projects::list_handler,
@@ -4676,7 +4623,7 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(delivery::projects::assign_session_handler))
         .routes(routes!(model_config_from_file_handler))
         .routes(routes!(
-            update_model_config_handler,
+            delivery::model_configurations::update_handler,
             delivery::model_configurations::delete_handler
         ))
         .routes(routes!(saved_model_config_models_handler))
@@ -5217,336 +5164,6 @@ async fn provider_models_handler(
             message: error.to_string(),
         })?;
     Ok(Json(ProviderModelList { base_url, models }))
-}
-
-/// Save a validated provider setup under a name.
-///
-/// The key is filed in the credential store under a generated name that the
-/// row then points at, so the secret stays out of the database and a launched
-/// session resolves it through the ordinary `api_key_env` path.
-#[utoipa::path(
-    post,
-    path = "/model-configs",
-    operation_id = "post_model_configs",
-    tag = "model-configs",
-    request_body(content = CreateModelConfigurationRequest, content_type = "application/json"),
-    responses((status = 201, description = "Success", body = ModelConfigurationRecord, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn create_model_config_handler(
-    State(manager): State<SessionManager>,
-    payload: std::result::Result<Json<CreateModelConfigurationRequest>, JsonRejection>,
-) -> std::result::Result<(StatusCode, Json<ModelConfigurationRecord>), ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let backend = request.backend;
-
-    let base_url = settle_configuration_base_url(&manager, backend, request.base_url.as_deref())?;
-
-    let api_key = request
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default();
-    let expects_key = provider_uses_api_key(backend);
-    if expects_key && api_key.is_empty() {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' requires an API key"),
-        });
-    }
-    if !expects_key && !api_key.is_empty() {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!(
-                "backend '{backend}' authenticates with a stored login and accepts no API key"
-            ),
-        });
-    }
-
-    let id = uuid::Uuid::new_v4();
-    let credential_name =
-        expects_key.then(|| format!("{GENERATED_CREDENTIAL_PREFIX}{}", id.simple()));
-    let policy = NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?;
-    let light = request
-        .light_model
-        .map(|light| {
-            light_model::normalize(
-                light,
-                &policy,
-                credential_name
-                    .as_deref()
-                    .map(|name| light_model::InheritedCredential {
-                        backend,
-                        name: Some(name),
-                        previous: None,
-                    }),
-            )
-        })
-        .transpose()?;
-
-    let configuration = model_configurations::NewModelConfiguration {
-        name: request.name,
-        backend: backend.to_string(),
-        model: request.model,
-        base_url,
-        api_key_env: credential_name.clone(),
-        reasoning_effort: request
-            .reasoning_effort
-            .map(|effort| effort.as_str().to_string()),
-        extra_headers: request.extra_headers.unwrap_or_default(),
-        orchestrator_compaction_threshold: request.orchestrator_compaction_threshold,
-        initial_prompt: request.initial_prompt,
-        light_model: light,
-    };
-    if let Some(name) = credential_name.as_deref() {
-        store_api_key(name, api_key)?;
-    }
-    // The light model must resolve to a working client now, not at the first
-    // launch that picks this setup. Validation needs the credential above
-    // already stored, so a failure retires it again.
-    if let Some(light) = configuration.light_model.as_ref() {
-        if let Err(error) = nac_core::light_model::validate(light, &configuration.extra_headers) {
-            if let Some(name) = credential_name.as_deref() {
-                let _ = remove_api_key(name);
-            }
-            return Err(request_configuration_error_from(error).into());
-        }
-    }
-    let record = model_configurations::insert_model_configuration(
-        &manager.inner.store_path,
-        &id.to_string(),
-        configuration,
-    );
-
-    match record {
-        Ok(record) => Ok((StatusCode::CREATED, Json(record))),
-        Err(error) => {
-            // The row is what makes the credential reachable, so a failed
-            // insert must not leave the secret behind.
-            if let Some(name) = credential_name.as_deref() {
-                let _ = remove_api_key(name);
-            }
-            Err(error.into())
-        }
-    }
-}
-
-/// Settles where a configuration sends its requests: the caller's URL when
-/// there is one, the provider's canonical URL otherwise, checked against the
-/// credential destination policy either way.
-fn settle_configuration_base_url(
-    manager: &SessionManager,
-    backend: BackendKind,
-    requested: Option<&str>,
-) -> std::result::Result<String, ApiError> {
-    let base_url = requested
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| provider_default_base_url(backend).map(str::to_string))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' has no default base URL; supply one"),
-        })?;
-    let base_url = resolve_model_base_url(backend, Some(base_url))?;
-    enforce_trusted_base_url(
-        Some(backend),
-        Some(base_url.as_str()),
-        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-    )?;
-    Ok(base_url)
-}
-
-/// Edit a saved provider setup, keeping whatever the request leaves out.
-///
-/// A new key is filed under a fresh generated name and the row is pointed at
-/// it; the credential it replaces is dropped only once the row has actually
-/// moved, so a failed edit never leaves the configuration pointing at a secret
-/// that is gone.
-#[utoipa::path(
-    patch,
-    path = "/model-configs/{config_id}",
-    operation_id = "patch_model_configs_config_id",
-    tag = "model-configs",
-    params(("config_id" = String, Path)),
-    request_body(content = UpdateModelConfigurationRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = ModelConfigurationRecord, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn update_model_config_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
-    payload: std::result::Result<Json<UpdateModelConfigurationRequest>, JsonRejection>,
-) -> std::result::Result<Json<ModelConfigurationRecord>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let existing =
-        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
-    let stored_backend: BackendKind =
-        existing
-            .backend
-            .parse()
-            .map_err(|message: String| ApiError {
-                status: StatusCode::BAD_REQUEST,
-                message,
-            })?;
-
-    let backend = match request.backend {
-        RequestField::Value(kind) => kind,
-        RequestField::Omitted | RequestField::Null => stored_backend,
-    };
-    // Switching provider retires a URL that was only the old provider's
-    // default, so an unmentioned URL follows the new backend instead.
-    let requested_base_url = match request.base_url {
-        RequestField::Value(url) => Some(url),
-        RequestField::Null => None,
-        RequestField::Omitted => (backend == stored_backend).then(|| existing.base_url.clone()),
-    };
-    let base_url = settle_configuration_base_url(&manager, backend, requested_base_url.as_deref())?;
-
-    let expects_key = provider_uses_api_key(backend);
-    let supplied_key = match &request.api_key {
-        RequestField::Value(key) => Some(key.trim().to_string()),
-        _ => None,
-    };
-    if !expects_key && supplied_key.as_deref().is_some_and(|key| !key.is_empty()) {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!(
-                "backend '{backend}' authenticates with a stored login and accepts no API key"
-            ),
-        });
-    }
-
-    // The credential the row ends up pointing at, and the one it is leaving
-    // behind — exactly one of the two survives this request.
-    let replacement_credential = supplied_key.filter(|key| !key.is_empty()).map(|key| {
-        (
-            format!(
-                "{GENERATED_CREDENTIAL_PREFIX}{}",
-                uuid::Uuid::new_v4().simple()
-            ),
-            key,
-        )
-    });
-    let (api_key_env, superseded) = if !expects_key {
-        (None, existing.api_key_env.clone())
-    } else if let Some((name, _)) = replacement_credential.as_ref() {
-        (Some(name.clone()), existing.api_key_env.clone())
-    } else if matches!(request.api_key, RequestField::Null) || existing.api_key_env.is_none() {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' requires an API key"),
-        });
-    } else {
-        (existing.api_key_env.clone(), None)
-    };
-
-    let inherited = light_model::InheritedCredential {
-        backend,
-        name: api_key_env.as_deref(),
-        previous: existing.api_key_env.as_deref(),
-    };
-    let configuration = model_configurations::NewModelConfiguration {
-        name: replaceable_text(request.name, &existing.name),
-        backend: backend.to_string(),
-        model: replaceable_text(request.model, &existing.model),
-        base_url,
-        api_key_env: api_key_env.clone(),
-        reasoning_effort: match request.reasoning_effort {
-            RequestField::Value(effort) => Some(effort.as_str().to_string()),
-            RequestField::Null => None,
-            RequestField::Omitted => existing.reasoning_effort.clone(),
-        },
-        extra_headers: match request.extra_headers {
-            RequestField::Value(headers) => headers,
-            RequestField::Null => BTreeMap::new(),
-            RequestField::Omitted => existing.extra_headers.clone(),
-        },
-        orchestrator_compaction_threshold: match request.orchestrator_compaction_threshold {
-            RequestField::Value(threshold) => (threshold != 0).then_some(threshold),
-            RequestField::Null => None,
-            RequestField::Omitted => existing.orchestrator_compaction_threshold,
-        },
-        initial_prompt: match request.initial_prompt {
-            RequestField::Value(prompt) => Some(prompt),
-            RequestField::Null => None,
-            RequestField::Omitted => existing.initial_prompt.clone(),
-        },
-        light_model: match request.light_model {
-            RequestField::Value(light) => Some(light_model::normalize(
-                light,
-                &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-                Some(inherited),
-            )?),
-            RequestField::Null => None,
-            RequestField::Omitted => existing.light_model.clone().map(|mut light| {
-                light_model::rotate_inherited_credential(&mut light, inherited);
-                light
-            }),
-        },
-    };
-
-    if let Some((name, key)) = replacement_credential.as_ref() {
-        store_api_key(name, key)?;
-    }
-    // As on create, the light model must resolve to a working client before
-    // the row is updated; a failure retires the just-stored key.
-    if let Some(light) = configuration.light_model.as_ref() {
-        if let Err(error) = nac_core::light_model::validate(light, &configuration.extra_headers) {
-            if let Some((name, _)) = replacement_credential.as_ref() {
-                let _ = remove_api_key(name);
-            }
-            return Err(request_configuration_error_from(error).into());
-        }
-    }
-    match model_configurations::update_model_configuration(
-        &manager.inner.store_path,
-        &config_id,
-        configuration,
-    ) {
-        Ok(record) => {
-            // A generated key survives exactly as long as something in the
-            // updated record — top-level or the light model — still names it;
-            // every other generated key this update walked away from is
-            // retired.
-            let mut retired: std::collections::BTreeSet<&str> = existing
-                .light_model
-                .as_ref()
-                .and_then(|light| light.api_key_env.as_deref())
-                .into_iter()
-                .chain(superseded.as_deref())
-                .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-                .collect();
-            for kept in record.api_key_env.iter().map(String::as_str).chain(
-                record
-                    .light_model
-                    .as_ref()
-                    .and_then(|light| light.api_key_env.as_deref()),
-            ) {
-                retired.remove(kept);
-            }
-            for name in retired {
-                let _ = remove_api_key(name);
-            }
-            Ok(Json(record))
-        }
-        Err(error) => {
-            if api_key_env != existing.api_key_env {
-                if let Some(name) = api_key_env.as_deref() {
-                    let _ = remove_api_key(name);
-                }
-            }
-            Err(error.into())
-        }
-    }
-}
-
-/// A tri-state text field applied to what is stored: null blanks the value so
-/// the store rejects it by name, rather than silently keeping the old one.
-fn replaceable_text(field: RequestField<String>, current: &str) -> String {
-    match field {
-        RequestField::Value(value) => value,
-        RequestField::Null => String::new(),
-        RequestField::Omitted => current.to_string(),
-    }
 }
 
 /// Read a configuration the user picked from disk and check it can actually run.
@@ -7293,6 +6910,22 @@ impl From<ModelConfigurationStoreError> for ApiError {
         Self {
             status,
             message: error.to_string(),
+        }
+    }
+}
+
+impl From<application::model_configurations::ModelConfigurationApplicationError> for ApiError {
+    fn from(error: application::model_configurations::ModelConfigurationApplicationError) -> Self {
+        match error {
+            application::model_configurations::ModelConfigurationApplicationError::InvalidInput(
+                message,
+            ) => Self::bad_request(message),
+            application::model_configurations::ModelConfigurationApplicationError::Store(error) => {
+                error.into()
+            }
+            application::model_configurations::ModelConfigurationApplicationError::Internal(
+                error,
+            ) => error.into(),
         }
     }
 }
