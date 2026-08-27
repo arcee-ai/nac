@@ -731,6 +731,13 @@ Rules:
   Model override/clear semantics, ambient isolation, compaction bounds, header
   validation, worker limits, store-path behavior, the complete core test
   build, and warning-denied Clippy pass.
+- Fresh primary-session and managed-worker construction now lives in a focused
+  417-line builder owner. Behavior selects the agent mode at construction;
+  SSH, local, and sandbox workspace assembly remain mutually exclusive; model,
+  light-model, MCP, skill, worktree rollback, and durable snapshot ordering are
+  unchanged. Required-model preflight, managed-worker context and SSH restore,
+  direct behavior, sandbox default/enablement, invalid SSH+sandbox rejection,
+  the complete core test build, and warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -746,7 +753,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 runtime model-resolution extraction with exact-path staging.
-Then decompose runtime contracts, direct/orchestrator/worker builders, resume,
-sandbox, and execution-context ownership without changing behavior selection
-or backend choice.
+Commit the M4 runtime builder extraction with exact-path staging. Then
+decompose runtime contracts, resume, sandbox, and execution-context ownership
+without changing behavior selection or backend choice.
