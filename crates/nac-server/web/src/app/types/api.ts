@@ -82,11 +82,9 @@ export type SessionMetadata = ApiSchema<"SessionMetadata">;
 export type ThreadSnapshot = ApiSchema<"ThreadSnapshot">;
 
 /** How a dispatch ended; only `ok` is retained context for later dispatches. */
-export type EpisodeStatus = "ok" | "error" | "timed_out" | "cancelled";
+export type EpisodeStatus = ApiSchema<"EpisodeStatus">;
 
-export type EpisodeSnapshot = Omit<ApiSchema<"EpisodeSnapshot">, "status"> & {
-  status: EpisodeStatus;
-};
+export type EpisodeSnapshot = ApiSchema<"EpisodeSnapshot">;
 
 export type WorksetItemSnapshot = ApiSchema<"WorksetItemSnapshot">;
 
@@ -262,7 +260,7 @@ export type StoredCredentialList = ApiSchema<"StoredCredentialList">;
 export type GeneratedCredential = ApiSchema<"GeneratedCredential">;
 
 /** Providers that sign in through a browser instead of taking an API key. */
-export type ManagedAuthProvider = "arcee" | "codex";
+export type ManagedAuthProvider = ApiSchema<"ManagedAuthProvider">;
 
 /** What a managed provider currently has stored, signed in or not. */
 export type ManagedAuthStatus = ApiSchema<"ManagedAuthStatusResponse">;
@@ -302,7 +300,7 @@ export type CreateSshConfigurationRequest = ApiSchema<"CreateSshConfigurationReq
 /** Tri-state fields: omit to keep, null to clear, value to replace. */
 export type UpdateSshConfigurationRequest = ApiSchema<"UpdateSshConfigurationRequest">;
 
-export type McpTransport = "stdio" | "streamable_http";
+export type McpTransport = ApiSchema<"McpTransportSchema">;
 
 export type McpLibraryAuth = ApiSchema<"McpLibraryAuth">;
 
@@ -316,9 +314,7 @@ export type McpLibraryResponse = ApiSchema<"McpLibraryResponse">;
  * values are redacted previews: a `${ENV_VAR}` reference echoes back verbatim,
  * a literal comes back masked.
  */
-export type McpServerView = Omit<ApiSchema<"McpServerView">, "transport"> & {
-  transport: McpTransport;
-};
+export type McpServerView = ApiSchema<"McpServerView">;
 
 export type McpServerList = ApiSchema<"McpServerList">;
 
@@ -446,10 +442,6 @@ export type RevertSessionRequest = ApiSchema<"RevertSessionRequest">;
 export type RevertSessionResponse = ApiSchema<"RevertSessionResponse">;
 
 export type RegenerateSessionRequest = ApiSchema<"RegenerateSessionRequest">;
-
-export interface SteeringRequest {
-  instruction: string;
-}
 
 export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringResponse">;
 
