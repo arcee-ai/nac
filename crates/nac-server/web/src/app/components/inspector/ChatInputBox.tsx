@@ -28,6 +28,7 @@ import {
   formatTokensCompact,
   runMetrics,
   sessionEnvLabel,
+  tokenUsage,
 } from "@/app/lib/format";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
@@ -50,7 +51,16 @@ import {
   useSlashCommands,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
-import { pushLocalEvent, useCancelArmed, useRunUsage, useRunning } from "@/app/store/runtimeStore";
+import {
+  liftSessionSpend,
+  pushLocalEvent,
+  useCancelArmed,
+  useLastElapsedMs,
+  useRunStartedAt,
+  useRunUsage,
+  useRunning,
+  useSessionSpend,
+} from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -272,9 +282,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const listboxId = useId();
 
   // The snapshot only accounts for a run once it ends, so while one is going
-  // the stream's own tally is what keeps these counters moving.
+  // (or Stopping, before persist lands) the stream's own tally keeps the
+  // session spend from dropping back to the previous turn. After Stop the
+  // snapshot can briefly be zeros — sessionSpend is the floor that never
+  // drops while this tab is open.
   const runUsage = useRunUsage();
-  const metrics = runMetrics(snapshot, entry, running ? runUsage : null);
+  const sessionSpend = useSessionSpend();
+  useEffect(() => {
+    liftSessionSpend(tokenUsage(snapshot));
+  }, [snapshot]);
+  const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
   const context = contextGauge(
@@ -282,7 +299,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
   );
   const now = useNow(1000, running);
-  const elapsedMs = metrics.startedAt ? now - metrics.startedAt : metrics.lastResponseMs;
+  const runStartedAt = useRunStartedAt();
+  const lastElapsedMs = useLastElapsedMs();
+  // Stop freezes the clock at click; Stopping must not keep adding cleanup time.
+  const liveElapsed = running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
+  const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
   const sshStatus = useSshConnectionStatus(sshTarget);
@@ -642,7 +663,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
     >
-      <span className={stopping ? "invisible" : undefined}>{sendIcon}</span>
+      {sendIcon}
     </StickyButton>
   ) : (
     <Button
@@ -657,7 +678,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
     >
-      <span className={stopping ? "invisible" : undefined}>{sendIcon}</span>
+      {sendIcon}
     </Button>
   );
 

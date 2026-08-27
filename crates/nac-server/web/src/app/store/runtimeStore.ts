@@ -4,7 +4,7 @@
 // tab and the transcript typing indicator.
 
 import { createStore } from "@/app/lib/store";
-import { addTokenUsage, isActiveRun } from "@/app/lib/format";
+import { addTokenUsage, isActiveRun, maxBillableUsage, tokenUsageHasSpend } from "@/app/lib/format";
 import { threadLogLine, toolCallFailed, type ThreadLogLine } from "@/app/lib/threadLog";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
@@ -92,6 +92,20 @@ export interface RuntimeState {
    */
   runUsage: TokenUsage | null;
   /**
+   * Session spend that only rises while this tab is open. Stop must not drop
+   * the composer totals back to a zero snapshot; `run_started` only clears
+   * the live delta above.
+   */
+  sessionSpend: TokenUsage | null;
+  /**
+   * Wall-clock start of the current run, kept after Stop so the composer
+   * clock can keep showing elapsed instead of falling back to a previous
+   * response's duration (or `--:--`).
+   */
+  runStartedAt: number | null;
+  /** Frozen elapsed ms from the last run, used once live `startedAt` is gone. */
+  lastElapsedMs: number | null;
+  /**
    * Bumped by every event that could have touched the checkout. The Files panel
    * watches it to reread the diff while a run is still going, instead of
    * standing on whatever the checkout looked like when the panel opened.
@@ -120,6 +134,9 @@ export const runtimeStore = createStore<RuntimeState>(
     streamSettled: false,
     optimisticUserPrompt: null,
     runUsage: null,
+    sessionSpend: null,
+    runStartedAt: null,
+    lastElapsedMs: null,
     workspaceEpoch: 0,
     cancelArmed: false,
   },
@@ -145,6 +162,9 @@ export function resetRuntime(sessionId: string | null): void {
     streamSettled: false,
     optimisticUserPrompt: null,
     runUsage: null,
+    sessionSpend: null,
+    runStartedAt: null,
+    lastElapsedMs: null,
     workspaceEpoch: 0,
     cancelArmed: false,
   });
@@ -152,6 +172,24 @@ export function resetRuntime(sessionId: string | null): void {
 
 export function clearRuntimeThreads(): void {
   setState({ threads: {} });
+}
+
+/** Raise session spend to match a snapshot total; never lowers it. */
+export function liftSessionSpend(persisted: TokenUsage | null | undefined): void {
+  if (!tokenUsageHasSpend(persisted) || !persisted) return;
+  setState((state) => {
+    const next = maxBillableUsage(state.sessionSpend, persisted);
+    if (
+      next?.input_tokens === state.sessionSpend?.input_tokens &&
+      next?.output_tokens === state.sessionSpend?.output_tokens &&
+      next?.cache_read_tokens === state.sessionSpend?.cache_read_tokens &&
+      next?.cache_write_tokens === state.sessionSpend?.cache_write_tokens &&
+      (next?.cost?.total ?? 0) === (state.sessionSpend?.cost?.total ?? 0)
+    ) {
+      return {};
+    }
+    return { sessionSpend: next };
+  });
 }
 
 /** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
@@ -198,8 +236,15 @@ export function syncRunFromSnapshot(activeRun: ActiveRunSnapshot | null | undefi
     // or a terminal SSE event.
     return;
   }
-  if (state.running === running) return;
-  setState({ running, activity: running ? state.activity : "" });
+  const runStartedAt =
+    running && activeRun ? activeRun.started_at_epoch_ms : state.runStartedAt;
+  if (state.running === running && state.runStartedAt === runStartedAt) return;
+  setState({
+    running,
+    activity: running ? state.activity : "",
+    runStartedAt: running ? runStartedAt : null,
+    lastElapsedMs: running ? null : freezeElapsed(state),
+  });
 }
 
 /** Record a client-side event so the Events tab shows the full interaction. */
@@ -246,6 +291,21 @@ function flagCancelledThreads(
   );
 }
 
+function elapsedSince(startedAt: number | null | undefined): number | null {
+  if (startedAt == null || startedAt <= 0) return null;
+  return Math.max(0, Date.now() - startedAt);
+}
+
+function freezeElapsed(
+  state: Pick<RuntimeState, "runStartedAt" | "lastElapsedMs">,
+  extra?: number | null,
+): number | null {
+  const candidates = [elapsedSince(state.runStartedAt), state.lastElapsedMs, extra].filter(
+    (value): value is number => value != null,
+  );
+  return candidates.length ? Math.max(...candidates) : null;
+}
+
 /**
  * Paint Stopping immediately. The HTTP cancel still waits for worker trees;
  * `finishRunCancel` and SSE `run_cancelled` clear the arm without flipping
@@ -263,6 +323,8 @@ export function requestRunCancel(): RuntimeState {
     modelError: null,
     streamSettled: true,
     cancelArmed: true,
+    lastElapsedMs: freezeElapsed(state),
+    runStartedAt: null,
     threads: terminalizeThreads(flagCancelledThreads(state.threads)),
   }));
   return previous;
@@ -278,6 +340,7 @@ export function restoreRunCancel(previous: RuntimeState): void {
     streamSettled: previous.streamSettled,
     threads: previous.threads,
     cancelArmed: previous.cancelArmed,
+    lastElapsedMs: previous.lastElapsedMs,
   });
 }
 
@@ -286,7 +349,13 @@ export function restoreRunCancel(previous: RuntimeState): void {
  * SSE `run_cancelled` does the same; either may win.
  */
 export function finishRunCancel(): void {
-  setState({ cancelArmed: false, running: false, activity: "" });
+  setState((state) => ({
+    cancelArmed: false,
+    running: false,
+    activity: "",
+    lastElapsedMs: freezeElapsed(state),
+    runStartedAt: null,
+  }));
 }
 
 /** Identifies the log lines whose events carry no id of their own. */
@@ -341,9 +410,11 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         streamText: "",
         streamReasoning: "",
         streamSettled: false,
-        // The snapshot this run is measured against is the one about to be
-        // refetched, so the tally starts empty here rather than at the end.
+        // Only this run's live delta resets. Session spend lives on the
+        // snapshot, including unattributed usage from cancelled or rewound turns.
         runUsage: null,
+        runStartedAt: event.started_at_epoch_ms,
+        lastElapsedMs: null,
         cancelArmed: false,
       });
       pushEvent({
@@ -365,6 +436,8 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         streamReasoning: "",
         streamSettled: true,
         cancelArmed: false,
+        lastElapsedMs: freezeElapsed(state, event.duration_ms ?? null),
+        runStartedAt: null,
         threads: terminalizeThreads(state.threads),
       }));
       pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
@@ -379,6 +452,8 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         error: message,
         streamSettled: true,
         cancelArmed: false,
+        lastElapsedMs: freezeElapsed(state),
+        runStartedAt: null,
         threads: terminalizeThreads(state.threads),
       }));
       pushEvent({ seq, kind: "error", text: message, isError: true });
@@ -395,6 +470,8 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         modelError: null,
         streamSettled: true,
         cancelArmed: false,
+        lastElapsedMs: freezeElapsed(state),
+        runStartedAt: null,
         threads: terminalizeThreads(flagCancelledThreads(state.threads)),
       }));
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
@@ -468,6 +545,13 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
           // The gauge measures the orchestrator's own context window, so a
           // worker's reading of its private one must not stand in for it.
           event.thread_name ? (state.runUsage?.total_tokens ?? 0) : event.usage.total_tokens,
+        ),
+        sessionSpend: addTokenUsage(
+          state.sessionSpend,
+          event.usage,
+          event.thread_name
+            ? (state.sessionSpend?.total_tokens ?? 0)
+            : event.usage.total_tokens || (state.sessionSpend?.total_tokens ?? 0),
         ),
       }));
       return "none";
@@ -604,6 +688,9 @@ export const useLiveEvents = () => useStore((s) => s.events);
 export const useStreamStatus = () => useStore((s) => s.streamStatus);
 export const useLiveThreads = () => useStore((s) => s.threads);
 export const useRunUsage = () => useStore((s) => s.runUsage);
+export const useSessionSpend = () => useStore((s) => s.sessionSpend);
+export const useRunStartedAt = () => useStore((s) => s.runStartedAt);
+export const useLastElapsedMs = () => useStore((s) => s.lastElapsedMs);
 export const useWorkspaceEpoch = () => useStore((s) => s.workspaceEpoch);
 export const useStreamText = () => useStore((s) => s.streamText);
 export const useStreamReasoning = () => useStore((s) => s.streamReasoning);

@@ -139,6 +139,8 @@ interface BuildContext {
   threadEpisodes: Record<string, AgentEvent[][]>;
   /** How often each name is dispatched across the whole transcript. */
   dispatchCounts: Record<string, number>;
+  /** Latest dispatch of this name exists only because the user stopped. */
+  cancelledNames: Set<string>;
 }
 
 /**
@@ -314,22 +316,58 @@ function toolResultsForAssistant(
 /**
  * Thread names whose latest dispatch exists only because the user stopped the
  * run. A later successful dispatch of the same name drops off this set.
+ *
+ * A stop does not always write a tool result for every dispatch — a name that
+ * never started has no `[tool call cancelled by user]` row. Those still belong
+ * here: the run ended without them, so a checkmark would claim work that never
+ * ran.
  */
 export function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
   const cancelled = new Set<string>();
   messages.forEach((message, index) => {
     if (message.role !== "assistant") return;
     const results = toolResultsForAssistant(messages, index);
-    for (const call of message.tool_calls ?? []) {
-      if (call.function?.name !== "thread") continue;
+    const threadCalls = (message.tool_calls ?? []).filter(
+      (call) => call.function?.name === "thread",
+    );
+    if (!threadCalls.length) return;
+
+    let anyCancelMarker = false;
+    for (const call of threadCalls) {
       const result = results.get(call.id);
       if (result == null) continue;
       const name = dispatchThreadName(call);
-      if (result.startsWith(TOOL_CALL_CANCELLED_MARKER)) cancelled.add(name);
-      else cancelled.delete(name);
+      if (result.startsWith(TOOL_CALL_CANCELLED_MARKER)) {
+        cancelled.add(name);
+        anyCancelMarker = true;
+      } else {
+        cancelled.delete(name);
+      }
+    }
+
+    if (!anyCancelMarker && !assistantTurnCancelled(messages, index)) return;
+    for (const call of threadCalls) {
+      if (results.get(call.id) != null) continue;
+      cancelled.add(dispatchThreadName(call));
     }
   });
   return cancelled;
+}
+
+/** True when this assistant turn is followed by the run-cancelled marker. */
+function assistantTurnCancelled(
+  messages: SessionSnapshotResponse["messages"],
+  assistantIndex: number,
+): boolean {
+  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "tool") continue;
+    if (message.role === "assistant") {
+      return typeof message.content === "string" && message.content.trim() === RUN_CANCELLED_MARKER;
+    }
+    return false;
+  }
+  return false;
 }
 
 /**
@@ -377,7 +415,11 @@ function describeThread(
       : episodeEvents?.some((event) => event.type === "thread_finished");
   const finishedLive = live?.status === "finished";
   const cancelled =
-    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true || Boolean(live?.cancelled);
+    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
+    Boolean(live?.cancelled) ||
+    (result == null &&
+      episode === (ctx.dispatchCounts[name] ?? 1) - 1 &&
+      ctx.cancelledNames.has(name));
   const state: ThreadState = cancelled
     ? "cancelled"
     : live?.isError
@@ -530,6 +572,7 @@ export function buildTranscript(
     liveThreads,
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts,
+    cancelledNames: cancelledThreadNames(messages),
   };
 
   const turns: TranscriptTurn[] = [];

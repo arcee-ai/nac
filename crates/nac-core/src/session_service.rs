@@ -599,6 +599,7 @@ struct FinishingRun {
 
 struct CancellingRun {
     snapshot: ActiveRunSnapshot,
+    started_at: Instant,
     task: Option<JoinHandle<()>>,
     transcript_baseline: Option<usize>,
 }
@@ -1669,11 +1670,13 @@ impl SessionService {
                 let mut durations =
                     response_duration_history_from_snapshot(snapshot, kept_responses);
                 durations.truncate(kept_responses);
-                let mut token_usages = snapshot.token_usages.clone();
-                token_usages.truncate(kept_responses);
-                // Not response-indexed, so a truncation has nothing to drop
-                // from it: the failed runs it accounts for stay accounted for.
-                let unattributed_token_usage = snapshot.unattributed_token_usage.clone();
+                // Spend from dropped responses is moved onto unattributed
+                // usage so revert/resend does not erase billable tokens.
+                let (token_usages, unattributed_token_usage) = fold_truncated_response_usage(
+                    snapshot.token_usages.clone(),
+                    snapshot.unattributed_token_usage.clone(),
+                    kept_responses,
+                );
                 let last = durations.last().copied().flatten();
                 let previous = durations
                     .len()
@@ -2211,12 +2214,16 @@ impl SessionService {
             let message = cleanup_failures.join("\n");
             self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
             self.normalize_failed_run_transcript().await;
-            let usage = self.agent.lock().await.last_usage.clone();
+            let usage = {
+                let mut agent = self.agent.lock().await;
+                agent.commit_pending_usage().await;
+                agent.last_usage.clone()
+            };
             let event_message = match self
                 .persist_run_snapshot(
                     &cancelling_run.snapshot,
                     cancelling_run.transcript_baseline,
-                    None,
+                    Some(duration_ms(cancelling_run.started_at.elapsed())),
                     usage,
                     DurableRunTerminal::Failed,
                 )
@@ -2268,12 +2275,13 @@ impl SessionService {
         // committed compaction projection when cancellation happened before
         // the following ordinary call completed.
         let cancel_usage = self.append_cancellation_message().await;
+        let cancel_duration_ms = duration_ms(cancelling_run.started_at.elapsed());
 
         let persistence_error = match self
             .persist_run_snapshot(
                 &cancelling_run.snapshot,
                 transcript_baseline,
-                None,
+                Some(cancel_duration_ms),
                 cancel_usage,
                 DurableRunTerminal::Canonical,
             )
@@ -2761,6 +2769,7 @@ impl SessionService {
         active_run.snapshot.submitted_user_message = None;
         Some(CancellingRun {
             snapshot: active_run.snapshot.clone(),
+            started_at: active_run.started_at,
             task: active_run.task.take(),
             transcript_baseline: active_run.transcript_baseline,
         })
@@ -2851,11 +2860,26 @@ impl SessionService {
         }
         self.update_transcript_scan().await?;
         let current_response_count = self.lock_transcript_scan().visible_response_count;
+        let completed_usage = completed_usage.filter(|usage| usage.has_spend());
         let mut update = {
             let mut snapshot = self.session_snapshot.lock().await;
             let Some(snapshot) = snapshot.as_mut() else {
                 return Ok(());
             };
+            // Cancel persist used to write a padded empty vector over sqlite
+            // when the in-memory snapshot had not loaded prior spend (restart
+            // then Stop). Re-read the row before replacing it.
+            if !session_snapshot_has_spend(snapshot) {
+                if let Ok((disk, _)) = sessions::load_session_run_state(
+                    &self.metadata.store_path,
+                    &snapshot.session_id,
+                ) {
+                    if session_run_state_has_spend(&disk) {
+                        snapshot.token_usages = disk.token_usages;
+                        snapshot.unattributed_token_usage = disk.unattributed_token_usage;
+                    }
+                }
+            }
             // Fallback when the run task never captured a baseline
             // (cancelled before its first append, or a capture failure):
             // diffing against the run-end count is exact in the no-append
@@ -2950,9 +2974,11 @@ impl SessionService {
             eprintln!("nac: failed to normalize transcript log for cancellation: {error:#}");
         }
         agent.invalidate_context_sample();
-        // Return partial usage so the caller can persist it. Because `send()`
-        // updates `last_usage` mid-loop, this captures all token usage from
-        // model calls made before the cancel.
+        // Return partial usage so the caller can persist it. `send()` updates
+        // `last_usage` mid-loop, but a cancel during tools used to return
+        // before folding worker spend — commit that here so Stop keeps the
+        // tokens the UI already showed.
+        agent.commit_pending_usage().await;
         agent.last_usage.clone()
     }
 }
@@ -3258,11 +3284,64 @@ fn token_usages_after_run(
         if let (Some(usage), Some(last_index)) =
             (completed_usage, current_response_count.checked_sub(1))
         {
-            usages[last_index] = Some(usage);
+            if usage.has_spend() {
+                usages[last_index] = Some(usage);
+            }
         }
     }
 
     usages
+}
+
+fn session_snapshot_has_spend(snapshot: &sessions::SessionSnapshot) -> bool {
+    snapshot
+        .unattributed_token_usage
+        .as_ref()
+        .is_some_and(crate::model::TokenUsage::has_spend)
+        || snapshot
+            .token_usages
+            .iter()
+            .flatten()
+            .any(crate::model::TokenUsage::has_spend)
+}
+
+fn session_run_state_has_spend(state: &sessions::SessionRunState) -> bool {
+    state
+        .unattributed_token_usage
+        .as_ref()
+        .is_some_and(crate::model::TokenUsage::has_spend)
+        || state
+            .token_usages
+            .iter()
+            .flatten()
+            .any(crate::model::TokenUsage::has_spend)
+}
+
+/// Move billable usage off truncated responses onto the session remainder so
+/// revert/resend does not erase spend. Context-window gauges stay with the
+/// kept transcript; dropped entries must not overwrite them.
+fn fold_truncated_response_usage(
+    mut token_usages: Vec<Option<crate::model::TokenUsage>>,
+    mut unattributed: Option<crate::model::TokenUsage>,
+    kept_responses: usize,
+) -> (
+    Vec<Option<crate::model::TokenUsage>>,
+    Option<crate::model::TokenUsage>,
+) {
+    let dropped = if token_usages.len() > kept_responses {
+        token_usages.split_off(kept_responses)
+    } else {
+        Vec::new()
+    };
+    for usage in dropped.into_iter().flatten() {
+        if !usage.has_spend() {
+            continue;
+        }
+        let mut cumulative = unattributed.unwrap_or_default();
+        cumulative.add_cost_saturating(&usage);
+        unattributed = Some(cumulative);
+    }
+    (token_usages, unattributed)
 }
 
 /// Accumulate billable usage for runs with no visible response without

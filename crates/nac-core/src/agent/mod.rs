@@ -526,6 +526,17 @@ impl Agent {
         self.tool_runtime.skills.clone()
     }
 
+    /// Fold in-flight worker spend into `last_usage` so a cancel mid-tools
+    /// still persists the tokens the UI already showed. Zero readings are
+    /// dropped rather than stored as a completed usage.
+    pub(crate) async fn commit_pending_usage(&mut self) {
+        let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
+        let mut accumulated = self.last_usage.take().unwrap_or_default();
+        accumulated.add_cost_saturating(&worker_usage);
+        *worker_usage = TokenUsage::default();
+        self.last_usage = accumulated.has_spend().then_some(accumulated);
+    }
+
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
         self.send_inner(prompt, None).await
     }
@@ -833,6 +844,12 @@ impl Agent {
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
+                {
+                    let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
+                    accumulated_usage.add_cost_saturating(&worker_usage);
+                    *worker_usage = TokenUsage::default();
+                }
+                self.last_usage = accumulated_usage.has_spend().then_some(accumulated_usage);
                 let error = anyhow!("worker command cancelled");
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
@@ -851,7 +868,9 @@ impl Agent {
                 *wu = TokenUsage::default();
             }
 
-            self.last_usage = Some(accumulated_usage.clone());
+            self.last_usage = accumulated_usage
+                .has_spend()
+                .then_some(accumulated_usage.clone());
 
             // Transcript commit point (tool results): the complete parallel
             // batch is logged atomically before any of it enters the
