@@ -1,3 +1,4 @@
+pub(crate) mod contracts;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod managed_secrets;

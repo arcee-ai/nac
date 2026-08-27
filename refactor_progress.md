@@ -637,6 +637,13 @@ Rules:
   complete server test build and warning-denied crate check are green. Server
   `lib.rs` is now 2,973 lines and the cohesive delivery composition module is
   888 lines because it is the single route/security/listener assembly owner.
+- Shared HTTP wire contracts now live in `delivery::contracts` rather than
+  alongside server state and lifecycle coordination. Crate-root re-exports and
+  OpenAPI schema names remain unchanged; tri-state request decoding and config
+  mapping moved with their wire owners. OpenAPI parity and special-schema,
+  omitted/null/value, and legacy-header compatibility regressions pass; the
+  complete server test build and warning-denied crate check are green. Server
+  `lib.rs` is now 2,367 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -652,8 +659,8 @@ Rules:
 
 ## Exact next action
 
-Commit the HTTP server-composition slice with exact-path staging, then audit
-the remaining 2,973-line crate root by owner. Extract shared model/session
-validation and a transport-neutral session-creation command if that closes a
-real application boundary; otherwise run the full server suite and record M2
-acceptance before starting the durable harness decomposition in M4.
+Commit the shared wire-contract extraction with exact-path staging, then make
+session creation accept an application-owned command instead of the transport
+DTO. Move the remaining shared creation/configuration validators to their
+application owner, extract error mapping from composition, and then run the
+full server suite to close M2 before starting M4.
