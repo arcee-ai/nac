@@ -23,6 +23,11 @@ use crate::workspace::first_stderr_line;
 /// failure.
 pub(crate) const SANDBOX_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Host-side read of a guest pidfile while pinning a published PID.
+/// Remote Podman (`ssh://` machine) round-trips can exceed a few hundred
+/// milliseconds; keep this well under `SANDBOX_KILL_TIMEOUT`.
+pub(crate) const SANDBOX_PIDFILE_READ_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Probes whether podman can be used on this host right now: first the binary
 /// (`podman --version`), then the runtime (`podman info`, which fails while a
 /// macOS `podman machine` is stopped or never initialized).
@@ -139,23 +144,41 @@ status=$?
 rm -f "$pidfile"
 exit "$status""#;
 
+/// `$1` is the guest pidfile. `$2` is the PID the host observed when the
+/// exec/PTY wrapper published a numeric identity (empty before that).
+///
+/// A published pin is the stop identity: later pidfile bytes — missing,
+/// `cancelled`, garbage, or a different number — cannot retarget the kill
+/// or fake a successful pre-start tombstone. Without a pin, a missing
+/// pidfile is still a pre-start noclobber `cancelled` so EXEC/PTY refuse
+/// with exit 130.
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
-attempts=0
-while :; do
-  if pid=$(cat "$pidfile" 2>/dev/null); then
-    case "$pid" in
-      cancelled) exit 0 ;;
-      starting|'') ;;
-      *[!0-9]*) exit 1 ;;
-      *) [ "$pid" -gt 0 ] || exit 1; break ;;
-    esac
-  elif (set -C; printf '%s' cancelled > "$pidfile") 2>/dev/null; then
-    exit 0
-  fi
-  attempts=$((attempts + 1))
-  [ "$attempts" -ge 20 ] && exit 1
-  sleep 0.05
-done
+pinned=$2
+pid=
+if [ -n "$pinned" ]; then
+  case "$pinned" in
+    *[!0-9]*) exit 1 ;;
+  esac
+  [ "$pinned" -gt 0 ] || exit 1
+  pid=$pinned
+else
+  attempts=0
+  while :; do
+    if pid=$(cat "$pidfile" 2>/dev/null); then
+      case "$pid" in
+        cancelled) exit 0 ;;
+        starting|'') ;;
+        *[!0-9]*) exit 1 ;;
+        *) [ "$pid" -gt 0 ] || exit 1; break ;;
+      esac
+    elif (set -C; printf '%s' cancelled > "$pidfile") 2>/dev/null; then
+      exit 0
+    fi
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge 20 ] && exit 1
+    sleep 0.05
+  done
+fi
 if [ -n "$pid" ]; then
   descendants() {
     parent=$1
@@ -471,7 +494,35 @@ impl PodmanSession {
         (command, pidfile)
     }
 
-    pub(crate) async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
+    pub(crate) async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
+        let mut command = Command::new("podman");
+        command
+            .arg("exec")
+            .arg(&self.container_name)
+            .arg("cat")
+            .arg("--")
+            .arg(pidfile)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let output = match timeout(SANDBOX_PIDFILE_READ_TIMEOUT, command.output()).await {
+            Ok(Ok(output)) => output,
+            _ => return Ok(None),
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(parse_published_pid(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
+    }
+
+    pub(crate) async fn terminal_pipe_kill(
+        &self,
+        pidfile: &str,
+        published_pid: Option<&str>,
+    ) -> Result<()> {
         let mut command = Command::new("podman");
         command
             .arg("exec")
@@ -481,6 +532,7 @@ impl PodmanSession {
             .arg(SANDBOX_KILL_WRAPPER)
             .arg("nac-kill")
             .arg(pidfile)
+            .arg(published_pid.unwrap_or(""))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -730,11 +782,22 @@ pub(crate) fn make_sandbox_pidfile() -> String {
     format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())
 }
 
+pub(crate) fn parse_published_pid(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if trimmed.parse::<u64>().ok()? == 0 {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 fn bind_mount_arg(mount: &MountSpec) -> Result<OsString> {
     for (kind, path) in [("host", &mount.host), ("guest", &mount.guest)] {
         if path.as_os_str().as_encoded_bytes().contains(&b',') {
             bail!(
-                "podman bind-mount {kind} path '{}' contains ','; \
+                "invalid podman bind-mount {kind} path '{}': contains ','; \
                  move the path before launching the sandbox",
                 path.display()
             );

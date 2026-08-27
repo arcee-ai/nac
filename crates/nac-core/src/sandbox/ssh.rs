@@ -14,7 +14,8 @@ use uuid::Uuid;
 use crate::paths::PathContext;
 
 use super::podman::{
-    SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_TIMEOUT, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER,
+    parse_published_pid, SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_TIMEOUT, SANDBOX_KILL_WRAPPER,
+    SANDBOX_PIDFILE_READ_TIMEOUT, SANDBOX_PTY_WRAPPER,
 };
 use super::ssh_command::{
     prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, shell_quote,
@@ -227,8 +228,32 @@ impl SshBackend {
         (command, Some(pidfile))
     }
 
-    pub(crate) async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
-        let remote = ssh_kill_command(pidfile);
+    pub(crate) async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
+        let remote = format!("cat -- {}", shell_quote_path(pidfile));
+        let mut command = self.ssh_command(&remote);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let output = match timeout(SANDBOX_PIDFILE_READ_TIMEOUT, command.output()).await {
+            Ok(Ok(output)) => output,
+            _ => return Ok(None),
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(parse_published_pid(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
+    }
+
+    pub(crate) async fn terminal_pipe_kill(
+        &self,
+        pidfile: &str,
+        published_pid: Option<&str>,
+    ) -> Result<()> {
+        let remote = ssh_kill_command(pidfile, published_pid);
         let mut command = self.ssh_command(&remote);
         command.stdin(Stdio::null());
         command.stdout(Stdio::null());
@@ -309,13 +334,14 @@ chmod 700 "$HOME/.cache/nac" "$pidfile_dir" || exit 125
     )
 }
 
-fn ssh_kill_command(pidfile: &str) -> String {
+fn ssh_kill_command(pidfile: &str, published_pid: Option<&str>) -> String {
     [
         "bash".to_string(),
         "-lc".to_string(),
         shell_quote(&ssh_wrapper_script(SANDBOX_KILL_WRAPPER)),
         "nac-kill".to_string(),
         shell_quote_path(pidfile),
+        shell_quote(published_pid.unwrap_or("")),
     ]
     .join(" ")
 }
@@ -604,7 +630,7 @@ mod tests {
         let pidfile = home.join(".cache/nac/exec/command.pid");
         let status = StdCommand::new("sh")
             .arg("-c")
-            .arg(ssh_kill_command(pidfile.to_str().unwrap()))
+            .arg(ssh_kill_command(pidfile.to_str().unwrap(), None))
             .env("HOME", &home)
             .status()
             .unwrap();

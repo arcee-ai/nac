@@ -121,7 +121,7 @@ impl TerminalManager {
             }
         }
 
-        let session = TerminalSession::spawn(
+        let mut session = TerminalSession::spawn(
             name.clone(),
             cwd,
             cols,
@@ -129,6 +129,7 @@ impl TerminalManager {
             backend,
             self.output_registry.clone(),
         )?;
+        session.observe_published_pid().await;
         let info = self.session_info(&name, &session);
         self.sessions.lock().await.insert(name, session);
         Ok(info)
@@ -387,54 +388,72 @@ impl TerminalManager {
         let mut runtime_error = None;
         let mut process_exited = false;
         let mut readers_open = true;
-
-        while !process_exited {
-            match child.try_wait() {
-                Ok(Some(process_status)) => {
-                    exit_code = Some(process_status.code().unwrap_or(-1));
-                    process_exited = true;
-                    continue;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    status = CommandStatus::SpawnError;
-                    runtime_error = Some(format!("failed to wait for command: {error}"));
-                    break;
-                }
-            }
-
-            if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-                status = CommandStatus::Cancelled;
-                break;
-            }
-            if Instant::now() >= deadline {
-                status = CommandStatus::TimedOut;
-                break;
-            }
-
-            tokio::select! {
-                chunk = receiver.recv(), if readers_open => {
-                    match chunk {
-                        Some(chunk) => {
-                            if let Err(error) = self.output_registry.append(&output_id, chunk.stream, chunk.bytes) {
-                                status = CommandStatus::SpawnError;
-                                runtime_error = Some(error.to_string());
-                                break;
-                            }
-                        }
-                        None => readers_open = false,
+        let mut published_pid = None;
+        {
+            let pin_loop = async {
+                let Some(path) = pidfile.clone() else {
+                    return None;
+                };
+                loop {
+                    match backend.read_published_pid(&path).await {
+                        Ok(Some(pid)) => return Some(pid),
+                        _ => sleep(Duration::from_millis(20)).await,
                     }
                 }
-                _ = sleep(PROCESS_POLL_INTERVAL) => {}
-                _ = async {
-                    if let Some(cancellation) = cancellation {
-                        cancellation.cancelled().await;
-                    } else {
-                        std::future::pending::<()>().await;
+            };
+            tokio::pin!(pin_loop);
+
+            while !process_exited {
+                match child.try_wait() {
+                    Ok(Some(process_status)) => {
+                        exit_code = Some(process_status.code().unwrap_or(-1));
+                        process_exited = true;
+                        continue;
                     }
-                } => {
+                    Ok(None) => {}
+                    Err(error) => {
+                        status = CommandStatus::SpawnError;
+                        runtime_error = Some(format!("failed to wait for command: {error}"));
+                        break;
+                    }
+                }
+
+                if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
                     status = CommandStatus::Cancelled;
                     break;
+                }
+                if Instant::now() >= deadline {
+                    status = CommandStatus::TimedOut;
+                    break;
+                }
+
+                tokio::select! {
+                    chunk = receiver.recv(), if readers_open => {
+                        match chunk {
+                            Some(chunk) => {
+                                if let Err(error) = self.output_registry.append(&output_id, chunk.stream, chunk.bytes) {
+                                    status = CommandStatus::SpawnError;
+                                    runtime_error = Some(error.to_string());
+                                    break;
+                                }
+                            }
+                            None => readers_open = false,
+                        }
+                    }
+                    pid = &mut pin_loop, if published_pid.is_none() && pidfile.is_some() => {
+                        published_pid = pid;
+                    }
+                    _ = sleep(PROCESS_POLL_INTERVAL) => {}
+                    _ = async {
+                        if let Some(cancellation) = cancellation {
+                            cancellation.cancelled().await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    } => {
+                        status = CommandStatus::Cancelled;
+                        break;
+                    }
                 }
             }
         }
@@ -442,7 +461,13 @@ impl TerminalManager {
         let mut force_reader_shutdown = false;
         if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
-                if let Err(error) = backend.terminal_pipe_kill(pidfile).await {
+                if published_pid.is_none() {
+                    published_pid = backend.read_published_pid(pidfile).await.ok().flatten();
+                }
+                if let Err(error) = backend
+                    .terminal_pipe_kill(pidfile, published_pid.as_deref())
+                    .await
+                {
                     let cleanup_error = format!("command cleanup incomplete: {error}");
                     runtime_error = Some(match runtime_error.take() {
                         Some(existing) => format!("{existing}\n{cleanup_error}"),

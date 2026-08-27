@@ -656,11 +656,14 @@ fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, 
             let host = PathBuf::from(pair[0].clone());
             let guest = PathBuf::from(pair[1].clone());
             if !host.exists() {
-                return Err(anyhow!("mount source '{}' does not exist", host.display()));
+                return Err(anyhow!(
+                    "invalid mount source '{}': path does not exist",
+                    host.display()
+                ));
             }
             if !guest.is_absolute() {
                 return Err(anyhow!(
-                    "mount target '{}' must be an absolute path inside the sandbox",
+                    "invalid mount target '{}': must be an absolute path inside the sandbox",
                     guest.display()
                 ));
             }
