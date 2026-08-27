@@ -369,6 +369,9 @@ Rules:
 - `7540dbd refactor: extract hardened credential store` — gives private file
   replacement and cross-process locking an infrastructure owner shared by
   ordinary authentication and managed persistence.
+- `8edde97 refactor(managed): extract host and GitHub context` — establishes
+  the harness-independent managed crate and points server/CLI consumers at its
+  configuration, secret, provider, and command-environment owners.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -471,6 +474,13 @@ Rules:
   until the clone workflow migrates. All 10 managed tests, warning-denied
   Clippy for managed/core/server, and focused secret/GitHub HTTP and credential-
   helper tests pass.
+- Process-tree supervision now has a shared `nac-process` infrastructure owner
+  instead of a 1,034-line core-private module. Core retains only a small private
+  re-export seam for terminal/worker consumers and test hooks are feature-gated.
+  Both process-tree cancellation tests, warning-denied core Clippy, the full
+  core test build, and managed/core/server offline checks pass. This boundary
+  lets managed Git execution retain the same descendant cleanup semantics
+  without depending on the harness.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -486,7 +496,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the first substantive managed-
-context slice without protected files. Then move the durable clone workflow
-behind explicit project-registration and Git/process ports, remove the
-temporary core managed re-exports, and rerun managed/server E2E coverage.
+Inspect exact worktree/staged diffs and commit the process-supervision boundary
+without protected files. Then move the durable clone workflow behind an
+explicit project-registration port using the shared Git/process and credential
+infrastructure, remove temporary core managed re-exports, and rerun managed/
+server E2E coverage.
