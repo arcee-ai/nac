@@ -738,6 +738,14 @@ Rules:
   unchanged. Required-model preflight, managed-worker context and SSH restore,
   direct behavior, sandbox default/enablement, invalid SSH+sandbox rejection,
   the complete core test build, and warning-denied Clippy pass.
+- Resume selection and construction now lives in a focused 468-line owner. It
+  owns picker admission, snapshot lookup/normalization, interrupted-run
+  recovery, operation-lease migration, model/client restoration, local/SSH/
+  sandbox workspace reconstruction, and resumed agent assembly. Picker network
+  deferral, message restoration, effort migration/lease ownership, remote and
+  local path normalization, invalid legacy repair, SSH+sandbox rejection, the
+  complete core test build, and warning-denied Clippy pass. The picker tests'
+  loopback mock required the authorized unsandboxed test run.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -753,6 +761,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 runtime builder extraction with exact-path staging. Then
-decompose runtime contracts, resume, sandbox, and execution-context ownership
-without changing behavior selection or backend choice.
+Commit the M4 runtime resume extraction with exact-path staging. Then
+decompose runtime contracts, sandbox, and execution-context ownership without
+changing behavior selection or backend choice.
