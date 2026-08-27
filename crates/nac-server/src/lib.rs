@@ -1,5 +1,6 @@
 mod compaction;
 mod filesystem;
+mod fork;
 mod light_model;
 mod managed_auth;
 mod managed_github;
@@ -11,6 +12,7 @@ mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
+pub use fork::{DismissForkError, ForkSessionError, ForkSessionRequest, ForkSessionResponse};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,
@@ -5099,6 +5101,8 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(compaction::handler))
         .routes(routes!(revert::handler))
         .routes(routes!(revert::regenerate_handler))
+        .routes(routes!(fork::handler))
+        .routes(routes!(fork::dismiss_handler))
         .routes(routes!(queue_orchestrator_steering_handler))
         .routes(routes!(queue_thread_steering_handler))
         .routes(routes!(recent_events))
@@ -8207,6 +8211,7 @@ mod tests {
             "DELETE",
             "/sessions/{session_id}/permissions/grants/{grant_id}",
         ),
+        ("DELETE", "/sessions/{session_id}/forks/{fork_id}"),
         ("DELETE", "/ssh-configs/{config_id}"),
         ("GET", "/auth"),
         ("GET", "/auth/{provider}/login/{login_id}"),
@@ -8299,6 +8304,7 @@ mod tests {
             "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel",
         ),
         ("POST", "/sessions/{session_id}/permissions/{request_id}"),
+        ("POST", "/sessions/{session_id}/fork"),
         ("POST", "/sessions/{session_id}/regenerate"),
         ("POST", "/sessions/{session_id}/revert"),
         ("POST", "/sessions/{session_id}/runs"),
