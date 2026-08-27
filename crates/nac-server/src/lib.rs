@@ -279,7 +279,7 @@ struct SessionManagerInner {
     store_path: PathBuf,
     worker_executable: PathBuf,
     managed_host: Option<nac_managed::configuration::ManagedHostConfig>,
-    managed_clones: Option<nac_core::managed_clone::ManagedCloneService>,
+    managed_clones: Option<nac_managed::clone_workflow::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -1282,11 +1282,13 @@ impl SessionManager {
             .managed_host
             .as_ref()
             .map(|managed| {
-                nac_core::managed_clone::ManagedCloneService::new(
+                nac_managed::clone_workflow::ManagedCloneService::new(
                     &managed.repository_root,
                     &managed.state_root,
                     &managed.home_root,
-                    &store_path,
+                    Arc::new(application::managed::StoreProjectRegistrar::new(
+                        &store_path,
+                    )),
                     Some(
                         managed
                             .github_auth()

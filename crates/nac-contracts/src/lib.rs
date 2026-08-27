@@ -7,6 +7,40 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+/// Stable project projection shared by persistence, managed workflows, and
+/// delivery without exposing a SQLite implementation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProjectRecord {
+    pub project_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub cwd: PathBuf,
+    pub ssh_host: Option<String>,
+    pub ssh_port: Option<u16>,
+    pub ssh_identity_file: Option<String>,
+    pub default_model_config_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub pinned: bool,
+    pub sort_order: i64,
+    pub presentation_version: i64,
+}
+
+/// Project registration command used by application ports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewProject {
+    pub project_id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub cwd: PathBuf,
+    pub ssh_host: Option<String>,
+    pub ssh_port: Option<u16>,
+    pub ssh_identity_file: Option<String>,
+    pub default_model_config_id: Option<String>,
+}
+
 /// Immutable command environment plus the exact secret values that must be
 /// redacted from output produced under that environment.
 ///

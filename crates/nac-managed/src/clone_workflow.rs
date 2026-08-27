@@ -17,17 +17,26 @@ use tokio::process::Command;
 use tokio::sync::Notify;
 use url::Url;
 
-use crate::managed_github::ManagedGitHubAuth;
-use crate::model::auth_store::{
+use crate::github::ManagedGitHubAuth;
+use nac_contracts::{NewProject, ProjectRecord};
+use nac_credential_store::{
     acquire_credential_lock, read_auth_string_from_path, try_acquire_credential_lock,
     write_auth_string_to_path, FileLock,
 };
-use crate::process::ProcessTreeGuard;
-use crate::projects::{self, NewProject, ProjectRecord};
+use nac_process::ProcessTreeGuard;
 
 const OPERATION_VERSION: u32 = 1;
 const MARKER_VERSION: u32 = 1;
 const MAX_PROGRESS_BYTES: usize = 64 * 1024;
+
+/// Application port used by clone completion and restart reconciliation.
+///
+/// Implementations own project persistence and transactional validation; the
+/// managed workflow never opens the harness database directly.
+pub trait ProjectRegistrar: Send + Sync {
+    fn list_projects(&self) -> Result<Vec<ProjectRecord>>;
+    fn register_project(&self, project: NewProject) -> Result<ProjectRecord>;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -89,7 +98,7 @@ struct ManagedCloneServiceInner {
     repository_root: PathBuf,
     operation_root: PathBuf,
     home_root: PathBuf,
-    store_path: PathBuf,
+    project_registrar: Arc<dyn ProjectRegistrar>,
     git_executable: PathBuf,
     github: Option<ManagedGitHubAuth>,
     live: StdMutex<HashMap<String, LiveClone>>,
@@ -155,14 +164,14 @@ impl ManagedCloneService {
         repository_root: impl AsRef<Path>,
         state_root: impl AsRef<Path>,
         home_root: impl AsRef<Path>,
-        store_path: impl AsRef<Path>,
+        project_registrar: Arc<dyn ProjectRegistrar>,
         github: Option<ManagedGitHubAuth>,
     ) -> Result<Self> {
         Self::new_with_git_executable(
             repository_root,
             state_root,
             home_root,
-            store_path,
+            project_registrar,
             github,
             PathBuf::from("git"),
         )
@@ -172,7 +181,7 @@ impl ManagedCloneService {
         repository_root: impl AsRef<Path>,
         state_root: impl AsRef<Path>,
         home_root: impl AsRef<Path>,
-        store_path: impl AsRef<Path>,
+        project_registrar: Arc<dyn ProjectRegistrar>,
         github: Option<ManagedGitHubAuth>,
         git_executable: PathBuf,
     ) -> Result<Self> {
@@ -207,7 +216,7 @@ impl ManagedCloneService {
                 repository_root,
                 operation_root,
                 home_root: home_root.as_ref().to_path_buf(),
-                store_path: store_path.as_ref().to_path_buf(),
+                project_registrar,
                 git_executable,
                 github,
                 live: StdMutex::new(HashMap::new()),
@@ -406,7 +415,10 @@ impl ManagedCloneService {
                 // for progress, completion, and cancellation.
                 continue;
             };
-            if let Some(project) = crate::projects::list_projects(&self.inner.store_path)?
+            if let Some(project) = self
+                .inner
+                .project_registrar
+                .list_projects()?
                 .into_iter()
                 .find(|project| project.project_id == operation.project_id)
             {
@@ -590,20 +602,16 @@ impl ManagedCloneService {
         request: &ManagedCloneRequest,
         destination: &Path,
     ) -> Result<ProjectRecord> {
-        projects::insert_project(
-            &self.inner.store_path,
-            NewProject {
-                project_id: request.project_id.clone(),
-                name: Some(request.project_name.clone()),
-                description: request.project_description.clone(),
-                cwd: destination.to_path_buf(),
-                ssh_host: None,
-                ssh_port: None,
-                ssh_identity_file: None,
-                default_model_config_id: None,
-            },
-        )
-        .map_err(anyhow::Error::new)
+        self.inner.project_registrar.register_project(NewProject {
+            project_id: request.project_id.clone(),
+            name: Some(request.project_name.clone()),
+            description: request.project_description.clone(),
+            cwd: destination.to_path_buf(),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        })
     }
 
     fn resolve_destination(&self, relative: &Path) -> Result<PathBuf> {
@@ -936,12 +944,57 @@ mod tests {
 
     use super::*;
 
+    #[derive(Default)]
+    struct TestProjectRegistrar {
+        projects: StdMutex<Vec<ProjectRecord>>,
+    }
+
+    impl ProjectRegistrar for TestProjectRegistrar {
+        fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
+            Ok(self
+                .projects
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone())
+        }
+
+        fn register_project(&self, project: NewProject) -> Result<ProjectRecord> {
+            let mut projects = self
+                .projects
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if projects.iter().any(|existing| {
+                existing.project_id == project.project_id || existing.cwd == project.cwd
+            }) {
+                bail!("a project already uses this identity or location");
+            }
+            let now = "2026-01-01T00:00:00Z".to_string();
+            let record = ProjectRecord {
+                project_id: project.project_id,
+                name: project.name.unwrap_or_else(|| "Project".to_string()),
+                description: project.description,
+                cwd: project.cwd,
+                ssh_host: project.ssh_host,
+                ssh_port: project.ssh_port,
+                ssh_identity_file: project.ssh_identity_file,
+                default_model_config_id: project.default_model_config_id,
+                created_at: now.clone(),
+                updated_at: now,
+                pinned: false,
+                sort_order: projects.len() as i64,
+                presentation_version: 0,
+            };
+            projects.push(record.clone());
+            Ok(record)
+        }
+    }
+
     struct Fixture {
         root: PathBuf,
         repository_root: PathBuf,
         state_root: PathBuf,
         home_root: PathBuf,
-        store_path: PathBuf,
+        registrar: Arc<TestProjectRegistrar>,
     }
 
     impl Fixture {
@@ -953,17 +1006,15 @@ mod tests {
             let repository_root = root.join("repositories");
             let state_root = root.join("state");
             let home_root = root.join("home");
-            let store_path = root.join("store.sqlite3");
             for path in [&repository_root, &state_root, &home_root] {
                 std::fs::create_dir_all(path).unwrap();
             }
-            crate::store::initialize(&store_path).unwrap();
             Self {
                 root,
                 repository_root,
                 state_root,
                 home_root,
-                store_path,
+                registrar: Arc::new(TestProjectRegistrar::default()),
             }
         }
 
@@ -972,7 +1023,7 @@ mod tests {
                 &self.repository_root,
                 &self.state_root,
                 &self.home_root,
-                &self.store_path,
+                self.registrar.clone(),
                 None,
             )
             .unwrap()
@@ -983,7 +1034,7 @@ mod tests {
                 &self.repository_root,
                 &self.state_root,
                 &self.home_root,
-                &self.store_path,
+                self.registrar.clone(),
                 None,
                 git_executable,
             )
@@ -1079,9 +1130,7 @@ mod tests {
         let started = service
             .start_validated(request(&remote, "example", "feature"), identity)
             .unwrap();
-        assert!(crate::projects::list_projects(&fixture.store_path)
-            .unwrap()
-            .is_empty());
+        assert!(fixture.registrar.list_projects().unwrap().is_empty());
 
         let completed = wait_for_terminal(&service, &started.operation_id).await;
         assert_eq!(completed.status, ManagedCloneStatus::Completed);
@@ -1094,7 +1143,7 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "feature");
-        let projects = crate::projects::list_projects(&fixture.store_path).unwrap();
+        let projects = fixture.registrar.list_projects().unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].cwd, destination);
         assert!(!fixture
@@ -1124,9 +1173,7 @@ mod tests {
             std::fs::read_to_string(destination.join("LOCAL.md")).unwrap(),
             "preserve me\n"
         );
-        assert!(crate::projects::list_projects(&fixture.store_path)
-            .unwrap()
-            .is_empty());
+        assert!(fixture.registrar.list_projects().unwrap().is_empty());
 
         let mismatch_destination = fixture.repository_root.join("mismatch");
         let mut clone = StdCommand::new("git");
@@ -1138,9 +1185,7 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("choose another destination"));
         assert!(mismatch_destination.join("README.md").is_file());
-        assert!(crate::projects::list_projects(&fixture.store_path)
-            .unwrap()
-            .is_empty());
+        assert!(fixture.registrar.list_projects().unwrap().is_empty());
     }
 
     #[cfg(unix)]
@@ -1169,9 +1214,7 @@ mod tests {
             .start_validated(request(&source, "reserved", "main"), identity)
             .unwrap_err();
         assert!(error.to_string().contains("already reserves"));
-        assert!(crate::projects::list_projects(&fixture.store_path)
-            .unwrap()
-            .is_empty());
+        assert!(fixture.registrar.list_projects().unwrap().is_empty());
         assert!(first.cancel(&started.operation_id).unwrap());
         let cancelled = wait_for_terminal(&first, &started.operation_id).await;
         assert_eq!(cancelled.status, ManagedCloneStatus::Cancelled);
@@ -1180,9 +1223,7 @@ mod tests {
             .repository_root
             .join(format!(".nac-clone-{}", started.operation_id))
             .exists());
-        assert!(crate::projects::list_projects(&fixture.store_path)
-            .unwrap()
-            .is_empty());
+        assert!(fixture.registrar.list_projects().unwrap().is_empty());
     }
 
     #[test]
@@ -1250,9 +1291,9 @@ mod tests {
         clone.arg("clone").arg(&remote).arg(&destination);
         run(&mut clone);
         let project_id = "project-published".to_string();
-        let project = crate::projects::insert_project(
-            &fixture.store_path,
-            NewProject {
+        let project = fixture
+            .registrar
+            .register_project(NewProject {
                 project_id: project_id.clone(),
                 name: Some("Published".to_string()),
                 description: None,
@@ -1261,9 +1302,8 @@ mod tests {
                 ssh_port: None,
                 ssh_identity_file: None,
                 default_model_config_id: None,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         let service = fixture.service();
         let operation_id = "abcdef0123456789abcdef0123456789".to_string();
         let now = now_ms().unwrap();

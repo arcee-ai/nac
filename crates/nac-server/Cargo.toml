@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 nac-contracts = { path = "../nac-contracts" }
 nac-core = { path = "../nac-core", features = ["openapi"] }
-nac-managed = { path = "../nac-managed" }
+nac-managed = { path = "../nac-managed", features = ["openapi"] }
 anyhow.workspace = true
 async-stream = "0.3"
 axum = "0.8"
@@ -37,5 +37,5 @@ utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum
 [dev-dependencies]
 flate2 = "1"
 nac-core = { path = "../nac-core", features = ["test-support"] }
-nac-managed = { path = "../nac-managed", features = ["test-support"] }
+nac-managed = { path = "../nac-managed", features = ["openapi", "test-support"] }
 tower = { version = "0.5", features = ["util"] }

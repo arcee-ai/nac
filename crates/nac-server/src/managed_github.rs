@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nac_core::managed_clone::{ManagedCloneOperation, ManagedCloneRequest, ManagedCloneService};
+use nac_managed::clone_workflow::{
+    ManagedCloneOperation, ManagedCloneRequest, ManagedCloneService,
+};
 use nac_managed::github::{
     GitHubAuthError, GitHubAuthFailureKind, GitHubConnectionStatus, GitHubRepository,
     ManagedGitHubAuth,

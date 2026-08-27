@@ -1630,6 +1630,8 @@ name = "nac-contracts"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde",
+ "utoipa",
 ]
 
 [[package]]
@@ -1691,12 +1693,15 @@ dependencies = [
  "anyhow",
  "nac-contracts",
  "nac-credential-store",
+ "nac-process",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "toml",
  "url",
+ "utoipa",
  "uuid",
 ]
 
