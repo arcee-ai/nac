@@ -131,7 +131,7 @@ pub(crate) fn key_arg_preview(
         "thread_read" | "thread_delete" => {
             get_str("name").unwrap_or_else(|| truncate_string(args_preview, 120))
         }
-        "threads" => "list".to_string(),
+        "threads" | "workset_list" => "list".to_string(),
         "workset_define" => {
             let id = get_str("id").unwrap_or_default();
             let goal = get_str("goal").unwrap_or_default();
@@ -144,7 +144,6 @@ pub(crate) fn key_arg_preview(
             }
         }
         "workset_read" => get_str("id").unwrap_or_else(|| truncate_string(args_preview, 120)),
-        "workset_list" => "list".to_string(),
         _ if tool_name.starts_with("mcp__") => {
             for key in &[
                 "query",

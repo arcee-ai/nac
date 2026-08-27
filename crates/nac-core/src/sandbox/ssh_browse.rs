@@ -72,7 +72,7 @@ pub enum RemoteBrowseError {
 impl std::fmt::Display for RemoteBrowseError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Invalid(reason) => write!(formatter, "{reason}"),
+            Self::Invalid(reason) | Self::Remote(reason) => write!(formatter, "{reason}"),
             Self::NotFound(path) => {
                 write!(formatter, "path '{path}' does not exist on the ssh host")
             }
@@ -89,7 +89,6 @@ impl std::fmt::Display for RemoteBrowseError {
             Self::Unreachable { host, reason } => {
                 write!(formatter, "cannot reach ssh host '{host}': {reason}")
             }
-            Self::Remote(reason) => write!(formatter, "{reason}"),
         }
     }
 }

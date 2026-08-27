@@ -606,8 +606,8 @@ fn message_role(msg: &nac_core::types::Message) -> &'static str {
 /// Returns the primary text content of a `Message`.
 fn message_content(msg: &nac_core::types::Message) -> String {
     match msg {
-        nac_core::types::Message::System { content } => content.clone(),
-        nac_core::types::Message::User { content } => content.clone(),
+        nac_core::types::Message::System { content }
+        | nac_core::types::Message::User { content } => content.clone(),
         nac_core::types::Message::Assistant { content, .. } => content.clone().unwrap_or_default(),
         nac_core::types::Message::Tool { content, .. } => content.preview(),
     }

@@ -471,10 +471,11 @@ pub(crate) fn settle_session_goal_run_with_connection(
     let tokens_used = current.tokens_used.saturating_add(delta_tokens);
     let time_used_ms = current.time_used_ms.saturating_add(delta_ms);
     let mut status = match disposition {
-        GoalRunDisposition::Completed => current.status,
         GoalRunDisposition::Failed if current.status.is_unfinished() => GoalStatus::Blocked,
         GoalRunDisposition::Cancelled if current.status.is_unfinished() => GoalStatus::Paused,
-        GoalRunDisposition::Failed | GoalRunDisposition::Cancelled => current.status,
+        GoalRunDisposition::Completed
+        | GoalRunDisposition::Failed
+        | GoalRunDisposition::Cancelled => current.status,
     };
     if status != GoalStatus::Complete
         && current
@@ -520,10 +521,11 @@ pub(crate) fn reconcile_session_goal_terminal_with_connection(
         return Ok(());
     }
     let status = match disposition {
-        GoalRunDisposition::Completed => current.status,
         GoalRunDisposition::Failed if current.status.is_unfinished() => GoalStatus::Blocked,
         GoalRunDisposition::Cancelled if current.status.is_unfinished() => GoalStatus::Paused,
-        GoalRunDisposition::Failed | GoalRunDisposition::Cancelled => current.status,
+        GoalRunDisposition::Completed
+        | GoalRunDisposition::Failed
+        | GoalRunDisposition::Cancelled => current.status,
     };
     connection.execute(
         "UPDATE session_goals

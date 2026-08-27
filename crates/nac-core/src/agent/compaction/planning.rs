@@ -629,8 +629,7 @@ fn estimate_non_source_tokens(messages: &[Message], policy: CompactionPolicy) ->
 
 fn message_content_len(message: &Message) -> usize {
     match message {
-        Message::System { content } => content.len(),
-        Message::User { content } => content.len(),
+        Message::System { content } | Message::User { content } => content.len(),
         Message::Assistant { content, .. } => content.as_deref().map_or(0, str::len),
         Message::Tool { content, .. } => content.len(),
     }

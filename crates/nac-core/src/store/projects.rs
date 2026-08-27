@@ -36,13 +36,12 @@ pub enum ProjectStoreError {
 impl std::fmt::Display for ProjectStoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidInput(message) => formatter.write_str(message),
+            Self::InvalidInput(message) | Self::Conflict(message) => formatter.write_str(message),
             Self::DuplicateLocation => formatter.write_str("a project already uses this location"),
             Self::NotFound(id) => write!(formatter, "project '{id}' was not found"),
             Self::ModelConfigurationNotFound(id) => {
                 write!(formatter, "model configuration '{id}' was not found")
             }
-            Self::Conflict(message) => formatter.write_str(message),
             Self::Store(error) => write!(formatter, "{error}"),
         }
     }
