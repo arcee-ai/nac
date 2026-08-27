@@ -344,6 +344,9 @@ Rules:
   crate-root public re-exports and the generated contract stable.
 - `2035930 refactor(server): isolate SSH configuration flows` — gives saved SSH
   connections focused application and HTTP owners with tri-state update tests.
+- `8620c99 refactor(server): isolate saved configuration deletion` — moves
+  saved model-configuration list/delete and generated-key retirement behind
+  application and delivery boundaries.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -389,6 +392,12 @@ Rules:
   Project-default conflict, credential-rotation, and OpenAPI parity regressions
   pass with warning-denied Clippy; `lib.rs` is now 7,588 lines. Create/update
   and provider resolution remain the next configuration slice.
+- Ordinary write-only credential administration now has an application facade
+  and a 113-line delivery adapter. Secret values remain mutation-only, listing
+  returns only the existing redacted suffix contract, and generation/deletion
+  preserve names and status behavior. The credential E2E-style server test,
+  OpenAPI special-schema/parity tests, and warning-denied Clippy pass;
+  `lib.rs` is now 7,466 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -404,7 +413,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the saved model-configuration
-list/delete slice without protected files. Then extract create/update and
-provider resolution while preserving credential rollback/retirement and
-provider-destination policy ordering.
+Inspect exact worktree/staged diffs and commit the ordinary credential
+application/delivery slice without protected files. Then extract saved model
+create/update and provider resolution while preserving credential rollback,
+retirement, and provider-destination policy ordering.
