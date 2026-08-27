@@ -12,6 +12,9 @@ mod orchestration;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
+pub use delivery::credentials::{
+    GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
+};
 pub use delivery::model_configurations::ModelConfigurationList;
 pub use delivery::projects::{
     AssignSessionRequest, CreateProjectRequest, DeleteProjectQuery, DeleteProjectResponse,
@@ -71,12 +74,12 @@ use nac_core::{
     },
     light_model::{LightModelError, LightModelSettings},
     model::{
-        list_managed_provider_models, list_provider_models, list_stored_api_keys,
-        managed_backend_base_url, provider_default_base_url, provider_for_model,
-        provider_uses_api_key, remove_api_key, resolve_backend_api_key, resolve_model_base_url,
-        store_api_key, validate_caller_supplied_base_url, validate_model_configuration,
-        BackendKind, EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError,
-        ModelListing, ProviderModel, ReasoningEffort,
+        list_managed_provider_models, list_provider_models, managed_backend_base_url,
+        provider_default_base_url, provider_for_model, provider_uses_api_key, remove_api_key,
+        resolve_backend_api_key, resolve_model_base_url, store_api_key,
+        validate_caller_supplied_base_url, validate_model_configuration, BackendKind,
+        EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError, ModelListing,
+        ProviderModel, ReasoningEffort,
     },
     model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
     permissions::{PermissionReply, PermissionRequest},
@@ -836,18 +839,6 @@ fn apply_sibling_model_defaults(
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct StoredCredentialSummary {
-    pub name: String,
-    /// Empty when the secret is too short for a suffix to be safe to show.
-    pub last_four: String,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct StoredCredentialList {
-    pub credentials: Vec<StoredCredentialSummary>,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ManagedSecretSummary {
     pub name: String,
     pub updated_at_unix_ms: u64,
@@ -960,17 +951,6 @@ pub struct ProviderModelList {
     /// the same destination it validated against.
     pub base_url: String,
     pub models: Vec<ProviderModel>,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct StoreCredentialRequest {
-    #[schema(write_only, example = "fake-credential-value")]
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct GeneratedCredential {
-    pub name: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
@@ -4751,10 +4731,13 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
             delete_managed_secret_handler
         ))
         .routes(routes!(
-            list_credentials_handler,
-            store_generated_credential_handler
+            delivery::credentials::list_handler,
+            delivery::credentials::generate_handler
         ))
-        .routes(routes!(store_credential_handler, delete_credential_handler))
+        .routes(routes!(
+            delivery::credentials::put_handler,
+            delivery::credentials::delete_handler
+        ))
         .routes(routes!(launch_model_defaults_handler))
         .routes(routes!(models_handler))
         .routes(routes!(commands_handler))
@@ -5807,89 +5790,6 @@ async fn delete_managed_secret_handler(
         Err(ApiError {
             status: StatusCode::NOT_FOUND,
             message: format!("managed secret '{name}' was not found"),
-        })
-    }
-}
-
-/// Stored credentials are write-only over HTTP: a caller may add, replace or
-/// drop a key, but the value is never echoed back. Only enough of a suffix to
-/// tell two keys apart leaves the process.
-#[utoipa::path(
-    get,
-    path = "/credentials",
-    operation_id = "get_credentials",
-    tag = "credentials",
-    responses((status = 200, description = "Success", body = StoredCredentialList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn list_credentials_handler() -> std::result::Result<Json<StoredCredentialList>, ApiError> {
-    let credentials = list_stored_api_keys()?
-        .into_iter()
-        .map(|entry| StoredCredentialSummary {
-            name: entry.name,
-            last_four: entry.last_four,
-        })
-        .collect();
-    Ok(Json(StoredCredentialList { credentials }))
-}
-
-#[utoipa::path(
-    put,
-    path = "/credentials/{name}",
-    operation_id = "put_credentials_name",
-    tag = "credentials",
-    params(("name" = String, Path)),
-    request_body(content = StoreCredentialRequest, content_type = "application/json"),
-    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn store_credential_handler(
-    AxumPath(name): AxumPath<String>,
-    payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
-) -> std::result::Result<StatusCode, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    store_api_key(&name, &request.value)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// Files a key away without the caller having to name it. The generated name is
-/// what a session stores in place of the secret, and its prefix marks the key as
-/// this server's to clean up rather than one the operator manages by hand.
-#[utoipa::path(
-    post,
-    path = "/credentials",
-    operation_id = "post_credentials",
-    tag = "credentials",
-    request_body(content = StoreCredentialRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = GeneratedCredential, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn store_generated_credential_handler(
-    payload: std::result::Result<Json<StoreCredentialRequest>, JsonRejection>,
-) -> std::result::Result<Json<GeneratedCredential>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let name = format!(
-        "{GENERATED_CREDENTIAL_PREFIX}{}",
-        uuid::Uuid::new_v4().simple()
-    );
-    store_api_key(&name, &request.value)?;
-    Ok(Json(GeneratedCredential { name }))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/credentials/{name}",
-    operation_id = "delete_credentials_name",
-    tag = "credentials",
-    params(("name" = String, Path)),
-    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn delete_credential_handler(
-    AxumPath(name): AxumPath<String>,
-) -> std::result::Result<StatusCode, ApiError> {
-    if remove_api_key(&name)? {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(ApiError {
-            status: StatusCode::NOT_FOUND,
-            message: format!("no stored credential named '{name}' was found"),
         })
     }
 }
