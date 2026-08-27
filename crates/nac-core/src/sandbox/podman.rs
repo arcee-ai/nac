@@ -764,12 +764,12 @@ impl PodmanSession {
 
     pub(crate) fn retain_for_durable_session(&self) {
         self.cleanup_on_drop.store(false, Ordering::Release);
-        if let Some(record) = self
+        let creation_record = self
             .creation_record
             .lock()
             .expect("Podman creation record lock poisoned")
-            .take()
-        {
+            .take();
+        if let Some(record) = creation_record {
             record.remove();
         }
     }
@@ -1242,12 +1242,12 @@ impl PodmanSession {
     /// runtime failure remains visible to the lifecycle caller.
     pub(crate) async fn destroy(&self) -> Result<()> {
         destroy_owned_container(&self.session_key).await?;
-        if let Some(record) = self
+        let creation_record = self
             .creation_record
             .lock()
             .expect("Podman creation record lock poisoned")
-            .take()
-        {
+            .take();
+        if let Some(record) = creation_record {
             record.remove();
         }
         Ok(())
