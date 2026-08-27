@@ -391,9 +391,7 @@ impl TerminalManager {
         let mut published_pid = None;
         {
             let pin_loop = async {
-                let Some(path) = pidfile.clone() else {
-                    return None;
-                };
+                let path = pidfile.clone()?;
                 loop {
                     match backend.read_published_pid(&path).await {
                         Ok(Some(pid)) => return Some(pid),
