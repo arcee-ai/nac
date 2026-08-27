@@ -631,7 +631,7 @@ impl Agent {
     /// resulting runtime is cloned into exactly that response's tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
         let credential = if self.web_retrieval_eligible {
-            crate::model::resolve_named_api_key("EXA_API_KEY")?
+            crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?
         } else {
             None
         };

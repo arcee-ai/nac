@@ -598,10 +598,8 @@ fn provider_status_error(
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "provider returned no safe diagnostic".to_string());
-    let provider_message = crate::model::redact_credentials(
-        &trim_chars(&provider_message, MAX_ERROR_CHARS),
-        &[credential.secret()],
-    );
+    let provider_message =
+        redact_exa_credential(&trim_chars(&provider_message, MAX_ERROR_CHARS), credential);
     anyhow!(
         "Exa request failed with status {status}: {}",
         redact_url_queries(&provider_message)
@@ -609,10 +607,7 @@ fn provider_status_error(
 }
 
 fn web_error(tool: &str, error: anyhow::Error, credential: &ExaCredential) -> ToolResult {
-    let diagnostic = crate::model::redact_credentials(
-        &redact_url_queries(&format!("{error:#}")),
-        &[credential.secret()],
-    );
+    let diagnostic = redact_exa_credential(&redact_url_queries(&format!("{error:#}")), credential);
     ToolResult::text(
         format!("Error: {tool} failed: {}", trim_chars(&diagnostic, 2_000)),
         true,
@@ -622,7 +617,7 @@ fn web_error(tool: &str, error: anyhow::Error, credential: &ExaCredential) -> To
 fn serialized_result(output: &impl Serialize, credential: &ExaCredential) -> ToolResult {
     match serde_json::to_string_pretty(output) {
         Ok(output) => {
-            let output = crate::model::redact_credentials(&output, &[credential.secret()]);
+            let output = redact_exa_credential(&output, credential);
             ToolResult::text(redact_url_queries(&output), false)
         }
         Err(error) => ToolResult::text(
@@ -630,6 +625,16 @@ fn serialized_result(output: &impl Serialize, credential: &ExaCredential) -> Too
             true,
         ),
     }
+}
+
+fn redact_exa_credential(text: &str, credential: &ExaCredential) -> String {
+    let secret = credential.secret();
+    let exact = if secret.is_empty() {
+        text.to_string()
+    } else {
+        text.replace(secret, "[REDACTED]")
+    };
+    crate::model::redact_credentials(&exact, &[secret])
 }
 
 fn official_endpoint(path: &str) -> Url {
@@ -850,6 +855,27 @@ mod tests {
 
     fn credential() -> ExaCredential {
         ExaCredential::new("exa-test-canary-secret".to_string())
+    }
+
+    #[test]
+    fn every_web_result_and_error_path_masks_an_exact_short_credential() {
+        let credential = ExaCredential::new("abc".to_string());
+
+        let result = serialized_result(&json!({ "text": "provider result abc" }), &credential);
+        let result = result.content.as_text().expect("text web result");
+        assert!(!result.contains("abc"), "unredacted web result: {result}");
+
+        let status = provider_status_error(
+            StatusCode::UNAUTHORIZED,
+            br#"{"message":"provider error abc"}"#,
+            &credential,
+        )
+        .to_string();
+        assert!(!status.contains("abc"), "unredacted status error: {status}");
+
+        let error = web_error("web_search", anyhow!("transport error abc"), &credential);
+        let error = error.content.as_text().expect("text web error");
+        assert!(!error.contains("abc"), "unredacted web error: {error}");
     }
 
     #[test]

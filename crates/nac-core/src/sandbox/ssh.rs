@@ -60,6 +60,9 @@ impl SshBackend {
 
     fn ssh_command(&self, remote_command: &str) -> Command {
         let mut command = Command::new("ssh");
+        for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+            command.env_remove(name);
+        }
         command.args(self.ssh_args());
         command.arg("--");
         command.arg(&self.connection.host);
