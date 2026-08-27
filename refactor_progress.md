@@ -22,8 +22,9 @@ a settled contract or required gate, and identify a missing invariant.
 
 ## Governing evidence and protected state
 
-- `AGENTS.md` was read completely at task start. It is currently an untracked,
-  branch-specific guide and is explicitly task-owned only for milestone 7.
+- The original `AGENTS.md` was read completely at task start. Milestone 7
+  replaced that untracked branch-specific brief with the committed durable
+  repository guide while preserving every other protected local path.
 - `demo_decisions.md` was not carried into this worktree. It was not recreated;
   the delegated objective plus tracked implementation/tests and the named local
   ledgers control this run.
@@ -309,25 +310,28 @@ Rules:
   its nearest guide with its reason and placement restriction.
 - Focused tracked ADRs record dependency direction and the generated API
   contract; the absent local decision notebook was not recreated.
-- Guide placement/read-back and local Markdown-link audits pass; the remaining
-  guide and measurement refinements are the task-owned M8 documentation slice.
+- Guide placement/read-back and local Markdown-link audits pass; the final
+  ownership/size measurement refinements are committed at `5b3058c`.
 
-### M8 — Integration and finite acceptance (in progress)
+### M8 — Integration and finite acceptance (complete)
 
-- Retire obsolete transition paths after all consumers migrate; audit exports,
-  dependency cycles, duplicate DTOs, broad service bags, maps, and generated
-  drift.
-- Record final hotspot/dependency measurements and compatibility summary here.
-- Required final candidate gates: `make format-check`, `make lint`, `make ci`,
-  `make test-durability`, `make test-assets`, `make test-e2e`, and
-  `make test-managed-image-contract`.
-- Run `make test-managed-image` only if Docker/Podman prerequisites are
-  available; otherwise record the exact gap without calling it a pass.
-- Run one bounded production-embedded browser smoke covering ordinary project/
-  session launch, all behavior selectors, managed status, GitHub entry, and Add
-  repository without real credentials.
-- Consume exactly one final independent review budget after the candidate is
-  green. Repair only qualified direct regressions and rerun proportionate gates.
+- Obsolete managed module paths, legacy first-party dispatch, duplicate wire
+  DTOs, broad query/service bags, public implementation modules, dependency
+  cycles, stale generated output, and undocumented large owners were audited.
+- Final hotspot/dependency measurements and public compatibility are recorded
+  below. No transitional production consumer remains for the retired paths.
+- Every required final gate passed. Docker 29.7.2 was available, so the optional
+  pinned Linux/amd64 managed-image build and smoke also ran and passed.
+- The production-embedded in-app browser smoke covered ordinary project and
+  session launch, toggled all three behavior selectors, inspected managed
+  readiness, and opened Add repository/GitHub onboarding without real
+  credentials. The browser reported no console errors; its isolated state was
+  removed afterward.
+- The single independent review budget found one generated-contract gap and no
+  other blocker. The three duplicated wire enums now derive from `ApiSchema`,
+  two redundant refinements use generated records directly, and an unused
+  handwritten steering request was removed. Proportionate contract/frontend/
+  asset verification passed after the repair; no second review was started.
 
 ## Reference-repository findings
 
@@ -884,7 +888,7 @@ Rules:
   in 3.1 document drives a dependency-free, fail-closed TypeScript schema
   generator; `make test-api-contract` verifies both artifacts without mutation,
   and `test-assets` now depends on that drift gate. The stable `api.ts` surface
-  fell from 1,592 handwritten lines to 458 lines of generated aliases and
+  fell from 1,592 handwritten lines to 450 lines of generated aliases and
   intentional frontend refinements; 142 same-name DTO declarations plus the
   managed/GitHub/catalog aliases now derive from 202 generated schemas.
   Required-nullable and constrained-enum OpenAPI corrections were added at the
@@ -939,10 +943,11 @@ Rules:
 - `nac-managed` has no public implementation modules and exposes one explicit
   facade. No obsolete `nac_managed::{configuration,github,...}` paths remain.
 - The checked-in OpenAPI document currently contains 205 schemas. The stable
-  frontend API surface has 164 unique generated `ApiSchema<...>` aliases and
-  only four intentional manual refinements (`SessionOverviewRecord`,
-  `ThreadEventBoundary`, `SshTarget`, and `SteeringRequest`); none duplicates
-  an OpenAPI schema or wire request/response DTO.
+  frontend API surface has generated `ApiSchema<...>` aliases plus only three
+  intentional manual record refinements (`SessionOverviewRecord`,
+  `ThreadEventBoundary`, and `SshTarget`); none duplicates an OpenAPI schema or
+  wire request/response DTO. `EpisodeStatus`, `ManagedAuthProvider`, and
+  `McpTransport` now derive from their generated schemas.
 - No `LegacyDirectTool` or migrated-tool central name dispatch remains. Native
   and dynamic tools cross the explicit capability/preparation/authorization
   boundary; model visibility is not treated as execution authority.
@@ -960,27 +965,105 @@ Rules:
   | managed clone | 1,345 core-owned | 625 workflow plus 177/266 adapters |
   | managed GitHub | 1,197 core-owned | 851 provider plus 94 credential store |
   | frontend queries | 1,605 | 20 barrel; largest owner 393 |
-  | frontend API types | 1,592 | 458 generated aliases/refinements |
+  | frontend API types | 1,592 | 450 generated aliases/refinements |
 
 - Remaining production modules above 800 lines are cohesive safety, provider,
   lifecycle, composition, UI, or generated-output owners. Their nearest
   `AGENTS.md` guide states why they remain intact and rejects unrelated growth;
   arbitrary fragmentation was not used to game the size target.
 
+## Final acceptance evidence
+
+All commands below passed on 2026-08-27 from the final candidate unless the
+post-review note says otherwise:
+
+- `make format-check` — frontend and Rust formatting current.
+- `make lint` — frontend lint plus warning-denied workspace Clippy current.
+- `make ci` — workspace Rust suites green, including 1,156 core tests with the
+  nine contractually ignored live/optional-infrastructure cases, 18 managed
+  tests, 148 server library tests, 23 server binary tests, 178 frontend tests,
+  generated OpenAPI/TypeScript drift checks, production build, and managed
+  image contract.
+- `make test-durability` — all ten focused transcript, child completion,
+  recovery, relationship, peer-lease, and managed-settlement regressions pass.
+- `make test-assets` — OpenAPI and generated TypeScript current; lint,
+  typecheck, production build, and committed bundle drift check pass.
+- `make test-e2e` — all 14 production-embedded Playwright journeys pass,
+  including direct execution, native tool results, immutable behavior,
+  steering/inbox/goal flows, child navigation, managed onboarding, responsive
+  repository selection, and clone cancellation.
+- `make test-managed-image-contract` — shell and static image/workflow contract
+  pass.
+- `make test-managed-image` — Docker 29.7.2 built the pinned Linux/amd64 image;
+  readiness, restart, toolchain, and SIGTERM smoke pass.
+- The bounded in-app browser smoke used an isolated loopback server and
+  task-owned temporary stores. It exercised all three immutable behavior
+  controls, created an ordinary project and reached its new-chat/session
+  surface, inspected exact managed readiness failures, and opened the GitHub/
+  Add repository entry without real credentials. No browser console errors
+  were emitted; the server, tab, and temporary directory were removed.
+- The one independent final review found only a P2 generated-contract gap:
+  three handwritten enums and one unused request interface could drift from
+  OpenAPI. The final slice removes that duplication. Afterward,
+  `make format-check`, all 178 frontend tests, and `make test-assets` (including
+  generation, lint, typecheck, build, and bundle drift) pass.
+
+## Public compatibility summary
+
+- HTTP route names, methods, response/error shapes, OpenAPI paths, outgoing MCP
+  tool names, CLI/configuration defaults, and persisted public vocabulary are
+  unchanged. OpenAPI corrections only describe already-serialized nullability
+  and enums more precisely.
+- No database migration or historical data rewrite was introduced. Existing
+  schema, transcript, relationship, lease, goal, inbox, recovery, and session
+  behavior values retain their supported read/write direction.
+- Orchestrator, direct, and direct-with-orchestrator remain immutable session
+  behaviors. Traditional child sessions, managed child orchestrators, and NAC
+  workers remain separate durable topologies.
+- Local, SSH, and optional Podman execution stay selected before authorization;
+  approval does not change backend confinement. Hard denials, canonical
+  resource binding, remembered-grant scope, headless fail-closed behavior,
+  revision/atomic mutation, output retention, cancellation, and cleanup are
+  preserved behind narrower owners.
+- Managed NAC remains additive and opt-in. Managed model/GitHub/host-secret and
+  ordinary Exa credentials retain their isolation and exact-value redaction
+  boundaries; native web retrieval remains a tool/provider family rather than
+  a managed-product dependency.
+
 ## Residual risks, coverage gaps, and pending decisions
 
-- `demo_decisions.md` is absent; no user decision is currently required because
-  the delegated objective resolves private organization choices.
-- Docker/Podman live managed-image prerequisites have not yet been rechecked.
-  Their absence is an optional coverage gap, not a pass or automatic blocker.
-- The refactor touches historically adversarial safety/durability seams. Moves
-  must preserve exact code first, then extract ownership behind existing tests;
-  semantic cleanups are separate coherent commits.
-- No product, persistence, public-API, migration, safety, or dependency decision
-  is currently pending.
+- `demo_decisions.md` was absent and was not recreated. No product,
+  persistence, public-API, migration, safety, dependency, or license decision
+  is pending.
+- Deliberately cohesive modules above 800 lines remain documented exceptions.
+  Their guides name the closed responsibility and forbid unrelated growth;
+  this is a maintenance constraint, not an acceptance gap.
+- The existing optional-Podman late-cidfile limitation remains the previously
+  accepted boundary and was not expanded by this refactor. Static Podman
+  contracts, local/remote backend characterization, and the live managed Docker
+  image smoke are green.
+- Docker emitted only the expected host-platform warning while running the
+  requested Linux/amd64 image on an arm64 host; emulated smoke completed.
+
+## Exact manual test instructions
+
+1. Run `make demo`, open the printed loopback URL, create a disposable local
+   Project, select each of the three behavior cards in turn, and confirm the
+   created chat labels the chosen immutable behavior. Use **New Chat** to verify
+   that behavior selection is requested again.
+2. In an ordinary direct chat configured with test credentials, submit a short
+   prompt, steer the active run, queue/edit/cancel one pending input, and stop
+   the run. Confirm the transcript and retained terminal/tool output survive a
+   page reload.
+3. Run `make test-managed-image`; then follow `docs/managed/README.md` with a
+   disposable managed configuration. Confirm status/readiness, GitHub Connect,
+   Add repository, repository/branch selection, clone cancellation, and
+   bounded shutdown. Real provider/GitHub credentials are required only for a
+   final external-service exercise, not for the checked-in automated or browser
+   smoke evidence above.
 
 ## Exact next action
 
-Commit the completed guide/measurement audit with exact-path staging, then run
-the required final gate set, optional container prerequisite check, production-
-embedded browser smoke, and single authorized independent final review.
+Commit this final generated-contract repair and acceptance handoff with exact-
+path staging. No implementation, verification, or review work remains after
+that commit.
