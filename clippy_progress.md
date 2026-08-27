@@ -132,6 +132,8 @@ zero-backlog async guard last.
   and reasoned `#[allow]` only for cross-target Rust dead-code/interface cases.
   Converting to expectations exposed one stale `result_large_err` suppression,
   which was removed instead of documented.
+- `future_not_send`: complete. The production workspace had zero findings, so
+  the guard adds no source exceptions or compatibility churn.
 
 ## Verification and next action
 
@@ -204,5 +206,10 @@ The `allow_attributes_without_reason` slice passes `make format-check`,
 core tests (nine ignored), 148 server library tests, 23 server binary tests, and
 all remaining workspace tests green.
 
-Next: commit this exact lint boundary, then add the zero-backlog
-`future_not_send` guard, run autofix, and verify its own green boundary.
+The `future_not_send` slice passes `make format-check`, `make lint`,
+`git diff --check`, and `cargo test --workspace --locked --no-run` for every
+workspace test target.
+
+Next: commit this exact lint boundary, then run the final repository acceptance
+suite, audit the resulting policy and commit range, and record the final clean
+handoff in one verification commit.
