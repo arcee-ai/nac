@@ -774,6 +774,14 @@ Rules:
   are retired. All 14 write/edit family tests and all 14 kernel/capability/
   authorization characterizations pass; the complete core test build and
   warning-denied Clippy are green.
+- `glob` and `grep` are now explicit native prepared-invocation types owned by
+  their discovery families. They retain bounded full decoding, parallel
+  admission, canonical root projection/binding, backend parity, stable paging,
+  ignore semantics, and cancellable execution; numeric legacy dispatch cases 3
+  and 4 and their dead shared validators are retired. The discovery suite passes
+  34 tests with its three documented optional/environment-specific cases
+  ignored, all 14 kernel characterizations pass, and warning-denied Clippy is
+  green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -789,7 +797,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M5 native write/edit convergence with exact-path staging. Then
-migrate glob/grep and terminal command tools out of the remaining numeric
-legacy dispatcher while preserving definitions, validation, binding,
-admission, execution, and capability ordering.
+Commit the M5 native glob/grep convergence with exact-path staging. Then
+migrate the three terminal command tools out of the remaining numeric legacy
+dispatcher while preserving definitions, validation, binding, admission,
+execution, retention, cancellation, and capability ordering.

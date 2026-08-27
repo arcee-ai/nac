@@ -717,8 +717,6 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
 
     fn definition(&self) -> ToolDefinition {
         match KIND {
-            3 => glob::definition(),
-            4 => grep::definition(),
             5 => exec_command::exec_command_definition(),
             6 => exec_command::write_stdin_definition(),
             7 => exec_command::read_command_output_definition(),
@@ -728,7 +726,7 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
 
     fn admission(&self) -> kernel::ToolAdmission {
         match KIND {
-            3 | 4 | 7 => kernel::ToolAdmission::Parallel,
+            7 => kernel::ToolAdmission::Parallel,
             _ => kernel::ToolAdmission::Exclusive,
         }
     }
@@ -764,10 +762,6 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
         Box::pin(async move {
             let gate = shared_workspace_gate(services.runtime);
             match KIND {
-                3 | 4 => {
-                    let _read = gate.read().await;
-                    execute_legacy_direct(KIND, input, services.runtime).await
-                }
                 5 | 6 => {
                     let _write = gate.write().await;
                     execute_legacy_direct(KIND, input, services.runtime).await
@@ -795,23 +789,6 @@ fn bind_legacy_authorized_resources(
         .as_object_mut()
         .ok_or_else(|| invalid("decoded tool arguments are not an object"))?;
     match kind {
-        3 => {
-            let root = canonical("glob")
-                .into_iter()
-                .next()
-                .ok_or_else(|| invalid("authorized glob root is missing"))?;
-            object.insert("root".to_string(), Value::String(root));
-        }
-        4 => {
-            let roots = canonical("grep");
-            if roots.is_empty() {
-                return Err(invalid("authorized grep roots are missing"));
-            }
-            object.insert(
-                "roots".to_string(),
-                Value::Array(roots.into_iter().map(Value::String).collect()),
-            );
-        }
         5 => {
             let cwd = canonical("execute_cwd")
                 .into_iter()
@@ -901,104 +878,8 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
         }
         Ok(())
     }
-    fn bounded_string(
-        object: &serde_json::Map<String, Value>,
-        key: &str,
-        required: bool,
-        minimum: usize,
-        maximum: usize,
-    ) -> Result<(), ToolResult> {
-        let value = match object.get(key) {
-            Some(Value::String(value)) => value,
-            None if !required => return Ok(()),
-            _ => return Err(invalid(format!("'{key}' argument must be a string"))),
-        };
-        if value.len() < minimum || value.len() > maximum {
-            return Err(invalid(format!(
-                "'{key}' argument must contain between {minimum} and {maximum} bytes"
-            )));
-        }
-        Ok(())
-    }
-    fn string_array(
-        object: &serde_json::Map<String, Value>,
-        key: &str,
-        minimum: usize,
-        maximum: usize,
-        item_maximum: usize,
-    ) -> Result<(), ToolResult> {
-        let Some(value) = object.get(key) else {
-            return Ok(());
-        };
-        let values = value
-            .as_array()
-            .ok_or_else(|| invalid(format!("'{key}' argument must be an array of strings")))?;
-        if values.len() < minimum || values.len() > maximum {
-            return Err(invalid(format!(
-                "'{key}' must contain between {minimum} and {maximum} strings"
-            )));
-        }
-        if values.iter().any(|value| {
-            value
-                .as_str()
-                .is_none_or(|value| value.len() > item_maximum)
-        }) {
-            return Err(invalid(format!(
-                "'{key}' must contain only strings of at most {item_maximum} bytes"
-            )));
-        }
-        Ok(())
-    }
-
     let object = object(input)?;
     match kind {
-        3 => {
-            reject_unknown(
-                object,
-                &["pattern", "root", "gitignore", "hidden", "limit", "cursor"],
-            )?;
-            bounded_string(object, "pattern", true, 1, 1024)?;
-            bounded_string(object, "root", false, 0, 1024)?;
-            optional_bool(object, "gitignore")?;
-            optional_bool(object, "hidden")?;
-            optional_u64(object, "limit", 1, 1_000)?;
-            bounded_string(object, "cursor", false, 0, 4_096)?;
-        }
-        4 => {
-            reject_unknown(
-                object,
-                &[
-                    "pattern",
-                    "roots",
-                    "regex",
-                    "case",
-                    "globs",
-                    "context",
-                    "multiline",
-                    "gitignore",
-                    "hidden",
-                    "limit",
-                    "cursor",
-                ],
-            )?;
-            bounded_string(object, "pattern", true, 1, 65_536)?;
-            string_array(object, "roots", 1, 32, 1_024)?;
-            string_array(object, "globs", 0, 128, 1_024)?;
-            optional_bool(object, "regex")?;
-            optional_bool(object, "multiline")?;
-            optional_bool(object, "gitignore")?;
-            optional_bool(object, "hidden")?;
-            optional_u64(object, "context", 0, 100)?;
-            optional_u64(object, "limit", 1, 1_000)?;
-            bounded_string(object, "cursor", false, 0, 4_096)?;
-            if let Some(case) = object.get("case") {
-                if !matches!(case.as_str(), Some("smart" | "sensitive" | "insensitive")) {
-                    return Err(invalid(
-                        "'case' argument must be smart, sensitive, or insensitive",
-                    ));
-                }
-            }
-        }
         5 => {
             reject_unknown(
                 object,
@@ -1065,8 +946,6 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
 
 async fn execute_legacy_direct(kind: u8, input: Value, runtime: &ToolRuntime) -> ToolResult {
     match kind {
-        3 => glob::execute(input, runtime).await,
-        4 => grep::execute(input, runtime).await,
         5 => exec_command::execute_exec_command(&input, runtime).await,
         6 => exec_command::execute_write_stdin(&input, runtime).await,
         7 => exec_command::execute_read_command_output(&input, runtime),
@@ -1088,55 +967,7 @@ fn legacy_permission_resources(
             .and_then(Value::as_str)
             .ok_or_else(|| invalid(format!("'{key}' argument must be a string")))
     }
-    fn resolved_file(
-        action: &str,
-        path: &str,
-        runtime: &ToolRuntime,
-        mutating: bool,
-    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
-        let path = runtime
-            .backend
-            .resolve_path(path)
-            .map_err(|error| invalid(format!("invalid {action} path: {error}")))?;
-        Ok(crate::permissions::file_resources(
-            action,
-            path,
-            runtime.backend.as_ref(),
-            &runtime.store_path,
-            mutating,
-        ))
-    }
-
     match kind {
-        3 => {
-            let root = match input.get("root") {
-                None => ".",
-                Some(Value::String(root)) => root,
-                Some(_) => return Err(invalid("'root' argument must be a string")),
-            };
-            resolved_file("glob", root, runtime, false)
-        }
-        4 => {
-            let roots = match input.get("roots") {
-                None => vec!["."],
-                Some(Value::Array(roots)) if !roots.is_empty() => roots
-                    .iter()
-                    .map(|root| {
-                        root.as_str()
-                            .ok_or_else(|| invalid("'roots' must contain only strings"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                Some(Value::Array(_)) => {
-                    return Err(invalid("'roots' must contain at least one path"));
-                }
-                Some(_) => return Err(invalid("'roots' argument must be an array of strings")),
-            };
-            roots
-                .into_iter()
-                .map(|root| resolved_file("grep", root, runtime, false))
-                .collect::<Result<Vec<_>, _>>()
-                .map(|resources| resources.into_iter().flatten().collect())
-        }
         5 => {
             let command = string(input, "cmd")?;
             let tty = match input.get("tty") {
@@ -1225,8 +1056,8 @@ fn worker_tool_registry(
         .register(ReadTool { image_read })
         .register(write::WriteTool)
         .register(edit::EditTool)
-        .register(LegacyDirectTool::<3>)
-        .register(LegacyDirectTool::<4>)
+        .register(glob::GlobTool)
+        .register(grep::GrepTool)
         .register(LegacyDirectTool::<5>)
         .register(LegacyDirectTool::<6>)
         .register(LegacyDirectTool::<7>)
