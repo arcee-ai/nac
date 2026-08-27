@@ -336,6 +336,9 @@ Rules:
 - `3df2b65 refactor: separate core and server test modules` — records the M0
   architecture handoff and moves the four priority inline test modules into
   sibling files with unchanged test inventories and green crate suites/checks.
+- `217825f refactor(server): isolate project application service` — moves the
+  complete project use-case family behind a focused application facade while
+  preserving HTTP contracts and lifecycle deletion ordering.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -363,6 +366,12 @@ Rules:
   delegating to the existing lifecycle owner. The project-focused filter passes
   4 tests, and the complete server suite remains green at 149 library plus 23
   binary tests.
+- Project transport DTOs and thin Axum/OpenAPI handlers now live in the
+  246-line `delivery::projects` adapter. Public DTO re-exports remain at the
+  crate root, the project and OpenAPI contract filters pass, and
+  `make crate-check CRATE=nac-server` is green. Server `lib.rs` is now 7,754
+  lines, down from its 17,351-line inline-test baseline and 7,977 lines after
+  the application extraction.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -378,6 +387,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the project application-service
+Inspect exact worktree/staged diffs and commit the project delivery-adapter
 slice without protected files. Then extract the next focused server use-case
-family, using the project seam as the dependency-direction template.
+family, using the project application/delivery seams as the dependency-direction
+template.
