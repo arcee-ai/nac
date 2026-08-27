@@ -5486,7 +5486,7 @@ async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionall
     sessions::update_session_config(&store_path, &unavailable_auth).unwrap();
 
     let manager = test_manager(&root);
-    let Json(endpoint_config) = session_config_handler(
+    let Json(endpoint_config) = delivery::session_lifecycle::session_config_handler(
         State(manager.clone()),
         AxumPath("missing-selector".to_string()),
     )
@@ -5659,10 +5659,12 @@ async fn structurally_invalid_raw_settings_require_explicit_transactional_repair
     assert_eq!(raw_effort.reasoning_effort.as_deref(), Some("ultra"));
     let raw_headers = manager.session_config("headers").unwrap();
     assert_eq!(raw_headers.extra_headers_json.as_deref(), Some("{broken"));
-    let Json(endpoint_headers) =
-        session_config_handler(State(manager.clone()), AxumPath("headers".to_string()))
-            .await
-            .unwrap();
+    let Json(endpoint_headers) = delivery::session_lifecycle::session_config_handler(
+        State(manager.clone()),
+        AxumPath("headers".to_string()),
+    )
+    .await
+    .unwrap();
     assert_eq!(endpoint_headers, raw_headers);
     assert!(manager.inner.active_sessions.read().await.is_empty());
 
@@ -6569,10 +6571,12 @@ threshold_tokens = 64000
         stored.extra_headers,
         BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
     );
-    let Json(config) =
-        session_config_handler(State(manager.clone()), AxumPath(inherited_id.clone()))
-            .await
-            .unwrap();
+    let Json(config) = delivery::session_lifecycle::session_config_handler(
+        State(manager.clone()),
+        AxumPath(inherited_id.clone()),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         config.extra_headers_json.as_deref(),
         Some("{\"X-Config\":\"yes\"}")
