@@ -88,6 +88,8 @@ zero-backlog async guard last.
   `Arc::<T>::clone` so the result can retain its existing trait-object coercion.
 - `redundant_clone`: complete. Clippy removed all six redundant clones; each
   source value was at its last use and is now moved directly.
+- `semicolon_if_nothing_returned`: complete. Clippy applied all seven
+  statement-tail fixes with no manual exceptions.
 
 ## Verification and next action
 
@@ -108,5 +110,9 @@ The `redundant_clone` slice passes `make format-check`, `make lint`,
 `git diff --check`, and the full Rust workspace suite with the same green test
 inventory recorded above.
 
-Next: commit this exact lint boundary, then add
-`semicolon_if_nothing_returned` and run autofix before any manual repair.
+The `semicolon_if_nothing_returned` slice passes `make format-check`,
+`make lint`, `git diff --check`, all 33 `nac-catalog-gen` tests, 77 focused
+core catalog tests, and 32 focused Arcee tests.
+
+Next: commit this exact lint boundary, then add `match_same_arms` and run
+autofix before any manual repair.

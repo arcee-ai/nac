@@ -236,7 +236,7 @@ pub(super) fn write_sidecar(path: &Path, sidecar: &OverlaySidecar) {
             }
         }
         Err(error) => {
-            eprintln!("nac: model catalog: failed to serialize overlay etag sidecar: {error}")
+            eprintln!("nac: model catalog: failed to serialize overlay etag sidecar: {error}");
         }
     }
 }

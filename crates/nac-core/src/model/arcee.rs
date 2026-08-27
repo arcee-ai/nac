@@ -971,7 +971,7 @@ where
         match error_code.as_deref() {
             Some("authorization_pending") => {}
             Some("slow_down") => {
-                interval_secs = interval_secs.saturating_add(SLOW_DOWN_BACKOFF_SECS)
+                interval_secs = interval_secs.saturating_add(SLOW_DOWN_BACKOFF_SECS);
             }
             Some("access_denied") => return Err(anyhow!("Arcee authorization was denied")),
             Some("expired_token") => {
