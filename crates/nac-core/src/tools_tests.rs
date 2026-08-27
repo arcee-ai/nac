@@ -154,7 +154,7 @@ fn exec_binding_rewrites_authorized_paths_and_workdir_into_the_invocation() {
         kernel::PermissionResource::new("execute_cwd", "/workspace"),
     ];
 
-    super::bind_legacy_authorized_resources(5, &mut input, &resources).unwrap();
+    super::terminal_tools::bind_exec_command_resources(&mut input, &resources).unwrap();
 
     assert_eq!(input["cmd"], "rg needle /outside/secret");
     assert_eq!(input["workdir"], "/workspace");
