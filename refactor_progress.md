@@ -347,6 +347,8 @@ Rules:
 - `8620c99 refactor(server): isolate saved configuration deletion` — moves
   saved model-configuration list/delete and generated-key retirement behind
   application and delivery boundaries.
+- `46e882a refactor(server): isolate credential administration` — moves the
+  ordinary write-only credential store behind application and delivery APIs.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -398,6 +400,13 @@ Rules:
   preserve names and status behavior. The credential E2E-style server test,
   OpenAPI special-schema/parity tests, and warning-denied Clippy pass;
   `lib.rs` is now 7,466 lines.
+- Saved model configuration create/update now lives in the focused application
+  owner and its HTTP adapter only maps DTO fields. Generated credentials are
+  stored before light-model validation, rolled back on validation/store
+  failure, and superseded generated selectors are retired only after the row
+  update succeeds, matching the original ordering. The complete server suite
+  passes 150 library and 23 binary tests; `lib.rs` is now 7,121 lines. Provider
+  discovery from saved/file configurations remains in delivery and is next.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -413,7 +422,6 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the ordinary credential
-application/delivery slice without protected files. Then extract saved model
-create/update and provider resolution while preserving credential rollback,
-retirement, and provider-destination policy ordering.
+Inspect exact worktree/staged diffs and commit saved model create/update without
+protected files. Then move file/saved provider resolution into the same
+application owner with transport-only response mapping.
