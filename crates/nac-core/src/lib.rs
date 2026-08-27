@@ -8,6 +8,7 @@ pub mod commands;
 pub mod events;
 mod goals;
 pub mod light_model;
+pub mod managed;
 mod mcp;
 pub mod model;
 pub mod orchestration_control;

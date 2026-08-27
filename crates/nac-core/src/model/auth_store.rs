@@ -47,7 +47,7 @@ pub(super) fn with_arcee_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> 
 }
 
 /// Serialize read-modify-write access to any credential file in NAC home.
-pub(super) fn with_credential_lock<T>(
+pub(crate) fn with_credential_lock<T>(
     lock_path: &Path,
     operation: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
@@ -61,7 +61,7 @@ pub(super) fn read_arcee_auth_string() -> Result<Option<String>> {
     read_auth_string_from_path(&arcee_auth_file_path()?)
 }
 
-pub(super) fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> {
+pub(crate) fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> {
     let Some(raw) = read_auth_bytes_from_path(path)? else {
         return Ok(None);
     };
@@ -143,7 +143,7 @@ pub(super) fn write_arcee_auth_string(raw: &str) -> Result<()> {
     write_auth_string_to_path(&arcee_auth_file_path()?, raw)
 }
 
-pub(super) fn write_auth_string_to_path(path: &Path, raw: &str) -> Result<()> {
+pub(crate) fn write_auth_string_to_path(path: &Path, raw: &str) -> Result<()> {
     atomic_replace_auth_file(path, |file| file.write_all(raw.as_bytes()))
 }
 

@@ -246,6 +246,7 @@ pub struct ServerOptions {
     pub root_cwd: PathBuf,
     pub store_path: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
+    pub managed_host: Option<nac_core::managed::ManagedHostConfig>,
 }
 
 #[derive(Clone)]
@@ -257,6 +258,7 @@ struct SessionManagerInner {
     root_cwd: PathBuf,
     store_path: PathBuf,
     worker_executable: PathBuf,
+    managed_host: Option<nac_core::managed::ManagedHostConfig>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -1447,6 +1449,7 @@ impl SessionManager {
                 root_cwd,
                 store_path: store_path.clone(),
                 worker_executable,
+                managed_host: options.managed_host,
                 active_sessions: RwLock::new(HashMap::new()),
 
                 lifecycle_gates: StdMutex::new(HashMap::new()),
@@ -1478,6 +1481,10 @@ impl SessionManager {
             store_path: self.inner.store_path.clone(),
             worker_executable: self.inner.worker_executable.clone(),
         }
+    }
+
+    pub fn managed_host(&self) -> Option<&nac_core::managed::ManagedHostConfig> {
+        self.inner.managed_host.as_ref()
     }
 
     fn resolve_launch_location(
@@ -9419,6 +9426,7 @@ mod tests {
             root_cwd: root.to_path_buf(),
             store_path: Some(root.join("store.db")),
             worker_executable: None,
+            managed_host: None,
         })
         .expect("session manager")
     }
