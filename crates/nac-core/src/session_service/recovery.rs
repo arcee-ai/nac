@@ -9,7 +9,7 @@ impl SessionService {
         let reconciled = self
             .reconciled_recovery_run_id
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str())))
     }
 
@@ -63,14 +63,14 @@ impl SessionService {
         *self
             .transcript_recovery_warning
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = transcript_warning;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = transcript_warning;
         let reconciled_run_id =
             crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
                 .map(|record| record.run_id);
         *self
             .reconciled_recovery_run_id
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = reconciled_run_id;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = reconciled_run_id;
 
         match &recovery {
             crate::store::ActiveRunReconciliation::CanonicalTerminal => {

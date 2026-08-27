@@ -79,6 +79,10 @@ zero-backlog async guard last.
 
 - `uninlined_format_args`: complete. Workspace autofix rewrote all 177
   diagnostics; no manual exceptions or residual diagnostics were required.
+- `redundant_closure_for_method_calls`: complete. Clippy applied 105 safe
+  rewrites. One suggestion incorrectly named the private `model::types` module;
+  the equivalent method reference uses the public `crate::model::TokenUsage`
+  re-export instead.
 
 ## Verification and next action
 
@@ -88,5 +92,9 @@ The `uninlined_format_args` slice passes `make format-check`, `make lint`,
 credential-store, managed, process, catalog, contracts, and documentation tests
 passed (nine intentionally ignored core tests).
 
-Next: commit this exact lint boundary, then add
-`redundant_closure_for_method_calls` and run autofix before any manual repair.
+The `redundant_closure_for_method_calls` slice passes `make format-check`,
+`make lint`, `git diff --check`, and the full Rust workspace suite with the same
+green test inventory recorded above.
+
+Next: commit this exact lint boundary, then add `clone_on_ref_ptr` and run
+autofix before any manual repair.

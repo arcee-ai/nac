@@ -133,7 +133,7 @@ fn add_cache_control_to_last_block(message: &mut Value, ttl: Option<&str>) {
     };
 
     // If content is a string, convert to a single-element text block array.
-    if let Some(text) = content.as_str().map(|s| s.to_string()) {
+    if let Some(text) = content.as_str().map(std::string::ToString::to_string) {
         *content = Value::Array(vec![json!({"type": "text", "text": text})]);
     }
 
@@ -361,16 +361,22 @@ pub(super) fn parse_anthropic_messages_response(
         });
 
     let usage = value.get("usage").map(|u| {
-        let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let input_tokens = u
+            .get("input_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         let cache_read = u
             .get("cache_read_input_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         let cache_write = u
             .get("cache_creation_input_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
-        let output_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let output_tokens = u
+            .get("output_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         TokenUsage {
             input_tokens,
             output_tokens,

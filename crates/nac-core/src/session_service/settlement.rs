@@ -460,7 +460,7 @@ impl SessionService {
     ) -> std::sync::MutexGuard<'_, Option<ActiveSessionOperation>> {
         self.active_operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Run-end persist (DB-direct transcript workset, step 4 — never-fold):

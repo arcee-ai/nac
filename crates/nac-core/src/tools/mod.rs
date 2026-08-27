@@ -305,7 +305,7 @@ pub fn orchestrator_tool_definitions(
 pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
     args.get(key)
         .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| ToolResult {
             content: (format!("Error: '{key}' argument required")).into(),
             is_error: true,

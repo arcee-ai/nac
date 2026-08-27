@@ -27,14 +27,14 @@ impl PermissionBroker {
         *self
             .event_bus
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(bus);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bus);
     }
 
     pub fn pending(&self) -> Vec<PermissionRequest> {
         let mut requests = self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pending
             .values()
             .map(|pending| pending.request.clone())
@@ -59,7 +59,7 @@ impl PermissionBroker {
         let pending = self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pending
             .remove(request_id)
             .ok_or_else(|| anyhow::anyhow!("permission request '{request_id}' was not found"))?;
@@ -130,7 +130,7 @@ impl PermissionBroker {
         let interactive = self
             .event_bus
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
         let delegated_child =
@@ -168,7 +168,7 @@ impl PermissionBroker {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pending
             .insert(
                 request.id.clone(),
@@ -289,7 +289,7 @@ impl PermissionBroker {
         let dismissed = self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pending
             .remove(request_id)
             .is_some();
@@ -308,7 +308,7 @@ impl PermissionBroker {
             let interactive = self
                 .event_bus
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .as_ref()
                 .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
             if !interactive {
@@ -325,7 +325,7 @@ impl PermissionBroker {
                     let interactive = self
                         .event_bus
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .as_ref()
                         .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
                     if interactive {
@@ -347,7 +347,7 @@ impl PermissionBroker {
         if let Some(bus) = self
             .event_bus
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
         {
             bus.emit(event);

@@ -71,7 +71,7 @@ static CONTROLLERS: LazyLock<Mutex<HashMap<PathBuf, Arc<dyn OrchestrationControl
 pub fn register_controller(path: PathBuf, controller: Arc<dyn OrchestrationController>) {
     CONTROLLERS
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(path, controller);
 }
 
@@ -79,7 +79,7 @@ pub fn register_controller(path: PathBuf, controller: Arc<dyn OrchestrationContr
 pub fn controller_for(path: &Path) -> Result<Arc<dyn OrchestrationController>> {
     CONTROLLERS
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(path)
         .cloned()
         .ok_or_else(|| anyhow!("internal orchestrator session control is unavailable"))

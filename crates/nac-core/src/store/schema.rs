@@ -73,7 +73,7 @@ impl ConnectionCapacity {
         let mut state = self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
             let store_count = state.by_store.get(store_path).copied().unwrap_or(0);
             if state.total < self.process_limit && store_count < self.store_limit {
@@ -92,7 +92,7 @@ impl ConnectionCapacity {
             let (next, wait) = self
                 .available
                 .wait_timeout(state, remaining)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             state = next;
             if wait.timed_out() {
                 let store_count = state.by_store.get(store_path).copied().unwrap_or(0);
@@ -127,7 +127,7 @@ impl Drop for ConnectionPermit {
             .capacity
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.total = state
             .total
             .checked_sub(1)

@@ -83,7 +83,11 @@ pub(crate) fn key_arg_preview(
     let Ok(obj) = serde_json::from_str::<serde_json::Value>(args_json) else {
         return truncate_string(args_preview, 120);
     };
-    let get_str = |key: &str| obj.get(key).and_then(|v| v.as_str()).map(|s| s.to_string());
+    let get_str = |key: &str| {
+        obj.get(key)
+            .and_then(|v| v.as_str())
+            .map(std::string::ToString::to_string)
+    };
 
     match tool_name {
         "read" | "write" | "edit" => {
@@ -298,7 +302,7 @@ pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
         if !preview.is_empty() {
             let summary = preview.lines().last().unwrap_or(preview).trim();
             return Some(
-                match parsed.get("exit_code").and_then(|value| value.as_i64()) {
+                match parsed.get("exit_code").and_then(serde_json::Value::as_i64) {
                     Some(code) if code != 0 => format!("exit {code}: {summary}"),
                     _ => summary.to_string(),
                 },
@@ -329,7 +333,7 @@ pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
         .get("status")
         .and_then(|value| value.as_str())
         .unwrap_or("completed");
-    let exit_code = parsed.get("exit_code").and_then(|value| value.as_i64());
+    let exit_code = parsed.get("exit_code").and_then(serde_json::Value::as_i64);
     let more = ellipsis(lines.len());
 
     match (status, exit_code, summary) {

@@ -341,7 +341,7 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
         .headers()
         .get(reqwest::header::ETAG)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
+        .map(std::string::ToString::to_string);
     let body = match response.text().await {
         Ok(body) => body,
         Err(error) => {
@@ -689,7 +689,7 @@ fn map_credential_env_var(
         return None;
     }
     let Some(first) = env.as_array().and_then(|env| env.first()) else {
-        if env.as_array().is_some_and(|env| env.is_empty()) {
+        if env.as_array().is_some_and(std::vec::Vec::is_empty) {
             return None;
         }
         warnings.push(format!(

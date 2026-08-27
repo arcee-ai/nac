@@ -106,7 +106,7 @@ impl TerminalManager {
                 });
                 self.pending_remote_cleanups
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .insert(pidfile.to_string(), Arc::clone(&cleanup));
                 RemoteTransportOwnership { cleanup }
             });
