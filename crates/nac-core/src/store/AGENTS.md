@@ -40,6 +40,12 @@ workspace revisions, recovery markers, and cross-process coordination.
 - `../sessions/codec.rs`, `db.rs`, `operation_lease.rs`, `snapshot.rs` — session
   encoding, storage facade, lease, and projection contracts.
 
+`schema.rs` is intentionally above 800 lines because it is the ordered,
+transactional migration ledger for every supported database revision; splitting
+the sequence would obscure upgrade order and rollback. `transcript.rs` is the
+single append/revision/scan/repair owner for the durable model conversation.
+Neither file may acquire network, process, HTTP, or unrelated lifecycle logic.
+
 ## Verification
 
 ```sh
