@@ -578,6 +578,14 @@ Rules:
   after cancellation. Fail-closed corrupt-snapshot, cancelled-request cleanup,
   and both durable child-topology cascade regressions plus the full test build
   and warning-denied Clippy pass. Server `lib.rs` is now 5,054 lines.
+- Transactional session configuration coordination now belongs to a 170-line
+  application service. It retains the universal empty-patch no-op, primary
+  ownership check, lifecycle gate, active-map write lock, durable operation and
+  resource leases, full prospective validation, revision CAS, and eviction
+  ordering. Pure patch/model validation helpers remain unchanged for the next
+  ownership step. Empty-patch, both submission/patch race directions, invalid-
+  patch rollback, the full test build, and warning-denied Clippy pass. Server
+  `lib.rs` is now 4,927 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -593,8 +601,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the destructive lifecycle slice
-without protected files. Then continue M2 with attachment/recovery,
-configuration, session creation, and their remaining HTTP delivery, keeping
-lifecycle gates, operation leases, and exact settlement ordering in their
-coordinator.
+Inspect exact worktree/staged diffs and commit the session-configuration
+coordinator without protected files. Then move its pure validation helpers and
+transport-independent command contract, followed by attachment/recovery,
+session creation, and remaining HTTP delivery. Keep lifecycle gates, operation
+leases, and exact settlement ordering in their coordinator.
