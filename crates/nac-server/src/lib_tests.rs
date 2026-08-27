@@ -3894,7 +3894,8 @@ async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() 
         .await
         .unwrap();
     manager
-        .update_session_presentation("delegating", "Pinned parent", true, 0)
+        .session_catalog()
+        .update_presentation("delegating", "Pinned parent", true, 0)
         .await
         .unwrap();
 
@@ -4459,7 +4460,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
         .await
         .unwrap();
 
-    let summaries = manager.list_sessions(false).await.unwrap();
+    let summaries = manager.session_catalog().list(false).await.unwrap();
     assert!(summaries
         .iter()
         .find(|entry| entry.summary.session_id == child)
@@ -5165,7 +5166,10 @@ thread_timeout_secs = 7200
     // Server startup, listing, and attachment use only non-model ambient
     // settings; the model tuple and selector come from the stored snapshot.
     let manager = test_manager(&root);
-    assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+    assert_eq!(
+        manager.session_catalog().list(false).await.unwrap().len(),
+        1
+    );
     let resumed = manager.snapshot("persisted").await.unwrap();
     assert_eq!(resumed.metadata.session_id.as_deref(), Some("persisted"));
 
@@ -5182,7 +5186,10 @@ thread_timeout_secs = 7200
         error.to_string().contains("failed to parse config"),
         "{error:#}"
     );
-    assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+    assert_eq!(
+        manager.session_catalog().list(false).await.unwrap().len(),
+        1
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -5490,7 +5497,7 @@ async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionall
         .unwrap()
         .contains("server-repair-key"));
 
-    let listed = manager.list_sessions(false).await.unwrap();
+    let listed = manager.session_catalog().list(false).await.unwrap();
     let listed_ids = listed
         .iter()
         .map(|entry| entry.summary.session_id.as_str())
@@ -5590,7 +5597,7 @@ async fn incomplete_persisted_settings_are_listed_retrievable_and_transactionall
         "failed repair must leave persisted settings unchanged"
     );
 
-    let listed_after_repairs = manager.list_sessions(false).await.unwrap();
+    let listed_after_repairs = manager.session_catalog().list(false).await.unwrap();
     assert_eq!(listed_after_repairs.len(), 4);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -5619,7 +5626,7 @@ async fn structurally_invalid_raw_settings_require_explicit_transactional_repair
     }
 
     let manager = test_manager(&root);
-    let listed = manager.list_sessions(false).await.unwrap();
+    let listed = manager.session_catalog().list(false).await.unwrap();
     assert_eq!(listed.len(), 6);
     assert_eq!(
         listed
@@ -7040,7 +7047,12 @@ async fn create_reports_the_missing_light_model_credential() {
         "{}",
         response.message
     );
-    assert!(manager.list_sessions(false).await.unwrap().is_empty());
+    assert!(manager
+        .session_catalog()
+        .list(false)
+        .await
+        .unwrap()
+        .is_empty());
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -8078,7 +8090,7 @@ async fn presentation_handlers_preserve_error_shape_and_status() {
     seed_session(&root, "known", "2026-01-01 00:00:00.000000000");
     let manager = test_manager(&root);
 
-    let invalid = update_session_presentation_handler(
+    let invalid = delivery::sessions::update_presentation_handler(
         State(manager.clone()),
         AxumPath("known".to_string()),
         Ok(Json(UpdateSessionPresentationRequest {
@@ -8091,7 +8103,7 @@ async fn presentation_handlers_preserve_error_shape_and_status() {
     .unwrap_err();
     assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
 
-    let missing = update_session_presentation_handler(
+    let missing = delivery::sessions::update_presentation_handler(
         State(manager.clone()),
         AxumPath("missing".to_string()),
         Ok(Json(UpdateSessionPresentationRequest {
@@ -8104,7 +8116,7 @@ async fn presentation_handlers_preserve_error_shape_and_status() {
     .unwrap_err();
     assert_eq!(missing.status, StatusCode::NOT_FOUND);
 
-    let _ = update_session_presentation_handler(
+    let _ = delivery::sessions::update_presentation_handler(
         State(manager.clone()),
         AxumPath("known".to_string()),
         Ok(Json(UpdateSessionPresentationRequest {
@@ -8115,7 +8127,7 @@ async fn presentation_handlers_preserve_error_shape_and_status() {
     )
     .await
     .unwrap();
-    let stale = update_session_presentation_handler(
+    let stale = delivery::sessions::update_presentation_handler(
         State(manager.clone()),
         AxumPath("known".to_string()),
         Ok(Json(UpdateSessionPresentationRequest {
@@ -8135,7 +8147,7 @@ async fn presentation_handlers_preserve_error_shape_and_status() {
     assert_eq!(body.as_object().unwrap().len(), 1);
     assert!(body["error"].as_str().unwrap().contains("version changed"));
 
-    let malformed_reorder = reorder_sessions_handler(
+    let malformed_reorder = delivery::sessions::reorder_handler(
         State(manager.clone()),
         Ok(Json(ReorderSessionsRequest {
             pinned: false,
@@ -8147,7 +8159,7 @@ async fn presentation_handlers_preserve_error_shape_and_status() {
     .unwrap_err();
     assert_eq!(malformed_reorder.status, StatusCode::BAD_REQUEST);
 
-    let membership_conflict = reorder_sessions_handler(
+    let membership_conflict = delivery::sessions::reorder_handler(
         State(manager),
         Ok(Json(ReorderSessionsRequest {
             pinned: false,
@@ -8170,7 +8182,7 @@ async fn presentation_routes_serialize_summaries_and_drive_list_order() {
     seed_session(&root, "c", "2026-01-03 00:00:00.000000000");
     let manager = test_manager(&root);
 
-    let Json(a) = update_session_presentation_handler(
+    let Json(a) = delivery::sessions::update_presentation_handler(
         State(manager.clone()),
         AxumPath("a".to_string()),
         Ok(Json(UpdateSessionPresentationRequest {
@@ -8190,7 +8202,7 @@ async fn presentation_routes_serialize_summaries_and_drive_list_order() {
     assert_eq!(serialized["sort_order"], 0);
     assert_eq!(serialized["presentation_version"], 1);
 
-    let _ = update_session_presentation_handler(
+    let _ = delivery::sessions::update_presentation_handler(
         State(manager.clone()),
         AxumPath("b".to_string()),
         Ok(Json(UpdateSessionPresentationRequest {
@@ -8202,7 +8214,7 @@ async fn presentation_routes_serialize_summaries_and_drive_list_order() {
     .await
     .unwrap();
 
-    let Json(reordered) = reorder_sessions_handler(
+    let Json(reordered) = delivery::sessions::reorder_handler(
         State(manager.clone()),
         Ok(Json(ReorderSessionsRequest {
             pinned: true,
@@ -8228,7 +8240,7 @@ async fn presentation_routes_serialize_summaries_and_drive_list_order() {
         .iter()
         .all(|summary| summary.presentation_version == 2));
 
-    let listed = manager.list_sessions(false).await.unwrap();
+    let listed = manager.session_catalog().list(false).await.unwrap();
     assert_eq!(
         listed
             .iter()
@@ -8743,7 +8755,8 @@ async fn project_session_materializes_defaults_and_filters_membership() {
     assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
 
     let filtered = manager
-        .list_sessions_for_project(false, Some(&project.project_id))
+        .session_catalog()
+        .list_for_project(false, Some(&project.project_id))
         .await
         .unwrap();
     assert_eq!(filtered.len(), 1);
@@ -8761,7 +8774,10 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         .await
         .unwrap_err();
     assert!(conflict.to_string().contains("cannot be combined"));
-    assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+    assert_eq!(
+        manager.session_catalog().list(false).await.unwrap().len(),
+        1
+    );
 
     let missing = manager
         .create_session(CreateSessionRequest {
@@ -8771,7 +8787,10 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         .await
         .unwrap_err();
     assert!(missing.to_string().contains("was not found"));
-    assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+    assert_eq!(
+        manager.session_catalog().list(false).await.unwrap().len(),
+        1
+    );
 
     let required_null = manager
         .create_session(CreateSessionRequest {
@@ -8782,7 +8801,10 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         .await
         .unwrap_err();
     assert!(required_null.to_string().contains("model"));
-    assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
+    assert_eq!(
+        manager.session_catalog().list(false).await.unwrap().len(),
+        1
+    );
 
     let deletion = delivery::model_configurations::delete_handler(
         State(manager.clone()),

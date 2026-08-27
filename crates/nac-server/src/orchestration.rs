@@ -33,7 +33,10 @@ impl OrchestrationOperations {
         &self,
         include_workspace_stats: bool,
     ) -> Result<Vec<crate::ManagedSessionSummary>> {
-        self.manager.list_sessions(include_workspace_stats).await
+        self.manager
+            .session_catalog()
+            .list(include_workspace_stats)
+            .await
     }
 
     pub(crate) async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
