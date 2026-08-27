@@ -1342,18 +1342,20 @@ impl SessionManager {
 
     fn attach_managed_command_environment(&self, run_config: &mut runtime::OrchestratorRunConfig) {
         let Some(managed) = self.inner.managed_host.as_ref() else {
-            run_config.set_managed_host_context(None, None, None);
+            run_config.set_command_environment_provider(None);
             return;
         };
-        run_config.set_managed_host_context(
-            Some(managed.secret_store()),
-            Some(
-                managed
-                    .github_auth()
-                    .expect("validated managed GitHub configuration"),
+        run_config.set_command_environment_provider(Some(Arc::new(
+            nac_core::managed::ManagedCommandEnvironmentProvider::new(
+                Some(managed.secret_store()),
+                Some(
+                    managed
+                        .github_auth()
+                        .expect("validated managed GitHub configuration"),
+                ),
+                Some(managed.home_root.clone()),
             ),
-            Some(managed.home_root.clone()),
-        );
+        )));
     }
 
     fn resolve_launch_location(

@@ -4,6 +4,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     process,
+    sync::Arc,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -740,7 +741,14 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         (_, None) => None,
         (None, Some(_)) => unreachable!("clap requires a managed secret root"),
     };
-    run_config.set_managed_host_context(secret_store, github, cli.managed_home_root);
+    let command_environment = secret_store.map(|secret_store| {
+        Arc::new(nac_core::managed::ManagedCommandEnvironmentProvider::new(
+            Some(secret_store),
+            github,
+            cli.managed_home_root,
+        )) as Arc<dyn nac_contracts::CommandEnvironmentProvider>
+    });
+    run_config.set_command_environment_provider(command_environment);
     runtime::run_managed_worker(run_config).await
 }
 fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, bool)>> {
