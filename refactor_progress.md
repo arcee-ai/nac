@@ -898,6 +898,16 @@ Rules:
   toast, cancellation, and navigation semantics. All 178 frontend tests,
   typecheck, lint, and format check pass. `make test-assets` passes from commit
   `19a4235` with the OpenAPI/type drift checks and production build clean.
+- The remaining 1,507-line frontend query service bag is now a 20-line stable
+  compatibility barrel over focused host (120), direct/delegation (286),
+  configuration (352), session (397), workspace (139), project (143), key
+  (80), and invalidation (18) owners. Existing imports and query-key bytes are
+  unchanged; snapshot generation fencing, cancellation signals, polling,
+  optimistic prompt state, ordering, and invalidation logic moved intact. Web
+  typecheck/format/lint and all 178 tests pass. The production build is green;
+  the first `make test-assets` run failed only at the expected committed-bundle
+  drift assertion after writing the new hashed chunks, which must be committed
+  with this source slice and rechecked cleanly.
 - The integration public-surface audit makes all `nac-managed` implementation
   modules private and exports one explicit supported facade. Clone domain/
   workflow coordination is now a 625-line owner over a 177-line durable
@@ -930,8 +940,8 @@ Rules:
 
 ## Exact next action
 
-Finish the M8 hotspot/dependency/DTO/service-bag audit, record justified
-cohesive size exceptions in their nearest guides, and commit this green managed
-facade/adapter cleanup with exact-path staging. Then run the required final gate
-set, optional container prerequisite check, production-embedded browser smoke,
-and the single authorized independent final review.
+Commit the green focused frontend query owners and synchronized production
+bundle with exact-path staging, then rerun `make test-assets` cleanly. Finish the
+remaining hotspot/dependency/DTO/public-surface guide audit, then run the
+required final gate set, optional container prerequisite check, production-
+embedded browser smoke, and single authorized independent final review.

@@ -26,13 +26,32 @@ server remains the source of business truth and wire schemas.
 
 - `src/App.tsx` — provider/router composition.
 - `src/app/services/api.ts` — HTTP transport and error decoding.
-- `src/app/services/queries.ts` — shared/session query owners and compatibility
-  re-exports; move feature-specific implementations to their feature.
+- `src/app/services/queries.ts` — stable compatibility barrel only.
+- `src/app/services/queries/` — focused host, direct/delegation,
+  configuration, session, workspace, project, key, and invalidation owners.
 - `src/app/features/managed/` — managed model/query/controller/presentation.
 - `src/app/types/api.ts` — stable aliases/refinements over generated schemas.
 - `openapi.json`, `scripts/generate-api-types.mjs` — checked-in contract and
   fail-closed generator.
 - `e2e/` and `playwright.config.ts` — production-embedded browser coverage.
+
+## Cohesive size exceptions
+
+- `components/inspector/ChatInputBox.tsx` keeps one composer state machine:
+  text/selection, slash commands, attachments, send-versus-queue behavior,
+  keyboard/IME handling, and its accessible presentation. Put server state and
+  API mutations in query/controller owners, not in this component.
+- `components/modals/ConfigurationsPanel.tsx` and `SettingsModal.tsx` keep the
+  existing dense configuration forms whose field validation and save ordering
+  are exercised as one workflow. Managed-host panels do not belong there.
+- `components/inspector/ThreadsView.tsx` keeps orchestrator thread/workset
+  navigation and episode rendering together. Direct-child and managed-host
+  workflows remain separate features.
+
+These existing UI owners may exceed 800 lines because splitting their tightly
+coupled local form/view state would scatter one workflow. Do not add unrelated
+queries, providers, or new product workflows to them; extract a real controller
+or feature boundary when new behavior proves one.
 
 ## Commands
 
