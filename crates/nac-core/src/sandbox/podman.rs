@@ -923,6 +923,9 @@ impl PodmanSession {
         stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         let mut command = Command::new("podman");
+        for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+            command.env_remove(name);
+        }
         command.args(self.exec_args(program, args, true, false, None, &[]));
 
         if stdin.is_some() {

@@ -213,6 +213,9 @@ pub(super) async fn run_worker(
         )
     })?;
     let mut command = Command::new(executable);
+    for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+        command.env_remove(name);
+    }
     if let Some(store) = runtime.host_secret_store.as_ref() {
         command.arg("--managed-secret-root").arg(store.state_root());
     }
@@ -506,6 +509,78 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_credential_worker_process_helper() {
+        let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker.sh");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n",
+            root.join("inherited-exa").display()
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let run = run_worker(
+            &runtime,
+            &ModelClient::new_for_test(),
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.exit_code, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_worker_process_does_not_inherit_exa_api_key() {
+        let root = std::env::temp_dir().join(format!(
+            "nac_worker_native_credential_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::thread::worker::tests::native_credential_worker_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_WORKER_NATIVE_CREDENTIAL_ROOT", &root)
+            .env("EXA_API_KEY", "exa-worker-environment-canary")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "worker credential helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("inherited-exa")).unwrap(),
+            "unset"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[cfg(unix)]
     #[tokio::test]

@@ -8,6 +8,12 @@ use url::Url;
 
 use crate::types::{FunctionCall, Message, ModelOrigin, ToolCall, ToolDefinition};
 
+/// Native integration credentials are resolved by NAC and must never enter a
+/// model-controlled process environment. Environment lookup remains available
+/// to the admitting native-tool request snapshot in the NAC process itself.
+pub(crate) const EXA_API_KEY_ENV: &str = "EXA_API_KEY";
+pub(crate) const NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES: &[&str] = &[EXA_API_KEY_ENV];
+
 fn backoff_duration(attempt: usize) -> Duration {
     let base_ms = 200u64;
     let delay_ms = std::cmp::min(base_ms.saturating_mul(1 << attempt), 30_000);

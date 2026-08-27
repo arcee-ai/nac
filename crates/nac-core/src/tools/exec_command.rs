@@ -294,6 +294,8 @@ mod tests {
     const PROMPT_POLICY_COMMAND: &str =
         "printf '%s|%s|%s\n' \"$GIT_TERMINAL_PROMPT\" \"$GCM_INTERACTIVE\" \"$GH_PROMPT_DISABLED\"";
 
+    const NATIVE_CREDENTIAL_COMMAND: &str = "printf '%s' \"${EXA_API_KEY-unset}\"";
+
     #[tokio::test]
     async fn prompt_policy_process_helper() {
         let Some(result_path) = std::env::var_os("NAC_PROMPT_POLICY_RESULT") else {
@@ -352,6 +354,71 @@ mod tests {
         assert!(
             output.status.success(),
             "prompt-policy helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let result = serde_json::from_slice(&std::fs::read(&result_path).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        result
+    }
+
+    #[tokio::test]
+    async fn native_credential_process_helper() {
+        let Some(result_path) = std::env::var_os("NAC_NATIVE_CREDENTIAL_RESULT") else {
+            return;
+        };
+
+        let runtime = test_runtime();
+        let one_shot = execute_exec_command(
+            &json!({
+                "cmd": NATIVE_CREDENTIAL_COMMAND,
+                "tty": false,
+                "yield_time_ms": 2000
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!one_shot.is_error, "{}", one_shot.content);
+        let pty = execute_exec_command(
+            &json!({
+                "cmd": NATIVE_CREDENTIAL_COMMAND,
+                "tty": true,
+                "yield_time_ms": 2000
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!pty.is_error, "{}", pty.content);
+
+        let one_shot: Value =
+            serde_json::from_str(one_shot.content.as_text().expect("text tool result")).unwrap();
+        let pty: Value =
+            serde_json::from_str(pty.content.as_text().expect("text tool result")).unwrap();
+        runtime.terminal_manager.remove_all().await.unwrap();
+        std::fs::write(
+            result_path,
+            serde_json::to_vec(&json!({ "one_shot": one_shot, "pty": pty })).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn run_native_credential_process_helper() -> Value {
+        let dir = unique_temp_dir("native_credential");
+        let result_path = dir.join("result.json");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::exec_command::tests::native_credential_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_NATIVE_CREDENTIAL_RESULT", &result_path)
+            .env("EXA_API_KEY", "exa-command-environment-canary")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "native-credential helper failed: stdout={} stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -545,6 +612,15 @@ mod tests {
             "got: {output}"
         );
         assert!(result["pty"]["session_name"].is_null());
+    }
+
+    #[test]
+    fn model_controlled_local_commands_and_terminals_do_not_inherit_exa_api_key() {
+        let result = run_native_credential_process_helper();
+        assert_eq!(result["one_shot"]["stdout_preview"], "unset");
+        let output = result["pty"]["content_preview"].as_str().unwrap();
+        assert!(output.contains("unset"), "got: {output}");
+        assert!(!output.contains("exa-command-environment-canary"));
     }
 
     #[cfg(unix)]

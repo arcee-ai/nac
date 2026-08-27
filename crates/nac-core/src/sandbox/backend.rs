@@ -194,6 +194,7 @@ printf '%s%s' "$base" "$suffix"
         match self {
             Self::Local { workspace_cwd } => {
                 let mut command = Command::new(program);
+                remove_native_integration_credentials(&mut command);
                 command.args(args).current_dir(workspace_cwd);
                 if stdin.is_some() {
                     command.stdin(Stdio::piped());
@@ -229,7 +230,7 @@ printf '%s%s' "$base" "$suffix"
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (Command, Option<String>) {
-        match self {
+        let (mut command, pidfile) = match self {
             Self::Local { .. } => {
                 let mut command = Command::new("bash");
                 command.arg("-c").arg(cmd);
@@ -246,7 +247,9 @@ printf '%s%s' "$base" "$suffix"
                 (command, Some(pidfile))
             }
             Self::Ssh(ssh) => ssh.terminal_pipe_command(cmd, cwd, envs),
-        }
+        };
+        remove_native_integration_credentials(&mut command);
+        (command, pidfile)
     }
 
     pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
@@ -263,7 +266,7 @@ printf '%s%s' "$base" "$suffix"
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, Option<String>) {
-        match self {
+        let (mut command, pidfile) = match self {
             Self::Local { .. } => {
                 let mut command = PtyCommandBuilder::new("bash");
                 command.arg("-c");
@@ -281,7 +284,9 @@ printf '%s%s' "$base" "$suffix"
                 (cmd, Some(pidfile))
             }
             Self::Ssh(ssh) => ssh.terminal_pty_command(cmd, cwd, envs),
-        }
+        };
+        remove_native_integration_credentials_from_pty(&mut command);
+        (command, pidfile)
     }
 
     pub fn worker_cli_args(&self) -> Vec<OsString> {
@@ -305,6 +310,18 @@ printf '%s%s' "$base" "$suffix"
             Self::Local { .. } | Self::Sandbox(_) => true,
             Self::Ssh(_) => false,
         }
+    }
+}
+
+fn remove_native_integration_credentials(command: &mut Command) {
+    for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+        command.env_remove(name);
+    }
+}
+
+fn remove_native_integration_credentials_from_pty(command: &mut PtyCommandBuilder) {
+    for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+        command.env_remove(name);
     }
 }
 
