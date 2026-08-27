@@ -83,6 +83,9 @@ zero-backlog async guard last.
   rewrites. One suggestion incorrectly named the private `model::types` module;
   the equivalent method reference uses the public `crate::model::TokenUsage`
   re-export instead.
+- `clone_on_ref_ptr`: complete. All 27 reference-count increments now use
+  explicit `Arc::clone`; the type-erased native-tool registry uses
+  `Arc::<T>::clone` so the result can retain its existing trait-object coercion.
 
 ## Verification and next action
 
@@ -96,5 +99,8 @@ The `redundant_closure_for_method_calls` slice passes `make format-check`,
 `make lint`, `git diff --check`, and the full Rust workspace suite with the same
 green test inventory recorded above.
 
-Next: commit this exact lint boundary, then add `clone_on_ref_ptr` and run
+The `clone_on_ref_ptr` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full `nac-core` suite (1,156 passed, nine ignored).
+
+Next: commit this exact lint boundary, then add `redundant_clone` and run
 autofix before any manual repair.

@@ -273,7 +273,7 @@ pub(super) async fn run_worker(
     let stderr = child.stderr.take().unwrap();
     let event_sink = runtime.event_sink.clone();
     let thread_name_for_logs = invocation.thread_name.to_string();
-    let timeout_trace_for_logs = timeout_trace.clone();
+    let timeout_trace_for_logs = Arc::clone(&timeout_trace);
     let (cancel_ack_tx, mut cancel_ack_rx) = watch::channel(false);
     let reader_shutdown = ThreadCancellation::default();
     let stderr_cancellation = cancellation.clone();

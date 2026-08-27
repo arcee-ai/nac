@@ -1183,7 +1183,7 @@ impl Agent {
     }
 
     pub fn active_threads_handle(&self) -> Arc<crate::tools::ActiveThreadRegistry> {
-        self.tool_runtime.active_threads.clone()
+        Arc::clone(&self.tool_runtime.active_threads)
     }
 
     pub fn set_steering_dispatch_id(&mut self, dispatch_id: Option<String>) {
@@ -1196,7 +1196,9 @@ impl Agent {
     /// log through the same writer for store-backed transcript reads (step
     /// 3), so reads and appends stay serialized without retaining a connection.
     pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
-        self.transcript_log.as_ref().map(|sink| sink.writer.clone())
+        self.transcript_log
+            .as_ref()
+            .map(|sink| Arc::clone(&sink.writer))
     }
 
     pub(crate) fn transcript_recovery_warning(&self) -> Option<&str> {
@@ -1267,7 +1269,7 @@ impl Agent {
         };
         let mut blob_len = messages.len() as u64;
         let mut blob_len_usize = messages.len();
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         if let Some(operation_lease) = operation_lease {
             operation_lease
@@ -1280,7 +1282,7 @@ impl Agent {
         let mut _acquired_operation_lease = None;
         loop {
             let mut tail = {
-                let writer = writer.clone();
+                let writer = Arc::clone(&writer);
                 let session_id = session_id.clone();
                 tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len))
                     .await
@@ -1302,7 +1304,7 @@ impl Agent {
             if gap.is_some() && operation_lease.is_none() && _acquired_operation_lease.is_none() {
                 let (lease, refreshed_messages) = acquire_transcript_operation_lease_and_snapshot(
                     sink.store_path.clone(),
-                    writer.clone(),
+                    Arc::clone(&writer),
                     session_id.clone(),
                 )
                 .await?;
@@ -1320,7 +1322,7 @@ impl Agent {
             }
 
             if gap.is_some() {
-                let repair_writer = writer.clone();
+                let repair_writer = Arc::clone(&writer);
                 let repair_session_id = session_id.clone();
                 let (repaired_tail, recovery) = tokio::task::spawn_blocking(move || {
                     repair_writer.read_tail_repairing_gap(&repair_session_id, blob_len)
@@ -1362,7 +1364,7 @@ impl Agent {
             {
                 let (lease, refreshed_messages) = acquire_transcript_operation_lease_and_snapshot(
                     sink.store_path.clone(),
-                    writer.clone(),
+                    Arc::clone(&writer),
                     session_id.clone(),
                 )
                 .await?;
@@ -1385,7 +1387,7 @@ impl Agent {
                 // in the write-once snapshot itself, so rewrite the snapshot
                 // and tail together while the operation lease is held.
                 if merged.len() < blob_len_usize {
-                    let repair_writer = writer.clone();
+                    let repair_writer = Arc::clone(&writer);
                     let repair_session_id = session_id.clone();
                     let repaired_messages = merged.clone();
                     tokio::task::spawn_blocking(move || {
@@ -1447,7 +1449,7 @@ impl Agent {
         operation_lease
             .validate(&sink.store_path, &sink.session_id)
             .map_err(anyhow::Error::new)?;
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
 
         let snapshot_messages = writer.read_snapshot_messages(&session_id)?;
@@ -1540,7 +1542,7 @@ impl Agent {
             return Ok(false);
         };
         let from_idx = self.committed_log_len;
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let tail = tokio::task::spawn_blocking(move || writer.read_from(&session_id, from_idx))
             .await
@@ -1558,7 +1560,7 @@ impl Agent {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let (snapshot, tail) = tokio::task::spawn_blocking(move || {
             let snapshot = writer.read_snapshot_messages(&session_id)?;
@@ -1748,7 +1750,7 @@ impl Agent {
         if messages.is_empty() {
             return Ok(());
         }
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let messages = messages.to_vec();
         let batch_len = messages.len() as u64;
@@ -1792,7 +1794,7 @@ impl Agent {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let message = message.clone();
         // Claim the row at submission, before the await — see
@@ -1835,7 +1837,7 @@ impl Agent {
     ) -> Result<()> {
         let idx = self.messages.len() as u64;
         if let Some(sink) = &self.transcript_log {
-            let writer = sink.writer.clone();
+            let writer = Arc::clone(&sink.writer);
             let session_id = sink.session_id.clone();
             let stored_message = message.clone();
             let run_id = run_id.to_string();
@@ -1889,7 +1891,7 @@ impl Agent {
         if staged.is_empty() {
             return Ok(());
         }
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let sink_session_id = sink.session_id.clone();
         let dispatch_id = dispatch_id.to_string();
         let steering_ids = steering_ids.to_vec();
@@ -1929,7 +1931,7 @@ impl Agent {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         tokio::task::spawn_blocking(move || writer.delete_from(&session_id, from_idx))
             .await
@@ -2051,7 +2053,7 @@ impl Agent {
             .steering_dispatch_id
             .clone()
             .ok_or_else(|| anyhow!("direct inbox delivery requires an active run id"))?;
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let start_idx = self.messages.len() as u64;
         let pre_submission_committed = self.committed_log_len;

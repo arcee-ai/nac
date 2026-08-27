@@ -396,7 +396,7 @@ impl ToolRegistryBuilder {
             ));
             return self;
         }
-        self.native.insert(type_id, tool.clone());
+        self.native.insert(type_id, Arc::<T>::clone(&tool));
         self.entries
             .push(Arc::new(NativeEntry { tool, descriptor }));
         self

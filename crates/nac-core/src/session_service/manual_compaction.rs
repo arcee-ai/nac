@@ -300,7 +300,7 @@ impl SessionService {
             completion: Some(completion_tx),
             lifecycle: Some(lifecycle),
         };
-        let agent = self.agent.clone();
+        let agent = Arc::clone(&self.agent);
         let persist_service = self.clone();
         let compaction_id = snapshot.compaction_id;
         let task = tokio::spawn(async move {

@@ -222,7 +222,7 @@ impl McpRegistry {
 
             seen_endpoints.insert(endpoint, server_name.clone());
             let server = Arc::new(McpServer {
-                _service: service.clone(),
+                _service: Arc::clone(&service),
             });
             for tool in listed_tools {
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);
@@ -232,7 +232,7 @@ impl McpRegistry {
                     Arc::new(McpToolBinding {
                         tool_name: tool.name.to_string(),
                         definition,
-                        server: server.clone(),
+                        server: Arc::clone(&server),
                     }),
                 );
             }
