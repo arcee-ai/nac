@@ -92,6 +92,10 @@ zero-backlog async guard last.
   statement-tail fixes with no manual exceptions.
 - `match_same_arms`: complete. All 15 duplicate branches were manually merged
   after autofix declined them; guarded cases retain their original precedence.
+- `needless_collect`: complete. Clippy identified two temporary reversed
+  `Vec<char>` allocations but suggested an iterator chain that does not compile
+  for `Chars`. A shared `char_suffix` helper now finds the UTF-8 boundary and
+  borrows the ordered suffix without either allocation.
 
 ## Verification and next action
 
@@ -120,5 +124,9 @@ The `match_same_arms` slice passes `make format-check`, `make lint`,
 `git diff --check`, and the full Rust workspace suite with the same green test
 inventory recorded above.
 
-Next: commit this exact lint boundary, then add `needless_collect` and run
-autofix before any manual repair.
+The `needless_collect` slice passes `make format-check`, `make lint`,
+`git diff --check`, and all 14 focused terminal-output tests, including a new
+Unicode boundary/order regression test.
+
+Next: commit this exact lint boundary, then add `unused_async` and run autofix
+before any manual repair.

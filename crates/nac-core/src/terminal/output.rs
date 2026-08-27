@@ -694,12 +694,8 @@ fn render_preview(
         .chars()
         .take(head_chars)
         .collect();
-    let tail_reversed: Vec<char> = String::from_utf8_lossy(&tail_source)
-        .chars()
-        .rev()
-        .take(tail_chars)
-        .collect();
-    let tail: String = tail_reversed.into_iter().rev().collect();
+    let tail_source = String::from_utf8_lossy(&tail_source);
+    let tail = char_suffix(&tail_source, tail_chars);
     (
         format!("{head}...\n...[preview truncated from {retained_len} retained bytes]...\n{tail}"),
         true,
@@ -710,9 +706,20 @@ fn truncate_decoded_preview(text: &str, max_chars: usize, retained_len: usize) -
     let head_chars = max_chars / 2;
     let tail_chars = max_chars.saturating_sub(head_chars);
     let head: String = text.chars().take(head_chars).collect();
-    let tail_reversed: Vec<char> = text.chars().rev().take(tail_chars).collect();
-    let tail: String = tail_reversed.into_iter().rev().collect();
+    let tail = char_suffix(text, tail_chars);
     format!("{head}...\n...[preview truncated from {retained_len} retained bytes]...\n{tail}")
+}
+
+fn char_suffix(text: &str, max_chars: usize) -> &str {
+    if max_chars == 0 {
+        return "";
+    }
+    let start = text
+        .char_indices()
+        .rev()
+        .nth(max_chars - 1)
+        .map_or(0, |(index, _)| index);
+    &text[start..]
 }
 
 fn drop_from_artifact(inner: &mut RegistryInner, output_id: &str, bytes: usize) {
@@ -1019,6 +1026,13 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.content, "éé");
         assert!(!snapshot.truncated);
+    }
+
+    #[test]
+    fn character_suffix_preserves_utf8_boundaries_and_order() {
+        assert_eq!(char_suffix("a€🙂z", 0), "");
+        assert_eq!(char_suffix("a€🙂z", 2), "🙂z");
+        assert_eq!(char_suffix("a€🙂z", 8), "a€🙂z");
     }
 
     #[test]
