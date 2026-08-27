@@ -695,6 +695,13 @@ Rules:
   completion/cancel races, cleanup retryability, persistence failure, and
   child terminal recovery regressions pass; the complete core test build is
   green. `session_service.rs` is now 1,615 lines.
+- Session construction, client attachment/subscriptions, metadata snapshots,
+  sandbox resource leases, and terminal/sandbox teardown now live in a focused
+  322-line attachment/resource owner. Subscriber identity, sandbox detection,
+  worktree-preserving container destruction, and retained-terminal teardown
+  regressions pass; the complete core test build is green.
+  `session_service.rs` is now 1,297 lines and serves as the public contract,
+  shared state/type owner, steering facade, and submodule composition root.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -710,6 +717,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 admission/cancellation/settlement owners with exact-path staging.
-Then finish the session-service boundary with construction/attachment/resource
-ownership before proceeding to the permissions gravity well.
+Commit the M4 session attachment/resource owner with exact-path staging. Then
+inventory and decompose the permissions gravity well into rule evaluation,
+shell/resource projection, hard policy, broker, and remembered-grant owners.
