@@ -100,9 +100,10 @@ binary. Any branch server must use a different explicit port and store path.
   credential/secret foundation should reuse that native behavior rather than
   create a parallel weaker store.
 - Command construction is distributed across Local, SSH, Podman, terminal, and
-  helper paths. A single immutable spawn-environment value must be resolved at
-  run construction and threaded into every agent command path without changing
-  unmanaged environments or readiness/model subprocesses.
+  helper paths. Managed local commands now snapshot the owner-only store at
+  each spawn; worker dispatch transports only the nonsecret store root so the
+  child worker applies the same late snapshot and controlled-output redaction.
+  Unmanaged environments and readiness/model subprocesses remain unchanged.
 - `nac-server` already owns managed provider device-login coordination, the
   Project REST surface, settings modals, embedded static assets, and a
   credential-free production Playwright harness with isolated HOME/NAC_HOME,
@@ -130,7 +131,16 @@ binary. Any branch server must use a different explicit port and store path.
    reject symlink targets, enforce reserved names and finite limits, survive
    reopen/rotation, serialize concurrent updates, expose summaries/snapshots
    without values, and provide exact-value redaction.
-3. **Command environment and generic secrets — pending.**
+3. **Command environment and generic secrets — complete.** The managed-only
+   REST surface creates/replaces/deletes values and lists metadata without
+   values; unmanaged hosts fail closed. Reserved integration/runtime names and
+   finite file limits are enforced. Direct commands snapshot values immediately
+   before one-shot or PTY spawn, retained output keeps its spawn redactor across
+   rotation, and later processes see replacement/deletion. Server-owned new,
+   resumed, and attached runs all receive the store. Orchestrator worker
+   dispatch passes only the nonsecret store root to the hidden worker CLI so
+   worker command processes use the same late snapshot without adding secrets
+   to worker argv or NAC's global environment.
 4. **GitHub authorization and repository onboarding — pending.**
 5. **Native Exa web tools — pending.**
 6. **Managed UI, readiness, image, and delivery — pending.**
@@ -139,7 +149,8 @@ binary. Any branch server must use a different explicit port and store path.
 
 ## Coherent commits and verification
 
-The first foundation slice includes `demo_ext_managed.md`, optional managed
+Commit `8584de2` is the first foundation slice and includes
+`demo_ext_managed.md`, optional managed
 configuration, durable credential/secret primitives, environment-before-store
 named credential resolution, CLI/manager plumbing, and this handoff. Focused
 verification before commit:
@@ -147,6 +158,18 @@ verification before commit:
 - `cargo test --locked -p nac-core managed::tests` — 7 passed.
 - `cargo test --locked -p nac-core named_integration_credentials_prefer_nonblank_environment_then_storage` — 1 passed.
 - `cargo test --locked -p nac-server --bin nac-web managed_configuration_is_explicit_and_ordinary_server_cli_remains_unmanaged` — 1 passed.
+- `cargo check --locked -p nac-core -p nac-server` — passed.
+
+The command-environment slice adds write-only managed-secret HTTP operations,
+spawn-time injection through the existing one-shot/PTY machinery, retained
+output redaction bound to output identity, managed run attachment at every
+server construction/resume seam, and nonsecret worker-store transport. Focused
+verification before commit:
+
+- `cargo test --locked -p nac-core tools::exec_command::tests::managed_secrets_are_snapshotted_per_spawn_and_redacted_from_all_output_views -- --exact` — 1 passed.
+- `cargo test --locked -p nac-core managed_worker_receives_only_the_nonsecret_store_root -- --nocapture` — 1 passed.
+- `cargo test --locked -p nac-server managed_host_secret_api_is_write_only_and_unmanaged_hosts_fail_closed -- --nocapture` — 1 passed.
+- `cargo test --locked -p nac-server openapi_special_wire_schemas_and_docs_are_live -- --nocapture` — 1 passed outside the workspace sandbox because the existing fixture reads user-level NAC configuration.
 - `cargo check --locked -p nac-core -p nac-server` — passed.
 
 Historical `progress.md` and `demo_review.md` remain evidence only and are not
@@ -166,7 +189,7 @@ No product blocker has been found.
 
 ## Exact next action
 
-Commit the audited foundation with exact-path staging, then implement the shared
-immutable command-environment snapshot and write-only host-secret REST surface,
-including all direct/child/worker/launched-orchestrator inheritance and canary
-redaction tests without changing unmanaged spawn behavior.
+Commit the audited command-environment slice with exact-path staging, then
+implement GitHub device authorization, durable refresh, Git identity, scoped
+Git/`gh` credential delivery, and transactional clone onboarding against a
+credential-independent fake GitHub service.

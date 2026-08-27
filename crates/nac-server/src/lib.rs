@@ -908,6 +908,24 @@ pub struct StoredCredentialList {
     pub credentials: Vec<StoredCredentialSummary>,
 }
 
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct ManagedSecretSummary {
+    pub name: String,
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct ManagedSecretList {
+    pub secrets: Vec<ManagedSecretSummary>,
+    pub healthy: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct PutManagedSecretRequest {
+    #[schema(write_only, example = "fake-managed-secret-value")]
+    pub value: String,
+}
+
 /// Marks credential names this server generated for a saved configuration, so
 /// deleting one never removes a key the operator manages themselves.
 const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
@@ -1485,6 +1503,15 @@ impl SessionManager {
 
     pub fn managed_host(&self) -> Option<&nac_core::managed::ManagedHostConfig> {
         self.inner.managed_host.as_ref()
+    }
+
+    fn attach_managed_command_environment(&self, run_config: &mut runtime::OrchestratorRunConfig) {
+        run_config.set_host_secret_store(
+            self.inner
+                .managed_host
+                .as_ref()
+                .map(nac_core::managed::ManagedHostConfig::secret_store),
+        );
     }
 
     fn resolve_launch_location(
@@ -2217,7 +2244,7 @@ impl SessionManager {
             model.api_base_url.as_deref(),
             &NacConfig::load_credential_destination_policy(&location.config_cwd)?,
         )?;
-        let run_config = runtime::build_run_config_for_project_with_behavior(
+        let mut run_config = runtime::build_run_config_for_project_with_behavior(
             RunOptions {
                 workspace_cwd: location.workspace_cwd,
                 config_cwd: Some(location.config_cwd.clone()),
@@ -2246,6 +2273,7 @@ impl SessionManager {
                 _ => error,
             }
         })?;
+        self.attach_managed_command_environment(&mut run_config);
         let parts = SessionService::from_orchestrator_run_config(run_config);
         let service = parts.service;
         service.acquire_sandbox_resource_lease()?;
@@ -3756,7 +3784,7 @@ impl SessionManager {
             &summary.cwd
         };
         let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
-        let run_config = if let Some(operation_lease) = operation_lease {
+        let mut run_config = if let Some(operation_lease) = operation_lease {
             runtime::build_resume_config_for_session_with_lease(
                 self.inner.store_path.clone(),
                 session_id,
@@ -3776,6 +3804,7 @@ impl SessionManager {
             )
             .await?
         };
+        self.attach_managed_command_environment(&mut run_config);
         let service = SessionService::from_orchestrator_run_config(run_config).service;
         if let Some(resource_lease) = resource_lease {
             service.adopt_sandbox_resource_lease(resource_lease);
@@ -3816,7 +3845,7 @@ impl SessionManager {
             &summary.cwd
         };
         let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
-        let (run_config, cacheable, operation_lease) =
+        let (mut run_config, cacheable, operation_lease) =
             runtime::build_resume_config_for_session_attachment(
                 self.inner.store_path.clone(),
                 session_id,
@@ -3825,6 +3854,7 @@ impl SessionManager {
                 Some(self.inner.worker_executable.clone()),
             )
             .await?;
+        self.attach_managed_command_environment(&mut run_config);
         let service = SessionService::from_orchestrator_run_config(run_config).service;
         if let Some(resource_lease) = resource_lease {
             service.adopt_sandbox_resource_lease(resource_lease);
@@ -4885,6 +4915,11 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(
             managed_auth::poll_login_handler,
             managed_auth::cancel_login_handler
+        ))
+        .routes(routes!(list_managed_secrets_handler))
+        .routes(routes!(
+            put_managed_secret_handler,
+            delete_managed_secret_handler
         ))
         .routes(routes!(
             list_credentials_handler,
@@ -6042,6 +6077,88 @@ async fn delete_ssh_config_handler(
     ssh_configurations::load_ssh_configuration(&manager.inner.store_path, &config_id)?;
     ssh_configurations::delete_ssh_configuration(&manager.inner.store_path, &config_id)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn managed_secret_store(
+    manager: &SessionManager,
+) -> std::result::Result<nac_core::managed::HostSecretStore, ApiError> {
+    manager
+        .managed_host()
+        .map(nac_core::managed::ManagedHostConfig::secret_store)
+        .ok_or_else(|| ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: "Managed NAC is not configured".to_string(),
+        })
+}
+
+#[utoipa::path(
+    get,
+    path = "/managed/secrets",
+    operation_id = "get_managed_secrets",
+    tag = "managed",
+    responses((status = 200, description = "Write-only managed host secret metadata", body = ManagedSecretList, content_type = "application/json"), (status = 404, description = "Managed NAC is not configured", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Secret store unavailable", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn list_managed_secrets_handler(
+    State(manager): State<SessionManager>,
+) -> std::result::Result<Json<ManagedSecretList>, ApiError> {
+    let secrets = managed_secret_store(&manager)?
+        .list()?
+        .into_iter()
+        .map(|secret| ManagedSecretSummary {
+            name: secret.name,
+            updated_at_unix_ms: secret.updated_at_unix_ms,
+        })
+        .collect();
+    Ok(Json(ManagedSecretList {
+        secrets,
+        healthy: true,
+    }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/managed/secrets/{name}",
+    operation_id = "put_managed_secrets_name",
+    tag = "managed",
+    params(("name" = String, Path)),
+    request_body(content = PutManagedSecretRequest, content_type = "application/json"),
+    responses((status = 200, description = "Secret created or replaced without returning its value", body = ManagedSecretSummary, content_type = "application/json"), (status = 400, description = "Invalid or reserved secret", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Managed NAC is not configured", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Secret store unavailable", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn put_managed_secret_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(name): AxumPath<String>,
+    payload: std::result::Result<Json<PutManagedSecretRequest>, JsonRejection>,
+) -> std::result::Result<Json<ManagedSecretSummary>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let summary = managed_secret_store(&manager)?
+        .put(&name, &request.value)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(ManagedSecretSummary {
+        name: summary.name,
+        updated_at_unix_ms: summary.updated_at_unix_ms,
+    }))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/managed/secrets/{name}",
+    operation_id = "delete_managed_secrets_name",
+    tag = "managed",
+    params(("name" = String, Path)),
+    responses((status = 204, description = "Secret removed from future command environments"), (status = 404, description = "Managed NAC or secret not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Secret store unavailable", body = ApiErrorBody, content_type = "application/json"))
+)]
+async fn delete_managed_secret_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(name): AxumPath<String>,
+) -> std::result::Result<StatusCode, ApiError> {
+    if managed_secret_store(&manager)?.delete(&name)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: format!("managed secret '{name}' was not found"),
+        })
+    }
 }
 
 /// Stored credentials are write-only over HTTP: a caller may add, replace or
@@ -7818,6 +7935,7 @@ mod tests {
         ("DELETE", "/auth/{provider}"),
         ("DELETE", "/auth/{provider}/login/{login_id}"),
         ("DELETE", "/credentials/{name}"),
+        ("DELETE", "/managed/secrets/{name}"),
         ("DELETE", "/mcp_library/servers/{server_name}"),
         ("DELETE", "/model-configs/{config_id}"),
         ("DELETE", "/projects/{project_id}"),
@@ -7835,6 +7953,7 @@ mod tests {
         ("GET", "/credentials"),
         ("GET", "/fs/browse"),
         ("GET", "/health"),
+        ("GET", "/managed/secrets"),
         ("GET", "/mcp_library/library"),
         ("GET", "/mcp_library/servers"),
         ("GET", "/model-configs"),
@@ -7919,6 +8038,7 @@ mod tests {
         ("POST", "/ssh-configs"),
         ("POST", "/ssh/browse"),
         ("PUT", "/credentials/{name}"),
+        ("PUT", "/managed/secrets/{name}"),
         ("PUT", "/projects/order"),
         ("PUT", "/sessions/order"),
         ("PUT", "/sessions/{session_id}/presentation"),
@@ -8226,6 +8346,11 @@ mod tests {
             .is_some_and(|required| required.iter().any(|field| field == "content")));
 
         for (schema, field, example) in [
+            (
+                "PutManagedSecretRequest",
+                "value",
+                "fake-managed-secret-value",
+            ),
             ("StoreCredentialRequest", "value", "fake-credential-value"),
             ("ProviderModelsRequest", "api_key", "fake-provider-key"),
             ("CreateModelConfigurationRequest", "api_key", "fake-api-key"),
@@ -9429,6 +9554,36 @@ mod tests {
             managed_host: None,
         })
         .expect("session manager")
+    }
+
+    fn test_managed_manager(root: &std::path::Path) -> SessionManager {
+        let state_root = root.join("managed-state");
+        let repository_root = root.join("repositories");
+        let home_root = root.join("managed-home");
+        for path in [&state_root, &repository_root, &home_root] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        let managed_host = nac_core::managed::ManagedHostConfig {
+            version: nac_core::managed::MANAGED_CONFIG_VERSION,
+            logical_host_id: "test-host".to_string(),
+            owner: Some("owner@example.test".to_string()),
+            public_hostname: "nac.example.test".to_string(),
+            repository_root,
+            state_root,
+            home_root,
+            github_client_id: "Iv1.test".to_string(),
+            model_endpoint: "https://models.example.test/v1".to_string(),
+            model_credential_file: root.join("model-token"),
+            model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
+        };
+        managed_host.validate().unwrap();
+        SessionManager::new(ServerOptions {
+            root_cwd: root.to_path_buf(),
+            store_path: Some(root.join("store.db")),
+            worker_executable: None,
+            managed_host: Some(managed_host),
+        })
+        .expect("managed session manager")
     }
 
     fn poison_operation_lease_directory(root: &std::path::Path) -> PathBuf {
@@ -16511,6 +16666,19 @@ model = "gpt-5.2"
         .unwrap()
     }
 
+    async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> Response {
+        app.oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
     /// One-shot stand-in for a provider's model index, answering the first
     /// request with `body` and reporting the `Authorization` header it saw — so
     /// a test can tell which credential actually went out on the wire.
@@ -16599,6 +16767,70 @@ model = "gpt-5.2"
                 .expect("the model index was asked"),
             "Bearer sk-server-test-key"
         );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn managed_host_secret_api_is_write_only_and_unmanaged_hosts_fail_closed() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_secret_api");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+
+        let unmanaged = router(test_manager(&root));
+        let response = get_response(unmanaged, "/managed/secrets", None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let app = router(test_managed_manager(&root));
+        let canary = "managed-canary-value-that-must-not-return";
+        let stored = put_json(
+            app.clone(),
+            "/managed/secrets/DEMO_TOKEN",
+            serde_json::json!({ "value": canary }),
+        )
+        .await;
+        assert_eq!(stored.status(), StatusCode::OK);
+        let stored_body = String::from_utf8(response_body(stored).await.to_vec()).unwrap();
+        assert!(stored_body.contains("DEMO_TOKEN"));
+        assert!(!stored_body.contains(canary));
+
+        let listed = get_response(app.clone(), "/managed/secrets", None).await;
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed_body = String::from_utf8(response_body(listed).await.to_vec()).unwrap();
+        assert!(listed_body.contains("DEMO_TOKEN"));
+        assert!(listed_body.contains("\"healthy\":true"));
+        assert!(!listed_body.contains(canary));
+
+        let rejected = put_json(
+            app.clone(),
+            "/managed/secrets/PATH",
+            serde_json::json!({ "value": canary }),
+        )
+        .await;
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        assert!(!String::from_utf8(response_body(rejected).await.to_vec())
+            .unwrap()
+            .contains(canary));
+
+        let deleted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::DELETE)
+                    .uri("/managed/secrets/DEMO_TOKEN")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+        let listed = get_response(app, "/managed/secrets", None).await;
+        assert!(!String::from_utf8(response_body(listed).await.to_vec())
+            .unwrap()
+            .contains("DEMO_TOKEN"));
 
         let _ = std::fs::remove_dir_all(root);
     }

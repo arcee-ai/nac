@@ -175,6 +175,7 @@ impl CommandEnvironmentSnapshot {
 
 #[derive(Clone, Debug)]
 pub struct HostSecretStore {
+    state_root: PathBuf,
     path: PathBuf,
     lock_path: PathBuf,
     reserved_names: BTreeSet<String>,
@@ -184,6 +185,7 @@ impl HostSecretStore {
     pub fn new(state_root: impl AsRef<Path>) -> Self {
         let state_root = state_root.as_ref();
         Self {
+            state_root: state_root.to_path_buf(),
             path: state_root.join("managed_host_secrets.json"),
             lock_path: state_root.join("managed_host_secrets.json.lock"),
             reserved_names: BTreeSet::new(),
@@ -199,6 +201,10 @@ impl HostSecretStore {
     pub fn with_reserved_names(mut self, names: impl IntoIterator<Item = String>) -> Self {
         self.reserved_names.extend(names);
         self
+    }
+
+    pub fn state_root(&self) -> &Path {
+        &self.state_root
     }
 
     pub fn list(&self) -> Result<Vec<HostSecretSummary>> {
@@ -393,6 +399,13 @@ pub fn is_reserved_environment_name(name: &str) -> bool {
         "ENV",
         "GIT_ASKPASS",
         "SSH_ASKPASS",
+        "EXA_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "ARCEE_API_KEY",
+        "TOGETHER_API_KEY",
+        "FIREWORKS_API_KEY",
+        "DEEPSEEK_API_KEY",
     ];
     EXACT.contains(&name)
         || name.starts_with("NAC_")

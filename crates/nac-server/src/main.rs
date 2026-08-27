@@ -206,6 +206,10 @@ struct UpgradeCli {
 
 #[derive(Args)]
 struct ManagedWorkerCli {
+    /// Internal Managed NAC host-secret root used for per-command snapshots.
+    #[arg(long, hide = true)]
+    managed_secret_root: Option<PathBuf>,
+
     /// Internal workspace cwd used for managed worker path resolution.
     #[arg(long, hide = true)]
     workspace_cwd: Option<PathBuf>,
@@ -653,7 +657,12 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             identity_file: cli.ssh_identity_file,
         },
     };
-    runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
+    let mut run_config = runtime::build_managed_worker_config(options, &config).await?;
+    run_config.set_host_secret_store(
+        cli.managed_secret_root
+            .map(nac_core::managed::HostSecretStore::new),
+    );
+    runtime::run_managed_worker(run_config).await
 }
 fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, bool)>> {
     let mut mounts = Vec::new();

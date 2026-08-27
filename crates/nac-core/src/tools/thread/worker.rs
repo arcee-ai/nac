@@ -213,6 +213,9 @@ pub(super) async fn run_worker(
         )
     })?;
     let mut command = Command::new(executable);
+    if let Some(store) = runtime.host_secret_store.as_ref() {
+        command.arg("--managed-secret-root").arg(store.state_root());
+    }
     if runtime.backend.workspace_cwd_is_local() {
         command.current_dir(&runtime.workspace_cwd);
     }
@@ -495,6 +498,64 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn managed_worker_receives_only_the_nonsecret_store_root() {
+        let root =
+            std::env::temp_dir().join(format!("nac_worker_secrets_{}", uuid::Uuid::new_v4()));
+        let state_root = root.join("managed-state");
+        std::fs::create_dir_all(&state_root).unwrap();
+        let executable = root.join("worker.sh");
+        let script = format!(
+            r#"#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --managed-secret-root) printf '%s' "$2" > '{root}/secret-root'; shift 2 ;;
+    *) shift ;;
+  esac
+done
+"#,
+            root = root.display()
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let store = crate::managed::HostSecretStore::new(&state_root);
+        store
+            .put("DEMO_TOKEN", "managed-worker-canary-never-in-argv")
+            .unwrap();
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        runtime.host_secret_store = Some(store);
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let run = run_worker(
+            &runtime,
+            &ModelClient::new_for_test(),
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(run.exit_code, 0);
+        assert_eq!(
+            std::fs::read_to_string(root.join("secret-root")).unwrap(),
+            state_root.display().to_string()
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[cfg(unix)]
     #[tokio::test]

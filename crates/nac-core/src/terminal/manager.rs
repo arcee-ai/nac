@@ -218,6 +218,7 @@ impl TerminalManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub async fn create_with_cancellation(
         &self,
         name: String,
@@ -227,6 +228,22 @@ impl TerminalManager {
         rows: u16,
         backend: &Arc<ExecutionBackend>,
         cancellation: Option<&ThreadCancellation>,
+    ) -> Result<TerminalInfo> {
+        self.create_with_environment(name, command, cwd, cols, rows, backend, cancellation, &[])
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_with_environment(
+        &self,
+        name: String,
+        command: &str,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        backend: &Arc<ExecutionBackend>,
+        cancellation: Option<&ThreadCancellation>,
+        extra_envs: &[(String, String)],
     ) -> Result<TerminalInfo> {
         // Capacity accounting, replacement, and insertion form one admission
         // transaction. Cleanup may await a remote backend, so a dedicated
@@ -309,6 +326,7 @@ impl TerminalManager {
                         rows,
                         backend,
                         self.output_registry.clone(),
+                        extra_envs,
                     )?;
                     let info = self.session_info(&name, &session);
                     sessions.insert(name.clone(), session);
@@ -324,6 +342,7 @@ impl TerminalManager {
                     rows,
                     backend,
                     self.output_registry.clone(),
+                    extra_envs,
                 )?;
                 let info = self.session_info(&name, &session);
                 sessions.insert(name, session);
@@ -491,6 +510,7 @@ impl TerminalManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub async fn exec_one_shot(
         &self,
         cmd: &str,
@@ -501,6 +521,33 @@ impl TerminalManager {
         max_output: usize,
         backend: &Arc<ExecutionBackend>,
         cancellation: Option<&ThreadCancellation>,
+    ) -> CommandOutput {
+        self.exec_one_shot_with_environment(
+            cmd,
+            cwd,
+            _cols,
+            _rows,
+            yield_ms,
+            max_output,
+            backend,
+            cancellation,
+            &[],
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn exec_one_shot_with_environment(
+        &self,
+        cmd: &str,
+        cwd: Option<PathBuf>,
+        _cols: u16,
+        _rows: u16,
+        yield_ms: u64,
+        max_output: usize,
+        backend: &Arc<ExecutionBackend>,
+        cancellation: Option<&ThreadCancellation>,
+        extra_envs: &[(String, String)],
     ) -> CommandOutput {
         let start = Instant::now();
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
@@ -524,6 +571,7 @@ impl TerminalManager {
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string())),
         );
+        envs.extend(extra_envs.iter().cloned());
         let (mut command, pidfile) = backend.terminal_pipe_command(cmd, cwd.as_deref(), &envs);
         command
             .stdin(Stdio::null())

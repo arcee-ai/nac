@@ -108,10 +108,15 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
         .and_then(Value::as_u64)
         .unwrap_or(8_000) as usize;
     let cwd = resolve_command_cwd(args, runtime)?;
+    let command_environment = runtime.command_environment_snapshot()?;
+    let extra_envs = command_environment
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect::<Vec<_>>();
 
     if !tty {
         let output = manager
-            .exec_one_shot(
+            .exec_one_shot_with_environment(
                 &cmd,
                 cwd,
                 120,
@@ -120,15 +125,22 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
                 max_output,
                 &runtime.backend,
                 Some(&runtime.command_cancellation),
+                &extra_envs,
             )
             .await;
+        if let Some(output_id) = output.output_id.as_deref() {
+            runtime.remember_output_environment(output_id, command_environment.clone());
+        }
         let is_error = output.status == CommandStatus::SpawnError;
-        return Ok((serde_json::to_string_pretty(&output)?, is_error));
+        return Ok((
+            command_environment.redact(&serde_json::to_string_pretty(&output)?),
+            is_error,
+        ));
     }
 
     let session_name = manager.next_session_name();
     manager
-        .create_with_cancellation(
+        .create_with_environment(
             session_name.clone(),
             &cmd,
             cwd,
@@ -136,6 +148,7 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
             40,
             &runtime.backend,
             Some(&runtime.command_cancellation),
+            &extra_envs,
         )
         .await?;
     let output = manager
@@ -147,7 +160,11 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
             Some(&runtime.command_cancellation),
         )
         .await?;
-    Ok((serde_json::to_string_pretty(&output)?, false))
+    runtime.remember_output_environment(&output.output_id, command_environment.clone());
+    Ok((
+        command_environment.redact(&serde_json::to_string_pretty(&output)?),
+        false,
+    ))
 }
 
 pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolResult {
@@ -181,15 +198,15 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
                 .await?;
             output.retained = true;
         }
-        Ok(output)
+        let rendered = serde_json::to_string_pretty(&output)?;
+        let redacted = runtime.redact_output(&output.output_id, &rendered)?;
+        Ok(redacted)
     }
     .await;
 
     match result {
-        Ok(output) => ToolResult {
-            content: (serde_json::to_string_pretty(&output)
-                .unwrap_or_else(|error| format!("Error serializing terminal output: {error}")))
-            .into(),
+        Ok(redacted) => ToolResult {
+            content: redacted.into(),
             is_error: false,
         },
         Err(error) => ToolResult {
@@ -211,7 +228,8 @@ pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolR
         let page = runtime
             .terminal_manager
             .read_output(&output_id, stream, offset, limit)?;
-        Ok(serde_json::to_string_pretty(&page)?)
+        let rendered = serde_json::to_string_pretty(&page)?;
+        runtime.redact_output(&output_id, &rendered)
     })();
 
     match result {
@@ -247,11 +265,8 @@ fn clamp_yield(ms: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventSink;
     use serde_json::json;
     use std::process::Command;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     #[cfg(unix)]
     use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -263,27 +278,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn test_runtime() -> ToolRuntime {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        ToolRuntime {
-            config_cwd: cwd.clone(),
-            workspace_cwd: cwd.clone(),
-            store_path: PathBuf::new(),
-            session_id: None,
-            worker_executable: None,
-            active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
-            event_sink: EventSink::none(),
-            backend: crate::sandbox::execution_backend_from_sandbox(None, &cwd),
-            mcp: None,
-            skills: None,
-            terminal_manager: crate::terminal::TerminalManager::new(),
-            command_cancellation: crate::tools::ThreadCancellation::default(),
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
-            light_client: None,
-            allowed_tools: None,
-            permission_broker: None,
-            goal_runtime: None,
-        }
+        crate::tools::test_runtime()
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {
@@ -709,6 +704,96 @@ mod tests {
         let page_value: Value =
             serde_json::from_str(page.content.as_text().expect("text tool result")).unwrap();
         assert_eq!(page_value["content"].as_str().unwrap().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn managed_secrets_are_snapshotted_per_spawn_and_redacted_from_all_output_views() {
+        let root = unique_temp_dir("managed_environment");
+        let store = crate::managed::HostSecretStore::new(&root);
+        let old_secret = "managed-old-canary-never-visible";
+        let new_secret = "managed-new-canary-never-visible";
+        store.put("DEMO_TOKEN", old_secret).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.host_secret_store = Some(store.clone());
+
+        let one_shot = execute_exec_command(
+            &json!({
+                "cmd": "case \"$DEMO_TOKEN\" in managed-old-*) printf 'matched-old|' ;; *) printf 'missing|' ;; esac; printf '%s' \"$DEMO_TOKEN\""
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!one_shot.is_error, "{}", one_shot.content);
+        let one_shot_text = one_shot.content.as_text().expect("text tool result");
+        assert!(one_shot_text.contains("matched-old|[REDACTED]"));
+        assert!(!one_shot_text.contains(old_secret));
+        let one_shot_value: Value = serde_json::from_str(one_shot_text).unwrap();
+        let one_shot_output_id = one_shot_value["output_id"].as_str().unwrap();
+
+        let live = execute_exec_command(
+            &json!({
+                "cmd": "sleep 0.2; case \"$DEMO_TOKEN\" in managed-old-*) printf 'retained-old|' ;; *) printf 'changed|' ;; esac; printf '%s' \"$DEMO_TOKEN\"",
+                "tty": true,
+                "yield_time_ms": 10
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!live.is_error, "{}", live.content);
+        let live_value: Value =
+            serde_json::from_str(live.content.as_text().expect("text tool result")).unwrap();
+        let session_id = live_value["session_name"].as_str().unwrap();
+
+        store.put("DEMO_TOKEN", new_secret).unwrap();
+
+        let completed = execute_write_stdin(
+            &json!({ "session_id": session_id, "yield_time_ms": 2_000 }),
+            &runtime,
+        )
+        .await;
+        assert!(!completed.is_error, "{}", completed.content);
+        let completed_text = completed.content.as_text().expect("text tool result");
+        assert!(completed_text.contains("retained-old|[REDACTED]"));
+        assert!(!completed_text.contains(old_secret));
+        assert!(!completed_text.contains(new_secret));
+
+        let retained = execute_read_command_output(
+            &json!({ "output_id": one_shot_output_id, "stream": "stdout" }),
+            &runtime,
+        );
+        assert!(!retained.is_error, "{}", retained.content);
+        let retained_text = retained.content.as_text().expect("text tool result");
+        assert!(retained_text.contains("matched-old|[REDACTED]"));
+        assert!(!retained_text.contains(old_secret));
+        assert!(!retained_text.contains(new_secret));
+
+        let rotated = execute_exec_command(
+            &json!({
+                "cmd": "case \"$DEMO_TOKEN\" in managed-new-*) printf 'matched-new|' ;; *) printf 'stale|' ;; esac; printf '%s' \"$DEMO_TOKEN\""
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!rotated.is_error, "{}", rotated.content);
+        let rotated_text = rotated.content.as_text().expect("text tool result");
+        assert!(rotated_text.contains("matched-new|[REDACTED]"));
+        assert!(!rotated_text.contains(old_secret));
+        assert!(!rotated_text.contains(new_secret));
+
+        store.delete("DEMO_TOKEN").unwrap();
+        let absent = execute_exec_command(
+            &json!({
+                "cmd": "if [ -z \"${DEMO_TOKEN+x}\" ]; then printf absent; else printf present; fi"
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!absent.is_error, "{}", absent.content);
+        assert!(absent.content.contains("absent"));
+
+        runtime.terminal_manager.remove_all().await.unwrap();
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
