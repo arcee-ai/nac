@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+dockerfile="$repo_root/docker/managed/Dockerfile"
+entrypoint="$repo_root/docker/managed/entrypoint.sh"
+workflow="$repo_root/.github/workflows/managed-image.yml"
+
+fail() {
+    printf 'managed image contract: %s\n' "$1" >&2
+    exit 1
+}
+
+require_literal() {
+    file=$1
+    literal=$2
+    grep -F -- "$literal" "$file" >/dev/null || fail "missing '$literal' in ${file#"$repo_root"/}"
+}
+
+require_literal "$dockerfile" 'FROM --platform=linux/amd64 debian:bookworm-slim@sha256:'
+require_literal "$dockerfile" 'useradd --uid 10001 --gid 10001'
+require_literal "$dockerfile" 'USER 10001:10001'
+require_literal "$dockerfile" 'ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/nac-managed-entrypoint"]'
+require_literal "$dockerfile" 'RUST_VERSION=1.98.0'
+require_literal "$dockerfile" 'NODE_VERSION=24.20.0'
+require_literal "$dockerfile" 'GO_VERSION=1.27.0'
+require_literal "$dockerfile" 'UV_VERSION=0.12.1'
+require_literal "$dockerfile" 'corepack enable'
+require_literal "$dockerfile" 'fd-find'
+require_literal "$dockerfile" '/var/lib/nac'
+require_literal "$dockerfile" '/repositories'
+require_literal "$dockerfile" '/home/nac'
+require_literal "$dockerfile" '/run/nac'
+
+require_literal "$entrypoint" '--bind 0.0.0.0:3210'
+require_literal "$entrypoint" '--allow-remote'
+require_literal "$entrypoint" '--store-path /var/lib/nac/nac.sqlite3'
+require_literal "$entrypoint" '--managed-config "$managed_config"'
+if grep -Eq '(^|[[:space:]])(sudo|su)([[:space:]]|$)' "$dockerfile" "$entrypoint"; then
+    fail 'image or entrypoint grants an escalation command'
+fi
+
+require_literal "$workflow" 'platforms: linux/amd64'
+require_literal "$workflow" 'provenance: mode=max'
+require_literal "$workflow" 'sbom: true'
+require_literal "$workflow" 'environment: dev'
+require_literal "$workflow" 'OIDC_ROLE_TO_ASSUME'
+require_literal "$workflow" 'ECR_CACHE_REPOSITORY'
+require_literal "$workflow" 'run: make ci'
+if grep -Eq '^[[:space:]]*tags:.*(:latest|:dev)([,[:space:]]|$)' "$workflow"; then
+    fail 'publication workflow contains a mutable latest/dev image tag'
+fi
+
+printf '%s\n' 'managed image contract: ok'

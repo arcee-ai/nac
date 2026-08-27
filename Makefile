@@ -1,9 +1,10 @@
-.PHONY: all build dev demo release install ci test test-rust test-web test-assets test-e2e test-durability check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all build dev demo release install ci test test-rust test-web test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
 BIN := nac-web
 WEB_DIR := crates/$(PKG)/web
+MANAGED_IMAGE ?= nac-managed:local
 
 DEV_BIND ?= 127.0.0.1:3210
 DEV_URL ?= http://$(DEV_BIND)/
@@ -72,7 +73,7 @@ install:
 ci: format-check lint test
 
 ## Run workspace Rust tests, frontend tests, and web asset checks
-test: test-rust test-web test-assets
+test: test-rust test-web test-assets test-managed-image-contract
 
 test-rust:
 	$(CARGO) test --workspace --locked
@@ -111,6 +112,27 @@ test-durability:
 	$(CARGO) test --locked -p nac-server managed_binding_failure_precedes_run_and_prompt_execution
 	$(CARGO) test --locked -p nac-server parent_attachment_settles_canonical_managed_terminal_once_after_restart
 	$(CARGO) test --locked -p nac-server wrong_parent_relationship_reads_are_opaque_not_found
+
+## Check the managed image/workflow contract without a container runtime
+test-managed-image-contract:
+	sh -n docker/managed/entrypoint.sh
+	sh -n scripts/smoke-managed-image.sh
+	sh -n scripts/test-managed-image-contract.sh
+	sh scripts/test-managed-image-contract.sh
+
+## Build the linux/amd64 managed image with Docker or Podman
+managed-image:
+	@runtime="$${CONTAINER_RUNTIME:-}"; \
+	if [ -z "$$runtime" ]; then \
+		if command -v docker >/dev/null 2>&1; then runtime=docker; \
+		elif command -v podman >/dev/null 2>&1; then runtime=podman; \
+		else printf '%s\n' 'error: managed-image requires Docker or Podman'; exit 2; fi; \
+	fi; \
+	"$$runtime" build --platform linux/amd64 --file docker/managed/Dockerfile --tag "$(MANAGED_IMAGE)" .
+
+## Build and smoke the managed image, including readiness/restart/SIGTERM
+test-managed-image:
+	MANAGED_IMAGE="$(MANAGED_IMAGE)" sh scripts/smoke-managed-image.sh
 
 ## Type-check the workspace without producing binaries
 check:
@@ -174,6 +196,9 @@ help:
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  test-e2e     Run production-embedded Playwright tests' \
 		'  test-durability Run focused lifecycle/crash-window regressions' \
+		'  test-managed-image-contract Check managed image/workflow statically' \
+		'  managed-image Build the linux/amd64 managed developer image' \
+		'  test-managed-image Build and smoke the managed image locally' \
 		'  check        Run cargo check --workspace --locked' \
 		'  lint         Lint frontend and production Rust targets' \
 		'  fix          Apply safe Rust lint fixes and format Rust sources' \

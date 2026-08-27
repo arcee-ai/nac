@@ -165,7 +165,7 @@ binary. Any branch server must use a different explicit port and store path.
    retries, decoding, and result construction, prevent credential replay on
    redirects, and redact credentials and URL queries from errors/results.
    Fetch never connects from NAC to the model-supplied target URL.
-6. **Managed UI, readiness, image, and delivery — in progress.** Managed mode
+6. **Managed UI, readiness, image, and delivery — complete locally.** Managed mode
    now has credential-free `/healthz`, strict `/readyz`, owner-facing status,
    responsive Projects/Settings onboarding, GitHub device authorization,
    write-only Secrets, repository/branch selection, visible clone completion
@@ -173,8 +173,8 @@ binary. Any branch server must use a different explicit port and store path.
    journeys cover desktop, exact 390×844 mobile, Exa absent/present request
    snapshots, and the managed first-run flow. The pinned non-root image,
    read-only-root smoke, configurable ECR/OIDC workflow, static contract gate,
-   and operator documentation are implemented and awaiting their coherent
-   commit. Docker, Podman, and Buildah are absent on this host, so live image
+   and operator documentation are implemented. Docker, Podman, and Buildah are
+   absent on this host, so live image
    build/smoke remains an exact unexecuted local coverage gap; the GitHub
    workflow runs it without real provider credentials.
 7. **Integrated exact-candidate acceptance — pending.**
@@ -263,9 +263,14 @@ The managed UI/readiness candidate passed:
 - Production assets were rebuilt from the final UI sources.
 - `sh scripts/test-managed-image-contract.sh` — passed.
 
-Current exact next action: commit the green UI/readiness/assets slice with
-exact-path staging, then commit and statically verify the image/delivery/docs
-slice. After both are immutable, run the required broad candidate gates.
+Commit `dce5f65` contains the managed UI, readiness, graceful shutdown,
+production-browser coverage, and generated assets. The image/delivery slice
+also passed POSIX and Dash syntax checks, static workflow/image assertions,
+Ruby YAML parsing, and `make -n managed-image`. The live image build and smoke
+were not executed because no supported container runtime is installed.
+
+Current exact next action: commit the image/delivery/docs slice with exact-path
+staging. After it is immutable, run the required broad candidate gates.
 
 ## External coverage gaps versus product blockers
 

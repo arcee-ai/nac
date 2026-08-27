@@ -17,4 +17,5 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [Catalog and cost](configuration/catalog.md)
   - [Providers and logins](configuration/credentials.md)
 - [HTTP API](api/http.md)
+- [Managed NAC host](managed/README.md)
 - [Model request security](security/model-requests.md)
