@@ -8560,7 +8560,7 @@ async fn sse_route_is_never_compressed_and_preserves_boundary_ordering() {
         let (delta_sender, assistant_deltas) = tokio::sync::broadcast::channel(4);
         drop(delta_sender);
 
-        Sse::new(session_event_stream(
+        Sse::new(delivery::session_runs::session_event_stream(
             "test-epoch".to_string(),
             5,
             Some(SessionReplayGap {

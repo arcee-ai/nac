@@ -54,8 +54,7 @@ pub use revert::{
 };
 
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    convert::Infallible,
+    collections::{BTreeMap, HashMap},
     future::{Future, IntoFuture},
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -64,14 +63,13 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use async_stream::stream;
 #[cfg(test)]
-use axum::response::sse::Sse;
+use axum::response::sse::{Event, Sse};
 use axum::{
     extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
     http::{header, StatusCode},
     middleware::{self, Next},
-    response::{sse::Event, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -117,6 +115,8 @@ use nac_core::{
     workspace::GitTarget,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::convert::Infallible;
 use tokio::{
     net::TcpListener,
     sync::{Mutex, RwLock},
@@ -4548,87 +4548,6 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
 
 fn frontend_command_name(command: SlashCommand) -> &'static str {
     command.definition().name
-}
-
-fn session_event_stream(
-    epoch_id: String,
-    replay_boundary_sequence_id: u64,
-    replay_gap: Option<SessionReplayGap>,
-    replayed_events: Vec<SessionEventEnvelope>,
-    mut receiver: SessionEventReceiver,
-    mut assistant_deltas: AssistantStreamDeltaReceiver,
-) -> impl futures_core::Stream<Item = std::result::Result<Event, Infallible>> {
-    let mut replayed_events = VecDeque::from(replayed_events);
-    stream! {
-        yield Ok(sse_json_event(
-            "replay_boundary",
-            None,
-            &ReplayBoundaryEvent {
-                epoch_id,
-                replay_boundary_sequence_id,
-            },
-        ));
-
-        if let Some(replay_gap) = replay_gap {
-            yield Ok(sse_json_event("replay_gap", None, &ReplayGapEvent { replay_gap }));
-        }
-
-        while let Some(envelope) = replayed_events.pop_front() {
-            yield Ok(sse_envelope_event(&envelope));
-        }
-
-        // Deltas share the connection but not the sequence: they carry no SSE
-        // id, so a reconnect still resumes from the last session event.
-        let mut deltas_open = true;
-        loop {
-            let next = tokio::select! {
-                envelope = receiver.recv() => StreamItem::Session(envelope),
-                delta = assistant_deltas.recv(), if deltas_open => StreamItem::Delta(delta),
-            };
-            match next {
-                StreamItem::Session(Ok(envelope)) => yield Ok(sse_envelope_event(&envelope)),
-                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Lagged(missed))) => {
-                    yield Ok(sse_json_event("lagged", None, &LaggedEvent { missed }));
-                }
-                StreamItem::Session(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
-                StreamItem::Delta(Ok(delta)) => {
-                    yield Ok(sse_json_event("assistant_delta", None, &delta));
-                }
-                // Falling behind on deltas costs the client nothing it will not
-                // get again from the assistant message.
-                StreamItem::Delta(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
-                StreamItem::Delta(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
-                    deltas_open = false;
-                }
-            }
-        }
-    }
-}
-
-/// Whichever of the two channels behind the event stream woke up first.
-enum StreamItem {
-    Session(std::result::Result<SessionEventEnvelope, tokio::sync::broadcast::error::RecvError>),
-    Delta(std::result::Result<AssistantStreamDelta, tokio::sync::broadcast::error::RecvError>),
-}
-
-fn sse_envelope_event(envelope: &SessionEventEnvelope) -> Event {
-    sse_json_event(
-        "session_event",
-        Some(envelope.sequence_id.to_string()),
-        envelope,
-    )
-}
-
-fn sse_json_event<T: Serialize>(event: &str, id: Option<String>, payload: &T) -> Event {
-    let data = serde_json::to_string(payload).unwrap_or_else(|error| {
-        let _ = error;
-        serde_json::json!({ "error": "failed to serialize SSE payload" }).to_string()
-    });
-    let event = Event::default().event(event).data(data);
-    match id {
-        Some(id) => event.id(id),
-        None => event,
-    }
 }
 
 fn canonicalize_dir(path: PathBuf) -> Result<PathBuf> {

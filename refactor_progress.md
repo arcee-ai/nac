@@ -570,6 +570,10 @@ Rules:
   rendering behavior remain unchanged. OpenAPI/router parity, active steering,
   idempotent cancellation, bounded shutdown with an open stream, the full test
   build, and warning-denied Clippy pass. Server `lib.rs` is now 5,191 lines.
+  The same delivery owner now also contains the SSE stream multiplexer and
+  event encoding, including replay boundaries/gaps, lag markers, transient
+  assistant deltas, and durable event IDs. The bounded-shutdown stream
+  regression and warning-denied server check pass after the move.
 - Destructive session deletion now belongs to a 154-line lifecycle application
   service that preserves the complete authority chain: relationship gate,
   completion suppression, operation/resource leases, recursive descendant
