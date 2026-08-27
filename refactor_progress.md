@@ -806,6 +806,14 @@ Rules:
   revalidation, binding, and invocation without inline test weight. All six
   moved collision, ordering, prepared-call, hard-denial, canonical-binding, and
   interactive-broker tests pass; warning-denied Clippy is green.
+- Tool execution context and thread lifecycle now have explicit owners. A
+  131-line runtime-context module owns construction-time capabilities, backend,
+  terminal/environment/redaction services, workspace gates, and path helpers;
+  a 401-line lifecycle module owns run generations, dispatch admission,
+  steering settlement, cancellation, and drain. Four stale-generation,
+  cancellation/drain, and shared-workspace-gate regressions pass; the complete
+  core test build and warning-denied Clippy are green. The tool root is now 455
+  lines of contracts, native registry/capability composition, and routing.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -821,7 +829,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4/M5 kernel test separation with exact-path staging. Then separate
-capability/registry composition and common invocation routing from tool
-runtime/thread lifecycle ownership, and decompose terminal process/retention
-ownership where the current manager still mixes responsibilities.
+Commit the M4 tool runtime/thread-lifecycle extraction with exact-path staging.
+Then decompose terminal process/retention ownership and audit the remaining
+tool root/kernel surfaces before declaring M4/M5 complete.
