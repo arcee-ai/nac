@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use nac_contracts::{NewProject, ProjectRecord};
-use nac_managed::clone_workflow::ProjectRegistrar;
-use nac_managed::configuration::{HostSecretStore, HostSecretSummary, ManagedHostConfig};
+use nac_managed::{HostSecretStore, HostSecretSummary, ManagedHostConfig, ProjectRegistrar};
 
 /// SQLite-backed adapter for the managed clone workflow's project port.
 #[derive(Clone)]

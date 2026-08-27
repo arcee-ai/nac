@@ -9,12 +9,9 @@ use std::time::{Duration, Instant};
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nac_managed::clone_workflow::{
-    ManagedCloneOperation, ManagedCloneRequest, ManagedCloneService,
-};
-use nac_managed::github::{
+use nac_managed::{
     GitHubAuthError, GitHubAuthFailureKind, GitHubConnectionStatus, GitHubRepository,
-    ManagedGitHubAuth,
+    ManagedCloneOperation, ManagedCloneRequest, ManagedCloneService, ManagedGitHubAuth,
 };
 use serde::{Deserialize, Serialize};
 
@@ -337,7 +334,7 @@ impl SessionManager {
 }
 
 fn configure_git_defaults(
-    managed: &nac_managed::configuration::ManagedHostConfig,
+    managed: &nac_managed::ManagedHostConfig,
     executable: &Path,
     status: &GitHubConnectionStatus,
 ) -> Result<GitIdentityResponse, ApiError> {
@@ -813,9 +810,9 @@ pub(crate) async fn update_git_identity_handler(
 mod tests {
     use super::*;
 
-    fn managed_config(root: &Path) -> nac_managed::configuration::ManagedHostConfig {
-        let config = nac_managed::configuration::ManagedHostConfig {
-            version: nac_managed::configuration::MANAGED_CONFIG_VERSION,
+    fn managed_config(root: &Path) -> nac_managed::ManagedHostConfig {
+        let config = nac_managed::ManagedHostConfig {
+            version: nac_managed::MANAGED_CONFIG_VERSION,
             logical_host_id: "git-config-test".to_string(),
             owner: Some("owner@example.test".to_string()),
             public_hostname: "nac.example.test".to_string(),

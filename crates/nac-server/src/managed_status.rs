@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use nac_managed::readiness::ReadinessCheck;
+use nac_managed::ReadinessCheck;
 use serde::Serialize;
 
 use crate::SessionManager;
@@ -230,7 +230,7 @@ fn readiness_checks(
         return checks;
     };
 
-    checks.extend(nac_managed::readiness::host_checks(
+    checks.extend(nac_managed::host_checks(
         managed,
         expected_uid,
         expected_gid,

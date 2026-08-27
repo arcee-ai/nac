@@ -1748,8 +1748,8 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
     for path in [&state_root, &repository_root, &home_root] {
         std::fs::create_dir_all(path).unwrap();
     }
-    let managed_host = nac_managed::configuration::ManagedHostConfig {
-        version: nac_managed::configuration::MANAGED_CONFIG_VERSION,
+    let managed_host = nac_managed::ManagedHostConfig {
+        version: nac_managed::MANAGED_CONFIG_VERSION,
         logical_host_id: "test-host".to_string(),
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),

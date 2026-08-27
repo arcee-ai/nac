@@ -293,7 +293,7 @@ pub struct ServerOptions {
     pub root_cwd: PathBuf,
     pub store_path: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
-    pub managed_host: Option<nac_managed::configuration::ManagedHostConfig>,
+    pub managed_host: Option<nac_managed::ManagedHostConfig>,
 }
 
 #[derive(Clone)]
@@ -305,8 +305,8 @@ struct SessionManagerInner {
     root_cwd: PathBuf,
     store_path: PathBuf,
     worker_executable: PathBuf,
-    managed_host: Option<nac_managed::configuration::ManagedHostConfig>,
-    managed_clones: Option<nac_managed::clone_workflow::ManagedCloneService>,
+    managed_host: Option<nac_managed::ManagedHostConfig>,
+    managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -468,7 +468,7 @@ impl SessionManager {
             .managed_host
             .as_ref()
             .map(|managed| {
-                nac_managed::clone_workflow::ManagedCloneService::new(
+                nac_managed::ManagedCloneService::new(
                     &managed.repository_root,
                     &managed.state_root,
                     &managed.home_root,
@@ -524,7 +524,7 @@ impl SessionManager {
         }
     }
 
-    pub fn managed_host(&self) -> Option<&nac_managed::configuration::ManagedHostConfig> {
+    pub fn managed_host(&self) -> Option<&nac_managed::ManagedHostConfig> {
         self.inner.managed_host.as_ref()
     }
 
@@ -534,7 +534,7 @@ impl SessionManager {
             return;
         };
         run_config.set_command_environment_provider(Some(Arc::new(
-            nac_managed::configuration::ManagedCommandEnvironmentProvider::new(
+            nac_managed::ManagedCommandEnvironmentProvider::new(
                 Some(managed.secret_store()),
                 Some(
                     managed

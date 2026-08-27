@@ -311,7 +311,7 @@ Rules:
   do not commit local historical notebooks.
 - Verification: guide placement/link/read-back audit and `git diff --check`.
 
-### M8 — Integration and finite acceptance (pending)
+### M8 — Integration and finite acceptance (in progress)
 
 - Retire obsolete transition paths after all consumers migrate; audit exports,
   dependency cycles, duplicate DTOs, broad service bags, maps, and generated
@@ -898,6 +898,17 @@ Rules:
   toast, cancellation, and navigation semantics. All 178 frontend tests,
   typecheck, lint, and format check pass. `make test-assets` passes from commit
   `19a4235` with the OpenAPI/type drift checks and production build clean.
+- The integration public-surface audit makes all `nac-managed` implementation
+  modules private and exports one explicit supported facade. Clone domain/
+  workflow coordination is now a 625-line owner over a 177-line durable
+  operation/destination/staging adapter and a 266-line supervised Git/process
+  adapter. GitHub credential persistence and locking is a separate 94-line
+  adapter; the 851-line provider client retains only OAuth/device/refresh,
+  authenticated API discovery, provider policy, and wire decoding. All four
+  managed inline test suites moved to descriptive sibling files. The complete
+  managed suite passes 18 tests, the complete server suite passes 148 library
+  plus 23 binary tests, the three focused core secret/redaction/worker
+  propagation regressions pass, and managed/server checks compile cleanly.
 - The M7 candidate replaces the untracked branch research brief with a stable
   root ownership/dependency guide, adds substantive guides at the core, tool,
   permission, session lifecycle, session snapshot, store, managed, server, web,
@@ -919,8 +930,8 @@ Rules:
 
 ## Exact next action
 
-Audit every M7 guide against its nearest implementation and required purpose,
-invariant, dependency, starting-file, command, generated-artifact, and placement
-contract. Run Markdown/link and diff checks, stage only the guides, architecture
-records, documentation index, and this handoff, then commit the navigation
-milestone before starting the final integration audit.
+Finish the M8 hotspot/dependency/DTO/service-bag audit, record justified
+cohesive size exceptions in their nearest guides, and commit this green managed
+facade/adapter cleanup with exact-path staging. Then run the required final gate
+set, optional container prerequisite check, production-embedded browser smoke,
+and the single authorized independent final review.

@@ -609,7 +609,7 @@ done
         std::fs::write(&executable, script).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
 
-        let store = nac_managed::configuration::HostSecretStore::new(&state_root);
+        let store = nac_managed::HostSecretStore::new(&state_root);
         store
             .put("DEMO_TOKEN", "managed-worker-canary-never-in-argv")
             .unwrap();
@@ -618,9 +618,9 @@ done
         runtime.config_cwd = root.clone();
         runtime.worker_executable = Some(executable);
         runtime.command_environment = Some(Arc::new(
-            nac_managed::configuration::ManagedCommandEnvironmentProvider::new(
+            nac_managed::ManagedCommandEnvironmentProvider::new(
                 Some(store),
-                Some(nac_managed::github::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap()),
+                Some(nac_managed::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap()),
                 Some(root.join("managed-home")),
             ),
         ));
