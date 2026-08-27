@@ -629,8 +629,7 @@ pub fn workspace_snapshot(
 /// there is nothing durable to inspect or restore.
 fn unreachable_workspace_message(workspace_display: &str) -> String {
     format!(
-        "workspace '{}' lives only inside the sandbox; mount a working directory to inspect it",
-        workspace_display
+        "workspace '{workspace_display}' lives only inside the sandbox; mount a working directory to inspect it"
     )
 }
 

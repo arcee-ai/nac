@@ -73,8 +73,7 @@ fn save(path: &Path, keys: &StoredApiKeys) -> Result<()> {
 fn validate_name(name: &str) -> Result<()> {
     if !is_valid_env_name(name) {
         return Err(anyhow!(
-            "invalid credential name '{}'; expected [A-Za-z_][A-Za-z0-9_]*",
-            name
+            "invalid credential name '{name}'; expected [A-Za-z_][A-Za-z0-9_]*"
         ));
     }
     Ok(())
@@ -85,7 +84,7 @@ fn validate_value(value: &str) -> Result<()> {
         return Err(anyhow!("API key must not be blank"));
     }
     if value.len() > MAX_API_KEY_LEN {
-        return Err(anyhow!("API key must be at most {} bytes", MAX_API_KEY_LEN));
+        return Err(anyhow!("API key must be at most {MAX_API_KEY_LEN} bytes"));
     }
     // A control character would be smuggled straight into an HTTP header.
     if value.chars().any(char::is_control) {

@@ -60,17 +60,11 @@ fn streamable_http_config_from_raw(raw: &str) -> Result<McpConfigFile> {
     let mut config = McpConfigFile::default();
     for (server_name, server_value) in raw_config.mcp_servers {
         if !raw_transport_is_streamable_http(&server_value) {
-            eprintln!(
-                "Skipping MCP server '{}': transport is not streamable_http",
-                server_name
-            );
+            eprintln!("Skipping MCP server '{server_name}': transport is not streamable_http");
             continue;
         }
         let server_config = server_value.try_into().with_context(|| {
-            format!(
-                "failed to parse streamable_http MCP server '{}'",
-                server_name
-            )
+            format!("failed to parse streamable_http MCP server '{server_name}'")
         })?;
         config.mcp_servers.insert(server_name, server_config);
     }
@@ -105,11 +99,11 @@ pub(super) fn expand_env(input: &str) -> Result<String> {
         out.push_str(&rest[..start]);
         let after_start = &rest[start + 2..];
         let Some(end) = after_start.find('}') else {
-            bail!("invalid environment placeholder '{}'", input);
+            bail!("invalid environment placeholder '{input}'");
         };
         let name = &after_start[..end];
-        let value = env::var(name)
-            .with_context(|| format!("environment variable '{}' is not set", name))?;
+        let value =
+            env::var(name).with_context(|| format!("environment variable '{name}' is not set"))?;
         out.push_str(&value);
         rest = &after_start[end + 1..];
     }

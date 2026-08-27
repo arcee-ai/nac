@@ -144,14 +144,12 @@ pub fn validate_caller_supplied_base_url(
 
     let parsed = Url::parse(base_url).map_err(|error| {
         model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
-            base_url, error
+            "invalid model configuration: base_url '{base_url}' is not a valid absolute URL: {error}"
         ))
     })?;
     let host = parsed.host().ok_or_else(|| {
         model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' must include a host",
-            base_url
+            "invalid model configuration: base_url '{base_url}' must include a host"
         ))
     })?;
     if types::allows_plaintext_transport(&host) {
@@ -194,14 +192,12 @@ pub fn validate_backend_api_key_env(backend: BackendKind, api_key_env: Option<&s
         };
         if name.trim().is_empty() {
             return Err(model_configuration_error(format!(
-                "invalid model configuration: backend '{}' requires a nonblank api_key_env naming the environment variable containing its API key",
-                backend
+                "invalid model configuration: backend '{backend}' requires a nonblank api_key_env naming the environment variable containing its API key"
             )));
         }
         if !is_valid_env_name(name) {
             return Err(model_configuration_error(format!(
-                "invalid model configuration: api_key_env '{}' is not a valid environment variable name for backend '{}'; expected [A-Za-z_][A-Za-z0-9_]*",
-                name, backend
+                "invalid model configuration: api_key_env '{name}' is not a valid environment variable name for backend '{backend}'; expected [A-Za-z_][A-Za-z0-9_]*"
             )));
         }
         return Ok(());
@@ -214,8 +210,7 @@ pub fn validate_backend_api_key_env(backend: BackendKind, api_key_env: Option<&s
             _ => unreachable!("all API-key backends handled above"),
         };
         return Err(model_configuration_error(format!(
-            "invalid model configuration: api_key_env '{}' is not supported for backend '{}'; {}",
-            name, backend, credential_source
+            "invalid model configuration: api_key_env '{name}' is not supported for backend '{backend}'; {credential_source}"
         )));
     }
 
@@ -237,23 +232,20 @@ pub(super) fn api_key_for_backend(
     let value = match std::env::var_os(env_name) {
         Some(value) => value.into_string().map_err(|_| {
             model_configuration_error(format!(
-                "invalid model configuration: configured api_key_env '{}' contains a non-Unicode value for backend '{}'",
-                env_name, backend
+                "invalid model configuration: configured api_key_env '{env_name}' contains a non-Unicode value for backend '{backend}'"
             ))
         })?,
         None => api_key_store::read_stored_api_key(env_name)
             .map_err(|error| model_configuration_error(error.to_string()))?
             .ok_or_else(|| {
                 model_configuration_error(format!(
-                    "invalid model configuration: configured api_key_env '{}' is not set for backend '{}' and no key is stored under that name",
-                    env_name, backend
+                    "invalid model configuration: configured api_key_env '{env_name}' is not set for backend '{backend}' and no key is stored under that name"
                 ))
             })?,
     };
     if value.trim().is_empty() {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: configured api_key_env '{}' is empty or whitespace-only for backend '{}'",
-            env_name, backend
+            "invalid model configuration: configured api_key_env '{env_name}' is empty or whitespace-only for backend '{backend}'"
         )));
     }
     Ok(value)

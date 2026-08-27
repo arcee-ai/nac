@@ -79,7 +79,7 @@ pub fn dispatch_definition(
             for entry in &catalog {
                 description.push_str(&format!("\n- {}: {}", entry.name, entry.description));
                 if let Some(compatibility) = &entry.compatibility {
-                    description.push_str(&format!(" (compatibility: {})", compatibility));
+                    description.push_str(&format!(" (compatibility: {compatibility})"));
                 }
             }
 
@@ -269,7 +269,7 @@ pub async fn execute_parsed_dispatch(
     let run = match result {
         Ok(run) => run,
         Err(error) => {
-            let message = format!("Failed to spawn thread '{}': {}", thread_name, error);
+            let message = format!("Failed to spawn thread '{thread_name}': {error}");
             record_dispatch_failure(
                 runtime,
                 &session_id,
@@ -388,11 +388,10 @@ fn classify_dispatch_failure(
 
     if run.timed_out {
         let mut message = match run.timeout_reason.as_deref() {
-            Some(reason) => format!(
-                "Thread '{}' timed out after {}s.\n{}",
-                thread_name, timeout_secs, reason
-            ),
-            None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
+            Some(reason) => {
+                format!("Thread '{thread_name}' timed out after {timeout_secs}s.\n{reason}")
+            }
+            None => format!("Thread '{thread_name}' timed out after {timeout_secs}s"),
         };
         if let Some(cleanup_error) = &run.cleanup_error {
             message.push('\n');
@@ -535,8 +534,7 @@ pub async fn execute_dispatch(
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
         return ToolResult {
             content: (format!(
-                "Thread '{}' is already running; retry after the current dispatch completes.",
-                thread_name
+                "Thread '{thread_name}' is already running; retry after the current dispatch completes."
             ))
             .into(),
             is_error: true,
@@ -562,13 +560,13 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             Ok(Ok(threads)) => threads,
             Ok(Err(error)) => {
                 return ToolResult {
-                    content: (format!("Error listing threads: {}", error)).into(),
+                    content: (format!("Error listing threads: {error}")).into(),
                     is_error: true,
                 }
             }
             Err(join_error) => {
                 return ToolResult {
-                    content: (format!("Internal error listing threads: {}", join_error)).into(),
+                    content: (format!("Internal error listing threads: {join_error}")).into(),
                     is_error: true,
                 }
             }
@@ -588,7 +586,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             thread.name, thread.episode_count, thread.created_at, thread.updated_at
         ));
         if let Some(action) = thread.latest_action.as_deref() {
-            output.push_str(&format!(" | last action: {}", action));
+            output.push_str(&format!(" | last action: {action}"));
         }
     }
 
@@ -617,15 +615,12 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: false,
         },
         Ok(Err(error)) => ToolResult {
-            content: (format!("Error reading thread '{}': {}", thread_name, error)).into(),
+            content: (format!("Error reading thread '{thread_name}': {error}")).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: (format!(
-                "Internal error reading thread '{}': {}",
-                thread_name, join_error
-            ))
-            .into(),
+            content: (format!("Internal error reading thread '{thread_name}': {join_error}"))
+                .into(),
             is_error: true,
         },
     }
@@ -644,8 +639,7 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
     if is_thread_active(runtime, &thread_name) {
         return ToolResult {
             content: (format!(
-                "Thread '{}' is currently running; wait for it to finish before deleting it.",
-                thread_name
+                "Thread '{thread_name}' is currently running; wait for it to finish before deleting it."
             ))
             .into(),
             is_error: true,
@@ -658,27 +652,20 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
     match tokio::task::spawn_blocking(move || store::delete_thread(&store_path, &sid, &tname)).await
     {
         Ok(Ok(true)) => ToolResult {
-            content: (format!(
-                "Deleted thread '{}' and its retained episodes.",
-                thread_name
-            ))
-            .into(),
+            content: (format!("Deleted thread '{thread_name}' and its retained episodes.")).into(),
             is_error: false,
         },
         Ok(Ok(false)) => ToolResult {
-            content: (format!("Thread '{}' does not exist in this session.", thread_name)).into(),
+            content: (format!("Thread '{thread_name}' does not exist in this session.")).into(),
             is_error: true,
         },
         Ok(Err(error)) => ToolResult {
-            content: (format!("Error deleting thread '{}': {}", thread_name, error)).into(),
+            content: (format!("Error deleting thread '{thread_name}': {error}")).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: (format!(
-                "Internal error deleting thread '{}': {}",
-                thread_name, join_error
-            ))
-            .into(),
+            content: (format!("Internal error deleting thread '{thread_name}': {join_error}"))
+                .into(),
             is_error: true,
         },
     }
@@ -726,7 +713,7 @@ fn resolve_scheduled_skills(
     for skill in &skills {
         if !registry.has_skill(skill) {
             return Err(ToolResult {
-                content: (format!("Error: unknown skill '{}'", skill)).into(),
+                content: (format!("Error: unknown skill '{skill}'")).into(),
                 is_error: true,
             });
         }

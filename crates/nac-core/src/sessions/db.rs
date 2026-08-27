@@ -375,7 +375,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
         .optional()?;
 
     let Some(row) = row else {
-        return Err(anyhow!("session '{}' was not found", session_id));
+        return Err(anyhow!("session '{session_id}' was not found"));
     };
 
     row.into_snapshot()
@@ -404,7 +404,7 @@ pub(crate) fn load_session_run_state(
         )
         .optional()?;
     let Some((last, previous, durations_json, token_usages_json, updated_at)) = row else {
-        return Err(anyhow!("session '{}' was not found", session_id));
+        return Err(anyhow!("session '{session_id}' was not found"));
     };
     let response_durations_ms = durations_json
         .map(|json| {
@@ -456,7 +456,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
         .optional()?;
 
     let Some((mut config, light_model_json)) = row else {
-        return Err(anyhow!("session '{}' was not found", session_id));
+        return Err(anyhow!("session '{session_id}' was not found"));
     };
     match deserialize_light_model(light_model_json.as_deref()) {
         Ok(light_model) => config.light_model = light_model,
@@ -1194,11 +1194,7 @@ fn parse_backend(raw: Option<String>) -> Result<BackendKind> {
         )
     })?;
     raw.parse::<BackendKind>().map_err(|error| {
-        anyhow!(
-            "unsupported stored backend '{}'; session settings repair required: {}",
-            raw,
-            error
-        )
+        anyhow!("unsupported stored backend '{raw}'; session settings repair required: {error}")
     })
 }
 
@@ -1245,8 +1241,7 @@ fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>
         Some("xhigh") => Ok(Some(ReasoningEffort::Xhigh)),
         Some("max") => Ok(Some(ReasoningEffort::Max)),
         Some(other) => Err(anyhow!(
-            "unsupported stored reasoning effort '{}'; session settings repair required: select a supported reasoning effort or clear it",
-            other
+            "unsupported stored reasoning effort '{other}'; session settings repair required: select a supported reasoning effort or clear it"
         )),
         None => Ok(None),
     }

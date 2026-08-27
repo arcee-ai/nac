@@ -71,35 +71,28 @@ fn classify_stored_auth_data_error(error: anyhow::Error) -> anyhow::Error {
 
 pub(super) fn validate_arcee_base_url(base_url: &str) -> Result<(ArceeEndpointKind, Url)> {
     let parsed = Url::parse(base_url)
-        .map_err(|error| anyhow!("invalid Arcee base URL '{}': {}", base_url, error))?;
+        .map_err(|error| anyhow!("invalid Arcee base URL '{base_url}': {error}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(anyhow!(
-            "invalid Arcee base URL '{}': scheme must be http or https",
-            base_url
+            "invalid Arcee base URL '{base_url}': scheme must be http or https"
         ));
     }
-    let host = parsed.host_str().ok_or_else(|| {
-        anyhow!(
-            "invalid Arcee base URL '{}': URL must include a host",
-            base_url
-        )
-    })?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("invalid Arcee base URL '{base_url}': URL must include a host"))?;
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(anyhow!(
-            "invalid Arcee base URL '{}': userinfo is not allowed",
-            base_url
+            "invalid Arcee base URL '{base_url}': userinfo is not allowed"
         ));
     }
     if parsed.query().is_some() {
         return Err(anyhow!(
-            "invalid Arcee base URL '{}': query parameters are not allowed",
-            base_url
+            "invalid Arcee base URL '{base_url}': query parameters are not allowed"
         ));
     }
     if parsed.fragment().is_some() {
         return Err(anyhow!(
-            "invalid Arcee base URL '{}': fragments are not allowed",
-            base_url
+            "invalid Arcee base URL '{base_url}': fragments are not allowed"
         ));
     }
 
@@ -109,14 +102,12 @@ pub(super) fn validate_arcee_base_url(base_url: &str) -> Result<(ArceeEndpointKi
     }
     if parsed.scheme() != "https" {
         return Err(anyhow!(
-            "invalid Arcee base URL '{}': Arcee-owned endpoints require HTTPS",
-            base_url
+            "invalid Arcee base URL '{base_url}': Arcee-owned endpoints require HTTPS"
         ));
     }
     if parsed.port_or_known_default() != Some(443) {
         return Err(anyhow!(
-            "invalid Arcee base URL '{}': Arcee-owned endpoints require effective port 443",
-            base_url
+            "invalid Arcee base URL '{base_url}': Arcee-owned endpoints require effective port 443"
         ));
     }
 
@@ -127,8 +118,7 @@ pub(super) fn validate_approved_base_url(base_url: &str) -> Result<Url> {
     let (kind, parsed) = validate_arcee_base_url(base_url)?;
     if kind != ArceeEndpointKind::Approved {
         return Err(anyhow!(
-            "Arcee base URL '{}' is not an approved Arcee origin",
-            base_url
+            "Arcee base URL '{base_url}' is not an approved Arcee origin"
         ));
     }
     chat_completions_url(base_url)?;
@@ -139,8 +129,7 @@ pub(super) fn validate_stored_base_url(base_url: &str) -> Result<Url> {
     let (kind, parsed) = validate_arcee_base_url(base_url)?;
     if kind != ArceeEndpointKind::Approved {
         return Err(anyhow!(
-            "stored Arcee base URL '{}' is not an approved Arcee origin",
-            base_url
+            "stored Arcee base URL '{base_url}' is not an approved Arcee origin"
         ));
     }
     chat_completions_url(base_url)?;
@@ -187,8 +176,7 @@ fn validate_unambiguous_path(base_url: &str) -> Result<()> {
             let low = bytes.get(index + 2).and_then(|byte| hex_value(*byte));
             let (Some(high), Some(low)) = (high, low) else {
                 return Err(anyhow!(
-                    "invalid Arcee base URL '{}': path contains malformed percent encoding",
-                    base_url
+                    "invalid Arcee base URL '{base_url}': path contains malformed percent encoding"
                 ));
             };
             decoded.push((high << 4) | low);
@@ -197,8 +185,7 @@ fn validate_unambiguous_path(base_url: &str) -> Result<()> {
 
         if decoded == b"." || decoded == b".." {
             return Err(anyhow!(
-                "invalid Arcee base URL '{}': dot path segments, including percent-encoded forms, are not allowed",
-                base_url
+                "invalid Arcee base URL '{base_url}': dot path segments, including percent-encoded forms, are not allowed"
             ));
         }
         if had_percent_encoding
@@ -207,8 +194,7 @@ fn validate_unambiguous_path(base_url: &str) -> Result<()> {
                 .any(|control| decoded.eq_ignore_ascii_case(control))
         {
             return Err(anyhow!(
-                "invalid Arcee base URL '{}': percent-encoded route-control segments are not allowed; use literal path segments",
-                base_url
+                "invalid Arcee base URL '{base_url}': percent-encoded route-control segments are not allowed; use literal path segments"
             ));
         }
         if had_percent_encoding
@@ -217,8 +203,7 @@ fn validate_unambiguous_path(base_url: &str) -> Result<()> {
                 .any(|byte| matches!(byte, b'/' | b'\\' | b'?' | b'#'))
         {
             return Err(anyhow!(
-                "invalid Arcee base URL '{}': percent-encoded path delimiters are not allowed",
-                base_url
+                "invalid Arcee base URL '{base_url}': percent-encoded path delimiters are not allowed"
             ));
         }
     }
@@ -238,12 +223,7 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
     let (kind, mut parsed) = validate_arcee_base_url(base_url)?;
     let mut path_segments = parsed
         .path_segments()
-        .ok_or_else(|| {
-            anyhow!(
-                "invalid Arcee base URL '{}': URL cannot be a base",
-                base_url
-            )
-        })?
+        .ok_or_else(|| anyhow!("invalid Arcee base URL '{base_url}': URL cannot be a base"))?
         .collect::<Vec<_>>();
     while path_segments.last() == Some(&"") {
         path_segments.pop();
@@ -274,12 +254,9 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
 
     parsed.set_path(&format!("/{}", path_segments.join("/")));
     {
-        let mut segments = parsed.path_segments_mut().map_err(|_| {
-            anyhow!(
-                "invalid Arcee base URL '{}': URL cannot be a base",
-                base_url
-            )
-        })?;
+        let mut segments = parsed
+            .path_segments_mut()
+            .map_err(|_| anyhow!("invalid Arcee base URL '{base_url}': URL cannot be a base"))?;
         segments.pop_if_empty();
         segments.extend(additions);
     }
@@ -298,12 +275,9 @@ pub(super) fn chat_completions_url(base_url: &str) -> Result<Url> {
 pub(super) fn models_url(base_url: &str) -> Result<Url> {
     let mut url = chat_completions_url(base_url)?;
     {
-        let mut segments = url.path_segments_mut().map_err(|_| {
-            anyhow!(
-                "invalid Arcee base URL '{}': URL cannot be a base",
-                base_url
-            )
-        })?;
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| anyhow!("invalid Arcee base URL '{base_url}': URL cannot be a base"))?;
         segments.pop();
         segments.pop();
         segments.push("models");
@@ -404,9 +378,7 @@ fn validate_auth_service_base_url(base_url: &str) -> Result<()> {
         .expect("canonical Arcee auth service URL must remain valid");
     if parsed.origin() != canonical.origin() || parsed.path() != "/" {
         return Err(anyhow!(
-            "Arcee auth service URL '{}' is not the canonical origin {}",
-            base_url,
-            CANONICAL_AUTH_SERVICE_BASE_URL
+            "Arcee auth service URL '{base_url}' is not the canonical origin {CANONICAL_AUTH_SERVICE_BASE_URL}"
         ));
     }
     Ok(())

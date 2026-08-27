@@ -115,8 +115,7 @@ impl WorkerTimeoutTrace {
     fn timeout_reason(&self) -> String {
         match &self.location {
             TimeoutLocation::ModelApi { iteration } => format!(
-                "The thread timed out at a call to the model API.\nModel call: iteration {}",
-                iteration
+                "The thread timed out at a call to the model API.\nModel call: iteration {iteration}"
             ),
             TimeoutLocation::ToolCall if !self.active_tool_calls.is_empty() => {
                 if self.active_tool_calls.len() == 1 {
@@ -134,7 +133,7 @@ impl WorkerTimeoutTrace {
                     reason.push_str(&format!("\n- {} {}", call.name, call_id));
                     match call.args_detail.as_deref() {
                         Some(args_detail) => {
-                            reason.push_str(&format!("\n  arguments: {}", args_detail));
+                            reason.push_str(&format!("\n  arguments: {args_detail}"));
                         }
                         None => reason.push_str("\n  arguments: <not captured>"),
                     }

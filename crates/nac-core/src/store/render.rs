@@ -5,7 +5,7 @@ pub fn render_self_context(thread_name: &str, episodes: &[EpisodeRecord]) -> Opt
         return None;
     }
 
-    let mut rendered = format!("Retained history for thread \"{}\":", thread_name);
+    let mut rendered = format!("Retained history for thread \"{thread_name}\":");
     for (index, episode) in episodes.iter().enumerate() {
         rendered.push_str(&format!(
             "\n\n=== Episode {} | {} | action: {} ===\n{}",
@@ -27,7 +27,7 @@ pub fn render_source_context(episode: &EpisodeRecord) -> String {
 
 pub fn render_thread_document(thread_name: &str, episodes: &[EpisodeRecord]) -> String {
     if episodes.is_empty() {
-        return format!("Thread \"{}\" has no retained episodes.", thread_name);
+        return format!("Thread \"{thread_name}\" has no retained episodes.");
     }
 
     let mut rendered = format!(
@@ -64,7 +64,7 @@ pub fn render_workset_document(workset: &WorksetRecord) -> String {
     ));
     rendered.push_str(&format!("\ngoal: {}", workset.goal));
     if let Some(recipe) = workset.verification_recipe.as_deref() {
-        rendered.push_str(&format!("\nverification: {}", recipe));
+        rendered.push_str(&format!("\nverification: {recipe}"));
     }
     rendered.push_str(&format!(
         "\ncreated: {} | updated: {}",
@@ -88,11 +88,11 @@ pub fn render_workset_document(workset: &WorksetRecord) -> String {
             item.position, item.role, item.title
         ));
         rendered.push_str(&format!("\n   scope: {}", item.scope));
-        rendered.push_str(&format!("\n   depends on: {}", dependencies));
+        rendered.push_str(&format!("\n   depends on: {dependencies}"));
         rendered.push_str(&format!("\n   description: {}", item.description));
         rendered.push_str(&format!("\n   acceptance: {}", item.acceptance));
         if let Some(notes) = item.notes.as_deref() {
-            rendered.push_str(&format!("\n   notes: {}", notes));
+            rendered.push_str(&format!("\n   notes: {notes}"));
         }
     }
     rendered

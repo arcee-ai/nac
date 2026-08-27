@@ -72,7 +72,7 @@ impl<'a> WorkspaceApplication<'a> {
         let summary = initial_sessions
             .iter()
             .find(|entry| entry.summary.session_id == session_id)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         let target = self.manager.git_target(&summary.summary)?;
         let workspace_gate =
             nac_core::shared_workspace_gate_for(&self.manager.inner.store_path, target.root())
@@ -101,7 +101,7 @@ impl<'a> WorkspaceApplication<'a> {
         let current = sessions
             .iter()
             .find(|entry| entry.summary.session_id == session_id)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         let current_target = self.manager.git_target(&current.summary)?;
         if git_target_key(&current_target) != git_target_key(&target) {
             return Err(anyhow!("workspace changed during mutation admission"));
@@ -186,7 +186,7 @@ impl<'a> WorkspaceApplication<'a> {
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         let target = self.manager.git_target(&summary)?;
         self.manager.ensure_git_ready(&target).await?;
         Ok(target)
@@ -238,7 +238,7 @@ impl<'a> WorkspaceApplication<'a> {
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         if summary.ssh_host.is_some() {
             anyhow::bail!("opening paths is only available for local sessions");
         }
@@ -274,7 +274,7 @@ impl<'a> WorkspaceApplication<'a> {
         let target = self.workspace_root(session_id).await?;
         let revision = self
             .resolve_revision(session_id, Some(revision_id))?
-            .ok_or_else(|| anyhow!("revision '{}' was not found", revision_id))?;
+            .ok_or_else(|| anyhow!("revision '{revision_id}' was not found"))?;
 
         tokio::task::spawn_blocking(move || {
             view::revision_changes(&target, revision.base_sha.as_deref(), &revision.commit_sha)
@@ -294,7 +294,7 @@ impl<'a> WorkspaceApplication<'a> {
             return Ok(None);
         };
         view::read_workspace_revision(&self.manager.inner.store_path, session_id, revision)?
-            .ok_or_else(|| anyhow!("revision '{}' was not found", revision))
+            .ok_or_else(|| anyhow!("revision '{revision}' was not found"))
             .map(Some)
     }
 

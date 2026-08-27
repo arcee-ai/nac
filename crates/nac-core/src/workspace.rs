@@ -173,7 +173,7 @@ fn validate_branch_name(target: &GitTarget, name: &str) -> Result<String> {
         return Err(anyhow!("invalid branch name: it may not contain spaces"));
     }
     if run_git(target, &["check-ref-format", "--branch", name]).is_err() {
-        return Err(anyhow!("invalid branch name: git rejected '{}'", name));
+        return Err(anyhow!("invalid branch name: git rejected '{name}'"));
     }
     Ok(name.to_string())
 }

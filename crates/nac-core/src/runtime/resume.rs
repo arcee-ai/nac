@@ -246,8 +246,7 @@ pub(super) async fn build_resume_config_from_snapshot(
     )
     .map_err(|error| {
         anyhow::anyhow!(
-            "stored session model settings are invalid; settings repair required: {}",
-            error
+            "stored session model settings are invalid; settings repair required: {error}"
         )
     })?;
     if snapshot_settings.model != stored_model || snapshot_settings.base_url != stored_base_url {
@@ -270,8 +269,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         .map_err(|error| {
             if error.downcast_ref::<ModelConfigurationError>().is_some() {
                 let message = format!(
-                    "stored session model settings are invalid; settings repair required: {}",
-                    error
+                    "stored session model settings are invalid; settings repair required: {error}"
                 );
                 error.context(message)
             } else {

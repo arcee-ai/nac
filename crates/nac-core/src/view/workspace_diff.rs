@@ -76,7 +76,7 @@ impl WorkspaceDiffStage {
             "staged" => Ok(Self::Staged),
             "unstaged" => Ok(Self::Unstaged),
             "untracked" => Ok(Self::Untracked),
-            _ => bail!("invalid workspace diff stage '{}'", value),
+            _ => bail!("invalid workspace diff stage '{value}'"),
         }
     }
 }
@@ -538,7 +538,7 @@ fn read_worktree_file(repo: Repo<'_>, relpath: &str) -> Result<LimitedBytes> {
         .read_worktree(repo.root, relpath, WORKSPACE_DIFF_MAX_FILE_BYTES)?
     {
         WorktreeRead::Missing => Ok(LimitedBytes::Bytes(Vec::new())),
-        WorktreeRead::NotRegular => bail!("path '{}' is not a regular file", relpath),
+        WorktreeRead::NotRegular => bail!("path '{relpath}' is not a regular file"),
         WorktreeRead::Symlink { escapes: true, .. }
         | WorktreeRead::Regular { escapes: true, .. } => {
             bail!("invalid path: path escapes repository root")

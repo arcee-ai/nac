@@ -68,7 +68,7 @@ pub fn build_preloaded_skill_messages(
             continue;
         }
         if !registry.has_skill(name) {
-            anyhow::bail!("unknown skill '{}'", name);
+            anyhow::bail!("unknown skill '{name}'");
         }
 
         let activated = registry.activate(name);
@@ -139,7 +139,7 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
     let send_result = agent.send(&action).await;
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
-    println!("{}", response);
+    println!("{response}");
     Ok(())
 }
 

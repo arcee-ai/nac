@@ -94,8 +94,7 @@ pub fn resolve_backend_api_key(backend: BackendKind, api_key_env: Option<&str>) 
 pub fn resolve_named_api_key(name: &str) -> Result<Option<String>> {
     if !backend::is_valid_env_name(name) {
         return Err(anyhow!(
-            "invalid credential name '{}'; expected [A-Za-z_][A-Za-z0-9_]*",
-            name
+            "invalid credential name '{name}'; expected [A-Za-z_][A-Za-z0-9_]*"
         ));
     }
     if let Some(value) = std::env::var_os(name) {

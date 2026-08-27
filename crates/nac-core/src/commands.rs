@@ -121,7 +121,7 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
         .iter()
         .find(|definition| definition.name == name)
     else {
-        return Some(Err(format!("unknown slash command: /{}", name)));
+        return Some(Err(format!("unknown slash command: /{name}")));
     };
 
     Some(if definition.accepts_arguments || args.is_empty() {

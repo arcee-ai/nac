@@ -588,7 +588,7 @@ impl ModelClient {
                 self.post_sse_with_retry_headers(
                     &url,
                     &request,
-                    |request| request.header("Authorization", format!("Bearer {}", api_key)),
+                    |request| request.header("Authorization", format!("Bearer {api_key}")),
                     || ResponsesStreamFold::new(on_delta),
                 )
                 .await?
@@ -652,7 +652,7 @@ impl ModelClient {
     async fn post_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
         let api_key = self.api_key.as_str();
         self.post_json_with_retry_headers(url, body, |request| {
-            request.header("Authorization", format!("Bearer {}", api_key))
+            request.header("Authorization", format!("Bearer {api_key}"))
         })
         .await
     }

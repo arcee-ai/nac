@@ -178,5 +178,5 @@ fn validate_operation_id(operation_id: &str) -> Result<()> {
 fn destination_lock_path(repository_root: &Path, destination: &Path) -> PathBuf {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(destination.as_os_str().as_encoded_bytes());
-    repository_root.join(format!(".nac-destination-{:x}.lock", digest))
+    repository_root.join(format!(".nac-destination-{digest:x}.lock"))
 }

@@ -294,7 +294,7 @@ pub(super) fn parse_anthropic_messages_response(
     let content = value
         .get("content")
         .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("Response from {} did not include content blocks", url))?;
+        .ok_or_else(|| anyhow!("Response from {url} did not include content blocks"))?;
 
     let mut text_parts = Vec::new();
     let mut tool_calls = Vec::new();
@@ -320,11 +320,7 @@ pub(super) fn parse_anthropic_messages_response(
                     .get("input")
                     .ok_or_else(|| anyhow!("Anthropic tool_use block missing input"))?;
                 let arguments = serde_json::to_string(input).map_err(|error| {
-                    anyhow!(
-                        "Failed to serialize Anthropic tool_use input for '{}': {}",
-                        id,
-                        error
-                    )
+                    anyhow!("Failed to serialize Anthropic tool_use input for '{id}': {error}")
                 })?;
 
                 tool_calls.push(ToolCall {
