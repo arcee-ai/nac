@@ -670,6 +670,14 @@ Rules:
   mutation, peer-owned goal admission, budget-limited continuation, and
   orchestrator rejection regressions pass; the complete core test build is
   green. `session_service.rs` is now 4,006 lines, with the new owner at 395.
+- Frontend projection now has two focused session-service owners: a 355-line
+  snapshot/list/thread/workset assembler and a 516-line transcript paging,
+  timestamp, revert, and scan-cache owner. Cross-owner helpers are
+  `pub(super)` only; the public `SessionService` surface is unchanged. Paged
+  legacy-window parity, bounded connection use, malformed/future event
+  tolerance, steering reconciliation, and active-run nonblocking snapshot
+  regressions pass; the complete core test build is green.
+  `session_service.rs` is now 3,146 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -685,7 +693,7 @@ Rules:
 
 ## Exact next action
 
-Commit the first M4 direct-interaction owner with exact-path staging. Next
-extract frontend projection/transcript paging from `session_service`, followed
-by recovery/delegated completion; keep run admission, cancellation, and
-settlement ordering untouched until those read/recovery seams are green.
+Commit the M4 frontend/transcript projection owners with exact-path staging.
+Next extract durable run recovery and traditional-child terminal reconciliation
+from `session_service`; keep admission, cancellation, and settlement ordering
+untouched until that recovery seam is green.
