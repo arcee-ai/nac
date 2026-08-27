@@ -753,6 +753,14 @@ Rules:
   existing durable owner/activity keys. Sandbox default/enablement, GPU CDI,
   explicit-mount mapping, worktree rollback, remote conflict, the complete core
   test build, and warning-denied Clippy pass.
+- Runtime launch/resume contracts now live in a focused 313-line owner, and the
+  SSH browse/canonicalization adapter in a 61-line owner. Public `runtime` type
+  and function paths remain stable; private option-resolution and validation
+  methods are visible only to sibling runtime owners. The 100-line runtime root
+  is now composition/re-export wiring plus two generic path helpers. SSH config
+  cwd, remote creation, optional-model, sandbox enablement, the complete core
+  test build, and warning-denied Clippy pass. The fake MCP loopback test required
+  the authorized unsandboxed run.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -768,6 +776,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 runtime sandbox extraction with exact-path staging. Then
-decompose runtime contracts and execution-context/SSH ownership without
-changing behavior selection or backend choice.
+Commit the M4 runtime contract/remote extraction with exact-path staging. Then
+map and decompose the remaining tool/terminal gravity wells, preserving the
+prepared-invocation, authorization, process-lifecycle, retention, and backend
+cleanup boundaries.
