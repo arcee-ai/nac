@@ -110,9 +110,9 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         .unwrap()
     };
 
-    let parent = build("parent");
-    let child = build("child");
-    let delegating = build("delegating");
+    let mut parent = build("parent");
+    let mut child = build("child");
+    let mut delegating = build("delegating");
     let names = |agent: &Agent| {
         agent
             .tool_definitions_for_test()
@@ -131,6 +131,41 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     assert_eq!(
         names(&delegating),
         crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.map(str::to_string)
+    );
+    let capability_names = |definitions: Vec<ToolDefinition>| {
+        definitions
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        capability_names(parent.model_request_capabilities_for_test(None)),
+        crate::tools::DIRECT_TOOL_NAMES
+    );
+    let parent_web =
+        capability_names(parent.model_request_capabilities_for_test(Some("direct-exa-canary")));
+    assert_eq!(
+        &parent_web[..crate::tools::DIRECT_TOOL_NAMES.len()],
+        crate::tools::DIRECT_TOOL_NAMES
+    );
+    assert_eq!(
+        &parent_web[crate::tools::DIRECT_TOOL_NAMES.len()..],
+        crate::tools::WEB_TOOL_NAMES
+    );
+    assert_eq!(
+        capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary"))),
+        crate::tools::WORKER_TOOL_NAMES
+    );
+    let delegating_web = capability_names(
+        delegating.model_request_capabilities_for_test(Some("delegating-exa-canary")),
+    );
+    assert_eq!(
+        &delegating_web[..crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()],
+        crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
+    );
+    assert_eq!(
+        &delegating_web[crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()..],
+        crate::tools::WEB_TOOL_NAMES
     );
     assert!(matches!(
         child.messages.first(),

@@ -154,7 +154,17 @@ binary. Any branch server must use a different explicit port and store path.
    Project-last creation. Existing matching checkouts are identified without
    accepting credential-bearing remotes; mismatches and collisions are
    preserved and rejected.
-5. **Native Exa web tools — pending.**
+5. **Native Exa web tools — complete.** Top-level direct and
+   direct-with-orchestrator agents now resolve the Exa credential before each
+   ordinary model request and expose one exact request/runtime snapshot that
+   includes first-party `web_search` and `web_fetch` only while that credential
+   is usable. Traditional children, orchestrator primaries/workers, and
+   Exa-disabled direct agents retain their prior exact capability sets. The
+   native tools call only fixed Exa Search/Contents endpoints, validate and
+   bound inputs/provider output, propagate cancellation through requests,
+   retries, decoding, and result construction, prevent credential replay on
+   redirects, and redact credentials and URL queries from errors/results.
+   Fetch never connects from NAC to the model-supplied target URL.
 6. **Managed UI, readiness, image, and delivery — pending.**
 7. **Integrated exact-candidate acceptance — pending.**
 8. **Single final detached review — pending and unspent.**
@@ -211,6 +221,21 @@ cancellation. Focused verification before its commit:
 - `cargo clippy --locked -p nac-core -p nac-server --lib -- -D warnings` — passed.
 - `cargo check --locked -p nac-core -p nac-server --all-features` — passed.
 
+The native-web slice adds request-consistent conditional capability snapshots
+and fixed-provider Exa Search/Contents operations with hard validation,
+query-safe permission resources, bounded retries/output, cancellation, and
+redaction. Focused and broad verification before its commit:
+
+- `cargo test --locked -p nac-core tools::web::tests -- --nocapture` — 7 passed against loopback provider doubles, covering request/result shapes, default/ask/deny permission behavior, cancellation during retry, cross-origin redirect credential isolation, provider-error redaction, and oversized bodies.
+- `cargo test --locked -p nac-core direct_topologies_expose_exact_capability_boundaries` — 1 passed.
+- `cargo test --locked -p nac-core direct_registries_preserve_exact_topology_capabilities` — 1 passed.
+- `cargo test --locked -p nac-core model_execution_cannot_invoke_a_tool_outside_its_capability_snapshot` — 1 passed.
+- `cargo test --locked -p nac-core agent::compaction_integration_tests::projection_durability::valid_checkpoint_projects_after_restore_when_generation_is_disabled -- --exact` — 1 passed.
+- `cargo test --locked -p nac-core -q` — 1,177 passed, 9 ignored; loopback fixtures required running outside the workspace sandbox.
+- `cargo fmt --all -- --check` — passed.
+- `cargo clippy --locked -p nac-core -p nac-server --lib -- -D warnings` — passed.
+- `cargo check --locked -p nac-core -p nac-server --all-features` — passed.
+
 Historical `progress.md` and `demo_review.md` remain evidence only and are not
 acceptance authority for these new contracts.
 
@@ -228,7 +253,7 @@ No product blocker has been found.
 
 ## Exact next action
 
-Commit the audited repository-onboarding slice with exact-path staging, then
-implement the native Exa request-snapshot capability seam and first-party
-`web_search`/`web_fetch` operations from `tooling.md` without changing worker,
-traditional-child, or Exa-disabled topology.
+Commit the audited native-web slice with exact-path staging, including its
+canonical `tooling.md` input, then implement the managed UI, health/readiness
+contract, nonroot development image, production-asset publication, and
+credential-independent browser/image acceptance journey.

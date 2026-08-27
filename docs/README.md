@@ -10,6 +10,7 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [Durable direct goals](usage/direct-goals.md)
   - [Traditional child sessions](usage/traditional-children.md)
   - [Managed orchestrator sessions](usage/managed-orchestrators.md)
+  - [Native web retrieval](usage/web-retrieval.md)
 - [Configuration](configuration/README.md)
   - [Example config](configuration/example.md)
   - [Model configuration](configuration/model.md)

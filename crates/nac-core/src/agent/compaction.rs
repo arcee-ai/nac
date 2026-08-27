@@ -217,12 +217,13 @@ impl super::Agent {
     pub(super) async fn prepare_provider_view(
         &mut self,
         accumulated_usage: &mut TokenUsage,
+        tool_defs: &[crate::types::ToolDefinition],
     ) -> PreparedProviderView {
         let plan = self
             .compaction
             .as_mut()
             .expect("compaction state exists")
-            .plan(&self.messages, &self.tool_defs, CompactionReason::Auto);
+            .plan(&self.messages, tool_defs, CompactionReason::Auto);
         let CompactionPlan { prepared, decision } = plan;
         if matches!(decision, CompactionDecision::NotTriggered) {
             return prepared;

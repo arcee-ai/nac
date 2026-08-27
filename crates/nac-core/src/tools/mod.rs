@@ -36,6 +36,7 @@ pub(crate) mod orchestrator;
 pub mod read;
 pub(crate) mod subagent;
 pub mod thread;
+pub(crate) mod web;
 pub mod workset;
 pub mod write;
 
@@ -492,6 +493,9 @@ pub struct ToolRuntime {
     pub host_secret_store: Option<crate::managed::HostSecretStore>,
     pub managed_github: Option<crate::managed_github::ManagedGitHubAuth>,
     pub managed_home_root: Option<PathBuf>,
+    /// Exa key captured by the exact model-request capability snapshot that
+    /// admitted `web_search`/`web_fetch` for the following tool round.
+    pub(crate) web_credential: Option<Arc<web::ExaCredential>>,
     pub command_redactions:
         Arc<StdMutex<HashMap<String, crate::managed::CommandEnvironmentSnapshot>>>,
 }
@@ -710,6 +714,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_wait",
     "orchestrator_cancel",
 ];
+pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
 pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = [
     "read",
     "write",
@@ -1309,6 +1314,8 @@ fn worker_tool_registry(
         .register(orchestrator::ReadTool)
         .register(orchestrator::WaitTool)
         .register(orchestrator::CancelTool)
+        .register(web::WebSearchTool)
+        .register(web::WebFetchTool)
         .finish()?;
     // Keep the native instance retrievable; direct Rust callers do not need a
     // JSON round-trip to execute the same registered read operation.
@@ -1334,6 +1341,18 @@ pub fn direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
         .definitions()
 }
 
+#[cfg(test)]
+pub(crate) fn direct_tool_definitions_with_web(
+    image_read: bool,
+    web_enabled: bool,
+) -> Vec<ToolDefinition> {
+    let mut definitions = direct_tool_definitions(image_read);
+    if web_enabled {
+        definitions.extend(web::definitions());
+    }
+    definitions
+}
+
 pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     let snapshot = worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
@@ -1345,11 +1364,26 @@ pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDe
     snapshot.definitions()
 }
 
+#[cfg(test)]
+pub(crate) fn direct_with_orchestrator_tool_definitions_with_web(
+    image_read: bool,
+    web_enabled: bool,
+) -> Vec<ToolDefinition> {
+    let mut definitions = direct_with_orchestrator_tool_definitions(image_read);
+    if web_enabled {
+        definitions.extend(web::definitions());
+    }
+    definitions
+}
+
+fn is_complete_direct_capability(name: &str) -> bool {
+    DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name) || WEB_TOOL_NAMES.contains(&name)
+}
+
 pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission> {
     worker_tool_registry(false)
         .expect("built-in direct tool registration must be collision-free")
-        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
-        .expect("built-in direct capability selection must be complete")
+        .snapshot_where(|descriptor| is_complete_direct_capability(descriptor.name()))
         .admission(name)
 }
 
@@ -1448,8 +1482,7 @@ pub async fn execute_tool_with_context(
 
     let direct = worker_tool_registry(client.supports_image_tool_results())
         .expect("built-in direct tool registration must be collision-free")
-        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
-        .expect("complete direct capability selection must be available");
+        .snapshot_where(|descriptor| is_complete_direct_capability(descriptor.name()));
     if direct.contains(name) {
         return direct
             .invoke(
@@ -1549,6 +1582,37 @@ mod discovery_tool_definition_tests {
             Some("Error: unknown tool 'thread' is not available to this agent")
         );
         assert!(runtime.active_threads.names().is_empty());
+
+        runtime.web_credential = Some(Arc::new(super::web::ExaCredential::new(
+            "snapshot-only-canary".to_string(),
+        )));
+        let hidden = super::execute_tool(
+            "web_search",
+            serde_json::json!({"query":"must not reach Exa"}),
+            &runtime,
+            &crate::model::ModelClient::new_for_test(),
+        )
+        .await;
+        assert!(hidden.is_error);
+        assert_eq!(
+            hidden.content.as_text(),
+            Some("Error: unknown tool 'web_search' is not available to this agent")
+        );
+
+        runtime.allowed_tools = Some(Arc::new(HashSet::from(["web_search".to_string()])));
+        runtime.web_credential = None;
+        let missing_snapshot_credential = super::execute_tool(
+            "web_search",
+            serde_json::json!({"query":"must not reach Exa"}),
+            &runtime,
+            &crate::model::ModelClient::new_for_test(),
+        )
+        .await;
+        assert!(missing_snapshot_credential.is_error);
+        assert_eq!(
+            missing_snapshot_credential.content.as_text(),
+            Some("Error: web_search is unavailable in this capability snapshot")
+        );
     }
 
     #[test]
@@ -1623,10 +1687,31 @@ mod discovery_tool_definition_tests {
             .into_iter()
             .map(|definition| definition.function.name)
             .collect::<Vec<_>>();
+        let direct_web = super::direct_tool_definitions_with_web(false, true)
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>();
+        let delegating_web = super::direct_with_orchestrator_tool_definitions_with_web(false, true)
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>();
         assert_eq!(worker, super::WORKER_TOOL_NAMES);
         assert_eq!(direct, super::DIRECT_TOOL_NAMES);
         assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
         assert_eq!(&delegating[14..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
+        assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);
+        assert_eq!(
+            &direct_web[super::DIRECT_TOOL_NAMES.len()..],
+            super::WEB_TOOL_NAMES
+        );
+        assert_eq!(
+            &delegating_web[..super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()],
+            &delegating
+        );
+        assert_eq!(
+            &delegating_web[super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()..],
+            super::WEB_TOOL_NAMES
+        );
     }
 
     #[tokio::test]
@@ -2270,6 +2355,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         host_secret_store: None,
         managed_github: None,
         managed_home_root: None,
+        web_credential: None,
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),
     }
 }
