@@ -366,6 +366,9 @@ Rules:
 - `76be2ec refactor(core): inject environment at composition boundary` — makes
   agent/orchestrator/worker construction accept only the shared port and moves
   managed implementation assembly to server/CLI composition.
+- `7540dbd refactor: extract hardened credential store` — gives private file
+  replacement and cross-process locking an infrastructure owner shared by
+  ordinary authentication and managed persistence.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -460,6 +463,14 @@ Rules:
   implementation lock helper. The new crate suite and warning-denied core check
   pass. The complete core run passed 1,172 tests and again hit only the known
   unrelated Podman `ENOENT` fixture; its exact isolated rerun passed.
+- The new harness-independent `nac-managed` crate now owns strict opt-in host
+  configuration, write-only generic secrets, GitHub device authorization/token
+  persistence and repository discovery, and the managed command-environment
+  adapter. Server and CLI composition consume this crate directly; temporary
+  core compatibility modules are implementation-free re-exports needed only
+  until the clone workflow migrates. All 10 managed tests, warning-denied
+  Clippy for managed/core/server, and focused secret/GitHub HTTP and credential-
+  helper tests pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -475,7 +486,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the shared hardened credential-
-store slice without protected files. Then introduce the substantive
-`nac-managed` crate, beginning with managed configuration/secrets and the
-command-environment adapter while preserving public transport behavior.
+Inspect exact worktree/staged diffs and commit the first substantive managed-
+context slice without protected files. Then move the durable clone workflow
+behind explicit project-registration and Git/process ports, remove the
+temporary core managed re-exports, and rerun managed/server E2E coverage.

@@ -3,8 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 
 pub(crate) use nac_credential_store::{
-    acquire_credential_lock, read_auth_string_from_path, remove_auth_file_from_path,
-    try_acquire_credential_lock, with_credential_lock, write_auth_string_to_path, FileLock,
+    acquire_credential_lock, read_auth_string_from_path, try_acquire_credential_lock,
+    with_credential_lock, write_auth_string_to_path, FileLock,
 };
 pub(super) use nac_credential_store::{
     ensure_open_credential_file_is_safe, read_auth_bytes_from_path,

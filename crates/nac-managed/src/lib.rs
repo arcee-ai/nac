@@ -1,0 +1,8 @@
+//! Optional managed-host product configuration and GitHub integration.
+//!
+//! This crate is deliberately independent of the agent harness and HTTP
+//! delivery. Managed workflows expose narrow application-facing types that the
+//! server composition layer wires to core runtime ports.
+
+pub mod configuration;
+pub mod github;

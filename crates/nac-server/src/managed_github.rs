@@ -10,7 +10,7 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::Json;
 use nac_core::managed_clone::{ManagedCloneOperation, ManagedCloneRequest, ManagedCloneService};
-use nac_core::managed_github::{
+use nac_managed::github::{
     GitHubAuthError, GitHubAuthFailureKind, GitHubConnectionStatus, GitHubRepository,
     ManagedGitHubAuth,
 };
@@ -335,7 +335,7 @@ impl SessionManager {
 }
 
 fn configure_git_defaults(
-    managed: &nac_core::managed::ManagedHostConfig,
+    managed: &nac_managed::configuration::ManagedHostConfig,
     executable: &Path,
     status: &GitHubConnectionStatus,
 ) -> Result<GitIdentityResponse, ApiError> {
@@ -811,9 +811,9 @@ pub(crate) async fn update_git_identity_handler(
 mod tests {
     use super::*;
 
-    fn managed_config(root: &Path) -> nac_core::managed::ManagedHostConfig {
-        let config = nac_core::managed::ManagedHostConfig {
-            version: nac_core::managed::MANAGED_CONFIG_VERSION,
+    fn managed_config(root: &Path) -> nac_managed::configuration::ManagedHostConfig {
+        let config = nac_managed::configuration::ManagedHostConfig {
+            version: nac_managed::configuration::MANAGED_CONFIG_VERSION,
             logical_host_id: "git-config-test".to_string(),
             owner: Some("owner@example.test".to_string()),
             public_hostname: "nac.example.test".to_string(),
