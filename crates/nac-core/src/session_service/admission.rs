@@ -202,6 +202,7 @@ impl SessionService {
         )
     }
 
+    #[allow(clippy::result_large_err)]
     pub(super) fn try_submit_prompt_inner(
         &self,
         client_id: Option<SessionClientId>,
