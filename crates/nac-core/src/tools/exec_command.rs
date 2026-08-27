@@ -108,7 +108,7 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
         .and_then(Value::as_u64)
         .unwrap_or(8_000) as usize;
     let cwd = resolve_command_cwd(args, runtime)?;
-    let command_environment = runtime.command_environment_snapshot()?;
+    let command_environment = runtime.command_environment_snapshot().await?;
     let extra_envs = command_environment
         .iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
@@ -793,6 +793,39 @@ mod tests {
         assert!(absent.content.contains("absent"));
 
         runtime.terminal_manager.remove_all().await.unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn managed_github_token_and_home_are_command_scoped_and_only_the_token_is_redacted() {
+        let root = unique_temp_dir("managed_github_environment");
+        let state_root = root.join("state");
+        let home_root = root.join("home");
+        std::fs::create_dir_all(&state_root).unwrap();
+        std::fs::create_dir_all(&home_root).unwrap();
+        let auth = crate::managed_github::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap();
+        let token = "github-access-canary-never-visible";
+        auth.store_test_authorization(token, "refresh-canary", u64::MAX)
+            .unwrap();
+        let inherited = std::env::var_os("GH_TOKEN");
+
+        let mut runtime = test_runtime();
+        runtime.managed_github = Some(auth);
+        runtime.managed_home_root = Some(home_root.clone());
+        let result = execute_exec_command(
+            &json!({
+                "cmd": "case \"$GH_TOKEN\" in github-access-*) printf 'matched|' ;; *) printf 'missing|' ;; esac; printf '%s|%s' \"$GH_TOKEN\" \"$HOME\""
+            }),
+            &runtime,
+        )
+        .await;
+        assert!(!result.is_error, "{}", result.content);
+        let rendered = result.content.as_text().expect("text tool result");
+        assert!(rendered.contains("matched|[REDACTED]|"));
+        assert!(rendered.contains(&home_root.display().to_string()));
+        assert!(!rendered.contains(token));
+        assert_eq!(std::env::var_os("GH_TOKEN"), inherited);
+
         let _ = std::fs::remove_dir_all(root);
     }
 

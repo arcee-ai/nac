@@ -2,6 +2,7 @@ mod compaction;
 mod filesystem;
 mod light_model;
 mod managed_auth;
+mod managed_github;
 mod mcp;
 mod mcp_api;
 mod orchestration;
@@ -264,6 +265,7 @@ struct SessionManagerInner {
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
     managed_logins: managed_auth::ManagedLoginRegistry,
+    managed_github_logins: managed_github::ManagedGitHubLoginRegistry,
     #[cfg(test)]
     managed_monitor_peer_observed: tokio::sync::Notify,
 }
@@ -1474,6 +1476,7 @@ impl SessionManager {
                 workspace_diff_cache: RwLock::new(HashMap::new()),
                 git_probe_cache: RwLock::new(HashMap::new()),
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
+                managed_github_logins: managed_github::ManagedGitHubLoginRegistry::default(),
                 #[cfg(test)]
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),
@@ -1506,11 +1509,18 @@ impl SessionManager {
     }
 
     fn attach_managed_command_environment(&self, run_config: &mut runtime::OrchestratorRunConfig) {
-        run_config.set_host_secret_store(
-            self.inner
-                .managed_host
-                .as_ref()
-                .map(nac_core::managed::ManagedHostConfig::secret_store),
+        let Some(managed) = self.inner.managed_host.as_ref() else {
+            run_config.set_managed_host_context(None, None, None);
+            return;
+        };
+        run_config.set_managed_host_context(
+            Some(managed.secret_store()),
+            Some(
+                managed
+                    .github_auth()
+                    .expect("validated managed GitHub configuration"),
+            ),
+            Some(managed.home_root.clone()),
         );
     }
 
@@ -4916,6 +4926,21 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
             managed_auth::poll_login_handler,
             managed_auth::cancel_login_handler
         ))
+        .routes(routes!(
+            managed_github::status_handler,
+            managed_github::disconnect_handler
+        ))
+        .routes(routes!(managed_github::start_login_handler))
+        .routes(routes!(
+            managed_github::poll_login_handler,
+            managed_github::cancel_login_handler
+        ))
+        .routes(routes!(managed_github::repositories_handler))
+        .routes(routes!(managed_github::branches_handler))
+        .routes(routes!(
+            managed_github::git_identity_handler,
+            managed_github::update_git_identity_handler
+        ))
         .routes(routes!(list_managed_secrets_handler))
         .routes(routes!(
             put_managed_secret_handler,
@@ -7935,6 +7960,8 @@ mod tests {
         ("DELETE", "/auth/{provider}"),
         ("DELETE", "/auth/{provider}/login/{login_id}"),
         ("DELETE", "/credentials/{name}"),
+        ("DELETE", "/managed/github"),
+        ("DELETE", "/managed/github/login/{login_id}"),
         ("DELETE", "/managed/secrets/{name}"),
         ("DELETE", "/mcp_library/servers/{server_name}"),
         ("DELETE", "/model-configs/{config_id}"),
@@ -7953,6 +7980,14 @@ mod tests {
         ("GET", "/credentials"),
         ("GET", "/fs/browse"),
         ("GET", "/health"),
+        ("GET", "/managed/github"),
+        ("GET", "/managed/github/git-identity"),
+        ("GET", "/managed/github/login/{login_id}"),
+        ("GET", "/managed/github/repositories"),
+        (
+            "GET",
+            "/managed/github/repositories/{owner}/{repository}/branches",
+        ),
         ("GET", "/managed/secrets"),
         ("GET", "/mcp_library/library"),
         ("GET", "/mcp_library/servers"),
@@ -7999,6 +8034,7 @@ mod tests {
         ("PATCH", "/ssh-configs/{config_id}"),
         ("POST", "/auth/{provider}/login"),
         ("POST", "/credentials"),
+        ("POST", "/managed/github/login"),
         ("POST", "/mcp_library/servers"),
         ("POST", "/mcp_library/servers/test"),
         ("POST", "/model-configs"),
@@ -8038,6 +8074,7 @@ mod tests {
         ("POST", "/ssh-configs"),
         ("POST", "/ssh/browse"),
         ("PUT", "/credentials/{name}"),
+        ("PUT", "/managed/github/git-identity"),
         ("PUT", "/managed/secrets/{name}"),
         ("PUT", "/projects/order"),
         ("PUT", "/sessions/order"),
@@ -8080,6 +8117,8 @@ mod tests {
     fn concrete_api_path(path: &str) -> String {
         path.replace("{provider}", "arcee")
             .replace("{login_id}", "missing-login")
+            .replace("{owner}", "arcee-ai")
+            .replace("{repository}", "missing-repository")
             .replace("{name}", "MISSING_CREDENTIAL")
             .replace("{server_name}", "missing-server")
             .replace("{config_id}", "missing-config")
@@ -16831,6 +16870,65 @@ model = "gpt-5.2"
         assert!(!String::from_utf8(response_body(listed).await.to_vec())
             .unwrap()
             .contains("DEMO_TOKEN"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn managed_github_status_is_metadata_only_and_unmanaged_hosts_fail_closed() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("managed_github_status");
+        let nac_home = root.join("nac-home");
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let _env = ScopedModelEnv::isolated(&nac_home, None);
+
+        let unmanaged = router(test_manager(&root));
+        let response = get_response(unmanaged, "/managed/github", None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let manager = test_managed_manager(&root);
+        let app = router(manager.clone());
+        let response = get_response(app.clone(), "/managed/github", None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+        assert!(body.contains("\"configured\":true"));
+        assert!(body.contains("\"connected\":false"));
+        assert!(!body.contains("access_token"));
+        assert!(!body.contains("refresh_token"));
+
+        manager
+            .managed_github_auth()
+            .unwrap()
+            .store_test_authorization(
+                "server-status-access-canary",
+                "server-status-refresh-canary",
+                u64::MAX,
+            )
+            .unwrap();
+        let connected = get_response(app.clone(), "/managed/github", None).await;
+        assert_eq!(connected.status(), StatusCode::OK);
+        let connected = String::from_utf8(response_body(connected).await.to_vec()).unwrap();
+        assert!(connected.contains("\"connected\":true"));
+        assert!(connected.contains("\"git_configured\":true"));
+        assert!(connected.contains("42+test-user@users.noreply.github.com"));
+        assert!(!connected.contains("server-status-access-canary"));
+        assert!(!connected.contains("server-status-refresh-canary"));
+
+        let disconnected = app
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::DELETE)
+                    .uri("/managed/github")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(disconnected.status(), StatusCode::OK);
+        let body = String::from_utf8(response_body(disconnected).await.to_vec()).unwrap();
+        assert!(body.contains("\"connected\":false"));
+        assert!(!body.contains("token"));
 
         let _ = std::fs::remove_dir_all(root);
     }

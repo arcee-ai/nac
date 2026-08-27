@@ -582,6 +582,8 @@ impl Agent {
                 permission_broker: None,
                 goal_runtime,
                 host_secret_store: None,
+                managed_github: None,
+                managed_home_root: None,
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
             },
             event_sink: config.event_sink,
@@ -602,8 +604,15 @@ impl Agent {
 
     /// Attach the Managed NAC host-secret provider after server-owned session
     /// construction. This does not alter the model-visible capability set.
-    pub fn set_host_secret_store(&mut self, store: Option<crate::managed::HostSecretStore>) {
+    pub fn set_managed_host_context(
+        &mut self,
+        store: Option<crate::managed::HostSecretStore>,
+        github: Option<crate::managed_github::ManagedGitHubAuth>,
+        home_root: Option<PathBuf>,
+    ) {
         self.tool_runtime.host_secret_store = store;
+        self.tool_runtime.managed_github = github;
+        self.tool_runtime.managed_home_root = home_root;
     }
 
     #[cfg(test)]

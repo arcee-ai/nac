@@ -1,6 +1,6 @@
 use std::{
     ffi::OsString,
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal, Read, Write},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     process,
@@ -68,6 +68,9 @@ enum RootCommand {
 
     #[command(name = "__worker", hide = true)]
     ManagedWorker(ManagedWorkerCli),
+
+    #[command(name = "__github-credential", hide = true)]
+    GitHubCredential(GitHubCredentialCli),
 }
 
 #[derive(Args)]
@@ -210,6 +213,14 @@ struct ManagedWorkerCli {
     #[arg(long, hide = true)]
     managed_secret_root: Option<PathBuf>,
 
+    /// Internal Managed NAC GitHub App client ID for worker command auth.
+    #[arg(long, hide = true, requires = "managed_secret_root")]
+    managed_github_client_id: Option<String>,
+
+    /// Internal persistent owner home used by worker commands.
+    #[arg(long, hide = true, requires = "managed_secret_root")]
+    managed_home_root: Option<PathBuf>,
+
     /// Internal workspace cwd used for managed worker path resolution.
     #[arg(long, hide = true)]
     workspace_cwd: Option<PathBuf>,
@@ -241,6 +252,18 @@ struct ManagedWorkerCli {
 
     #[command(flatten)]
     sandbox: SandboxArgs,
+}
+
+#[derive(Args)]
+struct GitHubCredentialCli {
+    #[arg(long, hide = true)]
+    state_root: PathBuf,
+
+    #[arg(long, hide = true)]
+    client_id: String,
+
+    #[arg(hide = true)]
+    operation: String,
 }
 
 #[derive(clap::Args)]
@@ -447,10 +470,55 @@ async fn run() -> Result<()> {
     match cli.command {
         None => run_server(cli.server).await,
         Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
+        Some(RootCommand::GitHubCredential(helper)) => run_github_credential(helper).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth).await,
         Some(RootCommand::ArceeAuth(auth)) => run_arcee_auth_cli(auth).await,
         Some(RootCommand::Upgrade(upgrade)) => run_upgrade_cli(upgrade).await,
     }
+}
+
+async fn run_github_credential(cli: GitHubCredentialCli) -> Result<()> {
+    if cli.operation != "get" {
+        return Ok(());
+    }
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .context("failed to read Git credential request")?;
+    if let Some(token) = resolve_github_credential(&cli, &input).await? {
+        println!("username=x-access-token");
+        println!("password={}", token.secret());
+    }
+    Ok(())
+}
+
+async fn resolve_github_credential(
+    cli: &GitHubCredentialCli,
+    input: &str,
+) -> Result<Option<nac_core::managed_github::GitHubAccessToken>> {
+    let mut protocol = None;
+    let mut host = None;
+    for line in input.lines() {
+        if let Some((name, value)) = line.split_once('=') {
+            match name {
+                "protocol" => protocol = Some(value),
+                "host" => host = Some(value),
+                _ => {}
+            }
+        }
+    }
+    let github_host = host
+        .and_then(|host| host.split(':').next())
+        .is_some_and(|host| host.eq_ignore_ascii_case("github.com"));
+    if protocol != Some("https") || !github_host {
+        return Ok(None);
+    }
+    let auth =
+        nac_core::managed_github::ManagedGitHubAuth::new(&cli.state_root, cli.client_id.clone())?;
+    let token = auth.current_token().await?.ok_or_else(|| {
+        anyhow!("GitHub is not connected; reconnect GitHub before using HTTPS Git")
+    })?;
+    Ok(Some(token))
 }
 
 async fn run_server(cli: ServerCli) -> Result<()> {
@@ -658,10 +726,21 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         },
     };
     let mut run_config = runtime::build_managed_worker_config(options, &config).await?;
-    run_config.set_host_secret_store(
-        cli.managed_secret_root
-            .map(nac_core::managed::HostSecretStore::new),
-    );
+    let secret_store = cli
+        .managed_secret_root
+        .as_ref()
+        .map(nac_core::managed::HostSecretStore::new);
+    let github = match (
+        cli.managed_secret_root.as_ref(),
+        cli.managed_github_client_id,
+    ) {
+        (Some(root), Some(client_id)) => Some(nac_core::managed_github::ManagedGitHubAuth::new(
+            root, client_id,
+        )?),
+        (_, None) => None,
+        (None, Some(_)) => unreachable!("clap requires a managed secret root"),
+    };
+    run_config.set_managed_host_context(secret_store, github, cli.managed_home_root);
     runtime::run_managed_worker(run_config).await
 }
 fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, bool)>> {
@@ -1135,6 +1214,47 @@ thread_timeout_secs = 7200
             managed.managed_config.as_deref(),
             Some(std::path::Path::new("/etc/nac/managed.toml"))
         );
+    }
+
+    #[tokio::test]
+    async fn github_credential_helper_is_https_github_scoped_and_returns_the_current_token() {
+        let root = std::env::temp_dir().join(format!(
+            "nac-github-helper-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let auth = nac_core::managed_github::ManagedGitHubAuth::new(&root, "Iv1.test").unwrap();
+        auth.store_test_authorization("helper-access-canary", "helper-refresh-canary", u64::MAX)
+            .unwrap();
+        let cli = GitHubCredentialCli {
+            state_root: root.clone(),
+            client_id: "Iv1.test".to_string(),
+            operation: "get".to_string(),
+        };
+
+        let token = resolve_github_credential(
+            &cli,
+            "protocol=https\nhost=github.com\npath=arcee-ai/repo.git\n\n",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(token.secret(), "helper-access-canary");
+        assert!(resolve_github_credential(
+            &cli,
+            "protocol=https\nhost=example.com\npath=arcee-ai/repo.git\n\n"
+        )
+        .await
+        .unwrap()
+        .is_none());
+        assert!(
+            resolve_github_credential(&cli, "protocol=http\nhost=github.com\n\n")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

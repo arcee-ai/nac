@@ -216,6 +216,14 @@ pub(super) async fn run_worker(
     if let Some(store) = runtime.host_secret_store.as_ref() {
         command.arg("--managed-secret-root").arg(store.state_root());
     }
+    if let Some(github) = runtime.managed_github.as_ref() {
+        command
+            .arg("--managed-github-client-id")
+            .arg(github.client_id());
+    }
+    if let Some(home_root) = runtime.managed_home_root.as_ref() {
+        command.arg("--managed-home-root").arg(home_root);
+    }
     if runtime.backend.workspace_cwd_is_local() {
         command.current_dir(&runtime.workspace_cwd);
     }
@@ -509,9 +517,13 @@ mod tests {
         let executable = root.join("worker.sh");
         let script = format!(
             r#"#!/bin/sh
+printf '%s' "${{DEMO_TOKEN-unset}}" > '{root}/inherited-secret'
+printf '%s\n' "$@" > '{root}/argv'
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --managed-secret-root) printf '%s' "$2" > '{root}/secret-root'; shift 2 ;;
+    --managed-github-client-id) printf '%s' "$2" > '{root}/github-client-id'; shift 2 ;;
+    --managed-home-root) printf '%s' "$2" > '{root}/home-root'; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -530,6 +542,9 @@ done
         runtime.config_cwd = root.clone();
         runtime.worker_executable = Some(executable);
         runtime.host_secret_store = Some(store);
+        runtime.managed_github =
+            Some(crate::managed_github::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap());
+        runtime.managed_home_root = Some(root.join("managed-home"));
         let no_sources = Vec::<String>::new();
         let no_skills = Vec::<String>::new();
         let run = run_worker(
@@ -554,6 +569,21 @@ done
             std::fs::read_to_string(root.join("secret-root")).unwrap(),
             state_root.display().to_string()
         );
+        assert_eq!(
+            std::fs::read_to_string(root.join("github-client-id")).unwrap(),
+            "Iv1.test"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("home-root")).unwrap(),
+            root.join("managed-home").display().to_string()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("inherited-secret")).unwrap(),
+            "unset"
+        );
+        assert!(!std::fs::read_to_string(root.join("argv"))
+            .unwrap()
+            .contains("managed-worker-canary-never-in-argv"));
         let _ = std::fs::remove_dir_all(root);
     }
 

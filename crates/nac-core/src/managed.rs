@@ -97,6 +97,13 @@ impl ManagedHostConfig {
         HostSecretStore::new(&self.state_root)
             .with_reserved_names(self.model_credential_environment_names.iter().cloned())
     }
+
+    pub fn github_auth(&self) -> Result<crate::managed_github::ManagedGitHubAuth> {
+        crate::managed_github::ManagedGitHubAuth::new(
+            &self.state_root,
+            self.github_client_id.clone(),
+        )
+    }
 }
 
 fn validate_nonblank(field: &str, value: &str) -> Result<()> {
@@ -134,12 +141,14 @@ pub struct HostSecretSummary {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandEnvironmentSnapshot {
     values: BTreeMap<String, String>,
+    redactions: Vec<String>,
 }
 
 impl CommandEnvironmentSnapshot {
     pub fn empty() -> Self {
         Self {
             values: BTreeMap::new(),
+            redactions: Vec::new(),
         }
     }
 
@@ -157,11 +166,24 @@ impl CommandEnvironmentSnapshot {
         self.values.is_empty()
     }
 
+    pub(crate) fn insert_dedicated(
+        &mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+        redact: bool,
+    ) {
+        let value = value.into();
+        if redact && !value.is_empty() {
+            self.redactions.push(value.clone());
+        }
+        self.values.insert(name.into(), value);
+    }
+
     pub fn redact(&self, text: &str) -> String {
         let mut redacted = text.to_string();
         let mut values = self
-            .values
-            .values()
+            .redactions
+            .iter()
             .filter(|value| !value.is_empty())
             .collect::<Vec<_>>();
         values.sort_by_key(|value| std::cmp::Reverse(value.len()));
@@ -225,8 +247,9 @@ impl HostSecretStore {
             .secrets
             .into_iter()
             .map(|(name, secret)| (name, secret.value))
-            .collect();
-        Ok(CommandEnvironmentSnapshot { values })
+            .collect::<BTreeMap<_, _>>();
+        let redactions = values.values().cloned().collect();
+        Ok(CommandEnvironmentSnapshot { values, redactions })
     }
 
     pub fn put(&self, name: &str, value: &str) -> Result<HostSecretSummary> {
