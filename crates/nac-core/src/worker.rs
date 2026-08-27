@@ -21,14 +21,11 @@ pub struct ManagedWorkerRunConfig {
 }
 
 impl ManagedWorkerRunConfig {
-    pub fn set_managed_host_context(
+    pub fn set_command_environment_provider(
         &mut self,
-        store: Option<crate::managed::HostSecretStore>,
-        github: Option<crate::managed_github::ManagedGitHubAuth>,
-        home_root: Option<PathBuf>,
+        provider: Option<std::sync::Arc<dyn nac_contracts::CommandEnvironmentProvider>>,
     ) {
-        self.agent
-            .set_managed_host_context(store, github, home_root);
+        self.agent.set_command_environment_provider(provider);
     }
 }
 

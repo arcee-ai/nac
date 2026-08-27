@@ -611,17 +611,13 @@ impl Agent {
         })
     }
 
-    /// Attach the Managed NAC host-secret provider after server-owned session
+    /// Attach an optional process-environment provider after session
     /// construction. This does not alter the model-visible capability set.
-    pub fn set_managed_host_context(
+    pub fn set_command_environment_provider(
         &mut self,
-        store: Option<crate::managed::HostSecretStore>,
-        github: Option<crate::managed_github::ManagedGitHubAuth>,
-        home_root: Option<PathBuf>,
+        provider: Option<Arc<dyn nac_contracts::CommandEnvironmentProvider>>,
     ) {
-        self.tool_runtime.command_environment = Some(Arc::new(
-            crate::managed::ManagedCommandEnvironmentProvider::new(store, github, home_root),
-        ));
+        self.tool_runtime.command_environment = provider;
     }
 
     /// Build one immutable model-request capability view. The Exa credential

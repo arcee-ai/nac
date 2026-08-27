@@ -359,6 +359,10 @@ Rules:
   inward `nac-contracts` ownership boundary for immutable per-spawn process
   environments and exact-value output redaction without coupling tool/runtime
   consumers to managed credential stores.
+- `1850ff3 refactor(core): inject command environment provider` — replaces the
+  three managed-specific fields in `ToolRuntime` with one provider-neutral
+  capability while preserving spawn snapshots, retained-output redaction, and
+  worker reconstruction metadata.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -439,6 +443,12 @@ Rules:
   CRATE=nac-core` is green. The complete core suite passed 1,181 tests before
   one independent Podman process fixture returned `ENOENT`; that exact fixture
   passed immediately when rerun, confirming the slice's affected contracts.
+- Agent, orchestrator-run, and worker-run construction now accept only the
+  shared provider port. Managed credential objects are assembled at the outer
+  server/CLI composition boundary; no core execution constructor names or
+  accepts managed store/GitHub/home arguments. Both warning-denied crate checks,
+  the full server suite (150 library plus 23 CLI tests), and both focused worker
+  propagation/noninheritance tests pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -454,7 +464,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the provider-neutral runtime
-slice without protected files. Then replace the remaining concrete managed
-construction signature with provider injection at the server/runtime boundary
-so the substantive `nac-managed` crate can own the adapter and workflows.
+Inspect exact worktree/staged diffs and commit the provider-neutral construction
+slice without protected files. Then introduce the substantive `nac-managed`
+crate, beginning with managed configuration/secrets and the command-environment
+adapter while preserving core compatibility exports during consumer migration.

@@ -14,6 +14,7 @@ name = "nac-web"
 path = "src/main.rs"
 
 [dependencies]
+nac-contracts = { path = "../nac-contracts" }
 nac-core = { path = "../nac-core", features = ["openapi"] }
 anyhow.workspace = true
 async-stream = "0.3"
