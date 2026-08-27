@@ -1,0 +1,13 @@
+[package]
+name = "nac-credential-store"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+fs2 = "0.4"
+libc.workspace = true
+uuid = { workspace = true, features = ["v4"] }

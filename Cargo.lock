@@ -1650,6 +1650,7 @@ dependencies = [
  "image",
  "libc",
  "nac-contracts",
+ "nac-credential-store",
  "openssh-sftp-client",
  "parking_lot",
  "portable-pty",
@@ -1668,6 +1669,16 @@ dependencies = [
  "toml_edit",
  "url",
  "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "nac-credential-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fs2",
+ "libc",
  "uuid",
 ]
 
