@@ -1,18 +1,13 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { ManagedHostModal, type ManagedTab } from "@/app/components/modals/ManagedHostModal";
-import { ManagedRepositoryModal } from "@/app/components/modals/ManagedRepositoryModal";
-import { useManagedHostStatus } from "@/app/services/queries";
-import type { ManagedHostStatus } from "@/app/types/api";
-
-interface ManagedHostActions {
-  status: ManagedHostStatus | null;
-  isManaged: boolean;
-  openSettings: () => void;
-  addRepository: () => void;
-}
-
-const ManagedHostContext = createContext<ManagedHostActions | null>(null);
+import { useManagedHostStatus } from "@/app/features/managed/queries";
+import {
+  ManagedHostContext,
+  type ManagedHostActions,
+} from "@/app/features/managed/controller/useManagedHost";
+import type { ManagedTab } from "@/app/features/managed/model";
+import { ManagedHostModal } from "@/app/features/managed/presentation/ManagedHostModal";
+import { ManagedRepositoryModal } from "@/app/features/managed/presentation/ManagedRepositoryModal";
 
 export function ManagedHostProvider({ children }: { children: React.ReactNode }) {
   const statusQuery = useManagedHostStatus();
@@ -78,10 +73,4 @@ export function ManagedHostProvider({ children }: { children: React.ReactNode })
       ) : null}
     </ManagedHostContext.Provider>
   );
-}
-
-export function useManagedHost(): ManagedHostActions {
-  const context = useContext(ManagedHostContext);
-  if (!context) throw new Error("useManagedHost must be used within ManagedHostProvider");
-  return context;
 }

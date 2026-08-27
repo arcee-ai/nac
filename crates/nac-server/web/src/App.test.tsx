@@ -13,7 +13,7 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
 vi.mock("@/app/providers/SessionActionsProvider", () => ({
   SessionActionsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock("@/app/providers/ManagedHostProvider", () => ({
+vi.mock("@/app/features/managed/controller/ManagedHostProvider", () => ({
   ManagedHostProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock("@/app/providers/ToastProvider", () => ({

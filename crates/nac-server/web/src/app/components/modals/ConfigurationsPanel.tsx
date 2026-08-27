@@ -16,7 +16,7 @@ import {
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
-import { ManagedAuthCallout } from "@/app/components/modals/ManagedAuthCallout";
+import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
 import { PROTOCOL_ITEMS } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { ResolvedRows } from "@/app/components/modals/ResolvedRows";
@@ -24,7 +24,7 @@ import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type Source, SourceMenu } from "@/app/components/modals/SourceMenu";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, modelItems, type Validation } from "@/app/lib/apiKey";
 import { type CatalogPick, defaultCatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { errorMessage } from "@/app/providers/ToastProvider";
+import { managedQueryKeys } from "@/app/features/managed/queries";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
 import type { DeviceLoginStarted, ManagedAuthProvider } from "@/app/types/api";
@@ -86,11 +87,11 @@ export function useDeviceLogin(onSuccess?: () => void) {
         if (outcome.state === "complete") {
           active.current = null;
           setState({ status: "idle" });
-          void client.invalidateQueries({ queryKey: queryKeys.managedAuth });
+          void client.invalidateQueries({ queryKey: managedQueryKeys.auth });
           // The model index is only readable once signed in, so the picker
           // stays empty until this refetch lands.
           void client.invalidateQueries({
-            queryKey: queryKeys.managedProviderModelsAll,
+            queryKey: managedQueryKeys.providerModelsAll,
           });
           // A resolved configuration carries the same index, read on the server
           // with the login that has just been replaced. Without this it keeps

@@ -21,7 +21,7 @@ import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useManagedHost } from "@/app/providers/ManagedHostProvider";
+import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 
 // Figma "HeaderSurface": the same ground-to-transparent gradient stacked twice,
 // spanning the bar plus an overhang that fades the content scrolling below.

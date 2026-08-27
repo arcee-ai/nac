@@ -286,6 +286,19 @@ Rules:
 - Rebuild and commit production assets with the slice that changes sources.
 - Verification: generator drift test, typecheck/lint/format/Vitest,
   `make test-assets`, and managed production Playwright journeys.
+- The managed-host UI now has one feature boundary with pure model helpers,
+  TanStack query ownership, controller hooks/context, and presentation panels.
+  The former 456-line host modal is a 50-line layout/navigation shell over
+  focused status, GitHub, and secret panels; repository onboarding retains its
+  polling, abort, invalidation, toast, and navigation behavior in a 322-line
+  feature-owned workflow. Shared query exports remain as compatibility seams
+  for unaffected consumers while managed implementations live with the
+  feature. All feature production files are below 500 lines.
+- Frontend typecheck, lint, format check, and all 178 Vitest cases pass. The
+  production build is green; the first `make test-assets` run failed only at
+  its intentional checked-in bundle drift assertion after producing the new
+  hashed assets. The source and synchronized bundle are staged together, after
+  which the complete asset gate must be rerun from a clean candidate.
 
 ### M7 — Durable agent navigation (pending)
 
@@ -889,7 +902,7 @@ Rules:
 
 ## Exact next action
 
-Commit the first M6 generated-contract slice with exact-path staging. Then move
-managed frontend state, queries, controller hooks, and presentation under a
-real feature boundary, split the two managed workflow modals by responsibility,
-run the frontend/asset gates, and commit the synchronized production bundle.
+Stage only the managed feature extraction, its import updates, the synchronized
+production bundle, and this handoff; inspect the staged diff and commit the M6
+feature slice. Rerun `make test-assets` from that clean candidate, then begin
+the M7 root/nested repository guides and focused architecture decisions.

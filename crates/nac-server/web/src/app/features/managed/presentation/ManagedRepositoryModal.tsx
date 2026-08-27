@@ -18,10 +18,16 @@ import {
   Select,
 } from "@/app/atoms";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import { cloneIsRunning, repositoryIdentity } from "@/app/features/managed/model";
+import {
+  managedQueryKeys,
+  useManagedGitHub,
+  useManagedHostStatus,
+} from "@/app/features/managed/queries";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
-import { queryKeys, useManagedGitHub, useManagedHostStatus } from "@/app/services/queries";
+import { queryKeys } from "@/app/services/queries";
 import type { ManagedCloneOperation, ManagedGitHubRepository } from "@/app/types/api";
 
 export function ManagedRepositoryModal({
@@ -53,16 +59,16 @@ export function ManagedRepositoryModal({
     enabled: open && github.data?.connected === true,
     retry: false,
   });
-  const identity = selected?.full_name.split("/") ?? [];
+  const identity = repositoryIdentity(selected?.full_name);
   const branches = useQuery({
     queryKey: ["managed-github-branches", selected?.full_name],
-    queryFn: ({ signal }) => api.listManagedGitHubBranches(identity[0], identity[1], signal),
-    enabled: open && identity.length === 2,
+    queryFn: ({ signal }) => api.listManagedGitHubBranches(identity![0], identity![1], signal),
+    enabled: open && identity !== null,
     retry: false,
   });
 
   useEffect(() => {
-    if (!operation || operation.status !== "running") return undefined;
+    if (!operation || !cloneIsRunning(operation)) return undefined;
     let stopped = false;
     const controller = new AbortController();
     const poll = async () => {
@@ -75,7 +81,7 @@ export function ManagedRepositoryModal({
             if (next.status === "completed") {
               await Promise.all([
                 queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
+                queryClient.invalidateQueries({ queryKey: managedQueryKeys.hostStatus }),
               ]);
               toast.success(`${next.project_name} is ready`);
               onClose();
@@ -127,7 +133,7 @@ export function ManagedRepositoryModal({
   };
 
   const cancel = async () => {
-    if (!operation || operation.status !== "running") return;
+    if (!operation || !cloneIsRunning(operation)) return;
     try {
       setOperation(await api.cancelManagedClone(operation.operation_id));
     } catch (cancelError) {
@@ -135,7 +141,7 @@ export function ManagedRepositoryModal({
     }
   };
 
-  const busy = starting || operation?.status === "running";
+  const busy = starting || cloneIsRunning(operation);
   const branchItems = (branches.data?.branches ?? []).map((name) => ({ id: name, label: name }));
 
   return (
