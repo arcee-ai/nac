@@ -17,7 +17,7 @@ impl SkillRegistry {
         }
 
         let mut skills = HashMap::new();
-        let mut shadowed = HashSet::new();
+        let mut shadowed = std::collections::BTreeSet::new();
 
         for source in sources {
             let visible_root = match visible_root_for_source(&source, visibility) {

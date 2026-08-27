@@ -112,6 +112,9 @@ zero-backlog async guard last.
   proofs: all 33 production blocks compiled on macOS plus dormant Linux pidfd,
   rename-exchange, and process-group paths. Proofs name concrete descriptor,
   buffer, C-string, ownership, initialization, or syscall preconditions.
+- `iter_over_hash_type`: complete. One order-independent set transfer uses
+  `drain`; the seven observable cleanup, diagnostic, warning, projection,
+  coverage, diff, and measurement paths now use sorted keys or ordered maps.
 
 ## Verification and next action
 
@@ -164,5 +167,9 @@ The `undocumented_unsafe_blocks` slice passes `make format-check`, `make lint`,
 `git diff --check`, and the full Rust workspace suite with the same green test
 inventory recorded above.
 
-Next: commit this exact lint boundary, then add `iter_over_hash_type` and run
-autofix before any manual repair.
+The `iter_over_hash_type` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+Next: commit this exact lint boundary, then add `unwrap_used` with the narrow
+test-only allowance and run autofix before any manual repair.

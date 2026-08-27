@@ -430,12 +430,14 @@ impl<'a> SessionCatalogApplication<'a> {
         let mut pending = Vec::new();
         {
             let cache = self.manager.inner.workspace_diff_cache.read().await;
-            for key in targets.keys() {
-                match cache.get(key) {
+            let mut target_keys: Vec<_> = targets.keys().cloned().collect();
+            target_keys.sort();
+            for key in target_keys {
+                match cache.get(&key) {
                     Some(entry) if entry.is_fresh(now) => {
-                        totals_by_key.insert(key.clone(), entry.totals.clone());
+                        totals_by_key.insert(key, entry.totals.clone());
                     }
-                    _ => pending.push(key.clone()),
+                    _ => pending.push(key),
                 }
             }
         }
