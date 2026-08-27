@@ -13,7 +13,10 @@ use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
 use crate::tools::{ThreadCancellation, ToolRuntime};
 const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
-// SSH cleanup can spend five seconds in the kill request; Podman can spend two.
+// Must outlast SANDBOX_KILL_TIMEOUT (5s) plus ACK/reap. Host SIGKILL of the
+// worker tree does not stop Podman/SSH guest groups, so this wait is the
+// cooperative remote-kill window. Stop UI is already optimistic and does
+// not wait on this grace.
 const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
 
@@ -200,6 +203,26 @@ pub(crate) fn worker_model_arguments_for_test(client: &ModelClient) -> Vec<Strin
         .collect()
 }
 
+async fn reap_after_cooperative_worker_exit(
+    process_tree: &mut ProcessTreeGuard,
+    child: &mut tokio::process::Child,
+    status: std::process::ExitStatus,
+) -> Option<String> {
+    process_tree.mark_leader_reaped();
+    let worker_reported_incomplete =
+        status.code() == Some(crate::worker::MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT);
+    match process_tree.terminate(child).await {
+        Ok(()) if worker_reported_incomplete => {
+            Some("worker command shutdown incomplete".to_string())
+        }
+        Ok(()) => None,
+        Err(error) if worker_reported_incomplete => Some(format!(
+            "worker command shutdown incomplete; worker cleanup incomplete: {error}"
+        )),
+        Err(error) => Some(format!("worker cleanup incomplete: {error}")),
+    }
+}
+
 pub(super) async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
@@ -367,6 +390,7 @@ pub(super) async fn run_worker(
         _ = &mut deadline => WaitOutcome::TimedOut,
     };
     let mut cooperatively_cancelled = false;
+    let mut cooperative_cleanup_error = None;
     if matches!(outcome, WaitOutcome::Cancelled) {
         if let Some(mut stdin) = control_stdin.take() {
             let _ = stdin.write_all(b"cancel\n").await;
@@ -384,22 +408,29 @@ pub(super) async fn run_worker(
         };
         if acknowledged {
             if let Ok(wait_result) = timeout(COOPERATIVE_CLEANUP_GRACE, child.wait()).await {
-                wait_result?;
-                process_tree.mark_leader_reaped();
+                let status = wait_result?;
                 cooperatively_cancelled = true;
+                cooperative_cleanup_error =
+                    reap_after_cooperative_worker_exit(&mut process_tree, &mut child, status).await;
             }
         }
     } else if matches!(outcome, WaitOutcome::Exited(_)) {
-        process_tree.mark_leader_reaped();
         if cancellation.is_cancelled() {
-            outcome = WaitOutcome::Cancelled;
+            let status = match std::mem::replace(&mut outcome, WaitOutcome::Cancelled) {
+                WaitOutcome::Exited(wait_result) => wait_result?,
+                _ => unreachable!("checked Exited above"),
+            };
             cooperatively_cancelled = true;
+            cooperative_cleanup_error =
+                reap_after_cooperative_worker_exit(&mut process_tree, &mut child, status).await;
+        } else {
+            process_tree.mark_leader_reaped();
         }
     }
 
     let timed_out = matches!(outcome, WaitOutcome::TimedOut);
     let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
-    let mut cleanup_error = None;
+    let mut cleanup_error = cooperative_cleanup_error;
     let mut force_reader_shutdown = false;
     if timed_out || (cancelled && !cooperatively_cancelled) {
         match process_tree.terminate(&mut child).await {
@@ -589,8 +620,7 @@ wait
             .expect("managed workers never became ready");
             runtime
                 .active_threads
-                .cancel_and_drain(Some((&runtime.store_path, "session")))
-                .await
+                .begin_cancellation(Some((&runtime.store_path, "session")))
         };
 
         let (worker_a, worker_b, cancellation) =

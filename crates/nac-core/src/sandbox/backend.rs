@@ -161,11 +161,23 @@ impl ExecutionBackend {
         }
     }
 
-    pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
+    pub async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
+        match self {
+            Self::Local { .. } => Ok(None),
+            Self::Sandbox(session) => session.read_published_pid(pidfile).await,
+            Self::Ssh(ssh) => ssh.read_published_pid(pidfile).await,
+        }
+    }
+
+    pub async fn terminal_pipe_kill(
+        &self,
+        pidfile: &str,
+        published_pid: Option<&str>,
+    ) -> Result<()> {
         match self {
             Self::Local { .. } => Ok(()),
-            Self::Sandbox(session) => session.terminal_pipe_kill(pidfile).await,
-            Self::Ssh(ssh) => ssh.terminal_pipe_kill(pidfile).await,
+            Self::Sandbox(session) => session.terminal_pipe_kill(pidfile, published_pid).await,
+            Self::Ssh(ssh) => ssh.terminal_pipe_kill(pidfile, published_pid).await,
         }
     }
 

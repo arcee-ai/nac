@@ -452,6 +452,7 @@ impl Agent {
                 mcp: config.mcp,
                 skills: config.skills,
                 terminal_manager,
+                active_tools: Arc::new(crate::tools::ActiveToolRegistry::default()),
                 command_cancellation: crate::tools::ThreadCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
@@ -523,6 +524,17 @@ impl Agent {
     /// launch. The clone is cheap (the registry is behind `Arc`).
     pub fn skills(&self) -> Option<Arc<SkillRegistry>> {
         self.tool_runtime.skills.clone()
+    }
+
+    /// Fold in-flight worker spend into `last_usage` so a cancel mid-tools
+    /// still persists the tokens the UI already showed. Zero readings are
+    /// dropped rather than stored as a completed usage.
+    pub(crate) async fn commit_pending_usage(&mut self) {
+        let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
+        let mut accumulated = self.last_usage.take().unwrap_or_default();
+        accumulated.add_cost_saturating(&worker_usage);
+        *worker_usage = TokenUsage::default();
+        self.last_usage = accumulated.has_spend().then_some(accumulated);
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
@@ -832,6 +844,12 @@ impl Agent {
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
+                {
+                    let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
+                    accumulated_usage.add_cost_saturating(&worker_usage);
+                    *worker_usage = TokenUsage::default();
+                }
+                self.last_usage = accumulated_usage.has_spend().then_some(accumulated_usage);
                 let error = anyhow!("worker command cancelled");
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
@@ -850,7 +868,9 @@ impl Agent {
                 *wu = TokenUsage::default();
             }
 
-            self.last_usage = Some(accumulated_usage.clone());
+            self.last_usage = accumulated_usage
+                .has_spend()
+                .then_some(accumulated_usage.clone());
 
             // Transcript commit point (tool results): the complete parallel
             // batch is logged atomically before any of it enters the
@@ -885,6 +905,40 @@ impl Agent {
 
     pub(crate) fn command_cancellation(&self) -> crate::tools::ThreadCancellation {
         self.tool_runtime.command_cancellation.clone()
+    }
+
+    pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
+        self.tool_runtime.terminal_manager.clone()
+    }
+
+    pub(crate) fn active_tools_handle(&self) -> Arc<crate::tools::ActiveToolRegistry> {
+        Arc::clone(&self.tool_runtime.active_tools)
+    }
+
+    pub(crate) async fn confirm_command_shutdown(&self) -> Result<()> {
+        let one_shot = self
+            .tool_runtime
+            .terminal_manager
+            .wait_for_one_shot_shutdown()
+            .await;
+        self.tool_runtime.active_tools.wait_for_shutdown().await;
+        let sessions = self
+            .tool_runtime
+            .terminal_manager
+            .terminate_sessions()
+            .await;
+        let mut failures = Vec::new();
+        if let Err(error) = one_shot {
+            failures.push(error.to_string());
+        }
+        if let Err(error) = sessions {
+            failures.push(error.to_string());
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(failures.join("\n")))
+        }
     }
 
     #[cfg(test)]

@@ -14,6 +14,20 @@ use tokio::time::timeout;
 use super::{MountSpec, SandboxAvailability, SandboxAvailabilityStatus, SandboxSpec};
 use crate::workspace::first_stderr_line;
 
+/// Host-side wait for `SANDBOX_KILL_WRAPPER`.
+///
+/// The wrapper can sleep up to two seconds on its own (two 20 × 50ms polls)
+/// before exiting, then still has to scan `/proc` and deliver signals. Podman
+/// machine and SSH round-trips sit on top of that, so a 2s host deadline can
+/// fire while a successful kill is still running and report a false cleanup
+/// failure.
+pub(crate) const SANDBOX_KILL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Host-side read of a guest pidfile while pinning a published PID.
+/// Remote Podman (`ssh://` machine) round-trips can exceed a few hundred
+/// milliseconds; keep this well under `SANDBOX_KILL_TIMEOUT`.
+pub(crate) const SANDBOX_PIDFILE_READ_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Probes whether podman can be used on this host right now: first the binary
 /// (`podman --version`), then the runtime (`podman info`, which fails while a
 /// macOS `podman machine` is stopped or never initialized).
@@ -93,6 +107,9 @@ fn start_guidance() -> String {
 }
 
 pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
+if ! (set -C; printf '%s' starting > "$pidfile") 2>/dev/null; then
+  exit 130
+fi
 if command -v setsid >/dev/null 2>&1; then
   setsid bash -c "$1" &
 else
@@ -100,21 +117,68 @@ else
   bash -c "$1" &
 fi
 pid=$!
-printf '%s' "$pid" > "$pidfile"
+pidtmp="${pidfile}.ready.$$"
+if ! printf '%s' "$pid" > "$pidtmp" || ! mv -f "$pidtmp" "$pidfile"; then
+  rm -f "$pidtmp"
+  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null
+  rm -f "$pidfile"
+  exit 125
+fi
 wait "$pid"
 status=$?
 rm -f "$pidfile"
 exit "$status""#;
 
 pub(crate) const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$1
-printf '%s' "$$" > "$pidfile"
+if ! (set -C; printf '%s' starting > "$pidfile") 2>/dev/null; then
+  exit 130
+fi
+pidtmp="${pidfile}.ready.$$"
+if ! printf '%s' "$$" > "$pidtmp" || ! mv -f "$pidtmp" "$pidfile"; then
+  rm -f "$pidtmp" "$pidfile"
+  exit 125
+fi
 bash -i
 status=$?
 rm -f "$pidfile"
 exit "$status""#;
 
+/// `$1` is the guest pidfile. `$2` is the PID the host observed when the
+/// exec/PTY wrapper published a numeric identity (empty before that).
+///
+/// A published pin is the stop identity: later pidfile bytes — missing,
+/// `cancelled`, garbage, or a different number — cannot retarget the kill
+/// or fake a successful pre-start tombstone. Without a pin, only a
+/// noclobber create of `cancelled` counts as pre-start; an already-present
+/// `cancelled` is guest-writable and must fail closed.
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
-pid=$(cat "$pidfile" 2>/dev/null) || exit 0
+pinned=$2
+pid=
+if [ -n "$pinned" ]; then
+  case "$pinned" in
+    *[!0-9]*) exit 1 ;;
+  esac
+  [ "$pinned" -gt 0 ] || exit 1
+  pid=$pinned
+else
+  attempts=0
+  while :; do
+    if pid=$(cat "$pidfile" 2>/dev/null); then
+      case "$pid" in
+        cancelled) exit 1 ;;
+        starting|'') ;;
+        *[!0-9]*) exit 1 ;;
+        *) [ "$pid" -gt 0 ] || exit 1; break ;;
+      esac
+    elif (set -C; printf '%s' cancelled > "$pidfile") 2>/dev/null; then
+      exit 0
+    fi
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge 20 ] && exit 1
+    sleep 0.05
+  done
+fi
 if [ -n "$pid" ]; then
   descendants() {
     parent=$1
@@ -134,6 +198,42 @@ if [ -n "$pid" ]; then
     kill -KILL "$child" 2>/dev/null || true
   done
   kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  is_live() {
+    target=$1
+    [ -r "/proc/$target/stat" ] || return 1
+    rest=$(sed 's/^.*) //' "/proc/$target/stat" 2>/dev/null) || return 1
+    set -- $rest
+    case "${1:-}" in
+      Z*) return 1 ;;
+    esac
+    return 0
+  }
+  group_has_live() {
+    pgid=$1
+    for stat in /proc/[0-9]*/stat; do
+      [ -r "$stat" ] || continue
+      rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
+      set -- $rest
+      [ "${3:-}" = "$pgid" ] || continue
+      case "${1:-}" in
+        Z*) continue ;;
+      esac
+      return 0
+    done
+    return 1
+  }
+  attempts=0
+  while :; do
+    alive=0
+    group_has_live "$pid" && alive=1
+    for target in $pid $pids; do
+      is_live "$target" && alive=1
+    done
+    [ "$alive" -eq 0 ] && break
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge 20 ] && exit 1
+    sleep 0.05
+  done
 fi
 rm -f "$pidfile""#;
 
@@ -394,7 +494,35 @@ impl PodmanSession {
         (command, pidfile)
     }
 
-    pub(crate) async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
+    pub(crate) async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
+        let mut command = Command::new("podman");
+        command
+            .arg("exec")
+            .arg(&self.container_name)
+            .arg("cat")
+            .arg("--")
+            .arg(pidfile)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let output = match timeout(SANDBOX_PIDFILE_READ_TIMEOUT, command.output()).await {
+            Ok(Ok(output)) => output,
+            _ => return Ok(None),
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(parse_published_pid(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
+    }
+
+    pub(crate) async fn terminal_pipe_kill(
+        &self,
+        pidfile: &str,
+        published_pid: Option<&str>,
+    ) -> Result<()> {
         let mut command = Command::new("podman");
         command
             .arg("exec")
@@ -404,10 +532,18 @@ impl PodmanSession {
             .arg(SANDBOX_KILL_WRAPPER)
             .arg("nac-kill")
             .arg(pidfile)
+            .arg(published_pid.unwrap_or(""))
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
 
-        let _ = timeout(Duration::from_secs(2), command.status()).await;
+        let status = timeout(SANDBOX_KILL_TIMEOUT, command.status())
+            .await
+            .map_err(|_| anyhow!("podman command cleanup timed out"))??;
+        if !status.success() {
+            bail!("podman command cleanup exited with {status}");
+        }
         Ok(())
     }
 
@@ -646,11 +782,22 @@ pub(crate) fn make_sandbox_pidfile() -> String {
     format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())
 }
 
+pub(crate) fn parse_published_pid(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if trimmed.parse::<u64>().ok()? == 0 {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 fn bind_mount_arg(mount: &MountSpec) -> Result<OsString> {
     for (kind, path) in [("host", &mount.host), ("guest", &mount.guest)] {
         if path.as_os_str().as_encoded_bytes().contains(&b',') {
             bail!(
-                "podman bind-mount {kind} path '{}' contains ','; \
+                "invalid podman bind-mount {kind} path '{}': contains ','; \
                  move the path before launching the sandbox",
                 path.display()
             );
@@ -983,14 +1130,98 @@ mod tests {
     fn sandbox_wrappers_track_and_kill_process_group() {
         assert!(SANDBOX_EXEC_WRAPPER.contains("setsid bash -c"));
         assert!(
-            SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidfile\""),
+            SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidtmp\""),
             "exec wrapper: {SANDBOX_EXEC_WRAPPER}"
         );
-        assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidfile\""));
+        assert!(SANDBOX_EXEC_WRAPPER.contains("mv -f \"$pidtmp\" \"$pidfile\""));
+        assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidtmp\""));
+        assert!(SANDBOX_PTY_WRAPPER.contains("mv -f \"$pidtmp\" \"$pidfile\""));
         assert!(SANDBOX_PTY_WRAPPER.contains("bash -i"));
         assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
+
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
+        assert!(SANDBOX_KILL_WRAPPER.contains("is_live()"));
+        assert!(SANDBOX_KILL_WRAPPER.contains("group_has_live()"));
+        assert!(!SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
+        assert!(SANDBOX_KILL_WRAPPER.contains("[ \"$attempts\" -ge 20 ] && exit 1"));
+        assert!(
+            SANDBOX_KILL_WRAPPER.contains("cancelled) exit 1 ;;"),
+            "unpinned kill must not treat a guest-written cancelled pidfile as success"
+        );
+        assert!(
+            SANDBOX_KILL_TIMEOUT > Duration::from_millis(20 * 50 * 2),
+            "host kill deadline must outlast the wrapper's two 20×50ms wait loops"
+        );
+    }
+
+    #[test]
+    fn kill_wrapper_tombstones_a_missing_pidfile() {
+        let pidfile =
+            std::env::temp_dir().join(format!("nac-missing-pidfile-{}.pid", uuid::Uuid::new_v4()));
+        let marker =
+            std::env::temp_dir().join(format!("nac-late-command-{}", uuid::Uuid::new_v4()));
+        let kill_status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_KILL_WRAPPER)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .status()
+            .unwrap();
+
+        assert!(kill_status.success());
+        assert_eq!(std::fs::read_to_string(&pidfile).unwrap(), "cancelled");
+
+        let exec_status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_EXEC_WRAPPER)
+            .arg("nac-exec")
+            .arg(format!("printf ran > '{}'", shell_escape_path(&marker)))
+            .arg(&pidfile)
+            .status()
+            .unwrap();
+
+        assert!(!exec_status.success());
+        assert!(!marker.exists());
+        let _ = std::fs::remove_file(pidfile);
+    }
+
+    #[test]
+    fn kill_wrapper_rejects_an_empty_pidfile() {
+        let pidfile =
+            std::env::temp_dir().join(format!("nac-empty-pidfile-{}.pid", uuid::Uuid::new_v4()));
+        std::fs::write(&pidfile, "").unwrap();
+
+        let status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_KILL_WRAPPER)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .status()
+            .unwrap();
+
+        assert!(!status.success());
+        let _ = std::fs::remove_file(pidfile);
+    }
+
+    #[test]
+    fn kill_wrapper_rejects_a_cancelled_pidfile_without_a_pin() {
+        let pidfile = std::env::temp_dir().join(format!(
+            "nac-cancelled-pidfile-{}.pid",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&pidfile, "cancelled").unwrap();
+
+        let status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_KILL_WRAPPER)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .status()
+            .unwrap();
+
+        assert!(!status.success());
+        let _ = std::fs::remove_file(pidfile);
     }
 }

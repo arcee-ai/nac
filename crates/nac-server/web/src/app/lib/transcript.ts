@@ -139,6 +139,8 @@ interface BuildContext {
   threadEpisodes: Record<string, AgentEvent[][]>;
   /** How often each name is dispatched across the whole transcript. */
   dispatchCounts: Record<string, number>;
+  /** Latest dispatch of this name exists only because the user stopped. */
+  cancelledNames: Set<string>;
 }
 
 /**
@@ -312,6 +314,69 @@ function toolResultsForAssistant(
 }
 
 /**
+ * Thread names whose latest dispatch exists only because the user stopped the
+ * run. A later dispatch of the same name — finished or still in flight —
+ * drops off this set, so Continue does not keep painting the live card as
+ * cancelled.
+ *
+ * A stop does not always write a tool result for every dispatch — a name that
+ * never started has no `[tool call cancelled by user]` row. Those still belong
+ * here: the run ended without them, so a checkmark would claim work that never
+ * ran.
+ */
+export function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
+  const cancelled = new Set<string>();
+  messages.forEach((message, index) => {
+    if (message.role !== "assistant") return;
+    const results = toolResultsForAssistant(messages, index);
+    const threadCalls = (message.tool_calls ?? []).filter(
+      (call) => call.function?.name === "thread",
+    );
+    if (!threadCalls.length) return;
+
+    const turnCancelled = assistantTurnCancelled(messages, index);
+    let anyCancelMarker = false;
+    for (const call of threadCalls) {
+      const result = results.get(call.id);
+      const name = dispatchThreadName(call);
+      if (result == null) {
+        if (!turnCancelled) cancelled.delete(name);
+        continue;
+      }
+      if (result.startsWith(TOOL_CALL_CANCELLED_MARKER)) {
+        cancelled.add(name);
+        anyCancelMarker = true;
+      } else {
+        cancelled.delete(name);
+      }
+    }
+
+    if (!anyCancelMarker && !turnCancelled) return;
+    for (const call of threadCalls) {
+      if (results.get(call.id) != null) continue;
+      cancelled.add(dispatchThreadName(call));
+    }
+  });
+  return cancelled;
+}
+
+/** True when this assistant turn is followed by the run-cancelled marker. */
+function assistantTurnCancelled(
+  messages: SessionSnapshotResponse["messages"],
+  assistantIndex: number,
+): boolean {
+  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "tool") continue;
+    if (message.role === "assistant") {
+      return typeof message.content === "string" && message.content.trim() === RUN_CANCELLED_MARKER;
+    }
+    return false;
+  }
+  return false;
+}
+
+/**
  * @param episode Which dispatch of this name the card stands for, from 0.
  * @param batchNames Thread names in this assistant message (for in-batch deps).
  * @param finishedNames Names in this batch that have finished (tool result or
@@ -355,8 +420,17 @@ function describeThread(
       ? false
       : episodeEvents?.some((event) => event.type === "thread_finished");
   const finishedLive = live?.status === "finished";
+  // A follow-up that re-dispatches a stopped name is the live episode now.
+  // The previous cancel marker still belongs on the older card; it must not
+  // keep this one on Close while the worker is running.
+  const liveRunning = live?.status === "running" && !live.cancelled;
   const cancelled =
-    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true || Boolean(live?.cancelled);
+    !liveRunning &&
+    (result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
+      Boolean(live?.cancelled) ||
+      (result == null &&
+        episode === (ctx.dispatchCounts[name] ?? 1) - 1 &&
+        ctx.cancelledNames.has(name)));
   const state: ThreadState = cancelled
     ? "cancelled"
     : live?.isError
@@ -509,6 +583,7 @@ export function buildTranscript(
     liveThreads,
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts,
+    cancelledNames: cancelledThreadNames(messages),
   };
 
   const turns: TranscriptTurn[] = [];

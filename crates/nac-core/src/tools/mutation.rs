@@ -25,7 +25,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::tools::{
-    remote_file_lock_busy, ToolResult, ToolRuntime, REMOTE_FILE_LOCK_RETRY_INTERVAL,
+    remote_file_lock_busy, ThreadCancellation, ToolResult, ToolRuntime,
+    REMOTE_FILE_LOCK_RETRY_INTERVAL,
 };
 
 const FILE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(1);
@@ -333,6 +334,7 @@ pub(crate) fn read_error(path: &str, error: io::Error) -> ToolResult {
     error_tool_result(MutationError::io(path, error))
 }
 
+#[cfg(test)]
 pub(crate) async fn edit_local(
     path: PathBuf,
     path_display: String,
@@ -346,10 +348,31 @@ pub(crate) async fn edit_local(
             expected_revision,
             edits,
         },
+        None,
     )
     .await
 }
 
+pub(crate) async fn edit_local_cancellable(
+    path: PathBuf,
+    path_display: String,
+    expected_revision: String,
+    edits: Vec<EditSpec>,
+    cancellation: &ThreadCancellation,
+) -> ToolResult {
+    mutate_local(
+        path,
+        path_display,
+        MutationRequest::Edit {
+            expected_revision,
+            edits,
+        },
+        Some(cancellation),
+    )
+    .await
+}
+
+#[cfg(test)]
 pub(crate) async fn write_local(
     path: PathBuf,
     path_display: String,
@@ -363,15 +386,37 @@ pub(crate) async fn write_local(
             expected_revision,
             content,
         },
+        None,
     )
     .await
 }
-pub(crate) async fn edit_mounted(
+
+pub(crate) async fn write_local_cancellable(
+    path: PathBuf,
+    path_display: String,
+    content: String,
+    expected_revision: Option<String>,
+    cancellation: &ThreadCancellation,
+) -> ToolResult {
+    mutate_local(
+        path,
+        path_display,
+        MutationRequest::Write {
+            expected_revision,
+            content,
+        },
+        Some(cancellation),
+    )
+    .await
+}
+
+pub(crate) async fn edit_mounted_cancellable(
     root: PathBuf,
     relative: PathBuf,
     path_display: String,
     expected_revision: String,
     edits: Vec<EditSpec>,
+    cancellation: &ThreadCancellation,
 ) -> ToolResult {
     mutate_mounted(
         root,
@@ -381,10 +426,12 @@ pub(crate) async fn edit_mounted(
             expected_revision,
             edits,
         },
+        Some(cancellation),
     )
     .await
 }
 
+#[cfg(test)]
 pub(crate) async fn write_mounted(
     root: PathBuf,
     relative: PathBuf,
@@ -400,6 +447,28 @@ pub(crate) async fn write_mounted(
             expected_revision,
             content,
         },
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn write_mounted_cancellable(
+    root: PathBuf,
+    relative: PathBuf,
+    path_display: String,
+    content: String,
+    expected_revision: Option<String>,
+    cancellation: &ThreadCancellation,
+) -> ToolResult {
+    mutate_mounted(
+        root,
+        relative,
+        path_display,
+        MutationRequest::Write {
+            expected_revision,
+            content,
+        },
+        Some(cancellation),
     )
     .await
 }
@@ -541,7 +610,12 @@ enum MutationRequest {
     },
 }
 
-async fn mutate_local(path: PathBuf, path_display: String, request: MutationRequest) -> ToolResult {
+async fn mutate_local(
+    path: PathBuf,
+    path_display: String,
+    request: MutationRequest,
+    cancellation: Option<&ThreadCancellation>,
+) -> ToolResult {
     let target = match tokio::task::spawn_blocking(move || resolve_target_path(&path)).await {
         Ok(Ok(path)) => path,
         Ok(Err(error)) => return error_tool_result(MutationError::io(&path_display, error)),
@@ -552,7 +626,7 @@ async fn mutate_local(path: PathBuf, path_display: String, request: MutationRequ
             ))
         }
     };
-    let lock = match acquire_path_lock(&target).await {
+    let lock = match acquire_path_lock(&target, cancellation).await {
         Ok(lock) => lock,
         Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
     };
@@ -573,6 +647,7 @@ async fn mutate_mounted(
     relative: PathBuf,
     path_display: String,
     request: MutationRequest,
+    cancellation: Option<&ThreadCancellation>,
 ) -> ToolResult {
     #[cfg(unix)]
     {
@@ -587,7 +662,7 @@ async fn mutate_mounted(
             Ok(root) => lexical_normalize(&root.join(&relative)),
             Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
         };
-        let lock = match acquire_path_lock(&identity).await {
+        let lock = match acquire_path_lock(&identity, cancellation).await {
             Ok(lock) => lock,
             Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
         };
@@ -1273,7 +1348,10 @@ impl Drop for TempCleanup {
     }
 }
 
-async fn acquire_path_lock(target: &Path) -> io::Result<File> {
+async fn acquire_path_lock(
+    target: &Path,
+    cancellation: Option<&ThreadCancellation>,
+) -> io::Result<File> {
     let target = target.to_path_buf();
     let file = tokio::task::spawn_blocking(move || {
         let lock_path = lock_path(&target)?;
@@ -1282,10 +1360,30 @@ async fn acquire_path_lock(target: &Path) -> io::Result<File> {
     .await
     .map_err(|error| io::Error::other(format!("file-lock task failed: {error}")))??;
     loop {
+        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "file mutation cancelled",
+            ));
+        }
         match FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(file),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                tokio::time::sleep(FILE_LOCK_POLL_INTERVAL).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(FILE_LOCK_POLL_INTERVAL) => {}
+                    _ = async {
+                        if let Some(cancellation) = cancellation {
+                            cancellation.cancelled().await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    } => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "file mutation cancelled",
+                        ));
+                    }
+                }
             }
             Err(error) => return Err(error),
         }
@@ -2273,6 +2371,55 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[tokio::test]
+    async fn cancellation_stops_a_mutation_waiting_for_the_path_lock() {
+        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file.txt");
+        fs::write(&path, "before").unwrap();
+        let target = path.canonicalize().unwrap();
+        let (entered, release) = gate_before_publish(target);
+        let first_path = path.clone();
+        let first = tokio::spawn(async move {
+            write_local(
+                first_path,
+                "file.txt".into(),
+                "first".into(),
+                Some(revision(b"before")),
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || entered.recv().unwrap())
+            .await
+            .unwrap();
+
+        let cancellation = ThreadCancellation::default();
+        let second_cancellation = cancellation.clone();
+        let second_path = path.clone();
+        let second = tokio::spawn(async move {
+            write_local_cancellable(
+                second_path,
+                "file.txt".into(),
+                "second".into(),
+                Some(revision(b"before")),
+                &second_cancellation,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancellation.cancel();
+        let second = tokio::time::timeout(Duration::from_secs(1), second)
+            .await
+            .expect("cancelled mutation remained blocked")
+            .unwrap();
+        assert!(second.is_error);
+
+        release.send(()).unwrap();
+        assert!(!first.await.unwrap().is_error);
+        assert_eq!(fs::read(&path).unwrap(), b"first");
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn mutation_process_helper() {
         let Some(target) = std::env::var_os("NAC_TEST_MUTATION_TARGET") else {
@@ -2282,7 +2429,9 @@ mod tests {
         let target = PathBuf::from(target);
         let resolved = target.canonicalize().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let lock = runtime.block_on(acquire_path_lock(&resolved)).unwrap();
+        let lock = runtime
+            .block_on(acquire_path_lock(&resolved, None))
+            .unwrap();
         fs::write(&ready, b"ready").unwrap();
         std::thread::sleep(Duration::from_millis(100));
         mutate_locked(

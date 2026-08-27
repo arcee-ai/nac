@@ -28,6 +28,7 @@ import {
   formatTokensCompact,
   runMetrics,
   sessionEnvLabel,
+  tokenUsage,
 } from "@/app/lib/format";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
@@ -50,7 +51,16 @@ import {
   useSlashCommands,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
-import { pushLocalEvent, useRunUsage, useRunning } from "@/app/store/runtimeStore";
+import {
+  liftSessionSpend,
+  pushLocalEvent,
+  useCancelArmed,
+  useLastElapsedMs,
+  useRunStartedAt,
+  useRunUsage,
+  useRunning,
+  useSessionSpend,
+} from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -253,6 +263,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
   const running = useRunning();
+  const stopping = useCancelArmed();
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
@@ -271,9 +282,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const listboxId = useId();
 
   // The snapshot only accounts for a run once it ends, so while one is going
-  // the stream's own tally is what keeps these counters moving.
+  // (or Stopping, before persist lands) the stream's own tally keeps the
+  // session spend from dropping back to the previous turn. After Stop the
+  // snapshot can briefly be zeros — sessionSpend is the floor that never
+  // drops while this tab is open.
   const runUsage = useRunUsage();
-  const metrics = runMetrics(snapshot, entry, running ? runUsage : null);
+  const sessionSpend = useSessionSpend();
+  useEffect(() => {
+    liftSessionSpend(tokenUsage(snapshot));
+  }, [snapshot]);
+  const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
   const context = contextGauge(
@@ -281,14 +299,18 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
   );
   const now = useNow(1000, running);
-  const elapsedMs = metrics.startedAt ? now - metrics.startedAt : metrics.lastResponseMs;
+  const runStartedAt = useRunStartedAt();
+  const lastElapsedMs = useLastElapsedMs();
+  // Stop freezes the clock at click; Stopping must not keep adding cleanup time.
+  const liveElapsed = running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
+  const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
   const sshStatus = useSshConnectionStatus(sshTarget);
   const connectSsh = useSshConnect();
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
-  const busy = submitRun.isPending || compactSession.isPending || running;
+  const busy = submitRun.isPending || compactSession.isPending || running || stopping;
   const canSend = Boolean(value.trim()) && !busy;
 
   const resize = useCallback(() => {
@@ -623,11 +645,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     </Tooltip>
   );
 
-  const sendIcon = <Icon iconName={running ? IconName.Stop : IconName.Plane} />;
-  const sendLabel = running ? "Stop run" : "Send";
-  const sendType = running ? "button" : "submit";
-  const sendDisabled = !running && !canSend;
-  const onSend = running ? () => void stop() : undefined;
+  const sendIcon = <Icon iconName={running || stopping ? IconName.Stop : IconName.Plane} />;
+  const sendLabel = stopping ? "Stopping run" : running ? "Stop run" : "Send";
+  const sendType = running || stopping ? "button" : "submit";
+  const sendDisabled = stopping || (!running && !canSend);
+  const onSend = running && !stopping ? () => void stop() : undefined;
 
   const sendButton = isMobile ? (
     <StickyButton
@@ -636,6 +658,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       content={ButtonContent.Icon}
       type={sendType}
       disabled={sendDisabled}
+      loading={stopping}
       aria-label={sendLabel}
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
@@ -650,6 +673,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       content={ButtonContent.Icon}
       type={sendType}
       disabled={sendDisabled}
+      loading={stopping}
       aria-label={sendLabel}
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}

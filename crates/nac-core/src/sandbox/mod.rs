@@ -448,9 +448,19 @@ impl SandboxSession {
         }
     }
 
-    pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
+    pub async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
         match self {
-            Self::Podman(inner) => inner.terminal_pipe_kill(pidfile).await,
+            Self::Podman(inner) => inner.read_published_pid(pidfile).await,
+        }
+    }
+
+    pub async fn terminal_pipe_kill(
+        &self,
+        pidfile: &str,
+        published_pid: Option<&str>,
+    ) -> Result<()> {
+        match self {
+            Self::Podman(inner) => inner.terminal_pipe_kill(pidfile, published_pid).await,
         }
     }
 
@@ -488,13 +498,16 @@ pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountS
     let host = absolutize_host_path(host_raw, cwd)
         .with_context(|| format!("invalid host path in mount '{}'", raw))?;
     if !host.exists() {
-        return Err(anyhow!("mount source '{}' does not exist", host.display()));
+        return Err(anyhow!(
+            "invalid mount source '{}': path does not exist",
+            host.display()
+        ));
     }
 
     let guest = PathBuf::from(guest_raw);
     if !guest.is_absolute() {
         return Err(anyhow!(
-            "mount target '{}' must be an absolute path inside the sandbox",
+            "invalid mount target '{}': must be an absolute path inside the sandbox",
             guest.display()
         ));
     }
@@ -577,7 +590,7 @@ pub fn build_sandbox_spec(
     let workdir = PathBuf::from(workdir);
     if !workdir.is_absolute() {
         return Err(anyhow!(
-            "sandbox workdir '{}' must be an absolute path",
+            "invalid sandbox workdir '{}': must be an absolute path",
             workdir.display()
         ));
     }

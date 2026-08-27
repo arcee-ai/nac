@@ -52,25 +52,70 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const CURSOR_VERSION: u64 = 1;
 
 #[cfg(test)]
-static ACTIVE_SEARCH_TASKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ACTIVE_SEARCH_TASKS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, usize>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 #[cfg(test)]
-static PAUSE_SEARCH_TASKS: AtomicBool = AtomicBool::new(false);
+static PAUSED_SEARCH_TASKS: std::sync::LazyLock<std::sync::Mutex<HashSet<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
 
 #[cfg(test)]
-struct ActiveSearchTask;
+fn set_search_task_paused(path: &str, paused: bool) {
+    let mut paths = PAUSED_SEARCH_TASKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if paused {
+        paths.insert(path.to_string());
+    } else {
+        paths.remove(path);
+    }
+}
+
+#[cfg(test)]
+fn search_task_paused(path: &str) -> bool {
+    PAUSED_SEARCH_TASKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .contains(path)
+}
+
+#[cfg(test)]
+fn active_search_tasks(path: &str) -> usize {
+    ACTIVE_SEARCH_TASKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(path)
+        .copied()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+struct ActiveSearchTask(String);
 
 #[cfg(test)]
 impl ActiveSearchTask {
-    fn begin() -> Self {
-        ACTIVE_SEARCH_TASKS.fetch_add(1, Ordering::AcqRel);
-        Self
+    fn begin(path: &str) -> Self {
+        *ACTIVE_SEARCH_TASKS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(path.to_string())
+            .or_default() += 1;
+        Self(path.to_string())
     }
 }
 
 #[cfg(test)]
 impl Drop for ActiveSearchTask {
     fn drop(&mut self) {
-        ACTIVE_SEARCH_TASKS.fetch_sub(1, Ordering::AcqRel);
+        let mut tasks = ACTIVE_SEARCH_TASKS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(count) = tasks.get_mut(&self.0) else {
+            return;
+        };
+        *count -= 1;
+        if *count == 0 {
+            tasks.remove(&self.0);
+        }
     }
 }
 
@@ -194,6 +239,10 @@ impl SearchCancellation {
     fn flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.0)
     }
+
+    fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 impl Drop for SearchCancellation {
@@ -276,6 +325,9 @@ impl LocalFs {
 
 impl WorkspaceFs {
     async fn open(runtime: &ToolRuntime) -> SearchResult<Self> {
+        if runtime.command_cancellation.is_cancelled() {
+            return Err(SearchError::new("search_cancelled", "search cancelled"));
+        }
         match runtime.backend.as_ref() {
             ExecutionBackend::Local { workspace_cwd } => {
                 let root = tokio::fs::canonicalize(workspace_cwd)
@@ -405,23 +457,53 @@ impl WorkspaceFs {
                 let _ = tokio::io::copy(&mut stderr, &mut sink).await;
             });
         }
-        let sftp = Sftp::new(stdin, stdout, SftpOptions::default())
-            .await
-            .map_err(|error| {
+        let handshaken = {
+            let handshake = Sftp::new(stdin, stdout, SftpOptions::default());
+            tokio::pin!(handshake);
+            tokio::select! {
+                result = &mut handshake => Some(result),
+                _ = runtime.command_cancellation.cancelled() => None,
+            }
+        };
+        let sftp = match handshaken {
+            Some(result) => result.map_err(|error| {
                 SearchError::new(
                     "backend_protocol",
                     format!("SSH SFTP handshake failed: {error}"),
                 )
-            })?;
+            })?,
+            None => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Err(SearchError::new("search_cancelled", "search cancelled"));
+            }
+        };
         let requested = ssh.sftp_workspace_path();
         let mut fs = sftp.fs();
-        let root = fs.canonicalize(&requested).await.map_err(|error| {
-            SearchError::at(
-                "unreadable_path",
-                error.to_string(),
-                requested.display().to_string(),
-            )
-        })?;
+        let canonicalized = {
+            let canonicalize = fs.canonicalize(&requested);
+            tokio::pin!(canonicalize);
+            tokio::select! {
+                result = &mut canonicalize => Some(result),
+                _ = runtime.command_cancellation.cancelled() => None,
+            }
+        };
+        let root = match canonicalized {
+            Some(result) => result.map_err(|error| {
+                SearchError::at(
+                    "unreadable_path",
+                    error.to_string(),
+                    requested.display().to_string(),
+                )
+            })?,
+            None => {
+                drop(fs);
+                let _ = sftp.close().await;
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Err(SearchError::new("search_cancelled", "search cancelled"));
+            }
+        };
         Ok(Self::Remote(RemoteFs {
             root: root.clone(),
             absolute_roots: vec![requested, root.clone()],
@@ -903,7 +985,13 @@ impl WorkspaceFs {
             if let Some(sftp) = remote.sftp.take() {
                 let _ = sftp.close().await;
             }
-            let _ = remote.child.wait().await;
+            match remote.child.try_wait() {
+                Ok(Some(_)) => {}
+                _ => {
+                    let _ = remote.child.start_kill();
+                    let _ = remote.child.wait().await;
+                }
+            }
         }
     }
 }
@@ -1108,13 +1196,25 @@ async fn execute_inner(
     let cancellation = SearchCancellation::new();
     let cancellation_flag = cancellation.flag();
     let mut fs = WorkspaceFs::open(runtime).await?;
-    let result = match tool {
-        "glob" => run_glob(&mut fs, &args, &cancellation_flag).await,
-        "grep" => run_grep(&mut fs, &args, &cancellation_flag).await,
-        _ => Err(SearchError::new(
-            "invalid_arguments",
-            "unknown discovery tool",
-        )),
+    let result = {
+        let search = async {
+            match tool {
+                "glob" => run_glob(&mut fs, &args, &cancellation_flag).await,
+                "grep" => run_grep(&mut fs, &args, &cancellation_flag).await,
+                _ => Err(SearchError::new(
+                    "invalid_arguments",
+                    "unknown discovery tool",
+                )),
+            }
+        };
+        tokio::pin!(search);
+        tokio::select! {
+            result = &mut search => result,
+            _ = runtime.command_cancellation.cancelled() => {
+                cancellation.cancel();
+                search.await
+            }
+        }
     };
     fs.close().await;
     result
@@ -1799,9 +1899,9 @@ async fn search_file(
     let initial_materialized_bytes = *materialized_bytes;
     match tokio::task::spawn_blocking(move || {
         #[cfg(test)]
-        let _active_search = ActiveSearchTask::begin();
+        let _active_search = ActiveSearchTask::begin(&path);
         #[cfg(test)]
-        while PAUSE_SEARCH_TASKS.load(Ordering::Acquire) && !cancellation.load(Ordering::Acquire) {
+        while search_task_paused(&path) && !cancellation.load(Ordering::Acquire) {
             std::thread::yield_now();
         }
         let mut materialized_bytes = initial_materialized_bytes;

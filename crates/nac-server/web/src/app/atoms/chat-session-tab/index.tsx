@@ -72,16 +72,17 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
         content={ButtonContent.Icon}
         title="Close tab"
         aria-label={`Close ${title}`}
-        onClick={onDismiss}
-        // Hidden rather than transparent, so the title gets the room back
-        // whenever the pointer is elsewhere. Keyboard focus reveals it too, but
-        // only the visible kind: clicking a tab leaves its title button focused,
-        // and plain `:focus` would strand the button on screen long after the
-        // pointer moved away.
-        //
-        // `.btn`'s own `display` is unlayered CSS, so a plain `hidden` never
-        // reaches it.
-        className="shrink-0 !hidden group-hover:!inline-flex group-has-[:focus-visible]:!inline-flex absolute right-0 top-1/2 -translate-y-1/2"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDismiss();
+        }}
+        // Stay in layout (`display` is `.btn`'s) and fade in on hover. Toggling
+        // `hidden` never wins against unlayered `.btn { display: inline-flex }`,
+        // so the close control would stay gone even with the pointer on the tab.
+        // Keyboard focus reveals it too, but only the visible kind: clicking a
+        // tab leaves its title button focused, and plain `:focus` would strand
+        // the button on screen long after the pointer moved away.
+        className="absolute right-0 top-1/2 -translate-y-1/2 shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto"
       >
         <Icon iconName={IconName.Close} />
       </Button>

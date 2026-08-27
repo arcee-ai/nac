@@ -535,6 +535,12 @@ impl TokenUsage {
             .saturating_add(self.cache_write_tokens)
     }
 
+    /// True when this record accounts for billed tokens or a priced cost.
+    /// A default/zero usage is a missing reading, not a completed one.
+    pub(crate) fn has_spend(&self) -> bool {
+        self.billable_tokens() > 0 || self.cost.total > 0
+    }
+
     /// Accept a provider context total only when all represented usage fields
     /// fit in the supported range and the total covers their full sum. When
     /// the provider omits `total_tokens` (zero) but does report component

@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::io::BufRead;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use crate::tools::ThreadCancellation;
+use crate::tools::{ActiveToolRegistry, ThreadCancellation};
 use anyhow::Result;
 
 use crate::agent::Agent;
@@ -11,6 +12,29 @@ use crate::store::{self, WorkerContext};
 use crate::types::Message;
 
 pub(crate) const MANAGED_WORKER_CANCEL_ACK: &str = "__NAC_CANCEL_ACK__";
+/// Worker process exit when cancel ACK succeeded but command shutdown did not.
+/// Distinct from panic (`101`) so the parent can fail closed on leftover work
+/// without treating a dead host tree after a crash as cleanup failure.
+pub const MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT: i32 = 75;
+
+#[derive(Debug)]
+struct WorkerCleanupIncomplete(String);
+
+impl std::fmt::Display for WorkerCleanupIncomplete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for WorkerCleanupIncomplete {}
+
+pub fn is_managed_worker_cleanup_incomplete(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<WorkerCleanupIncomplete>().is_some()
+        || error
+            .root_cause()
+            .downcast_ref::<WorkerCleanupIncomplete>()
+            .is_some()
+}
 
 pub struct ManagedWorkerRunConfig {
     pub(crate) agent: Agent,
@@ -91,6 +115,7 @@ async fn commit_managed_worker_episode(
 
 fn spawn_cancellation_listener(
     command_cancellation: ThreadCancellation,
+    active_tools: Option<Arc<ActiveToolRegistry>>,
     #[cfg(test)] ready: Option<std::sync::mpsc::Sender<()>>,
 ) {
     std::thread::spawn(move || {
@@ -107,6 +132,9 @@ fn spawn_cancellation_listener(
             if line.trim() == "cancel" {
                 eprintln!("{MANAGED_WORKER_CANCEL_ACK}");
                 command_cancellation.cancel();
+                if let Some(active_tools) = active_tools {
+                    active_tools.cancel_abortable();
+                }
                 break;
             }
         }
@@ -122,12 +150,23 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
         action,
     } = run_config;
 
+    let cancellation = agent.command_cancellation();
     spawn_cancellation_listener(
-        agent.command_cancellation(),
+        cancellation.clone(),
+        Some(agent.active_tools_handle()),
         #[cfg(test)]
         None,
     );
     let send_result = agent.send(&action).await;
+    if cancellation.is_cancelled() {
+        if let Err(error) = agent.confirm_command_shutdown().await {
+            return Err(WorkerCleanupIncomplete(format!(
+                "worker command shutdown incomplete: {error:#}"
+            ))
+            .into());
+        }
+        return Ok(());
+    }
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
     println!("{}", response);
@@ -164,7 +203,7 @@ mod tests {
         };
         let cancellation = ThreadCancellation::default();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        spawn_cancellation_listener(cancellation.clone(), Some(ready_tx));
+        spawn_cancellation_listener(cancellation.clone(), None, Some(ready_tx));
         ready_rx
             .recv_timeout(Duration::from_secs(2))
             .expect("cancellation listener did not start reading");

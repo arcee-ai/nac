@@ -2451,6 +2451,7 @@ impl SessionManager {
             .await
         {
             Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
+            Err(error @ SessionCancelError::CleanupFailed { .. }) => Err(error.into()),
         }
     }
 
@@ -2476,12 +2477,13 @@ impl SessionManager {
                 return Err(anyhow!("session is busy with an active manual compaction"));
             }
             if let Some(active_run) = service.active_run() {
-                if let Err(error) = service
+                match service
                     .connect_client()
                     .request_cancel(&active_run.run_id)
                     .await
                 {
-                    if service.active_run().is_some() {
+                    Ok(()) | Err(SessionCancelError::NotActive { .. }) => {}
+                    Err(error @ SessionCancelError::CleanupFailed { .. }) => {
                         return Err(anyhow!(error.to_string()));
                     }
                 }

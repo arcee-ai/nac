@@ -33,7 +33,10 @@ use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
 use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
-pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
+pub use crate::worker::{
+    is_managed_worker_cleanup_incomplete, run_managed_worker, ManagedWorkerRunConfig,
+    MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT,
+};
 use crate::workspace::GitTarget;
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
