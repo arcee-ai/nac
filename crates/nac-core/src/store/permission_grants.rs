@@ -158,7 +158,7 @@ fn insert_permission_grant_set_inner(
     let waiter_guard = waiter_live.map(|waiter| {
         waiter
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     });
     if waiter_guard.as_deref().is_some_and(|live| !*live) {
         return Ok(None);

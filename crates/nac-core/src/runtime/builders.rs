@@ -186,7 +186,7 @@ async fn build_run_config_inner(
         let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
         let working_directory = sandbox
             .as_ref()
-            .map(|session| session.workdir_display())
+            .map(super::super::sandbox::SandboxSession::workdir_display)
             .unwrap_or_else(|| directory_display(&workspace_cwd));
         let workspace_git = if let Some(session) = sandbox.as_ref() {
             session.host_workdir().map(GitTarget::local)
@@ -195,7 +195,7 @@ async fn build_run_config_inner(
         };
         let sandbox_status = sandbox
             .as_ref()
-            .map(|session| session.status_text())
+            .map(super::super::sandbox::SandboxSession::status_text)
             .unwrap_or_else(|| "off".to_string());
         let agents_md_message = agents_md.system_message();
         let agents_md_status = agents_md.status_text();
@@ -358,7 +358,7 @@ pub async fn build_managed_worker_config(
     let mcp = mcp_outcome.registry;
     let working_directory = sandbox
         .as_ref()
-        .map(|session| session.workdir_display())
+        .map(super::super::sandbox::SandboxSession::workdir_display)
         .unwrap_or_else(|| directory_display(&workspace_cwd));
     let extra_tool_defs = mcp
         .as_ref()

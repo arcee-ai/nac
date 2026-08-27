@@ -555,7 +555,7 @@ pub fn workspace_snapshot(
         root.as_ref()
             .and_then(|path| path.file_name())
             .and_then(|value| value.to_str())
-            .map(|value| value.to_string())
+            .map(std::string::ToString::to_string)
     });
 
     let status_raw = match run_git(target, &["status", "--porcelain"]) {

@@ -107,7 +107,7 @@ pub fn shared_workspace_gate_for(
     let key = (store_path.to_path_buf(), workspace_cwd.to_path_buf());
     let mut gates = SHARED_WORKSPACE_GATES
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(gate) = gates.get(&key).and_then(StdWeak::upgrade) {
         return gate;
     }

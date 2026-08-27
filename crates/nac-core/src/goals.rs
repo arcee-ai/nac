@@ -35,7 +35,7 @@ impl GoalRuntime {
         *self
             .current_run
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(CurrentRun {
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CurrentRun {
             run_id: run_id.to_string(),
             billable_tokens: 0,
         });
@@ -45,7 +45,7 @@ impl GoalRuntime {
         if let Some(run) = self
             .current_run
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_mut()
         {
             run.billable_tokens = usage.billable_tokens();
@@ -56,7 +56,7 @@ impl GoalRuntime {
         let mut current = self
             .current_run
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if current.as_ref().is_some_and(|run| run.run_id == run_id) {
             *current = None;
         }
@@ -65,7 +65,7 @@ impl GoalRuntime {
     pub(crate) fn current_baseline(&self) -> Option<GoalRunBaseline> {
         self.current_run
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .map(|run| GoalRunBaseline {
                 run_id: run.run_id.clone(),
@@ -101,7 +101,7 @@ impl GoalRuntime {
         if self
             .current_run
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_none()
         {
             return Err(anyhow!("goal model updates require an active direct run"));

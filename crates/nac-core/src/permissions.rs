@@ -161,7 +161,7 @@ impl Drop for PermissionWaiterLiveness {
         *self
             .live
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
     }
 }
 

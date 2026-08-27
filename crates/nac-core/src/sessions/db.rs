@@ -929,7 +929,9 @@ impl SessionSummaryRow {
             .context("session visible message count overflowed")?;
         let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
         let aggregated = crate::model::TokenUsage::aggregate(&response_usages);
-        let total_tokens = aggregated.as_ref().map(|usage| usage.billable_tokens());
+        let total_tokens = aggregated
+            .as_ref()
+            .map(crate::model::TokenUsage::billable_tokens);
         let total_cost_micros = aggregated.as_ref().map(|usage| usage.cost.total);
         Ok(SessionSummary {
             session_id: self.session_id,

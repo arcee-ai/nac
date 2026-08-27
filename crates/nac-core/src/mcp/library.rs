@@ -96,7 +96,7 @@ pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
             docs_url: docs_url.to_string(),
             icon_url: Some(icon_url.to_string()),
             category: category.to_string(),
-            tags: tags.iter().map(|tag| tag.to_string()).collect(),
+            tags: tags.iter().map(std::string::ToString::to_string).collect(),
         }
     }
 

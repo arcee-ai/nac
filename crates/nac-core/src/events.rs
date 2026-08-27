@@ -789,7 +789,7 @@ impl SessionEventBus {
     fn lock_state(&self) -> std::sync::MutexGuard<'_, SessionEventBusState> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Prepare persistence before taking the event state lock. Snapshot loading

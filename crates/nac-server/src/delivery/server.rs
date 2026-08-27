@@ -160,7 +160,7 @@ async fn reject_cross_origin_mutation(request: axum::extract::Request, next: Nex
                     request
                         .uri()
                         .authority()
-                        .map(|authority| authority.as_str())
+                        .map(axum::http::uri::Authority::as_str)
                 });
             if !host.is_some_and(|host| origin_matches_host(origin, host)) {
                 return (

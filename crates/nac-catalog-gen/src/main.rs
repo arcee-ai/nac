@@ -92,7 +92,7 @@ async fn fetch(url: &str) -> Result<(String, Option<String>)> {
         .headers()
         .get(reqwest::header::ETAG)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
+        .map(std::string::ToString::to_string);
     let body = response.text().await.context("reading response body")?;
     Ok((body, etag))
 }

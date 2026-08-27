@@ -91,7 +91,10 @@ pub async fn probe_mcp_server(
         .into_iter()
         .map(|tool| McpProbedTool {
             name: tool.name.to_string(),
-            description: tool.description.as_ref().map(|value| value.to_string()),
+            description: tool
+                .description
+                .as_ref()
+                .map(std::string::ToString::to_string),
         })
         .collect();
     let _ = service.cancel().await;

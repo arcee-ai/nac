@@ -724,7 +724,7 @@ fn resolve_scheduled_skills(
 
 fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
     args.get("timeout")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(default_timeout_secs)
         .max(MIN_THREAD_TIMEOUT_SECS)
 }

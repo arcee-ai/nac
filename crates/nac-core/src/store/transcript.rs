@@ -127,7 +127,7 @@ pub fn is_transcript_log_payload(event_json: &str) -> bool {
         .is_some_and(|value| {
             value
                 .get(TRANSCRIPT_PAYLOAD_KEY)
-                .is_some_and(|entry| entry.is_object())
+                .is_some_and(serde_json::Value::is_object)
         })
 }
 
@@ -443,7 +443,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -476,7 +476,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -533,7 +533,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -564,7 +564,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -644,7 +644,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
@@ -711,7 +711,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
@@ -746,7 +746,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let messages_json: String = connection.query_row(
             "SELECT messages_json FROM sessions WHERE session_id = ?1",
@@ -763,7 +763,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let mut statement = connection.prepare(
             "SELECT id, event_json
@@ -809,7 +809,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -889,7 +889,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -944,7 +944,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;

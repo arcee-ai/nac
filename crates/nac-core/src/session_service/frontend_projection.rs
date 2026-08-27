@@ -315,7 +315,7 @@ impl SessionService {
         let transcript_warning = self
             .transcript_recovery_warning
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let transcript_recovery_warning = match (
             blocking.run_recovery_warning.as_deref(),
             transcript_warning.as_deref(),

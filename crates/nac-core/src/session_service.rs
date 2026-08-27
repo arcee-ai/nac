@@ -1161,7 +1161,7 @@ fn is_visible_response(message: &Message) -> bool {
     matches!(
         message,
         Message::Assistant { tool_calls, .. }
-            if tool_calls.as_ref().is_none_or(|tool_calls| tool_calls.is_empty())
+            if tool_calls.as_ref().is_none_or(std::vec::Vec::is_empty)
     )
 }
 

@@ -117,7 +117,7 @@ impl<'a> SessionRunApplication<'a> {
                     client_id: handle
                         .client_id
                         .as_ref()
-                        .map(|client_id| client_id.to_string()),
+                        .map(std::string::ToString::to_string),
                     display_prompt,
                 })
             }

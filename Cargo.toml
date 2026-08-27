@@ -32,6 +32,7 @@ unused_lifetimes = "warn"
 # Pedantic/nursery and panic-style lints can be enabled incrementally as their
 # existing backlog is paid down.
 dbg_macro = "warn"
+redundant_closure_for_method_calls = "warn"
 rest_pat_in_fully_bound_structs = "warn"
 todo = "warn"
 unimplemented = "warn"

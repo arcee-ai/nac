@@ -139,7 +139,7 @@ impl TerminalManager {
         *self
             .workspace_authority
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
             Some((store_path, workspace_identity));
     }
 
@@ -151,7 +151,7 @@ impl TerminalManager {
         *self
             .session_resource_authority
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((store_path, session_id));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((store_path, session_id));
     }
 
     pub(crate) fn acquire_workspace_activity_lease(
@@ -160,7 +160,7 @@ impl TerminalManager {
         let authority = self
             .workspace_authority
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         authority
             .map(|(store_path, workspace_identity)| {
@@ -179,7 +179,7 @@ impl TerminalManager {
         let authority = self
             .session_resource_authority
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         authority
             .map(|(store_path, session_id)| {

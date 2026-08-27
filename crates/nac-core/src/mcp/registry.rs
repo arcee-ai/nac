@@ -389,7 +389,7 @@ pub(super) fn tool_definition(full_name: &str, server_name: &str, tool: &Tool) -
     let description = tool
         .description
         .as_ref()
-        .map(|value| value.to_string())
+        .map(std::string::ToString::to_string)
         .unwrap_or_else(|| format!("MCP tool '{}' from server '{}'", tool.name, server_name));
     ToolDefinition {
         def_type: "function".to_string(),

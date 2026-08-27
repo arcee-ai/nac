@@ -111,7 +111,7 @@ impl TerminalManager {
     pub(super) fn forget_remote_cleanup(&self, pidfile: &str) {
         self.pending_remote_cleanups
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(pidfile);
     }
 
@@ -119,7 +119,7 @@ impl TerminalManager {
         let cleanup = self
             .pending_remote_cleanups
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(pidfile)
             .cloned();
         let Some(cleanup) = cleanup else {
@@ -139,7 +139,7 @@ impl TerminalManager {
         let pidfiles = self
             .pending_remote_cleanups
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .keys()
             .cloned()
             .collect::<Vec<_>>();

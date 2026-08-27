@@ -837,7 +837,7 @@ impl SessionManager {
             .inner
             .lifecycle_gates
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(gate) = gates.get(session_id).and_then(Weak::upgrade) {
             return gate;
         }
@@ -1699,7 +1699,7 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
         client_id: handle
             .client_id
             .as_ref()
-            .map(|client_id| client_id.to_string()),
+            .map(std::string::ToString::to_string),
         display_prompt,
     }
 }

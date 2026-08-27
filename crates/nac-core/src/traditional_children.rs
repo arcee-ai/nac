@@ -53,7 +53,7 @@ static CONTROLLERS: LazyLock<Mutex<HashMap<PathBuf, Arc<dyn TraditionalChildCont
 pub fn register_controller(path: PathBuf, controller: Arc<dyn TraditionalChildController>) {
     CONTROLLERS
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(path, controller);
 }
 
@@ -61,7 +61,7 @@ pub fn register_controller(path: PathBuf, controller: Arc<dyn TraditionalChildCo
 pub fn controller_for(path: &Path) -> Result<Arc<dyn TraditionalChildController>> {
     CONTROLLERS
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(path)
         .cloned()
         .ok_or_else(|| anyhow!("traditional child session control is unavailable"))

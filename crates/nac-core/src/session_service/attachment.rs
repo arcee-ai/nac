@@ -237,7 +237,7 @@ impl SessionService {
         let mut lease = self
             .sandbox_resource_lease
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if lease.is_none() {
             *lease = Some(
                 sessions::SessionResourceLease::try_acquire(&self.metadata.store_path, session_id)
@@ -257,7 +257,7 @@ impl SessionService {
         let mut slot = self
             .sandbox_resource_lease
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         debug_assert!(slot.is_none());
         *slot = Some(lease);
     }
@@ -269,7 +269,7 @@ impl SessionService {
     pub fn release_sandbox_resource_lease(&self) {
         self.sandbox_resource_lease
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
     }
 

@@ -351,7 +351,7 @@ pub(super) async fn build_resume_config_from_snapshot(
     };
     let working_directory = sandbox
         .as_ref()
-        .map(|session| session.workdir_display())
+        .map(super::super::sandbox::SandboxSession::workdir_display)
         .unwrap_or_else(|| directory_display(&workspace_cwd));
     let workspace_git = match ssh.clone() {
         Some(connection) => Some(GitTarget::ssh(
@@ -366,7 +366,7 @@ pub(super) async fn build_resume_config_from_snapshot(
     };
     let sandbox_status = sandbox
         .as_ref()
-        .map(|session| session.status_text())
+        .map(super::super::sandbox::SandboxSession::status_text)
         .unwrap_or_else(|| "off".to_string());
 
     let mut agent = Agent::with_config(

@@ -4,7 +4,7 @@ impl SessionService {
     pub(super) fn lock_transcript_scan(&self) -> std::sync::MutexGuard<'_, TranscriptScanCache> {
         self.transcript_scan
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Read a window of the transcript log tail relative to a snapshot blob
@@ -289,7 +289,7 @@ impl SessionService {
             let mut scan = self
                 .transcript_scan
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *scan = TranscriptScanCache::from_transcript(kept);
         }
 
