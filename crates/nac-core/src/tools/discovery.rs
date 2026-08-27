@@ -169,7 +169,7 @@ async fn run_glob(
         "glob pattern must be a string",
     )?;
     let matcher = compile_glob(pattern)?;
-    let root = normalize_path(fs, object.get("root"), "root").await?;
+    let root = normalize_path(fs, object.get("root"), "root")?;
     let common = parse_common(object)?;
     let mut walk_budget = WalkBudget { entries: 0 };
     let mut ignore_state = IgnoreState::new();
@@ -228,7 +228,7 @@ async fn run_grep(
     validate_collection(roots_array, "roots", MAX_ROOTS)?;
     let mut roots = Vec::new();
     for root in roots_array {
-        roots.push(normalize_path(fs, Some(root), "root").await?);
+        roots.push(normalize_path(fs, Some(root), "root")?);
     }
     roots.sort();
     roots.dedup();
@@ -694,7 +694,7 @@ async fn search_file(
     }
 }
 
-async fn normalize_path(
+fn normalize_path(
     fs: &mut WorkspaceFs,
     value: Option<&Value>,
     label: &'static str,

@@ -91,8 +91,7 @@ impl SessionService {
                 Some(message.clone()),
             ),
         };
-        self.settle_traditional_child_run(run_id, child_status, child_report, child_failure)
-            .await;
+        self.settle_traditional_child_run(run_id, child_status, child_report, child_failure);
 
         self.settle_direct_goal_run(run_id, goal_usage, goal_disposition)
             .await;
@@ -151,7 +150,7 @@ impl SessionService {
         self.agent.lock().await.end_goal_run(run_id);
     }
 
-    pub(super) async fn settle_traditional_child_run(
+    pub(super) fn settle_traditional_child_run(
         &self,
         run_id: &SessionRunId,
         status: crate::store::TraditionalChildStatus,

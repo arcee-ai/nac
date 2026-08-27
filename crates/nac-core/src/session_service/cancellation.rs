@@ -161,8 +161,7 @@ impl SessionService {
                 crate::store::TraditionalChildStatus::Cancelled,
                 None,
                 Some("parent or user cancelled the child run".to_string()),
-            )
-            .await;
+            );
         }
         self.event_bus.emit_with_context(
             SessionEvent::RunCancelled,

@@ -96,6 +96,9 @@ zero-backlog async guard last.
   `Vec<char>` allocations but suggested an iterator chain that does not compile
   for `Chars`. A shared `char_suffix` helper now finds the UTF-8 boundary and
   borrows the ordered suffix without either allocation.
+- `unused_async`: complete. Four concrete synchronous implementations and the
+  one delegating steering facade no longer manufacture futures; callers retain
+  their existing settlement, projection, attachment, and discovery ordering.
 
 ## Verification and next action
 
@@ -128,5 +131,9 @@ The `needless_collect` slice passes `make format-check`, `make lint`,
 `git diff --check`, and all 14 focused terminal-output tests, including a new
 Unicode boundary/order regression test.
 
-Next: commit this exact lint boundary, then add `unused_async` and run autofix
-before any manual repair.
+The `unused_async` slice passes `make format-check`, `make lint`,
+`git diff --check`, 73 focused session-service tests (one ignored), 34 focused
+discovery tests (three ignored), and two focused server steering tests.
+
+Next: commit this exact lint boundary, then add
+`significant_drop_in_scrutinee` and run autofix before manual repair.
