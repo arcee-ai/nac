@@ -149,9 +149,9 @@ exit "$status""#;
 ///
 /// A published pin is the stop identity: later pidfile bytes — missing,
 /// `cancelled`, garbage, or a different number — cannot retarget the kill
-/// or fake a successful pre-start tombstone. Without a pin, a missing
-/// pidfile is still a pre-start noclobber `cancelled` so EXEC/PTY refuse
-/// with exit 130.
+/// or fake a successful pre-start tombstone. Without a pin, only a
+/// noclobber create of `cancelled` counts as pre-start; an already-present
+/// `cancelled` is guest-writable and must fail closed.
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
 pinned=$2
 pid=
@@ -166,7 +166,7 @@ else
   while :; do
     if pid=$(cat "$pidfile" 2>/dev/null); then
       case "$pid" in
-        cancelled) exit 0 ;;
+        cancelled) exit 1 ;;
         starting|'') ;;
         *[!0-9]*) exit 1 ;;
         *) [ "$pid" -gt 0 ] || exit 1; break ;;
@@ -1147,6 +1147,10 @@ mod tests {
         assert!(!SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
         assert!(SANDBOX_KILL_WRAPPER.contains("[ \"$attempts\" -ge 20 ] && exit 1"));
         assert!(
+            SANDBOX_KILL_WRAPPER.contains("cancelled) exit 1 ;;"),
+            "unpinned kill must not treat a guest-written cancelled pidfile as success"
+        );
+        assert!(
             SANDBOX_KILL_TIMEOUT > Duration::from_millis(20 * 50 * 2),
             "host kill deadline must outlast the wrapper's two 20×50ms wait loops"
         );
@@ -1188,6 +1192,26 @@ mod tests {
         let pidfile =
             std::env::temp_dir().join(format!("nac-empty-pidfile-{}.pid", uuid::Uuid::new_v4()));
         std::fs::write(&pidfile, "").unwrap();
+
+        let status = StdCommand::new("sh")
+            .arg("-c")
+            .arg(SANDBOX_KILL_WRAPPER)
+            .arg("nac-kill")
+            .arg(&pidfile)
+            .status()
+            .unwrap();
+
+        assert!(!status.success());
+        let _ = std::fs::remove_file(pidfile);
+    }
+
+    #[test]
+    fn kill_wrapper_rejects_a_cancelled_pidfile_without_a_pin() {
+        let pidfile = std::env::temp_dir().join(format!(
+            "nac-cancelled-pidfile-{}.pid",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&pidfile, "cancelled").unwrap();
 
         let status = StdCommand::new("sh")
             .arg("-c")

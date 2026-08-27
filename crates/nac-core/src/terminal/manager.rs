@@ -459,9 +459,6 @@ impl TerminalManager {
         let mut force_reader_shutdown = false;
         if !process_exited {
             if let Some(pidfile) = pidfile.as_deref() {
-                if published_pid.is_none() {
-                    published_pid = backend.read_published_pid(pidfile).await.ok().flatten();
-                }
                 if let Err(error) = backend
                     .terminal_pipe_kill(pidfile, published_pid.as_deref())
                     .await

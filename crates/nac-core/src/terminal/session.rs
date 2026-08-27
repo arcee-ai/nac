@@ -225,11 +225,12 @@ impl TerminalSession {
 
     pub async fn kill(&mut self) -> Result<()> {
         let backend_result = if let Some((backend, pidfile)) = &self.backend_cleanup {
-            let mut pin = self.published_pid.clone();
-            if pin.is_none() {
-                pin = backend.read_published_pid(pidfile).await.ok().flatten();
-            }
-            backend.terminal_pipe_kill(pidfile, pin.as_deref()).await
+            // Only a PID observed while the wrapper was publishing is a pin.
+            // A kill-time cat of the guest-writable pidfile can be `cancelled`
+            // or another number and must not retarget the kill.
+            backend
+                .terminal_pipe_kill(pidfile, self.published_pid.as_deref())
+                .await
         } else {
             Ok(())
         };
