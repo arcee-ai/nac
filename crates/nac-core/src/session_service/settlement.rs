@@ -206,7 +206,7 @@ impl SessionService {
                 if let Ok(controller) =
                     crate::traditional_children::controller_for(&self.metadata.store_path)
                 {
-                    let parent_session_id = child.parent_session_id.clone();
+                    let parent_session_id = child.parent_session_id;
                     tokio::spawn(async move {
                         if let Err(error) = controller.wake(&parent_session_id).await {
                             eprintln!(

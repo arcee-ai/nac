@@ -227,7 +227,7 @@ impl WorkspaceFs {
                     })?;
                 return Ok(Self::Local(LocalFs {
                     root: root.clone(),
-                    absolute_roots: vec![workspace_cwd.clone(), root.clone()],
+                    absolute_roots: vec![workspace_cwd.clone(), root],
                     directory: Arc::new(directory),
                     overlays: Vec::new(),
                 }));
@@ -354,7 +354,7 @@ impl WorkspaceFs {
         })?;
         Ok(Self::Remote(RemoteFs {
             root: root.clone(),
-            absolute_roots: vec![requested, root.clone()],
+            absolute_roots: vec![requested, root],
             sftp: Some(sftp),
             child,
         }))
