@@ -717,8 +717,6 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
 
     fn definition(&self) -> ToolDefinition {
         match KIND {
-            1 => write::definition(),
-            2 => edit::definition(),
             3 => glob::definition(),
             4 => grep::definition(),
             5 => exec_command::exec_command_definition(),
@@ -770,7 +768,7 @@ impl<const KIND: u8> kernel::NativeTool for LegacyDirectTool<KIND> {
                     let _read = gate.read().await;
                     execute_legacy_direct(KIND, input, services.runtime).await
                 }
-                1 | 2 | 5 | 6 => {
+                5 | 6 => {
                     let _write = gate.write().await;
                     execute_legacy_direct(KIND, input, services.runtime).await
                 }
@@ -797,14 +795,6 @@ fn bind_legacy_authorized_resources(
         .as_object_mut()
         .ok_or_else(|| invalid("decoded tool arguments are not an object"))?;
     match kind {
-        1 | 2 => {
-            let path = canonical("edit")
-                .into_iter()
-                .next()
-                .ok_or_else(|| invalid("authorized mutation target is missing"))?;
-            object.insert("path".to_string(), Value::String(path));
-            object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
-        }
         3 => {
             let root = canonical("glob")
                 .into_iter()
@@ -962,39 +952,6 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
 
     let object = object(input)?;
     match kind {
-        1 => {
-            reject_unknown(object, &["path", "content", "expected_revision"])?;
-            required_string(object, "path")?;
-            required_string(object, "content")?;
-            match object.get("expected_revision") {
-                Some(Value::String(_)) | Some(Value::Null) => {}
-                _ => {
-                    return Err(invalid(
-                        "'expected_revision' must be a revision string or null",
-                    ));
-                }
-            }
-        }
-        2 => {
-            reject_unknown(object, &["path", "expected_revision", "edits"])?;
-            required_string(object, "path")?;
-            required_string(object, "expected_revision")?;
-            let edits = object
-                .get("edits")
-                .and_then(Value::as_array)
-                .filter(|edits| !edits.is_empty())
-                .ok_or_else(|| invalid("'edits' must contain at least one replacement"))?;
-            for edit in edits {
-                let edit = edit
-                    .as_object()
-                    .ok_or_else(|| invalid("each edit must be an object"))?;
-                reject_unknown(edit, &["old_text", "new_text"])?;
-                if required_string(edit, "old_text")?.is_empty() {
-                    return Err(invalid("'old_text' must not be empty"));
-                }
-                required_string(edit, "new_text")?;
-            }
-        }
         3 => {
             reject_unknown(
                 object,
@@ -1108,8 +1065,6 @@ fn validate_legacy_direct_input(kind: u8, input: &Value) -> Result<(), ToolResul
 
 async fn execute_legacy_direct(kind: u8, input: Value, runtime: &ToolRuntime) -> ToolResult {
     match kind {
-        1 => write::execute(input, runtime).await,
-        2 => edit::execute(input, runtime).await,
         3 => glob::execute(input, runtime).await,
         4 => grep::execute(input, runtime).await,
         5 => exec_command::execute_exec_command(&input, runtime).await,
@@ -1153,7 +1108,6 @@ fn legacy_permission_resources(
     }
 
     match kind {
-        1 | 2 => resolved_file("edit", string(input, "path")?, runtime, true),
         3 => {
             let root = match input.get("root") {
                 None => ".",
@@ -1269,8 +1223,8 @@ fn worker_tool_registry(
 ) -> Result<kernel::ToolRegistry, kernel::ToolRegistryError> {
     let registry = kernel::ToolRegistry::builder()
         .register(ReadTool { image_read })
-        .register(LegacyDirectTool::<1>)
-        .register(LegacyDirectTool::<2>)
+        .register(write::WriteTool)
+        .register(edit::EditTool)
         .register(LegacyDirectTool::<3>)
         .register(LegacyDirectTool::<4>)
         .register(LegacyDirectTool::<5>)

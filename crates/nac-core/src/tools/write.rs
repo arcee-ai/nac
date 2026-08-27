@@ -7,8 +7,83 @@ use crate::tools::mutation::{
     argument_error, execute_remote, permission_error, required_string, write_local,
     write_local_bound, write_mounted,
 };
-use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::tools::{
+    kernel, resolve_workspace_path, shared_workspace_gate, ToolResult, ToolRuntime,
+};
 use crate::types::{FunctionDef, ToolDefinition};
+
+pub(crate) struct WriteTool;
+
+impl kernel::NativeTool for WriteTool {
+    type Input = Value;
+
+    fn definition(&self) -> ToolDefinition {
+        definition()
+    }
+
+    fn admission(&self) -> kernel::ToolAdmission {
+        kernel::ToolAdmission::Exclusive
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        validate_input(&input)?;
+        Ok(input)
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: kernel::ToolServices<'_>,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        let path = input
+            .get("path")
+            .and_then(Value::as_str)
+            .expect("write input is decoded before resource projection");
+        let path = services
+            .runtime
+            .backend
+            .resolve_path(path)
+            .map_err(|error| argument_error(format!("invalid edit path: {error}")))?;
+        Ok(crate::permissions::file_resources(
+            "edit",
+            path,
+            services.runtime.backend.as_ref(),
+            &services.runtime.store_path,
+            true,
+        ))
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        let path = resources
+            .iter()
+            .find(|resource| resource.action == "edit")
+            .ok_or_else(|| argument_error("authorized mutation target is missing"))?;
+        let object = input
+            .as_object_mut()
+            .expect("write input is decoded as an object");
+        object.insert("path".to_string(), Value::String(path.resource.clone()));
+        object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
+        Ok(())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        services: kernel::ToolServices<'a>,
+        _context: &'a kernel::ToolCallContext,
+    ) -> futures_util::future::BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            let gate = shared_workspace_gate(services.runtime);
+            let _write = gate.write().await;
+            execute(input, services.runtime).await
+        })
+    }
+}
 
 pub fn definition() -> ToolDefinition {
     ToolDefinition {
@@ -124,6 +199,29 @@ fn parse_expected_revision(args: &Value) -> Result<Option<String>, ToolResult> {
         Some(Value::Null) => Ok(None),
         Some(Value::String(revision)) => Ok(Some(revision.clone())),
         Some(_) => Err(argument_error(
+            "'expected_revision' must be a revision string or null",
+        )),
+    }
+}
+
+fn validate_input(input: &Value) -> Result<(), ToolResult> {
+    let object = input
+        .as_object()
+        .ok_or_else(|| argument_error("tool arguments must be an object"))?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !["path", "content", "expected_revision"].contains(&key.as_str()))
+    {
+        return Err(argument_error(format!("unknown '{key}' argument")));
+    }
+    for key in ["path", "content"] {
+        if !object.get(key).is_some_and(Value::is_string) {
+            return Err(argument_error(format!("'{key}' argument must be a string")));
+        }
+    }
+    match object.get("expected_revision") {
+        Some(Value::String(_) | Value::Null) => Ok(()),
+        _ => Err(argument_error(
             "'expected_revision' must be a revision string or null",
         )),
     }
