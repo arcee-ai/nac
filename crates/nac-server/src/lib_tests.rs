@@ -8773,10 +8773,10 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         .update(
             &project.project_id,
             application::projects::UpdateProject {
-                name: application::projects::ProjectField::Unchanged,
-                description: application::projects::ProjectField::Unchanged,
-                default_model_config_id: application::projects::ProjectField::Clear,
-                pinned: application::projects::ProjectField::Unchanged,
+                name: application::Field::Unchanged,
+                description: application::Field::Unchanged,
+                default_model_config_id: application::Field::Clear,
+                pinned: application::Field::Unchanged,
             },
         )
         .unwrap();

@@ -88,11 +88,11 @@ pub struct DeleteProjectResponse {
     pub deleted_session_ids: Vec<String>,
 }
 
-fn project_field<T>(field: RequestField<T>) -> application::projects::ProjectField<T> {
+fn project_field<T>(field: RequestField<T>) -> application::Field<T> {
     match field {
-        RequestField::Omitted => application::projects::ProjectField::Unchanged,
-        RequestField::Null => application::projects::ProjectField::Clear,
-        RequestField::Value(value) => application::projects::ProjectField::Set(value),
+        RequestField::Omitted => application::Field::Unchanged,
+        RequestField::Null => application::Field::Clear,
+        RequestField::Value(value) => application::Field::Set(value),
     }
 }
 
