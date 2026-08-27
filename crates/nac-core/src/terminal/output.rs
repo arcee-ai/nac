@@ -766,16 +766,12 @@ fn prefix_to_unaligned_stream_boundary(artifact: &Artifact) -> Option<usize> {
             continue;
         }
         let first_for_stream = match chunk.stream {
-            OutputStream::Stdout if !saw_stdout => {
+            OutputStream::Stdout | OutputStream::Combined if !saw_stdout => {
                 saw_stdout = true;
                 true
             }
             OutputStream::Stderr if !saw_stderr => {
                 saw_stderr = true;
-                true
-            }
-            OutputStream::Combined if !saw_stdout => {
-                saw_stdout = true;
                 true
             }
             _ => false,
@@ -798,13 +794,12 @@ fn utf8_page_len(bytes: &[u8], target: usize, reaches_end: bool) -> usize {
     }
     let candidate = &bytes[..target.min(bytes.len())];
     match std::str::from_utf8(candidate) {
-        Ok(_) => candidate.len(),
         Err(error) if error.error_len().is_none() && error.valid_up_to() > 0 => error.valid_up_to(),
         Err(error) if error.error_len().is_none() => {
             let extra = bytes[target.min(bytes.len())..].iter().take(3).count();
             (target + extra).min(bytes.len())
         }
-        Err(_) => candidate.len(),
+        Ok(_) | Err(_) => candidate.len(),
     }
 }
 

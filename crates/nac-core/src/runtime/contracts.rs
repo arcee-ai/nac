@@ -250,8 +250,7 @@ impl OrchestratorSession {
 
     pub fn store_path(&self) -> PathBuf {
         match self {
-            Self::Active { store_path, .. } => store_path.clone(),
-            Self::Picker { store_path } => store_path.clone(),
+            Self::Active { store_path, .. } | Self::Picker { store_path } => store_path.clone(),
         }
     }
 

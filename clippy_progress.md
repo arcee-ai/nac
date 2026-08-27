@@ -90,6 +90,8 @@ zero-backlog async guard last.
   source value was at its last use and is now moved directly.
 - `semicolon_if_nothing_returned`: complete. Clippy applied all seven
   statement-tail fixes with no manual exceptions.
+- `match_same_arms`: complete. All 15 duplicate branches were manually merged
+  after autofix declined them; guarded cases retain their original precedence.
 
 ## Verification and next action
 
@@ -114,5 +116,9 @@ The `semicolon_if_nothing_returned` slice passes `make format-check`,
 `make lint`, `git diff --check`, all 33 `nac-catalog-gen` tests, 77 focused
 core catalog tests, and 32 focused Arcee tests.
 
-Next: commit this exact lint boundary, then add `match_same_arms` and run
+The `match_same_arms` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+Next: commit this exact lint boundary, then add `needless_collect` and run
 autofix before any manual repair.

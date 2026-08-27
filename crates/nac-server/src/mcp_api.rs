@@ -580,10 +580,10 @@ impl From<McpServerConfigurationStoreError> for ApiError {
     fn from(error: McpServerConfigurationStoreError) -> Self {
         let status = match &error {
             McpServerConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-            McpServerConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
+            McpServerConfigurationStoreError::DuplicateName(_)
+            | McpServerConfigurationStoreError::ConcurrentModification
+            | McpServerConfigurationStoreError::RecoveryRequired { .. } => StatusCode::CONFLICT,
             McpServerConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
-            McpServerConfigurationStoreError::ConcurrentModification => StatusCode::CONFLICT,
-            McpServerConfigurationStoreError::RecoveryRequired { .. } => StatusCode::CONFLICT,
             McpServerConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self::new(status, error.to_string())

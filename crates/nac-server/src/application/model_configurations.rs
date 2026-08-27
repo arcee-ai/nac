@@ -65,8 +65,7 @@ pub(crate) enum ModelConfigurationApplicationError {
 impl std::fmt::Display for ModelConfigurationApplicationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidInput(message) => formatter.write_str(message),
-            Self::Provider(message) => formatter.write_str(message),
+            Self::InvalidInput(message) | Self::Provider(message) => formatter.write_str(message),
             Self::Store(error) => error.fmt(formatter),
             Self::Internal(error) => error.fmt(formatter),
         }

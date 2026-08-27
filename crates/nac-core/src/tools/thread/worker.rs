@@ -107,8 +107,9 @@ impl WorkerTimeoutTrace {
             | AgentEvent::OrchestratorCompactionStarted { .. }
             | AgentEvent::OrchestratorCompactionCompleted { .. }
             | AgentEvent::OrchestratorCompactionSkipped { .. }
-            | AgentEvent::OrchestratorCompactionFailed { .. } => {}
-            AgentEvent::ThreadStarted { .. } | AgentEvent::ThreadFinished { .. } => {}
+            | AgentEvent::OrchestratorCompactionFailed { .. }
+            | AgentEvent::ThreadStarted { .. }
+            | AgentEvent::ThreadFinished { .. } => {}
         }
     }
 

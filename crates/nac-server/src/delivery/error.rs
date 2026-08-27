@@ -174,9 +174,9 @@ impl From<filesystem::BrowseError> for ApiError {
 impl From<runtime::RemoteBrowseError> for ApiError {
     fn from(error: runtime::RemoteBrowseError) -> Self {
         let status = match &error {
-            runtime::RemoteBrowseError::Invalid(_) => StatusCode::BAD_REQUEST,
+            runtime::RemoteBrowseError::Invalid(_)
+            | runtime::RemoteBrowseError::NotADirectory(_) => StatusCode::BAD_REQUEST,
             runtime::RemoteBrowseError::NotFound(_) => StatusCode::NOT_FOUND,
-            runtime::RemoteBrowseError::NotADirectory(_) => StatusCode::BAD_REQUEST,
             runtime::RemoteBrowseError::Unreadable { .. } => StatusCode::FORBIDDEN,
             // The host, not this server, is what failed, and the caller can
             // retry once it is fixed.

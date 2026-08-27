@@ -64,9 +64,8 @@ pub(super) fn parse_shell(command: &str) -> ParsedShell {
             continue;
         }
         let boundary = match current {
-            ';' | '\n' => 1,
             '|' | '&' if chars.get(index + 1) == Some(&current) => 2,
-            '|' | '&' => 1,
+            ';' | '\n' | '|' | '&' => 1,
             _ => 0,
         };
         if boundary > 0 {
