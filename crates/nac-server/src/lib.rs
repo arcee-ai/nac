@@ -3,6 +3,7 @@ mod filesystem;
 mod light_model;
 mod managed_auth;
 mod managed_github;
+mod managed_status;
 mod mcp;
 mod mcp_api;
 mod orchestration;
@@ -3496,6 +3497,37 @@ impl SessionManager {
         }
     }
 
+    /// Cancel every run owned by this process before a graceful server stop.
+    ///
+    /// Peer NAC processes keep ownership of their own durable leases. Runs
+    /// that do not settle before process shutdown are reconciled by the
+    /// existing store-recovery path on the next start.
+    async fn cancel_local_active_runs_for_shutdown(&self) {
+        let services = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for service in services {
+            let Some(active) = service.active_run() else {
+                continue;
+            };
+            if let Err(error) = service
+                .connect_client()
+                .request_cancel(&active.run_id)
+                .await
+            {
+                eprintln!(
+                    "nac: failed to cancel run {} during shutdown: {error}",
+                    active.run_id
+                );
+            }
+        }
+    }
+
     /// Deletes a session and all related data (threads, episodes, worksets,
     /// workset_items) from the store. If the session is currently active in
     /// memory, any running task is gracefully cancelled before removal.
@@ -4903,6 +4935,9 @@ fn embedded_frontend_router() -> Router {
 fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
     let documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
+        .routes(routes!(managed_status::healthz_handler))
+        .routes(routes!(managed_status::readyz_handler))
+        .routes(routes!(managed_status::managed_status_handler))
         .routes(routes!(store_info))
         .routes(routes!(sandbox_availability_handler))
         .routes(routes!(sandbox_activity_handler))
@@ -5064,9 +5099,53 @@ pub async fn serve_with_policy(
         .local_addr()
         .with_context(|| format!("failed to read bound address for {}", addr))?;
     on_listening(bound);
+    let shutdown_manager = manager.clone();
     axum::serve(listener, router(manager))
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            // Bound cleanup so a wedged provider or process tree cannot keep
+            // the container alive forever after Kubernetes sends SIGTERM.
+            let _ = tokio::time::timeout(
+                Duration::from_secs(20),
+                shutdown_manager.cancel_local_active_runs_for_shutdown(),
+            )
+            .await;
+        })
         .await
         .context("server stopped unexpectedly")
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            eprintln!("nac: failed to install Ctrl-C handler: {error}");
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let terminate = async {
+            match signal(SignalKind::terminate()) {
+                Ok(mut stream) => {
+                    stream.recv().await;
+                }
+                Err(error) => {
+                    eprintln!("nac: failed to install SIGTERM handler: {error}");
+                    std::future::pending::<()>().await;
+                }
+            }
+        };
+        tokio::select! {
+            () = ctrl_c => {}
+            () = terminate => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    ctrl_c.await;
 }
 
 #[utoipa::path(
@@ -8005,6 +8084,7 @@ mod tests {
         ("GET", "/credentials"),
         ("GET", "/fs/browse"),
         ("GET", "/health"),
+        ("GET", "/healthz"),
         ("GET", "/managed/github"),
         ("GET", "/managed/github/clone-operations/{operation_id}"),
         ("GET", "/managed/github/git-identity"),
@@ -8015,10 +8095,12 @@ mod tests {
             "/managed/github/repositories/{owner}/{repository}/branches",
         ),
         ("GET", "/managed/secrets"),
+        ("GET", "/managed/status"),
         ("GET", "/mcp_library/library"),
         ("GET", "/mcp_library/servers"),
         ("GET", "/model-configs"),
         ("GET", "/projects"),
+        ("GET", "/readyz"),
         ("GET", "/models"),
         ("GET", "/sandbox/activity"),
         ("GET", "/sandbox/availability"),

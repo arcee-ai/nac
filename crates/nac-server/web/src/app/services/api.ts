@@ -27,6 +27,16 @@ import type {
   ManagedAuthList,
   ManagedAuthProvider,
   ManagedAuthStatus,
+  ManagedCloneOperation,
+  ManagedGitHubBranchList,
+  ManagedGitHubLoginStarted,
+  ManagedGitHubLoginState,
+  ManagedGitHubRepositoryList,
+  ManagedGitHubStatus,
+  ManagedHostStatus,
+  ManagedSecretList,
+  ManagedSecretSummary,
+  StartManagedCloneRequest,
   GeneratedCredential,
   ManagedSessionSummary,
   ManagedOrchestratorRecord,
@@ -209,6 +219,66 @@ export const api = {
   health: (signal?: AbortSignal) => request<{ status: string }>("GET", "/health", { signal }),
 
   getStore: (signal?: AbortSignal) => request<StoreInfo>("GET", "/store", { signal }),
+
+  getManagedStatus: (signal?: AbortSignal) =>
+    request<ManagedHostStatus>("GET", "/managed/status", { signal }),
+
+  getManagedGitHub: (signal?: AbortSignal) =>
+    request<ManagedGitHubStatus>("GET", "/managed/github", { signal }),
+
+  startManagedGitHubLogin: () =>
+    request<ManagedGitHubLoginStarted>("POST", "/managed/github/login"),
+
+  pollManagedGitHubLogin: (loginId: string, signal?: AbortSignal) =>
+    request<ManagedGitHubLoginState>(
+      "GET",
+      `/managed/github/login/${encodeURIComponent(loginId)}`,
+      { signal },
+    ),
+
+  cancelManagedGitHubLogin: (loginId: string) =>
+    request<void>("DELETE", `/managed/github/login/${encodeURIComponent(loginId)}`),
+
+  disconnectManagedGitHub: () => request<ManagedGitHubStatus>("DELETE", "/managed/github"),
+
+  listManagedGitHubRepositories: (signal?: AbortSignal) =>
+    request<ManagedGitHubRepositoryList>("GET", "/managed/github/repositories", { signal }),
+
+  listManagedGitHubBranches: (owner: string, repository: string, signal?: AbortSignal) =>
+    request<ManagedGitHubBranchList>(
+      "GET",
+      `/managed/github/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/branches`,
+      { signal },
+    ),
+
+  startManagedClone: (payload: StartManagedCloneRequest) =>
+    request<ManagedCloneOperation>("POST", "/managed/github/clone-operations", {
+      body: payload,
+    }),
+
+  getManagedClone: (operationId: string, signal?: AbortSignal) =>
+    request<ManagedCloneOperation>(
+      "GET",
+      `/managed/github/clone-operations/${encodeURIComponent(operationId)}`,
+      { signal },
+    ),
+
+  cancelManagedClone: (operationId: string) =>
+    request<ManagedCloneOperation>(
+      "DELETE",
+      `/managed/github/clone-operations/${encodeURIComponent(operationId)}`,
+    ),
+
+  listManagedSecrets: (signal?: AbortSignal) =>
+    request<ManagedSecretList>("GET", "/managed/secrets", { signal }),
+
+  putManagedSecret: (name: string, value: string) =>
+    request<ManagedSecretSummary>("PUT", `/managed/secrets/${encodeURIComponent(name)}`, {
+      body: { value },
+    }),
+
+  deleteManagedSecret: (name: string) =>
+    request<void>("DELETE", `/managed/secrets/${encodeURIComponent(name)}`),
 
   // Probing spawns podman subprocesses, so callers query this on demand (the
   // launch form's sandbox mode) rather than on page load.

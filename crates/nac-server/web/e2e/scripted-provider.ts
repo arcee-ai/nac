@@ -15,6 +15,7 @@ export type ScriptMatch = {
   token?: string;
   functionOutputCallId?: string;
   requiredTools?: string[];
+  forbiddenTools?: string[];
   /** Match only after the named step was consumed, for repeated model inputs. */
   afterStep?: string;
 };
@@ -212,6 +213,17 @@ export class ScriptedProvider {
           : [],
       );
       if (match.requiredTools.some((name) => !toolNames.has(name))) return false;
+      if (match.forbiddenTools?.some((name) => toolNames.has(name))) return false;
+    } else if (match.forbiddenTools != null) {
+      const tools = this.asRecord(body)?.tools;
+      const toolNames = new Set(
+        tools instanceof Array
+          ? tools
+              .map((tool) => this.asRecord(tool)?.name)
+              .filter((name): name is string => typeof name === "string")
+          : [],
+      );
+      if (match.forbiddenTools.some((name) => toolNames.has(name))) return false;
     }
     return true;
   }

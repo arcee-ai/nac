@@ -43,6 +43,114 @@ export interface StoreInfo {
   worker_executable: string;
 }
 
+export interface ManagedReadinessCheck {
+  name: string;
+  ready: boolean;
+  detail: string;
+}
+
+export interface ManagedHostStatus {
+  managed: true;
+  ready: boolean;
+  version: string;
+  schema_version: number;
+  logical_host_id: string;
+  owner: string | null;
+  public_hostname: string;
+  repository_root: string;
+  model_ready: boolean;
+  github_status: "connected" | "disconnected" | "reauth-required";
+  secret_count: number;
+  project_count: number;
+  session_count: number;
+  checks: ManagedReadinessCheck[];
+}
+
+export interface ManagedGitHubStatus {
+  configured: boolean;
+  connected: boolean;
+  login: string | null;
+  name: string | null;
+  avatar_url: string | null;
+  organization: string | null;
+  expires_at_ms: number | null;
+  git_name: string | null;
+  git_email: string | null;
+  git_configured: boolean;
+}
+
+export interface ManagedGitHubLoginStarted {
+  login_id: string;
+  verification_uri: string;
+  user_code: string;
+  expires_in_secs: number;
+}
+
+export type ManagedGitHubLoginState =
+  | { state: "pending" }
+  | { state: "complete"; auth: ManagedGitHubStatus }
+  | { state: "failed"; error: string };
+
+export interface ManagedGitHubRepository {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  can_read: boolean;
+  can_write: boolean;
+  default_branch: string;
+  clone_url: string;
+  html_url: string;
+}
+
+export interface ManagedGitHubRepositoryList {
+  repositories: ManagedGitHubRepository[];
+}
+
+export interface ManagedGitHubBranchList {
+  branches: string[];
+}
+
+export interface ManagedSecretSummary {
+  name: string;
+  updated_at_unix_ms: number;
+}
+
+export interface ManagedSecretList {
+  secrets: ManagedSecretSummary[];
+  healthy: boolean;
+}
+
+export type ManagedCloneStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted";
+
+export interface ManagedCloneOperation {
+  version: number;
+  operation_id: string;
+  status: ManagedCloneStatus;
+  repository_id: number;
+  repository: string;
+  source_identity: string;
+  branch: string;
+  destination: string;
+  project_id: string;
+  project_name: string;
+  project: ProjectRecord | null;
+  progress: string;
+  error: string | null;
+  reused_existing_checkout: boolean;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
+}
+
+export interface StartManagedCloneRequest {
+  repository_id: number;
+  repository: string;
+  branch: string;
+  destination: string;
+  project_name: string;
+  project_description: string | null;
+}
+
 export type SandboxAvailabilityStatus = "ready" | "missing" | "unavailable";
 
 export interface SandboxAvailability {

@@ -41,7 +41,11 @@ test("runs a direct session through the loopback scripted Responses provider", a
 }) => {
   harness.provider.enqueue(
     "direct-text",
-    { token: "E2E_MODEL_TOKEN", requiredTools: ["read", "exec_command"] },
+    {
+      token: "E2E_MODEL_TOKEN",
+      requiredTools: ["read", "exec_command"],
+      forbiddenTools: ["web_search", "web_fetch"],
+    },
     { kind: "text", text: "production embedded response" },
   );
   const sessionId = await createDirectSession(request, harness);
@@ -60,6 +64,38 @@ test("runs a direct session through the loopback scripted Responses provider", a
   );
   expect(modelRequest?.headers.authorization).toBe("Bearer nac-e2e-dummy-only");
   expect(modelRequest?.body).toMatchObject({ model: "gpt-5.6-sol", store: false });
+});
+
+test.describe("with an isolated Exa credential", () => {
+  test.use({ exaCredential: "production-e2e-exa-canary" });
+
+  test("exposes native web retrieval in the production direct-agent request", async ({
+    harness,
+    page,
+    request,
+  }) => {
+    harness.provider.enqueue(
+      "exa-enabled-direct",
+      {
+        token: "E2E_EXA_ENABLED",
+        requiredTools: ["read", "web_search", "web_fetch"],
+      },
+      { kind: "text", text: "web retrieval is available" },
+    );
+    const sessionId = await createDirectSession(request, harness);
+    const submitted = await request.post(`${harness.baseUrl}/sessions/${sessionId}/runs`, {
+      data: { prompt: "E2E_EXA_ENABLED" },
+    });
+    expect(submitted.status()).toBe(202);
+    await harness.provider.waitForRequestCount(1);
+    await waitForRunIdle(request, harness, sessionId);
+    harness.provider.assertConsumed();
+
+    const requestJson = JSON.stringify(harness.provider.requests[0]?.body);
+    expect(requestJson).not.toContain("production-e2e-exa-canary");
+    await page.goto(`${harness.baseUrl}/#/session/${sessionId}/threads`);
+    await expect(page.getByText("web retrieval is available")).toBeVisible();
+  });
 });
 
 test("round-trips a native tool result through the scripted Responses provider", async ({

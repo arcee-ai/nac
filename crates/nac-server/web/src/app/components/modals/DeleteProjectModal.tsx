@@ -46,10 +46,10 @@ export function DeleteProjectModal({
       const deleted = deletedIds.length;
       toast.success(
         deleted > 0
-          ? `Project and ${deleted} ${plural(deleted)} deleted`
+          ? `Project and ${deleted} ${plural(deleted)} removed`
           : kept > 0
-            ? `Project deleted; ${kept} ${plural(kept)} kept`
-            : "Project deleted",
+            ? `Project removed; ${kept} ${plural(kept)} kept`
+            : "Project removed",
       );
       onClose();
     } catch (error) {
@@ -61,7 +61,7 @@ export function DeleteProjectModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Delete Entire Project?"
+      title="Remove Project?"
       size={ModalSize.Medium}
       footer={
         <>
@@ -89,20 +89,19 @@ export function DeleteProjectModal({
             onClick={() => void submit("delete")}
             loading={remove.isPending}
           >
-            Delete All
+            Remove Project and Sessions
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-4">
         <p>
-          Are you sure you want to delete{" "}
-          <span className="text-basic-primary">&quot;{project?.name}&quot;</span>? This can&apos;t
-          be undone.
+          Remove <span className="text-basic-primary">&quot;{project?.name}&quot;</span> from NAC?
         </p>
         <p>
-          Select Keep Sessions if you want to delete the project and keep the sessions within it.
-          Those sessions will be unassigned.
+          Files at <code className="break-all text-basic-primary">{project?.cwd}</code> will be
+          preserved. Select Keep Sessions to leave its chats unassigned, or remove the Project and
+          its chats together.
         </p>
       </div>
     </Modal>

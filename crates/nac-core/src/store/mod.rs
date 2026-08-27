@@ -37,7 +37,7 @@ pub use run_recovery::{
     clear_settled_run_recovery, load_run_recovery, reconcile_active_run, ActiveRunReconciliation,
     RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
 };
-pub use schema::{check_readiness, default_store_path, initialize};
+pub use schema::{check_readiness, default_store_path, initialize, schema_version};
 pub use session_goals::*;
 pub use session_inbox::*;
 pub use ssh_configurations::*;

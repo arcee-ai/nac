@@ -21,6 +21,7 @@ axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 futures-core = "0.3"
 include_dir = "0.7"
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
@@ -34,5 +35,4 @@ utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum
 [dev-dependencies]
 flate2 = "1"
 nac-core = { path = "../nac-core", features = ["test-support"] }
-libc.workspace = true
 tower = { version = "0.5", features = ["util"] }

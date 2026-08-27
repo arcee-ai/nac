@@ -148,8 +148,8 @@ export function ProjectPopover({
                     }}
                   />
                   <RowAction
-                    tooltip="Delete project"
-                    label={`Delete ${project.name}`}
+                    tooltip="Remove project"
+                    label={`Remove ${project.name}`}
                     icon={IconName.Trash}
                     variant={ButtonVariant.GhostDestructive}
                     onClick={() => {

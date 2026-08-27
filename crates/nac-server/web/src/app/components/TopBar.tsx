@@ -21,6 +21,7 @@ import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
+import { useManagedHost } from "@/app/providers/ManagedHostProvider";
 
 // Figma "HeaderSurface": the same ground-to-transparent gradient stacked twice,
 // spanning the bar plus an overhang that fades the content scrolling below.
@@ -36,6 +37,7 @@ export function TopBar() {
   const isTablet = useIsTablet();
   const { pathname } = useLocation();
   const actions = useProjectActions();
+  const managed = useManagedHost();
   const inTrail = sessionIdFromPath(pathname) !== null || projectIdFromPath(pathname) !== null;
 
   return (
@@ -79,8 +81,8 @@ export function TopBar() {
               size={ButtonSize.Medium}
               content={ButtonContent.Icon}
               className="btn-round"
-              aria-label="New project"
-              onClick={actions.create}
+              aria-label={managed.isManaged ? "Add repository" : "New project"}
+              onClick={managed.isManaged ? managed.addRepository : actions.create}
             >
               <Icon iconName={IconName.Add} />
             </Button>
@@ -90,6 +92,7 @@ export function TopBar() {
           <HeaderMenu
             onConfigurations={() => setConfiguring(true)}
             onSshConfigs={() => setSshConfigs(true)}
+            onManagedHost={managed.isManaged ? managed.openSettings : undefined}
           />
         </div>
       </header>
