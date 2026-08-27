@@ -342,6 +342,8 @@ Rules:
 - `fd30178 refactor(server): isolate project HTTP delivery` — moves project
   DTOs and thin Axum/OpenAPI handlers behind a delivery boundary while keeping
   crate-root public re-exports and the generated contract stable.
+- `2035930 refactor(server): isolate SSH configuration flows` — gives saved SSH
+  connections focused application and HTTP owners with tri-state update tests.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -381,6 +383,12 @@ Rules:
   Focused application validation/update/delete coverage was added; the complete
   server gate passes 150 library and 23 binary tests, and warning-denied Clippy
   is green. Server `lib.rs` is now 7,637 lines.
+- Saved model-configuration list/delete now crosses a focused application and
+  delivery seam. Deletion keeps the accepted row-first ordering and retires
+  only server-generated top-level/light-model credentials after success.
+  Project-default conflict, credential-rotation, and OpenAPI parity regressions
+  pass with warning-denied Clippy; `lib.rs` is now 7,588 lines. Create/update
+  and provider resolution remain the next configuration slice.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -396,7 +404,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the SSH configuration
-application/delivery slice without protected files. Then extract saved model
-configuration operations while preserving credential rollback/retirement and
+Inspect exact worktree/staged diffs and commit the saved model-configuration
+list/delete slice without protected files. Then extract create/update and
+provider resolution while preserving credential rollback/retirement and
 provider-destination policy ordering.

@@ -8760,7 +8760,7 @@ async fn project_session_materializes_defaults_and_filters_membership() {
     assert!(required_null.to_string().contains("model"));
     assert_eq!(manager.list_sessions(false).await.unwrap().len(), 1);
 
-    let deletion = delete_model_config_handler(
+    let deletion = delivery::model_configurations::delete_handler(
         State(manager.clone()),
         AxumPath("project-default".to_string()),
     )
@@ -8781,7 +8781,7 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         )
         .unwrap();
     assert_eq!(
-        delete_model_config_handler(
+        delivery::model_configurations::delete_handler(
             State(manager.clone()),
             AxumPath("project-default".to_string()),
         )
