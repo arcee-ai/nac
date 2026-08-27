@@ -524,6 +524,14 @@ Rules:
   adapter owns the six route pairs and maps HTTP DTOs into application
   commands. Both end-to-end foreground/background HTTP journeys, OpenAPI/router
   parity, the full server test build, and the server crate check pass.
+- Session catalog and presentation use cases now have a focused application
+  owner that combines durable summaries with process-local run state and
+  bounded, checkout-deduplicated workspace measurements. Project, workspace,
+  orchestration, MCP, and tests now call that explicit owner; a 113-line
+  delivery adapter owns list/update/reorder DTOs and handlers. Presentation
+  status/error-shape and serialized-order regressions, OpenAPI/router parity,
+  the full server test build, and warning-denied Clippy pass. Server `lib.rs`
+  is now 5,755 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -539,7 +547,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the delegation application/
-delivery slice without protected files. Then continue M2 with the primary
-session transport/application seam, keeping lifecycle gates, operation leases,
-and exact run-admission/settlement ordering in the lifecycle coordinator.
+Inspect exact worktree/staged diffs and commit the session catalog/presentation
+slice without protected files. Then continue M2 with session attachment,
+submission, inbox/goals, permissions, events, configuration, cancellation, and
+deletion, keeping lifecycle gates, operation leases, and exact run-admission/
+settlement ordering in the lifecycle coordinator.

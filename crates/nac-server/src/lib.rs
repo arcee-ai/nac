@@ -28,6 +28,10 @@ pub use delivery::projects::{
     DeleteProjectSessions, ProjectList, ReorderProjectsRequest, ReorderProjectsResponse,
     UpdateProjectRequest,
 };
+pub use delivery::sessions::{
+    ListSessionsQuery, ReorderSessionsRequest, ReorderSessionsResponse,
+    UpdateSessionPresentationRequest,
+};
 pub use delivery::ssh_configurations::{
     CreateSshConfigurationRequest, SshConfigurationList, UpdateSshConfigurationRequest,
 };
@@ -499,14 +503,6 @@ pub struct ManagedSessionSummary {
     pub workspace_diff: Option<view::WorkspaceDiffTotals>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct ListSessionsQuery {
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub workspace_stats: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum RequestField<T> {
     #[default]
@@ -911,26 +907,6 @@ impl UpdateConfigRequest {
             )
             && matches!(self.light_model, RequestField::Omitted)
     }
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct UpdateSessionPresentationRequest {
-    pub title: String,
-    pub pinned: bool,
-    pub expected_version: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct ReorderSessionsRequest {
-    pub pinned: bool,
-    pub session_ids: Vec<String>,
-    pub expected_versions: BTreeMap<String, i64>,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct ReorderSessionsResponse {
-    pub pinned: bool,
-    pub sessions: Vec<SessionSummarySnapshot>,
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
@@ -1349,6 +1325,10 @@ impl SessionManager {
         application::delegation::DelegationApplication::new(self)
     }
 
+    pub(crate) fn session_catalog(&self) -> application::sessions::SessionCatalogApplication<'_> {
+        application::sessions::SessionCatalogApplication::new(self)
+    }
+
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -1402,216 +1382,6 @@ impl SessionManager {
         })
     }
 
-    pub async fn list_sessions(
-        &self,
-        include_workspace_stats: bool,
-    ) -> Result<Vec<ManagedSessionSummary>> {
-        self.list_sessions_for_project(include_workspace_stats, None)
-            .await
-    }
-
-    pub async fn list_sessions_for_project(
-        &self,
-        include_workspace_stats: bool,
-        project_id: Option<&str>,
-    ) -> Result<Vec<ManagedSessionSummary>> {
-        if !self.inner.store_path.exists() {
-            return Ok(Vec::new());
-        }
-
-        let store_path = self.inner.store_path.clone();
-        let summaries = tokio::task::spawn_blocking(move || view::list_sessions(&store_path))
-            .await
-            .context("session list task failed")??;
-        let mut sessions = {
-            let active = self.inner.active_sessions.read().await;
-            summaries
-                .into_iter()
-                .filter(|summary| {
-                    project_id
-                        .is_none_or(|project_id| summary.project_id.as_deref() == Some(project_id))
-                })
-                .map(|summary| {
-                    let active_service = active.get(&summary.session_id);
-                    Ok(ManagedSessionSummary {
-                        lineage: self.session_lineage(&summary.session_id)?,
-                        active: active_service.is_some(),
-                        active_run: active_service.and_then(|service| service.active_run()),
-                        summary,
-                        workspace_diff: None,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?
-        };
-
-        if include_workspace_stats {
-            self.populate_workspace_diff(&mut sessions).await?;
-        }
-
-        Ok(sessions)
-    }
-
-    pub async fn update_session_presentation(
-        &self,
-        session_id: &str,
-        title: &str,
-        pinned: bool,
-        expected_version: i64,
-    ) -> std::result::Result<SessionSummarySnapshot, sessions::SessionPresentationError> {
-        let store_path = self.inner.store_path.clone();
-        let session_id = session_id.to_string();
-        let title = title.to_string();
-        tokio::task::spawn_blocking(move || {
-            sessions::update_session_presentation(
-                &store_path,
-                &session_id,
-                &title,
-                pinned,
-                expected_version,
-            )
-            .map(Into::into)
-        })
-        .await
-        .map_err(|error| {
-            sessions::SessionPresentationError::Store(anyhow!(
-                "session presentation update task failed: {error}"
-            ))
-        })?
-    }
-
-    pub async fn reorder_sessions(
-        &self,
-        pinned: bool,
-        session_ids: &[String],
-        expected_versions: &BTreeMap<String, i64>,
-    ) -> std::result::Result<Vec<SessionSummarySnapshot>, sessions::SessionPresentationError> {
-        let store_path = self.inner.store_path.clone();
-        let session_ids = session_ids.to_vec();
-        let expected_versions = expected_versions.clone();
-        tokio::task::spawn_blocking(move || {
-            sessions::reorder_sessions(&store_path, pinned, &session_ids, &expected_versions)
-                .map(|summaries| summaries.into_iter().map(Into::into).collect())
-        })
-        .await
-        .map_err(|error| {
-            sessions::SessionPresentationError::Store(anyhow!(
-                "session reorder task failed: {error}"
-            ))
-        })?
-    }
-
-    /// Attach "+n −m" to every row of the session list.
-    ///
-    /// Sessions sharing a checkout are measured once, and the answer is cached,
-    /// because this runs on every refresh of the list. Remote checkouts are the
-    /// reason for the rest of the care here: measuring one means talking to
-    /// another machine, so a host that is slow or gone must cost the list a
-    /// bounded wait once rather than a connect timeout per row.
-    async fn populate_workspace_diff(&self, sessions: &mut [ManagedSessionSummary]) -> Result<()> {
-        let mut targets: HashMap<GitTargetKey, (GitTarget, String)> = HashMap::new();
-        let mut key_by_session: HashMap<String, GitTargetKey> = HashMap::new();
-        for entry in sessions.iter() {
-            let Ok(target) = self.git_target(&entry.summary) else {
-                continue;
-            };
-            let key = git_target_key(&target);
-            key_by_session.insert(entry.summary.session_id.clone(), key.clone());
-            targets
-                .entry(key)
-                .or_insert_with(|| (target, entry.summary.cwd.display().to_string()));
-        }
-
-        let now = Instant::now();
-        let mut totals_by_key: HashMap<GitTargetKey, view::WorkspaceDiffTotals> = HashMap::new();
-        let mut pending = Vec::new();
-        {
-            let cache = self.inner.workspace_diff_cache.read().await;
-            for key in targets.keys() {
-                match cache.get(key) {
-                    Some(entry) if entry.is_fresh(now) => {
-                        totals_by_key.insert(key.clone(), entry.totals.clone());
-                    }
-                    _ => pending.push(key.clone()),
-                }
-            }
-        }
-
-        let mut tasks = Vec::new();
-        for key in pending {
-            let Some((target, display)) = targets.get(&key).cloned() else {
-                continue;
-            };
-            // A host already known to be unreachable is not dialled again just
-            // to fill in a column.
-            if let Some(failure) = self.cached_git_failure(&key).await {
-                totals_by_key.insert(
-                    key.clone(),
-                    view::WorkspaceDiffTotals {
-                        total_additions: 0,
-                        total_deletions: 0,
-                        error: Some(failure),
-                    },
-                );
-                continue;
-            }
-            tasks.push((
-                key,
-                tokio::task::spawn_blocking(move || {
-                    view::workspace_diff_totals(&display, Some(&target))
-                }),
-            ));
-        }
-
-        let mut cache_updates = Vec::new();
-        let deadline = tokio::time::Instant::now() + WORKSPACE_DIFF_MEASURE_BUDGET;
-        for (key, task) in tasks {
-            match tokio::time::timeout_at(deadline, task).await {
-                Ok(joined) => {
-                    let totals = joined.context("workspace diff task failed")?;
-                    totals_by_key.insert(key.clone(), totals.clone());
-                    cache_updates.push((key, totals));
-                }
-                Err(_) => {
-                    totals_by_key.insert(
-                        key,
-                        view::WorkspaceDiffTotals {
-                            total_additions: 0,
-                            total_deletions: 0,
-                            error: Some("workspace diff is still being measured".to_string()),
-                        },
-                    );
-                }
-            }
-        }
-
-        if !cache_updates.is_empty() {
-            let updated_at = Instant::now();
-            let mut cache = self.inner.workspace_diff_cache.write().await;
-            for (key, totals) in cache_updates {
-                cache.insert(key, WorkspaceDiffCacheEntry { updated_at, totals });
-            }
-        }
-
-        for entry in sessions.iter_mut() {
-            entry.workspace_diff = match key_by_session.get(&entry.summary.session_id) {
-                Some(key) => totals_by_key.get(key).cloned(),
-                None => Some(view::workspace_diff_totals(
-                    &entry.summary.cwd.display().to_string(),
-                    None,
-                )),
-            };
-        }
-
-        Ok(())
-    }
-
-    /// Where git runs for a session's checkout.
-    ///
-    /// An ssh session's files are on the machine it works on, so git runs there
-    /// too, over the connection the session already keeps open. What is left
-    /// without a target is a sandbox with no mounted working directory: those
-    /// files exist only inside a container that is removed with the session, so
-    /// there is nothing durable to inspect, commit or restore.
     fn git_target(&self, summary: &SessionSummarySnapshot) -> Result<GitTarget> {
         if let Some(host) = summary.ssh_host.as_deref() {
             // The stored connection is used as recorded: the key path was
@@ -2965,7 +2735,8 @@ impl SessionManager {
         operation_lease: Option<&sessions::SessionOperationLease>,
     ) -> Result<SessionService> {
         let summary = self
-            .list_sessions(false)
+            .session_catalog()
+            .list(false)
             .await?
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
@@ -3021,7 +2792,8 @@ impl SessionManager {
         Option<sessions::SessionOperationLease>,
     )> {
         let summary = self
-            .list_sessions(false)
+            .session_catalog()
+            .list(false)
             .await?
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
@@ -4175,9 +3947,9 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(launch_model_defaults_handler))
         .routes(routes!(models_handler))
         .routes(routes!(commands_handler))
-        .routes(routes!(list_sessions, create_session))
-        .routes(routes!(reorder_sessions_handler))
-        .routes(routes!(update_session_presentation_handler))
+        .routes(routes!(delivery::sessions::list_handler, create_session))
+        .routes(routes!(delivery::sessions::reorder_handler))
+        .routes(routes!(delivery::sessions::update_presentation_handler))
         .routes(routes!(session_messages))
         .routes(routes!(list_direct_inbox, create_direct_inbox_item))
         .routes(routes!(update_direct_inbox_item, cancel_direct_inbox_item))
@@ -4701,77 +4473,6 @@ async fn models_handler() -> Json<ModelListing> {
 )]
 async fn commands_handler() -> Json<&'static [SlashCommandDefinition]> {
     Json(slash_command_definitions())
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions",
-    operation_id = "get_sessions",
-    tag = "sessions",
-    params(ListSessionsQuery),
-    responses((status = 200, description = "Success", body = Vec<ManagedSessionSummary>, content_type = "application/json"), (status = 400, description = "Query extraction failed", body = String, content_type = "text/plain"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn list_sessions(
-    State(manager): State<SessionManager>,
-    Query(query): Query<ListSessionsQuery>,
-) -> std::result::Result<Json<Vec<ManagedSessionSummary>>, ApiError> {
-    Ok(Json(
-        manager
-            .list_sessions_for_project(query.workspace_stats, query.project_id.as_deref())
-            .await?,
-    ))
-}
-
-#[utoipa::path(
-    put,
-    path = "/sessions/{session_id}/presentation",
-    operation_id = "put_sessions_session_id_presentation",
-    tag = "sessions",
-    params(("session_id" = String, Path)),
-    request_body(content = UpdateSessionPresentationRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = SessionSummarySnapshot, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn update_session_presentation_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    payload: std::result::Result<Json<UpdateSessionPresentationRequest>, JsonRejection>,
-) -> std::result::Result<Json<SessionSummarySnapshot>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let summary = manager
-        .update_session_presentation(
-            &session_id,
-            &request.title,
-            request.pinned,
-            request.expected_version,
-        )
-        .await?;
-    Ok(Json(summary))
-}
-
-#[utoipa::path(
-    put,
-    path = "/sessions/order",
-    operation_id = "put_sessions_order",
-    tag = "sessions",
-    request_body(content = ReorderSessionsRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = ReorderSessionsResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn reorder_sessions_handler(
-    State(manager): State<SessionManager>,
-    payload: std::result::Result<Json<ReorderSessionsRequest>, JsonRejection>,
-) -> std::result::Result<Json<ReorderSessionsResponse>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let sessions = manager
-        .reorder_sessions(
-            request.pinned,
-            &request.session_ids,
-            &request.expected_versions,
-        )
-        .await?;
-    Ok(Json(ReorderSessionsResponse {
-        pinned: request.pinned,
-        sessions,
-    }))
 }
 
 #[utoipa::path(

@@ -68,7 +68,7 @@ impl<'a> WorkspaceApplication<'a> {
         &self,
         session_id: &str,
     ) -> Result<WorkspaceMutationAdmission> {
-        let initial_sessions = self.manager.list_sessions(false).await?;
+        let initial_sessions = self.manager.session_catalog().list(false).await?;
         let summary = initial_sessions
             .iter()
             .find(|entry| entry.summary.session_id == session_id)
@@ -97,7 +97,7 @@ impl<'a> WorkspaceApplication<'a> {
         // This turns the idle observation into an admission boundary: an
         // already-running peer makes acquisition fail, and a new run cannot
         // establish ownership until the branch/commit operation is finished.
-        let sessions = self.manager.list_sessions(false).await?;
+        let sessions = self.manager.session_catalog().list(false).await?;
         let current = sessions
             .iter()
             .find(|entry| entry.summary.session_id == session_id)
@@ -180,7 +180,8 @@ impl<'a> WorkspaceApplication<'a> {
     pub(crate) async fn workspace_root(&self, session_id: &str) -> Result<GitTarget> {
         let summary = self
             .manager
-            .list_sessions(false)
+            .session_catalog()
+            .list(false)
             .await?
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
@@ -231,7 +232,8 @@ impl<'a> WorkspaceApplication<'a> {
     ) -> Result<view::OpenLocalPathResult> {
         let summary = self
             .manager
-            .list_sessions(false)
+            .session_catalog()
+            .list(false)
             .await?
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
