@@ -232,7 +232,7 @@ Rules:
 - Verification: focused server suites per family, OpenAPI/router contract,
   complete `nac-server` tests, check/lint/format.
 
-### M3 — Managed bounded context (pending)
+### M3 — Managed bounded context (implementation complete; final image/E2E gates in M8)
 
 - Add a substantive `nac-managed` crate owning managed domain/workflow state,
   configuration/secrets, GitHub provider/auth/discovery, clone operations,
@@ -493,6 +493,15 @@ Rules:
   production dependency on `nac-managed`. All 16 managed tests, full server
   suite (150 library plus 23 CLI), warning-denied managed/core/server checks,
   core test build, contract test, and OpenAPI parity coverage pass.
+- Managed readiness facts and credential-safe path/model/tool/command probes now
+  belong to `nac-managed::readiness`; the server contributes only SQLite and
+  response facts. Generic managed secret administration has a focused
+  application service and 108-line delivery adapter, removing DTOs and handlers
+  from server `lib.rs` while preserving write-only values and exact 404/400/500
+  mapping. The managed suite now passes 18 tests; focused secret HTTP and
+  OpenAPI/router parity tests plus warning-denied managed/server checks pass.
+  `lib.rs` is 6,852 lines. Final production E2E and image-contract gates remain
+  intentionally scheduled under M8.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -508,7 +517,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the managed clone/project-port
-slice without protected files. Then move managed readiness facts and remaining
-secret HTTP use cases behind the managed application facade so M3 can close,
-and continue M2 server decomposition with session/delegation/workspace seams.
+Inspect exact worktree/staged diffs and commit the managed readiness/secrets
+slice without protected files. Then continue M2 with session, delegation, and
+workspace application/delivery seams, keeping lifecycle gates and transaction
+ordering in their existing owner until the matching core decomposition.
