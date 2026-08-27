@@ -116,11 +116,11 @@ impl TerminalSession {
             .context("Failed to take PTY writer")?;
 
         let alive = Arc::new(AtomicBool::new(true));
-        let alive_clone = alive.clone();
+        let alive_clone = Arc::clone(&alive);
         let reader_output_id = output_id.clone();
         let reader_output_registry = output_registry.clone();
         let notify = Arc::new(Notify::new());
-        let notify_clone = notify.clone();
+        let notify_clone = Arc::clone(&notify);
 
         let reader_thread = std::thread::spawn(move || {
             let mut reader = reader;

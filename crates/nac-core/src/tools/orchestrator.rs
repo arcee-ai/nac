@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use serde_json::json;
@@ -200,7 +202,7 @@ impl NativeTool for LaunchTool {
             let outcome = tokio::select! {
                 outcome = controller.wait(&session_id, started.generation) => outcome,
                 _ = services.runtime.command_cancellation.cancelled() => {
-                    let cancel_controller = controller.clone();
+                    let cancel_controller = Arc::clone(&controller);
                     let cancel_parent = parent.clone();
                     let cancel_session = session_id.clone();
                     let cancellation = tokio::spawn(async move {

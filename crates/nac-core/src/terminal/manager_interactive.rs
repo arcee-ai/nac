@@ -245,7 +245,7 @@ impl TerminalManager {
                 (
                     session.output_id().to_string(),
                     session.preview_cursor(),
-                    session.output_notify().clone(),
+                    Arc::clone(session.output_notify()),
                 )
             };
 
