@@ -678,6 +678,13 @@ Rules:
   tolerance, steering reconciliation, and active-run nonblocking snapshot
   regressions pass; the complete core test build is green.
   `session_service.rs` is now 3,146 lines.
+- Durable run recovery and traditional-child terminal reconciliation now live
+  in a focused 240-line recovery owner. Operation-lease validation, cached
+  transcript refresh, canonical/failed/interrupted terminal mapping, and
+  exactly-once child settlement retain their original ordering. Pre-prompt and
+  terminal crash-window delivery, shared-store peer recovery, and stale-
+  snapshot admission reconciliation regressions pass; the complete core test
+  build is green. `session_service.rs` is now 2,910 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -693,7 +700,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 frontend/transcript projection owners with exact-path staging.
-Next extract durable run recovery and traditional-child terminal reconciliation
-from `session_service`; keep admission, cancellation, and settlement ordering
-untouched until that recovery seam is green.
+Commit the M4 recovery owner with exact-path staging. Next separate run
+admission, cancellation, and settlement into explicit session-service owners,
+moving code with its invariants and running the race/cleanup characterization
+suites after each boundary.
