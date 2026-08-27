@@ -349,6 +349,9 @@ Rules:
   application and delivery boundaries.
 - `46e882a refactor(server): isolate credential administration` — moves the
   ordinary write-only credential store behind application and delivery APIs.
+- `567c278 refactor(server): isolate saved model configuration writes` — moves
+  create/update, light-model validation, and generated-key transaction ordering
+  into the configuration application owner.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -407,6 +410,13 @@ Rules:
   update succeeds, matching the original ordering. The complete server suite
   passes 150 library and 23 binary tests; `lib.rs` is now 7,121 lines. Provider
   discovery from saved/file configurations remains in delivery and is next.
+- Saved and file-based provider resolution now belongs to the same application
+  owner. Destination-policy checks and key resolution remain fail-fast; managed
+  login discovery failures remain nonfatal `models_error` values, while keyed
+  provider failures retain their 502 mapping. The full server suite passes 150
+  library and 23 binary tests with warning-denied Clippy; `lib.rs` is now 6,945
+  lines. The cohesive application module is 518 lines because it owns the full
+  credential/row/provider transaction rather than fragmenting that ordering.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -422,6 +432,6 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit saved model create/update without
-protected files. Then move file/saved provider resolution into the same
-application owner with transport-only response mapping.
+Inspect exact worktree/staged diffs and commit provider resolution without
+protected files. Then extract the next M2 service family and begin the managed
+bounded-context crate seam.

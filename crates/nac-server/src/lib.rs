@@ -16,7 +16,8 @@ pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
 };
 pub use delivery::model_configurations::{
-    CreateModelConfigurationRequest, ModelConfigurationList, UpdateModelConfigurationRequest,
+    CreateModelConfigurationRequest, ModelConfigFromFileRequest, ModelConfigurationList,
+    ResolvedModelConfiguration, UpdateModelConfigurationRequest,
 };
 pub use delivery::projects::{
     AssignSessionRequest, CreateProjectRequest, DeleteProjectQuery, DeleteProjectResponse,
@@ -82,7 +83,7 @@ use nac_core::{
         BackendKind, EffectiveModelSettings, ManagedAuthProvider, ModelConfigurationError,
         ModelListing, ProviderModel, ReasoningEffort,
     },
-    model_configurations::{self, ModelConfigurationRecord, ModelConfigurationStoreError},
+    model_configurations::{ModelConfigurationRecord, ModelConfigurationStoreError},
     permissions::{PermissionReply, PermissionRequest},
     projects::{self, ProjectStoreError},
     runtime::{
@@ -860,27 +861,6 @@ pub struct PutManagedSecretRequest {
 /// Marks credential names this server generated for a saved configuration, so
 /// deleting one never removes a key the operator manages themselves.
 const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct ModelConfigFromFileRequest {
-    pub path: String,
-}
-
-/// A configuration that has been checked end to end: the destination is
-/// approved, the credential resolves, and the provider answered with the
-/// models it allows.
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct ResolvedModelConfiguration {
-    pub backend: BackendKind,
-    pub model: Option<String>,
-    pub base_url: String,
-    pub api_key_env: Option<String>,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub models: Vec<ProviderModel>,
-    /// Why the list is empty, when a stored login could not be asked. An empty
-    /// list without this is a provider that simply offers no index.
-    pub models_error: Option<String>,
-}
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ProviderModelsRequest {
@@ -4621,12 +4601,16 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
             delivery::projects::delete_handler
         ))
         .routes(routes!(delivery::projects::assign_session_handler))
-        .routes(routes!(model_config_from_file_handler))
+        .routes(routes!(
+            delivery::model_configurations::resolve_file_handler
+        ))
         .routes(routes!(
             delivery::model_configurations::update_handler,
             delivery::model_configurations::delete_handler
         ))
-        .routes(routes!(saved_model_config_models_handler))
+        .routes(routes!(
+            delivery::model_configurations::resolve_saved_handler
+        ))
         .routes(routes!(
             delivery::ssh_configurations::list_handler,
             delivery::ssh_configurations::create_handler
@@ -5164,169 +5148,6 @@ async fn provider_models_handler(
             message: error.to_string(),
         })?;
     Ok(Json(ProviderModelList { base_url, models }))
-}
-
-/// Read a configuration the user picked from disk and check it can actually run.
-///
-/// The key is never sent by the client here: the file names an environment
-/// variable or stored credential, and the server resolves it the same way a
-/// session would.
-#[utoipa::path(
-    post,
-    path = "/model-configs/from-file",
-    operation_id = "post_model_configs_from_file",
-    tag = "model-configs",
-    request_body(content = ModelConfigFromFileRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = ResolvedModelConfiguration, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn model_config_from_file_handler(
-    State(manager): State<SessionManager>,
-    payload: std::result::Result<Json<ModelConfigFromFileRequest>, JsonRejection>,
-) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let path = PathBuf::from(request.path.trim());
-    if path.as_os_str().is_empty() {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: "a configuration file path is required".to_string(),
-        });
-    }
-
-    let config = NacConfig::load_from_file(&path).map_err(|error| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message: error.to_string(),
-    })?;
-    // A file written against the current schema names only a model, whose
-    // provider the catalog resolves; an older one states the provider
-    // outright and is taken at its word.
-    let identity = NacConfig::load_model_identity_from_file(&path).map_err(|error| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message: error.to_string(),
-    })?;
-    let backend = identity
-        .backend
-        .or_else(|| config.model.model.as_deref().and_then(provider_for_model))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!(
-                "{} names no model the catalog recognizes, so it cannot describe a provider",
-                path.display()
-            ),
-        })?;
-
-    resolve_configuration(
-        &manager,
-        backend,
-        config.model.model,
-        identity.base_url,
-        identity.api_key_env,
-        config.model.reasoning_effort,
-    )
-    .await
-}
-
-#[utoipa::path(
-    post,
-    path = "/model-configs/{config_id}/models",
-    operation_id = "post_model_configs_config_id_models",
-    tag = "model-configs",
-    params(("config_id" = String, Path)),
-    responses((status = 200, description = "Success", body = ResolvedModelConfiguration, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn saved_model_config_models_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
-) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
-    let record =
-        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
-    let backend: BackendKind = record.backend.parse().map_err(|message: String| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message,
-    })?;
-    let reasoning_effort = record
-        .reasoning_effort
-        .as_deref()
-        .map(|raw| parse_request_enum::<ReasoningEffort>(raw, "reasoning_effort"))
-        .transpose()?;
-
-    resolve_configuration(
-        &manager,
-        backend,
-        Some(record.model),
-        Some(record.base_url),
-        record.api_key_env,
-        reasoning_effort,
-    )
-    .await
-}
-
-/// Shared tail of the saved-configuration and config-file paths: settle the
-/// destination, resolve the credential, and confirm both by listing models.
-async fn resolve_configuration(
-    manager: &SessionManager,
-    backend: BackendKind,
-    model: Option<String>,
-    base_url: Option<String>,
-    api_key_env: Option<String>,
-    reasoning_effort: Option<ReasoningEffort>,
-) -> std::result::Result<Json<ResolvedModelConfiguration>, ApiError> {
-    let base_url = base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| provider_default_base_url(backend).map(str::to_string))
-        .ok_or_else(|| ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("backend '{backend}' has no default base URL; supply one"),
-        })?;
-    let base_url = resolve_model_base_url(backend, Some(base_url))?;
-    enforce_trusted_base_url(
-        Some(backend),
-        Some(base_url.as_str()),
-        &NacConfig::load_credential_destination_policy(&manager.inner.root_cwd)?,
-    )?;
-
-    let mut models_error = None;
-    let models = match ManagedAuthProvider::for_backend(backend) {
-        // A stored login has no key to check, but it does reach a model index,
-        // so a saved setup offers the same choice a fresh one does. Being
-        // signed out is not fatal here: the configuration still names a model.
-        // The reason for an empty list travels with it, so the caller can tell a
-        // provider with nothing to offer from a login that stopped working.
-        Some(provider) => match list_managed_provider_models(provider).await {
-            Ok(models) => models,
-            Err(error) => {
-                models_error = Some(error.to_string());
-                Vec::new()
-            }
-        },
-        None => {
-            let api_key =
-                resolve_backend_api_key(backend, api_key_env.as_deref()).map_err(|error| {
-                    ApiError {
-                        status: StatusCode::BAD_REQUEST,
-                        message: error.to_string(),
-                    }
-                })?;
-            list_provider_models(backend, &base_url, &api_key)
-                .await
-                .map_err(|error| ApiError {
-                    status: StatusCode::BAD_GATEWAY,
-                    message: error.to_string(),
-                })?
-        }
-    };
-
-    Ok(Json(ResolvedModelConfiguration {
-        backend,
-        model,
-        base_url,
-        api_key_env,
-        reasoning_effort,
-        models,
-        models_error,
-    }))
 }
 
 fn managed_secret_store(
@@ -6920,6 +6741,9 @@ impl From<application::model_configurations::ModelConfigurationApplicationError>
             application::model_configurations::ModelConfigurationApplicationError::InvalidInput(
                 message,
             ) => Self::bad_request(message),
+            application::model_configurations::ModelConfigurationApplicationError::Provider(
+                message,
+            ) => Self::new(StatusCode::BAD_GATEWAY, message),
             application::model_configurations::ModelConfigurationApplicationError::Store(error) => {
                 error.into()
             }

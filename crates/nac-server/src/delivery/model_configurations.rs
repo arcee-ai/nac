@@ -7,7 +7,7 @@ use axum::{
 };
 use nac_core::{
     light_model::LightModelSettings,
-    model::{BackendKind, ReasoningEffort},
+    model::{BackendKind, ProviderModel, ReasoningEffort},
     model_configurations::ModelConfigurationRecord,
 };
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,38 @@ pub struct UpdateModelConfigurationRequest {
     pub initial_prompt: RequestField<String>,
     #[serde(default)]
     pub light_model: RequestField<LightModelSettings>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct ModelConfigFromFileRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct ResolvedModelConfiguration {
+    pub backend: BackendKind,
+    pub model: Option<String>,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub models: Vec<ProviderModel>,
+    pub models_error: Option<String>,
+}
+
+impl From<application::model_configurations::ResolvedModelConfiguration>
+    for ResolvedModelConfiguration
+{
+    fn from(value: application::model_configurations::ResolvedModelConfiguration) -> Self {
+        Self {
+            backend: value.backend,
+            model: value.model,
+            base_url: value.base_url,
+            api_key_env: value.api_key_env,
+            reasoning_effort: value.reasoning_effort,
+            models: value.models,
+            models_error: value.models_error,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -144,6 +176,49 @@ pub(crate) async fn update_handler(
             light_model: field(request.light_model),
         },
     )?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/model-configs/from-file",
+    operation_id = "post_model_configs_from_file",
+    tag = "model-configs",
+    request_body(content = ModelConfigFromFileRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = ResolvedModelConfiguration, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn resolve_file_handler(
+    State(manager): State<SessionManager>,
+    payload: Result<Json<ModelConfigFromFileRequest>, JsonRejection>,
+) -> Result<Json<ResolvedModelConfiguration>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .model_configurations()
+            .resolve_from_file(&request.path)
+            .await?
+            .into(),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/model-configs/{config_id}/models",
+    operation_id = "post_model_configs_config_id_models",
+    tag = "model-configs",
+    params(("config_id" = String, Path)),
+    responses((status = 200, description = "Success", body = ResolvedModelConfiguration, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn resolve_saved_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(config_id): AxumPath<String>,
+) -> Result<Json<ResolvedModelConfiguration>, ApiError> {
+    Ok(Json(
+        manager
+            .model_configurations()
+            .resolve_saved(&config_id)
+            .await?
+            .into(),
+    ))
 }
 
 #[utoipa::path(

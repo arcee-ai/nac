@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use nac_core::{
     light_model::LightModelSettings,
     model::{
-        provider_default_base_url, provider_uses_api_key, remove_api_key, resolve_model_base_url,
-        store_api_key, validate_caller_supplied_base_url, BackendKind, ReasoningEffort,
+        list_managed_provider_models, list_provider_models, provider_default_base_url,
+        provider_for_model, provider_uses_api_key, remove_api_key, resolve_backend_api_key,
+        resolve_model_base_url, store_api_key, validate_caller_supplied_base_url, BackendKind,
+        ManagedAuthProvider, ProviderModel, ReasoningEffort,
     },
     model_configurations::{
         self, ModelConfigurationRecord, ModelConfigurationStoreError, NewModelConfiguration,
@@ -42,9 +44,20 @@ pub(crate) struct UpdateModelConfiguration {
     pub(crate) light_model: Field<LightModelSettings>,
 }
 
+pub(crate) struct ResolvedModelConfiguration {
+    pub(crate) backend: BackendKind,
+    pub(crate) model: Option<String>,
+    pub(crate) base_url: String,
+    pub(crate) api_key_env: Option<String>,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) models: Vec<ProviderModel>,
+    pub(crate) models_error: Option<String>,
+}
+
 #[derive(Debug)]
 pub(crate) enum ModelConfigurationApplicationError {
     InvalidInput(String),
+    Provider(String),
     Store(ModelConfigurationStoreError),
     Internal(anyhow::Error),
 }
@@ -53,6 +66,7 @@ impl std::fmt::Display for ModelConfigurationApplicationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidInput(message) => formatter.write_str(message),
+            Self::Provider(message) => formatter.write_str(message),
             Self::Store(error) => error.fmt(formatter),
             Self::Internal(error) => error.fmt(formatter),
         }
@@ -62,7 +76,7 @@ impl std::fmt::Display for ModelConfigurationApplicationError {
 impl std::error::Error for ModelConfigurationApplicationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidInput(_) => None,
+            Self::InvalidInput(_) | Self::Provider(_) => None,
             Self::Store(error) => Some(error),
             Self::Internal(error) => Some(error.as_ref()),
         }
@@ -321,6 +335,100 @@ impl<'a> ModelConfigurationApplication<'a> {
         }
     }
 
+    pub(crate) async fn resolve_from_file(
+        &self,
+        raw_path: &str,
+    ) -> Result<ResolvedModelConfiguration, ModelConfigurationApplicationError> {
+        let path = PathBuf::from(raw_path.trim());
+        if path.as_os_str().is_empty() {
+            return Err(invalid("a configuration file path is required".to_string()));
+        }
+        let config =
+            NacConfig::load_from_file(&path).map_err(|error| invalid(error.to_string()))?;
+        let identity = NacConfig::load_model_identity_from_file(&path)
+            .map_err(|error| invalid(error.to_string()))?;
+        let backend = identity
+            .backend
+            .or_else(|| config.model.model.as_deref().and_then(provider_for_model))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{} names no model the catalog recognizes, so it cannot describe a provider",
+                    path.display()
+                ))
+            })?;
+        self.resolve(
+            backend,
+            config.model.model,
+            identity.base_url,
+            identity.api_key_env,
+            config.model.reasoning_effort,
+        )
+        .await
+    }
+
+    pub(crate) async fn resolve_saved(
+        &self,
+        config_id: &str,
+    ) -> Result<ResolvedModelConfiguration, ModelConfigurationApplicationError> {
+        let record = model_configurations::load_model_configuration(self.store_path(), config_id)?;
+        let backend: BackendKind = record
+            .backend
+            .parse()
+            .map_err(|message: String| invalid(message))?;
+        let reasoning_effort = record
+            .reasoning_effort
+            .as_deref()
+            .map(parse_reasoning_effort)
+            .transpose()?;
+        self.resolve(
+            backend,
+            Some(record.model),
+            Some(record.base_url),
+            record.api_key_env,
+            reasoning_effort,
+        )
+        .await
+    }
+
+    async fn resolve(
+        &self,
+        backend: BackendKind,
+        model: Option<String>,
+        base_url: Option<String>,
+        api_key_env: Option<String>,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) -> Result<ResolvedModelConfiguration, ModelConfigurationApplicationError> {
+        let base_url = self.settle_base_url(backend, base_url.as_deref())?;
+        let mut models_error = None;
+        let models = match ManagedAuthProvider::for_backend(backend) {
+            Some(provider) => match list_managed_provider_models(provider).await {
+                Ok(models) => models,
+                Err(error) => {
+                    models_error = Some(error.to_string());
+                    Vec::new()
+                }
+            },
+            None => {
+                let api_key = resolve_backend_api_key(backend, api_key_env.as_deref())
+                    .map_err(|error| invalid(error.to_string()))?;
+                list_provider_models(backend, &base_url, &api_key)
+                    .await
+                    .map_err(|error| {
+                        ModelConfigurationApplicationError::Provider(error.to_string())
+                    })?
+            }
+        };
+        Ok(ResolvedModelConfiguration {
+            backend,
+            model,
+            base_url,
+            api_key_env,
+            reasoning_effort,
+            models,
+            models_error,
+        })
+    }
+
     /// Deletes the durable row before retiring only server-generated secrets.
     /// A failed or rejected row deletion therefore cannot invalidate a live
     /// configuration, and operator-owned environment selectors are untouched.
@@ -397,4 +505,14 @@ fn optional_value<T>(field: Field<T>, current: Option<T>) -> Option<T> {
         Field::Clear => None,
         Field::Unchanged => current,
     }
+}
+
+fn parse_reasoning_effort(
+    value: &str,
+) -> Result<ReasoningEffort, ModelConfigurationApplicationError> {
+    serde_json::from_value(serde_json::Value::String(value.to_string())).map_err(|error| {
+        invalid(format!(
+            "invalid model configuration: invalid 'reasoning_effort' value '{value}': {error}"
+        ))
+    })
 }
