@@ -243,37 +243,10 @@ impl ManagedCloneService {
         })?;
 
         if destination.exists() {
-            let existing_identity =
-                existing_repository_identity(&self.inner.git_executable, &destination)?;
-            if existing_identity.as_deref() != Some(source_identity.as_str()) {
-                bail!(
-                    "managed clone destination '{}' already exists and does not contain the requested repository",
-                    destination.display()
-                );
-            }
-            let now = now_ms()?;
-            let mut operation = ManagedCloneOperation {
-                version: OPERATION_VERSION,
-                operation_id: uuid::Uuid::new_v4().simple().to_string(),
-                status: ManagedCloneStatus::Completed,
-                repository_id: request.repository_id,
-                repository: request.repository.clone(),
-                source_identity: source_identity.clone(),
-                branch: request.branch.clone(),
-                destination: destination.clone(),
-                project_id: request.project_id.clone(),
-                project_name: request.project_name.clone(),
-                project: None,
-                progress: "Existing matching checkout accepted".to_string(),
-                error: None,
-                reused_existing_checkout: true,
-                created_at_unix_ms: now,
-                updated_at_unix_ms: now,
-            };
-            operation.project = Some(self.create_project(&request, &destination)?);
-            self.save_operation(&operation)?;
-            drop(destination_lock);
-            return Ok(operation);
+            bail!(
+                "managed clone destination '{}' already exists; choose another destination or create an ordinary Project from the existing checkout",
+                destination.display()
+            );
         }
 
         let operation_id = uuid::Uuid::new_v4().simple().to_string();
@@ -1131,7 +1104,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn matching_existing_checkout_is_reused_but_mismatch_is_preserved() {
+    async fn every_existing_checkout_is_preserved_and_rejected() {
         let fixture = Fixture::new("existing");
         let remote = local_remote(&fixture.root, "origin");
         let other = local_remote(&fixture.root, "other");
@@ -1139,13 +1112,21 @@ mod tests {
         let mut clone = StdCommand::new("git");
         clone.arg("clone").arg(&remote).arg(&destination);
         run(&mut clone);
+        std::fs::write(destination.join("LOCAL.md"), "preserve me\n").unwrap();
         let service = fixture.service();
         let identity = canonical_remote_identity(&remote.display().to_string()).unwrap();
-        let reused = service
+        let error = service
             .start_validated(request(&remote, "existing", "main"), identity)
-            .unwrap();
-        assert_eq!(reused.status, ManagedCloneStatus::Completed);
-        assert!(reused.reused_existing_checkout);
+            .unwrap_err();
+        assert!(error.to_string().contains("choose another destination"));
+        assert!(error.to_string().contains("ordinary Project"));
+        assert_eq!(
+            std::fs::read_to_string(destination.join("LOCAL.md")).unwrap(),
+            "preserve me\n"
+        );
+        assert!(crate::projects::list_projects(&fixture.store_path)
+            .unwrap()
+            .is_empty());
 
         let mismatch_destination = fixture.repository_root.join("mismatch");
         let mut clone = StdCommand::new("git");
@@ -1155,8 +1136,11 @@ mod tests {
         let error = service
             .start_validated(request(&remote, "mismatch", "main"), identity)
             .unwrap_err();
-        assert!(error.to_string().contains("does not contain"));
+        assert!(error.to_string().contains("choose another destination"));
         assert!(mismatch_destination.join("README.md").is_file());
+        assert!(crate::projects::list_projects(&fixture.store_path)
+            .unwrap()
+            .is_empty());
     }
 
     #[cfg(unix)]
@@ -1339,7 +1323,8 @@ mod tests {
         let error = service
             .start_validated(request(&source, "collision", "main"), identity)
             .unwrap_err();
-        assert!(error.to_string().contains("does not contain"));
+        assert!(error.to_string().contains("choose another destination"));
+        assert!(error.to_string().contains("ordinary Project"));
         assert_eq!(
             std::fs::read_to_string(collision.join("keep")).unwrap(),
             "keep"
