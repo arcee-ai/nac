@@ -519,18 +519,14 @@ async fn retained_output_is_pageable() {
 #[tokio::test]
 async fn managed_secrets_are_snapshotted_per_spawn_and_redacted_from_all_output_views() {
     let root = unique_temp_dir("managed_environment");
-    let store = nac_managed::configuration::HostSecretStore::new(&root);
+    let store = nac_managed::HostSecretStore::new(&root);
     let old_secret = "managed-old-canary-never-visible";
     let new_secret = "managed-new-canary-never-visible";
     store.put("DEMO_TOKEN", old_secret).unwrap();
 
     let mut runtime = test_runtime();
     runtime.command_environment = Some(Arc::new(
-        nac_managed::configuration::ManagedCommandEnvironmentProvider::new(
-            Some(store.clone()),
-            None,
-            None,
-        ),
+        nac_managed::ManagedCommandEnvironmentProvider::new(Some(store.clone()), None, None),
     ));
 
     let one_shot = execute_exec_command(
@@ -619,7 +615,7 @@ async fn managed_github_token_and_home_are_command_scoped_and_only_the_token_is_
     let home_root = root.join("home");
     std::fs::create_dir_all(&state_root).unwrap();
     std::fs::create_dir_all(&home_root).unwrap();
-    let auth = nac_managed::github::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap();
+    let auth = nac_managed::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap();
     let token = "github-access-canary-never-visible";
     auth.store_test_authorization(token, "refresh-canary", u64::MAX)
         .unwrap();
@@ -627,7 +623,7 @@ async fn managed_github_token_and_home_are_command_scoped_and_only_the_token_is_
 
     let mut runtime = test_runtime();
     runtime.command_environment = Some(Arc::new(
-        nac_managed::configuration::ManagedCommandEnvironmentProvider::new(
+        nac_managed::ManagedCommandEnvironmentProvider::new(
             None,
             Some(auth),
             Some(home_root.clone()),

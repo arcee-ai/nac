@@ -32,10 +32,21 @@ harness.
   implementation.
 - `github.rs` — provider transport, device auth/token lifecycle, repository and
   branch discovery.
-- `clone_workflow.rs` — domain state, operation store, Git/process adapter,
-  cancellation/reconciliation, and `ProjectRegistrar` port.
+- `github_credential_store.rs` — owner-only token persistence and locking.
+- `clone_workflow.rs` — application-facing clone state, publication ordering,
+  reconciliation, and `ProjectRegistrar` port.
+- `clone_operation_store.rs` — durable operation records, destination leases,
+  and staging ownership markers.
+- `clone_process.rs` — supervised Git execution, cancellation, bounded progress,
+  token masking, and remote identity validation.
 - `readiness.rs` — provider-independent readiness facts.
-- `lib.rs` — intentionally small public boundary.
+- `lib.rs` — intentionally small explicit facade over private modules.
+
+`github.rs` is a deliberate 851-line exception: one auditable provider client
+keeps OAuth/device/refresh retry policy, authenticated pagination, SAML/revoked-
+credential handling, and provider wire decoding together. Credential files are
+still isolated behind `github_credential_store.rs`; do not add clone, HTTP
+delivery, or unrelated provider behavior to the client.
 
 ## Verification
 
@@ -47,7 +58,8 @@ make test-managed-image-contract
 ```
 
 Provider transport tests should inject local/fake transport. Live credentials
-are never required for the ordinary test suite.
+are never required for the ordinary test suite. Production owners use sibling
+`*_tests.rs` modules so provider/workflow code remains readable.
 
 ## Generated artifacts and placement mistakes
 

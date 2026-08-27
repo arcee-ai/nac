@@ -496,7 +496,7 @@ async fn run_github_credential(cli: GitHubCredentialCli) -> Result<()> {
 async fn resolve_github_credential(
     cli: &GitHubCredentialCli,
     input: &str,
-) -> Result<Option<nac_managed::github::GitHubAccessToken>> {
+) -> Result<Option<nac_managed::GitHubAccessToken>> {
     let mut protocol = None;
     let mut host = None;
     for line in input.lines() {
@@ -514,7 +514,7 @@ async fn resolve_github_credential(
     if protocol != Some("https") || !github_host {
         return Ok(None);
     }
-    let auth = nac_managed::github::ManagedGitHubAuth::new(&cli.state_root, cli.client_id.clone())?;
+    let auth = nac_managed::ManagedGitHubAuth::new(&cli.state_root, cli.client_id.clone())?;
     let token = auth.current_token().await?.ok_or_else(|| {
         anyhow!("GitHub is not connected; reconnect GitHub before using HTTPS Git")
     })?;
@@ -534,9 +534,8 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     let managed_config_path = cli
         .managed_config
         .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
-    let managed_host = nac_managed::configuration::ManagedHostConfig::load_optional(
-        managed_config_path.as_deref(),
-    )?;
+    let managed_host =
+        nac_managed::ManagedHostConfig::load_optional(managed_config_path.as_deref())?;
     let manager = SessionManager::new(ServerOptions {
         root_cwd,
         store_path: cli.store_path,
@@ -730,25 +729,23 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     let secret_store = cli
         .managed_secret_root
         .as_ref()
-        .map(nac_managed::configuration::HostSecretStore::new);
+        .map(nac_managed::HostSecretStore::new);
     let github = match (
         cli.managed_secret_root.as_ref(),
         cli.managed_github_client_id,
     ) {
-        (Some(root), Some(client_id)) => Some(nac_managed::github::ManagedGitHubAuth::new(
-            root, client_id,
-        )?),
+        (Some(root), Some(client_id)) => {
+            Some(nac_managed::ManagedGitHubAuth::new(root, client_id)?)
+        }
         (_, None) => None,
         (None, Some(_)) => unreachable!("clap requires a managed secret root"),
     };
     let command_environment = secret_store.map(|secret_store| {
-        Arc::new(
-            nac_managed::configuration::ManagedCommandEnvironmentProvider::new(
-                Some(secret_store),
-                github,
-                cli.managed_home_root,
-            ),
-        ) as Arc<dyn nac_contracts::CommandEnvironmentProvider>
+        Arc::new(nac_managed::ManagedCommandEnvironmentProvider::new(
+            Some(secret_store),
+            github,
+            cli.managed_home_root,
+        )) as Arc<dyn nac_contracts::CommandEnvironmentProvider>
     });
     run_config.set_command_environment_provider(command_environment);
     runtime::run_managed_worker(run_config).await
@@ -1233,7 +1230,7 @@ thread_timeout_secs = 7200
             uuid::Uuid::new_v4().simple()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        let auth = nac_managed::github::ManagedGitHubAuth::new(&root, "Iv1.test").unwrap();
+        let auth = nac_managed::ManagedGitHubAuth::new(&root, "Iv1.test").unwrap();
         auth.store_test_authorization("helper-access-canary", "helper-refresh-canary", u64::MAX)
             .unwrap();
         let cli = GitHubCredentialCli {
