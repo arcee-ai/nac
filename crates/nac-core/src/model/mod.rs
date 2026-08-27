@@ -32,7 +32,7 @@ mod anthropic;
 mod anthropic_stream;
 mod api_key_store;
 mod arcee;
-mod auth_store;
+pub(crate) mod auth_store;
 mod backend;
 mod catalog;
 mod chat;
@@ -79,6 +79,28 @@ pub(crate) use redact::{
 /// same lookup the session will.
 pub fn resolve_backend_api_key(backend: BackendKind, api_key_env: Option<&str>) -> Result<String> {
     backend::api_key_for_backend(backend, api_key_env)
+}
+
+/// Resolve an optional named integration credential without requiring a model
+/// backend. A nonblank process environment value wins; blank environment and
+/// stored values are treated as absent so capability composition can omit an
+/// integration silently.
+pub fn resolve_named_api_key(name: &str) -> Result<Option<String>> {
+    if !backend::is_valid_env_name(name) {
+        return Err(anyhow!(
+            "invalid credential name '{}'; expected [A-Za-z_][A-Za-z0-9_]*",
+            name
+        ));
+    }
+    if let Some(value) = std::env::var_os(name) {
+        let value = value
+            .into_string()
+            .map_err(|_| anyhow!("credential environment variable '{name}' is not Unicode"))?;
+        if !value.trim().is_empty() {
+            return Ok(Some(value));
+        }
+    }
+    Ok(api_key_store::read_stored_api_key(name)?.filter(|value| !value.trim().is_empty()))
 }
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;

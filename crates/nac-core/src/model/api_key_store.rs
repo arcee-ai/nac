@@ -144,3 +144,56 @@ pub fn remove_api_key(name: &str) -> Result<bool> {
         Ok(removed)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_integration_credentials_prefer_nonblank_environment_then_storage() {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        let root =
+            std::env::temp_dir().join(format!("nac-named-key-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&root).unwrap();
+        let old_home = std::env::var_os("NAC_HOME");
+        let old_key = std::env::var_os("EXA_API_KEY");
+        unsafe {
+            std::env::set_var("NAC_HOME", &root);
+            std::env::remove_var("EXA_API_KEY");
+        }
+
+        store_api_key("EXA_API_KEY", "stored-key").unwrap();
+        assert_eq!(
+            crate::model::resolve_named_api_key("EXA_API_KEY")
+                .unwrap()
+                .as_deref(),
+            Some("stored-key")
+        );
+        unsafe { std::env::set_var("EXA_API_KEY", "environment-key") };
+        assert_eq!(
+            crate::model::resolve_named_api_key("EXA_API_KEY")
+                .unwrap()
+                .as_deref(),
+            Some("environment-key")
+        );
+        unsafe { std::env::set_var("EXA_API_KEY", "  ") };
+        assert_eq!(
+            crate::model::resolve_named_api_key("EXA_API_KEY")
+                .unwrap()
+                .as_deref(),
+            Some("stored-key")
+        );
+
+        unsafe {
+            match old_key {
+                Some(value) => std::env::set_var("EXA_API_KEY", value),
+                None => std::env::remove_var("EXA_API_KEY"),
+            }
+            match old_home {
+                Some(value) => std::env::set_var("NAC_HOME", value),
+                None => std::env::remove_var("NAC_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

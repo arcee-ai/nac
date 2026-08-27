@@ -116,6 +116,14 @@ struct ServerCli {
     #[arg(long)]
     worker_executable: Option<PathBuf>,
 
+    /// Explicit versioned Managed NAC host configuration document.
+    ///
+    /// Omit this for ordinary NAC. `NAC_MANAGED_CONFIG` is consulted only when
+    /// the flag is absent so managed containers can mount the document without
+    /// changing local defaults.
+    #[arg(long)]
+    managed_config: Option<PathBuf>,
+
     /// Open the dashboard in the default browser after listening.
     ///
     /// Interactive terminals open by default; pass `--no-open` to skip, or set
@@ -451,10 +459,16 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
     let root_cwd = resolve_project_directory(&launch_cwd, cli.directory.as_deref(), cli.yes)?;
     eprintln!("project: {}", root_cwd.display());
+    let managed_config_path = cli
+        .managed_config
+        .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
+    let managed_host =
+        nac_core::managed::ManagedHostConfig::load_optional(managed_config_path.as_deref())?;
     let manager = SessionManager::new(ServerOptions {
         root_cwd,
         store_path: cli.store_path,
         worker_executable: cli.worker_executable,
+        managed_host,
     })?;
     // Fire-and-forget models.dev catalog overlay refresh (4h cadence,
     // ETag-revalidated, never on picker/resume/validation paths).
@@ -1100,6 +1114,18 @@ thread_timeout_secs = 7200
         for (args, expected) in cases {
             assert_eq!(parse_server(args).bind_addr(), expected.parse().unwrap());
         }
+    }
+
+    #[test]
+    fn managed_configuration_is_explicit_and_ordinary_server_cli_remains_unmanaged() {
+        let ordinary = parse_server(&["nac-web"]);
+        assert!(ordinary.managed_config.is_none());
+
+        let managed = parse_server(&["nac-web", "--managed-config", "/etc/nac/managed.toml"]);
+        assert_eq!(
+            managed.managed_config.as_deref(),
+            Some(std::path::Path::new("/etc/nac/managed.toml"))
+        );
     }
 
     #[test]
