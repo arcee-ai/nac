@@ -791,7 +791,16 @@ export function ThreadsView({
       if (rankDiff !== 0) return rankDiff;
       return 0;
     });
-  }, [threads, dispatchedNames, selected, runningNames, pendingNames, liveThreads, sessionId, waveRank]);
+  }, [
+    threads,
+    dispatchedNames,
+    selected,
+    runningNames,
+    pendingNames,
+    liveThreads,
+    sessionId,
+    waveRank,
+  ]);
 
   const selectable = useMemo(
     () => ordered.filter((thread) => !pendingNames.has(thread.name)),

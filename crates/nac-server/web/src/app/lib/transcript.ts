@@ -315,9 +315,7 @@ function toolResultsForAssistant(
  * Thread names whose latest dispatch exists only because the user stopped the
  * run. A later successful dispatch of the same name drops off this set.
  */
-export function cancelledThreadNames(
-  messages: SessionSnapshotResponse["messages"],
-): Set<string> {
+export function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
   const cancelled = new Set<string>();
   messages.forEach((message, index) => {
     if (message.role !== "assistant") return;
