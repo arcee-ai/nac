@@ -724,6 +724,13 @@ Rules:
   destination policy, and all storage/model/compaction/sandbox/worker settings.
   Ambient and explicit config, non-model strictness, removed-key migration,
   the complete core test build, and warning-denied Clippy pass.
+- Runtime model and launch-setting resolution now lives in a focused 144-line
+  owner. It composes explicit/config model values, catalog provider selection,
+  compaction defaults, worker time/output limits, header transport, local
+  config cwd, and store-path resolution without owning run construction.
+  Model override/clear semantics, ambient isolation, compaction bounds, header
+  validation, worker limits, store-path behavior, the complete core test
+  build, and warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -739,7 +746,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 runtime configuration extraction with exact-path staging. Then
-decompose model resolution, direct/orchestrator/worker builders, resume,
+Commit the M4 runtime model-resolution extraction with exact-path staging.
+Then decompose runtime contracts, direct/orchestrator/worker builders, resume,
 sandbox, and execution-context ownership without changing behavior selection
 or backend choice.
