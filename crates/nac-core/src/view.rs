@@ -579,7 +579,9 @@ pub fn workspace_snapshot(
 
     let (_, mut file_map) = parse_status_porcelain(&status_raw);
     let (diff_map, total_additions, total_deletions) = parse_numstat_pairs(&diff_raw, &cached_raw);
-    for (path, (additions, deletions)) in diff_map {
+    let mut diff_entries: Vec<_> = diff_map.into_iter().collect();
+    diff_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (path, (additions, deletions)) in diff_entries {
         let entry = file_map
             .entry(path.clone())
             .or_insert_with(|| ChangedFileStat {
@@ -657,7 +659,9 @@ pub fn revision_changes(
 
     let mut file_map = parse_name_status(&status_raw);
     let (diff_map, total_additions, total_deletions) = parse_numstat_pairs(&numstat_raw, "");
-    for (path, (additions, deletions)) in diff_map {
+    let mut diff_entries: Vec<_> = diff_map.into_iter().collect();
+    diff_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (path, (additions, deletions)) in diff_entries {
         let entry = file_map
             .entry(path.clone())
             .or_insert_with(|| ChangedFileStat {

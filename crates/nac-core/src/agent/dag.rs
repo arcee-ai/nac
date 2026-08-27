@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use tokio::task::JoinSet;
 
@@ -355,7 +355,7 @@ pub(crate) async fn execute_with_dag(
     // at the end — unmarking a thread that was already active from a prior
     // turn would clobber its mutual-exclusion guarantee.
     let mut failed_indices: HashSet<usize> = HashSet::new();
-    let mut marked_by_us: HashMap<String, (String, String)> = HashMap::new();
+    let mut marked_by_us: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (i, dispatch) in thread_dispatches.iter().enumerate() {
         if thread::mark_thread_active(
             &runtime,
@@ -601,10 +601,7 @@ pub(crate) async fn execute_with_dag(
                 Some(Err(error)) => {
                     // A task panicked.  Mark all remaining in-flight thread
                     // dispatches as failed so dependents are skipped.
-                    for &dispatch_idx in in_flight.iter() {
-                        failed_indices.insert(dispatch_idx);
-                    }
-                    in_flight.clear();
+                    failed_indices.extend(in_flight.drain());
 
                     all_results.push((
                         usize::MAX,

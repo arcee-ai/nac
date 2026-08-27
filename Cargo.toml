@@ -33,6 +33,7 @@ unused_lifetimes = "warn"
 # existing backlog is paid down.
 dbg_macro = "warn"
 clone_on_ref_ptr = "warn"
+iter_over_hash_type = "warn"
 match_same_arms = "warn"
 missing_assert_message = "warn"
 needless_collect = "warn"

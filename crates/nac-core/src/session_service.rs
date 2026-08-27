@@ -971,7 +971,7 @@ fn covered_ids_from_scan(
         })
         .collect();
     delivered.sort_by_key(|record| std::cmp::Reverse(record.id));
-    let mut by_instruction: HashMap<&str, Vec<i64>> = HashMap::new();
+    let mut by_instruction: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
     for record in delivered {
         by_instruction
             .entry(record.instruction.as_str())

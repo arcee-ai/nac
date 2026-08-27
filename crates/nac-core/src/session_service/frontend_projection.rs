@@ -133,6 +133,8 @@ fn decode_thread_events(
 ) -> DecodedThreadEvents {
     let mut events = HashMap::new();
     let mut diagnostics = Vec::new();
+    let mut records: Vec<_> = records.into_iter().collect();
+    records.sort_by(|(left, _), (right, _)| left.cmp(right));
     for (thread_name, records) in records {
         let decoded = records
             .into_iter()
