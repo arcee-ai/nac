@@ -145,6 +145,9 @@ impl SessionManager {
             .map_err(|error| report_failure(session_id, "read the transcript", &error))?;
         let end = fork_end_index(&messages, message_idx)?;
         let prefix = messages[..=end].to_vec();
+        // Live merged length, not `messages_json`: the blob is write-once and
+        // the log tail is what `prefix` was sliced from.
+        let source_transcript_len = messages.len();
 
         let store_path = self.inner.store_path.clone();
         let source_id = session_id.to_string();
@@ -156,6 +159,7 @@ impl SessionManager {
                 &source_id,
                 &persist_fork_id,
                 prefix,
+                source_transcript_len,
                 message_idx,
             )
         })
@@ -194,6 +198,7 @@ fn persist_fork(
     source_id: &str,
     fork_id: &str,
     prefix: Vec<Message>,
+    source_transcript_len: usize,
     message_idx: usize,
 ) -> Result<(), ForkSessionError> {
     let source = sessions::load_session(store_path, source_id)
@@ -204,8 +209,6 @@ fn persist_fork(
         .find(|summary| summary.session_id == source_id)
         .map(|summary| source_display_name(&summary))
         .unwrap_or_else(|| "New Session".to_string());
-
-    let source_transcript_len = source.messages.len();
     let visible = prefix
         .iter()
         .filter(|message| is_visible_response(message))
@@ -258,6 +261,11 @@ fn persist_fork(
                 "nac: fork for session {source_id:?} failed after create; cleanup of {fork_id:?} also failed: {cleanup}"
             );
         }
+        if let Err(cleanup) = store::dismiss_session_fork(store_path, source_id, fork_id) {
+            eprintln!(
+                "nac: fork for session {source_id:?} failed after create; fork-link cleanup of {fork_id:?} also failed: {cleanup}"
+            );
+        }
         return Err(error);
     }
     Ok(())
@@ -280,8 +288,6 @@ fn finish_persisted_fork(
         source_transcript_len,
     )
     .map_err(|error| report_failure(source_id, "clone conversation artifacts", &error))?;
-    store::insert_session_fork(store_path, source_id, fork_id, message_idx, source_name)
-        .map_err(|error| report_failure(source_id, "record the fork link", &error))?;
     sessions::update_session_presentation(
         store_path,
         fork_id,
@@ -290,6 +296,10 @@ fn finish_persisted_fork(
         0,
     )
     .map_err(|error| report_failure(source_id, "name the forked session", &error))?;
+    // Last: a failed create must not leave a `session_forks` tombstone after
+    // `delete_session` cleanup. That table is not foreign-keyed on purpose.
+    store::insert_session_fork(store_path, source_id, fork_id, message_idx, source_name)
+        .map_err(|error| report_failure(source_id, "record the fork link", &error))?;
     Ok(())
 }
 
