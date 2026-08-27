@@ -702,6 +702,12 @@ Rules:
   regressions pass; the complete core test build is green.
   `session_service.rs` is now 1,297 lines and serves as the public contract,
   shared state/type owner, steering facade, and submodule composition root.
+- Permission approval coordination now has a 365-line broker owner, while
+  ordered rule/default/grant evaluation and wildcard matching live in a
+  147-line evaluation owner. The public permission types and wildcard path are
+  unchanged. Last-rule-wins, remembered-grant precedence, hard-denial
+  precedence, headless fail-closed, waiter cancellation, reply ownership, and
+  subscriber-loss regressions pass; the complete core test build is green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -717,6 +723,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 session attachment/resource owner with exact-path staging. Then
-inventory and decompose the permissions gravity well into rule evaluation,
-shell/resource projection, hard policy, broker, and remembered-grant owners.
+Commit the M4 broker/evaluation owners with exact-path staging. Then split
+file/resource projection, shell parsing, hard policy, and canonical command
+binding while preserving exact authorization ordering and denial semantics.
