@@ -708,6 +708,16 @@ Rules:
   unchanged. Last-rule-wins, remembered-grant precedence, hard-denial
   precedence, headless fail-closed, waiter cancellation, reply ownership, and
   subscriber-loss regressions pass; the complete core test build is green.
+- Permission resource and shell ownership is now explicit: file/canonical
+  projection (300 lines), shell parsing (190), command classification (95),
+  hard policy (772), opaque-shell policy (437), and canonical resource/command
+  binding (740). The 198-line root owns public contracts and composes those
+  stages; crate-visible entry points preserve their original paths. The two
+  larger cohesive modules remain below 800 lines and keep path binding separate
+  from denial analysis. Authority-amplification/broad-deletion denials,
+  canonical workdir projection, unlink/rmdir/git mutation policy, and grant vs
+  hard-denial precedence regressions pass; warning-denied Clippy and the
+  complete core test build are green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -723,6 +733,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 broker/evaluation owners with exact-path staging. Then split
-file/resource projection, shell parsing, hard policy, and canonical command
-binding while preserving exact authorization ordering and denial semantics.
+Commit the M4 permission resource/shell decomposition with exact-path staging.
+Then decompose runtime construction into configuration/model resolution,
+direct/orchestrator/worker builders, resume, sandbox, and execution-context
+owners without changing behavior selection or backend choice.
