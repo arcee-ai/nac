@@ -31,15 +31,11 @@ impl<'a> SessionAttachmentApplication<'a> {
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         for _ in 0..MAX_ATTEMPTS {
-            if let Some(service) = self
-                .manager
-                .inner
-                .active_sessions
-                .read()
-                .await
-                .get(session_id)
-                .cloned()
-            {
+            let cached_service = {
+                let active = self.manager.inner.active_sessions.read().await;
+                active.get(session_id).cloned()
+            };
+            if let Some(service) = cached_service {
                 let version = self.manager.session_config(session_id)?.config_version;
                 if service.config_version() == Some(version) {
                     let has_recovery = service.has_unreconciled_durable_run_recovery()?;

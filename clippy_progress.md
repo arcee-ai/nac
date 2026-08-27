@@ -99,6 +99,9 @@ zero-backlog async guard last.
 - `unused_async`: complete. Four concrete synchronous implementations and the
   one delegating steering facade no longer manufacture futures; callers retain
   their existing settlement, projection, attachment, and discovery ordering.
+- `significant_drop_in_scrutinee`: complete. All three mutex/RwLock-backed
+  scrutinees now bind their owned result in a preceding statement or scope, so
+  guards drop before cleanup, recovery, or cache-eviction work begins.
 
 ## Verification and next action
 
@@ -135,5 +138,9 @@ The `unused_async` slice passes `make format-check`, `make lint`,
 `git diff --check`, 73 focused session-service tests (one ignored), 34 focused
 discovery tests (three ignored), and two focused server steering tests.
 
-Next: commit this exact lint boundary, then add
-`significant_drop_in_scrutinee` and run autofix before manual repair.
+The `significant_drop_in_scrutinee` slice passes `make format-check`,
+`make lint`, `git diff --check`, and the full Rust workspace suite (including
+1,157 core tests, nine ignored, after the new Unicode regression test).
+
+Next: commit this exact lint boundary, then add `trivially_copy_pass_by_ref`
+and run autofix before any manual repair.
