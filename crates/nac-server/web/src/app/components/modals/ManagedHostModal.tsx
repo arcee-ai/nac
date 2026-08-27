@@ -30,7 +30,7 @@ import {
 } from "@/app/services/queries";
 import type { ManagedGitHubLoginStarted } from "@/app/types/api";
 
-type ManagedTab = "status" | "github" | "secrets";
+export type ManagedTab = "status" | "github" | "secrets";
 
 const RESERVED_NAMES = new Set([
   "PATH",
@@ -59,8 +59,19 @@ function StatusDot({ ready }: { ready: boolean }) {
   );
 }
 
-export function ManagedHostModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [tab, setTab] = useState<ManagedTab>("status");
+export function ManagedHostModal({
+  open,
+  onClose,
+  tab,
+  onTabChange,
+  onGitHubConnected,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tab: ManagedTab;
+  onTabChange: (tab: ManagedTab) => void;
+  onGitHubConnected?: () => void;
+}) {
   return (
     <Modal
       open={open}
@@ -77,7 +88,7 @@ export function ManagedHostModal({ open, onClose }: { open: boolean; onClose: ()
               key={item}
               type="button"
               className={`rounded px-3 py-2 text-left label-small capitalize ${tab === item ? "bg-elevation-level-2 text-basic-primary" : "text-basic-tertiary"}`}
-              onClick={() => setTab(item)}
+              onClick={() => onTabChange(item)}
             >
               {item === "github" ? "GitHub" : item}
             </button>
@@ -85,7 +96,7 @@ export function ManagedHostModal({ open, onClose }: { open: boolean; onClose: ()
         </nav>
         <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
           {tab === "status" ? <ManagedStatusPanel /> : null}
-          {tab === "github" ? <ManagedGitHubPanel /> : null}
+          {tab === "github" ? <ManagedGitHubPanel onConnected={onGitHubConnected} /> : null}
           {tab === "secrets" ? <ManagedSecretsPanel /> : null}
         </div>
       </div>
@@ -162,7 +173,7 @@ function StatusCard({ label, value, ready }: { label: string; value: string; rea
   );
 }
 
-function ManagedGitHubPanel() {
+function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }) {
   const toast = useToast();
   const client = useQueryClient();
   const github = useManagedGitHub();
@@ -186,6 +197,7 @@ function ManagedGitHubPanel() {
               client.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
             ]);
             toast.success("GitHub connected");
+            onConnected?.();
             return;
           }
           if (state.state === "failed") {
@@ -205,7 +217,7 @@ function ManagedGitHubPanel() {
       stopped = true;
       controller.abort();
     };
-  }, [login, client, toast]);
+  }, [login, client, onConnected, toast]);
 
   const connect = async () => {
     setBusy(true);

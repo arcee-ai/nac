@@ -1,6 +1,6 @@
 # Managed NAC v0 and native web retrieval progress
 
-Status: active implementation handoff
+Status: five invariant repairs complete; exact-candidate gates and closure review pending
 Branch: `allison-demo`
 Integration owner: this primary Codex goal session only
 
@@ -151,9 +151,9 @@ binary. Any branch server must use a different explicit port and store path.
    provider-validated repository/branch selection, exact destination
    reservations, operation-owned staging, live progress/cancellation, safe
    restart reconciliation, branch-specific clone, atomic publication, and
-   Project-last creation. Existing matching checkouts are identified without
-   accepting credential-bearing remotes; mismatches and collisions are
-   preserved and rejected.
+   Project-last creation. Every pre-existing destination, including a matching
+   Git checkout, is preserved and rejected with guidance to choose another
+   destination or create an ordinary Project from the existing checkout.
 5. **Native Exa web tools — complete.** Top-level direct and
    direct-with-orchestrator agents now resolve the Exa credential before each
    ordinary model request and expose one exact request/runtime snapshot that
@@ -177,8 +177,28 @@ binary. Any branch server must use a different explicit port and store path.
    absent on this host, so live image
    build/smoke remains an exact unexecuted local coverage gap; the GitHub
    workflow runs it without real provider credentials.
-7. **Integrated exact-candidate acceptance — pending.**
-8. **Single final detached review — pending and unspent.**
+7. **Integrated exact-candidate acceptance — complete on candidate
+   `42e2d9d6dcba04cabc23f5145f8d5354f554ad4a`.** All four broad gates and the
+   new focused managed-image, GitHub, clone, secret-redaction, and Exa gates
+   passed. Live image execution remains the explicitly unexecuted environment
+   gap below.
+8. **Original final detached review — consumed; qualified blockers found.** The
+   only authorized review round inspected the exact candidate in a clean
+   detached worktree across compatibility/topology, credentials/redaction,
+   lifecycle/clone, and production product/assets. Compatibility/topology had
+   no qualified blocker. The five concrete blockers recorded below require
+   human adjudication. On 2026-08-27 Allison adjudicated all five as required
+   repairs and authorized this bounded follow-up plus one fresh closure review
+   limited to the repaired invariants and their immediately adjacent
+   regressions.
+9. **Bounded repair/closure follow-up — repairs complete; acceptance pending.**
+   All five adjudicated invariants now have deterministic seam regressions and
+   minimal repairs. Three coherent core/server commits are complete; the
+   onboarding source, browser regressions, generated assets, and this ledger
+   form the final implementation commit. The named broad and focused gates
+   must now run once on that immutable candidate, followed by exactly one fresh
+   detached closure review limited to these five repairs and immediately
+   adjacent regressions.
 
 ## Coherent commits and verification
 
@@ -269,8 +289,124 @@ also passed POSIX and Dash syntax checks, static workflow/image assertions,
 Ruby YAML parsing, and `make -n managed-image`. The live image build and smoke
 were not executed because no supported container runtime is installed.
 
-Current exact next action: commit the image/delivery/docs slice with exact-path
-staging. After it is immutable, run the required broad candidate gates.
+Commit `42e2d9d` contains the managed developer image and delivery slice. The
+immutable final candidate `42e2d9d6dcba04cabc23f5145f8d5354f554ad4a`
+then received the complete acceptance run:
+
+- `make ci` — passed on a clean rerun: formatting, linting, Clippy, all
+  workspace suites (including 1,177 nac-core tests with 9 ignored, 148
+  nac-server library tests, 23 server-binary tests, and 175 frontend tests),
+  committed assets, and the managed-image static contract. An earlier run hit
+  one transient pre-existing parallel-test `sleep` spawn `NotFound`; its exact
+  isolated rerun and the unchanged candidate's full rerun both passed.
+- `make test-durability` — all 10 focused lifecycle/crash regressions passed.
+- `make test-assets` — lint, typecheck, and production asset rebuild/currentness
+  passed.
+- `make test-e2e` — all 14 production-embedded browser journeys passed.
+- `make test-managed-image-contract` — POSIX/static image and workflow contract
+  passed.
+- `cargo test --locked -p nac-core managed_github::tests -- --nocapture` — 3
+  passed with local-loopback permission.
+- `cargo test --locked -p nac-core managed_clone::tests -- --nocapture` — 6
+  passed.
+- `cargo test --locked -p nac-core tools::web::tests -- --nocapture` — 7 passed
+  with local-loopback permission.
+- The exact managed command-secret redaction test — 1 passed; the server
+  managed-GitHub tests — 2 passed; and the write-only managed-secret API test —
+  1 passed.
+
+The single final read-only review found these supported-path contract blockers:
+
+1. Environment-sourced `EXA_API_KEY` remains inherited by local agent commands,
+   while command output redaction snapshots include host secrets and
+   `GH_TOKEN`, not this dedicated key. A direct agent can print the key into a
+   tool result/model transcript; worker subprocesses inherit the server
+   environment too. Evidence: `crates/nac-core/src/model/mod.rs:84`,
+   `crates/nac-core/src/sandbox/backend.rs:226`, and
+   `crates/nac-core/src/tools/mod.rs:510`. Missing invariant: remove the
+   dedicated Exa credential from every agent/worker command environment while
+   preserving it only in admitted native web-tool snapshots.
+2. Web result/error masking delegates to the generic credential redactor,
+   which replaces secrets shorter than four bytes only in credential-shaped
+   contexts, although stored Exa credentials accept every nonblank value. A
+   provider-controlled result containing a valid short key such as `abc` can be
+   persisted unchanged. Evidence: `crates/nac-core/src/tools/web.rs:601`,
+   `crates/nac-core/src/model/redact.rs:82`, and
+   `crates/nac-core/src/model/api_key_store.rs:83`. Missing invariant:
+   web-specific output/error masking must replace the exact admitted Exa key
+   regardless of length (or the settled credential contract must change).
+3. Reusing an existing matching checkout validates only remote identity, then
+   creates the Project and reports completion without verifying or selecting
+   the requested branch. A request for `feature` can therefore complete on
+   `main`. Evidence: `crates/nac-core/src/managed_clone.rs:245`; the existing
+   reuse test at line 1133 requests `main` from a `main` checkout. Missing
+   invariant: the accepted checkout must observably be on the selected branch
+   before Project creation.
+4. SIGTERM bounds active-run cancellation to 20 seconds but places no deadline
+   around Axum's subsequent graceful connection drain. A permanent SSE session
+   stream can keep shutdown waiting past the controller grace period, and the
+   image smoke sends SIGTERM without an open SSE client. Evidence:
+   `crates/nac-server/src/lib.rs:5102`, `:7299`, and `:7741`. Missing invariant:
+   bounded shutdown/force-close behavior proven with a live session event
+   stream.
+5. **Add repository** while disconnected closes repository onboarding and opens
+   generic Managed Settings on its default Status tab. Successful GitHub
+   authorization only refreshes data/toasts; it does not resume onboarding.
+   The E2E manually clicks the GitHub tab, closes Settings, and clicks **Add
+   repository** again. Evidence:
+   `crates/nac-server/web/src/app/providers/ManagedHostProvider.tsx:35`,
+   `crates/nac-server/web/src/app/components/modals/ManagedHostModal.tsx:62` and
+   `:173`, and `crates/nac-server/web/e2e/managed.e2e.ts:201`. Missing invariant:
+   direct connection entry and automatic onboarding resume.
+
+### Adjudicated repair outcomes and focused evidence
+
+All five findings above were adjudicated as required repairs on 2026-08-27 and
+are now resolved in the implementation candidate:
+
+1. Commit `dce9280` makes `EXA_API_KEY` a NAC-only native-integration
+   credential. The central local one-shot and PTY command builders, Podman and
+   SSH command builders, and managed worker process spawn remove it from every
+   model-controlled process environment. Native request snapshots still use
+   environment-before-store resolution.
+2. The same commit exact-replaces the admitted Exa credential in every web
+   result/error before applying generic redaction, including credentials
+   shorter than four bytes, without weakening the nonblank credential
+   contract.
+3. Commit `2f7dc26` removes matching-checkout reuse. Managed onboarding rejects
+   every existing destination before inspecting or changing the checkout,
+   preserves local files and existing Projects, and gives the settled
+   different-destination/ordinary-Project guidance.
+4. Commit `ade9079` separates shutdown signaling from Axum drain and installs a
+   20-second OS watchdog after SIGTERM/Ctrl-C stops new acceptance. Active-run
+   cancellation and graceful HTTP/SSE drain may finish normally; if either is
+   stuck, process exit no longer depends on Tokio scheduler progress.
+5. The final onboarding implementation commit makes the Managed Host tab
+   provider-controlled. Disconnected **Add repository** opens GitHub
+   authorization directly, and successful connection automatically closes
+   settings and restores repository onboarding on desktop and mobile. The same
+   commit includes the rebuilt production assets and this ledger.
+
+Focused repair verification completed before the final implementation commit:
+
+- The new real-command and real-PTY Exa environment regression passed, as did
+  the real managed-worker process regression and the short-key result/error
+  masking regression. The complete native web test module passed 8 tests; the
+  environment-before-store credential test, direct topology boundary test,
+  command-secret redaction test, and nonsecret worker transport test also
+  passed.
+- `cargo test --locked -p nac-core managed_clone::tests -- --nocapture` passed
+  all 6 tests, including matching/mismatched Git checkouts and non-Git
+  collisions preserved and rejected with no Project creation.
+- The live `/sessions/{id}/events/stream` shutdown regression first reproduced
+  the unbounded drain, then passed three consecutive runs with a 100 ms test
+  watchdog and an open SSE client. The adjacent bind test and the required
+  nac-server library Clippy target passed.
+- Frontend typecheck, lint, and formatting passed. The rebuilt embedded binary
+  passed all 3 `managed.e2e.ts` journeys: direct disconnected authorization and
+  automatic onboarding resume, exact 390×844 mobile resume, clone completion,
+  write-only secret handling, and clone cancellation without Project
+  publication.
 
 ## External coverage gaps versus product blockers
 
@@ -282,11 +418,41 @@ local NAC contracts or credential-independent doubles. Docker/Podman live-image
 coverage will be reported as unexecuted if unavailable and will not be called a
 pass.
 
-No product blocker has been found.
+The five final-review findings above were product blockers under the goal's
+stopping contract and are now repaired pending exact-candidate acceptance and
+the bounded closure review. The unavailable local container runtime and the
+external platform inputs remain coverage gaps rather than product blockers.
 
 ## Exact next action
 
-Commit the audited native-web slice with exact-path staging, including its
-canonical `tooling.md` input, then implement the managed UI, health/readiness
-contract, nonroot development image, production-asset publication, and
-credential-independent browser/image acceptance journey.
+Commit the final onboarding source, browser regressions, generated assets, and
+this ledger as one coherent implementation slice. Then run the complete named
+broad and focused gate set once on the immutable candidate and authorize
+exactly one fresh detached read-only closure review limited to the five
+repaired invariants and immediately adjacent regressions.
+
+After repair or waiver, Allison can reproduce the credential-independent local
+acceptance with:
+
+```sh
+make ci
+make test-durability
+make test-assets
+make test-e2e
+make test-managed-image-contract
+```
+
+When Docker or Podman is available, build and exercise the exact non-root,
+read-only-root, restart, and SIGTERM contract with:
+
+```sh
+make test-managed-image MANAGED_IMAGE=nac-managed:local
+```
+
+For an interactive managed launch or external staging test, follow
+`docs/managed/README.md`: use the committed image, mount the three durable
+paths as `10001:10001`, provide strict managed TOML and an owner-only model
+credential, publish on a non-3210 host port during local testing, and validate
+device authorization, repository/branch onboarding, Git/`gh`, secrets,
+restart/rescheduling, `/healthz`, `/readyz`, and `/managed/status`. Never point
+this branch binary at the published-main store or its port 3210 process.

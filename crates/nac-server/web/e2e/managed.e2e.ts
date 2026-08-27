@@ -207,15 +207,19 @@ test("completes the managed first-run, write-only secret, and clone journey", as
 
   await expect(page.getByTestId("managed-empty-status")).toContainText("Arcee model");
   await expect(page.getByTestId("managed-empty-status")).toContainText("Not connected");
-  await page.getByRole("button", { name: "Connect GitHub" }).click();
-  await page.getByRole("button", { name: "GitHub", exact: true }).click();
+  await page.getByRole("button", { name: "Add repository" }).click();
+  await expect(page.getByTestId("managed-github-settings")).toBeVisible();
   await page
     .getByTestId("managed-github-settings")
     .getByRole("button", { name: "Connect GitHub", exact: true })
     .click();
   await expect(page.getByTestId("github-device-code")).toContainText("ABCD-EFGH");
-  await expect(page.getByText("@managed-e2e")).toBeVisible();
+  await expect(page.getByTestId("managed-repository-modal")).toBeVisible();
+  await expect(page.getByRole("button", { name: /arcee-ai\/managed-demo/ })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
 
+  await page.getByRole("button", { name: "Open the menu" }).click();
+  await page.getByRole("button", { name: "Managed host" }).click();
   await page.getByRole("button", { name: "secrets", exact: true }).click();
   await page.getByLabel("Variable name").fill("DEMO_SERVICE_TOKEN");
   await page.getByLabel("New value").fill("browser-e2e-secret-value");
@@ -241,17 +245,13 @@ test("keeps device authorization and repository selection usable at 390 by 844",
   await installManagedDouble(page);
   await page.goto(harness.baseUrl);
 
-  await page.getByRole("button", { name: "Connect GitHub" }).click();
-  await page.getByRole("button", { name: "GitHub", exact: true }).click();
+  await page.getByRole("button", { name: "Add repository" }).first().click();
+  await expect(page.getByTestId("managed-github-settings")).toBeVisible();
   await page
     .getByTestId("managed-github-settings")
     .getByRole("button", { name: "Connect GitHub", exact: true })
     .click();
   await expect(page.getByText("ABCD-EFGH")).toBeVisible();
-  await expect(page.getByText("@managed-e2e")).toBeVisible();
-  await page.getByRole("button", { name: "Close" }).click();
-
-  await page.getByRole("button", { name: "Add repository" }).first().click();
   await expect(page.getByTestId("managed-repository-modal")).toBeVisible();
   await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
   await expect(page.getByRole("button", { name: /main/ })).toBeVisible();
