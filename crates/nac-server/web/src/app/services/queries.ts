@@ -65,6 +65,9 @@ import type {
   RawSessionConfig,
   ManagedAuthList,
   ManagedAuthProvider,
+  ManagedGitHubStatus,
+  ManagedHostStatus,
+  ManagedSecretList,
   ResolvedModelConfiguration,
   SessionSnapshotResponse,
   SkillCatalogEntry,
@@ -103,6 +106,9 @@ export const WORKSPACE_STATS_POLL_MS = 30_000;
 
 export const queryKeys = {
   storeInfo: ["store"] as const,
+  managedHostStatus: ["managed-host-status"] as const,
+  managedGitHub: ["managed-github"] as const,
+  managedSecrets: ["managed-secrets"] as const,
   sandboxAvailability: ["sandbox-availability"] as const,
   sandboxActivity: ["sandbox-activity"] as const,
   credentials: ["credentials"] as const,
@@ -176,6 +182,59 @@ export function useStoreInfo() {
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
     staleTime: Infinity,
+  });
+}
+
+export function useManagedHostStatus() {
+  return useQuery<ManagedHostStatus>({
+    queryKey: queryKeys.managedHostStatus,
+    queryFn: ({ signal }) => api.getManagedStatus(signal),
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+}
+
+export function useManagedGitHub(enabled = true) {
+  return useQuery<ManagedGitHubStatus>({
+    queryKey: queryKeys.managedGitHub,
+    queryFn: ({ signal }) => api.getManagedGitHub(signal),
+    enabled,
+    retry: false,
+  });
+}
+
+export function useManagedSecrets(enabled = true) {
+  return useQuery<ManagedSecretList>({
+    queryKey: queryKeys.managedSecrets,
+    queryFn: ({ signal }) => api.listManagedSecrets(signal),
+    enabled,
+    retry: false,
+  });
+}
+
+export function usePutManagedSecret() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, value }: { name: string; value: string }) =>
+      api.putManagedSecret(name, value),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.managedSecrets }),
+        client.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
+      ]),
+  });
+}
+
+export function useDeleteManagedSecret() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.deleteManagedSecret(name),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.managedSecrets }),
+        client.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
+      ]),
   });
 }
 

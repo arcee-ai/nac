@@ -38,6 +38,7 @@ import { routes } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { pinGroup, targetIndexInGroup, type DropEdge } from "@/app/lib/sessionOrder";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
+import { useManagedHost } from "@/app/providers/ManagedHostProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
@@ -223,6 +224,7 @@ export default function ProjectsListPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const projectActions = useProjectActions();
+  const managed = useManagedHost();
   const toast = useToast();
   const query = useFilterQuery();
   const isDefaultSort = useIsDefaultSort();
@@ -540,7 +542,16 @@ export default function ProjectsListPage() {
     );
   };
 
-  const newButton = (
+  const newButton = managed.isManaged ? (
+    <Button
+      variant={ButtonVariant.Primary}
+      size={ButtonSize.Medium}
+      content={ButtonContent.IconLeft}
+      onClick={managed.addRepository}
+    >
+      <Icon iconName={IconName.Add} size={16} /> Add repository
+    </Button>
+  ) : (
     <Tooltip
       title="New project"
       keyboardShortcuts={NEW_PROJECT_KEYS}
@@ -612,7 +623,16 @@ export default function ProjectsListPage() {
   );
 
   if (!isLoading && !error && all.length === 0) {
-    return <ProjectsEmptyState mobile={isMobile} onStart={projectActions.create} />;
+    return (
+      <ProjectsEmptyState
+        mobile={isMobile}
+        onStart={projectActions.create}
+        onAddRepository={managed.isManaged ? managed.addRepository : undefined}
+        onManagedSettings={managed.isManaged ? managed.openSettings : undefined}
+        modelReady={managed.status?.model_ready}
+        githubConnected={managed.status?.github_status === "connected"}
+      />
+    );
   }
 
   const showPinDropZone =

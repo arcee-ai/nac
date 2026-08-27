@@ -19,6 +19,12 @@ use std::time::{Duration, Instant};
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
 const STORE_SCHEMA_VERSION: i64 = 23;
 
+/// Current durable-store schema version for credential-free readiness and
+/// operational status reporting.
+pub fn schema_version() -> i64 {
+    STORE_SCHEMA_VERSION
+}
+
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
 const RUN_COUNT_BACKFILL_VERSION: i64 = 5;

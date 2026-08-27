@@ -13,6 +13,9 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
 vi.mock("@/app/providers/SessionActionsProvider", () => ({
   SessionActionsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
+vi.mock("@/app/providers/ManagedHostProvider", () => ({
+  ManagedHostProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 vi.mock("@/app/providers/ToastProvider", () => ({
   ToastProvider: ({ children }: { children: React.ReactNode }) => children,
 }));

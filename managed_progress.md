@@ -165,7 +165,18 @@ binary. Any branch server must use a different explicit port and store path.
    retries, decoding, and result construction, prevent credential replay on
    redirects, and redact credentials and URL queries from errors/results.
    Fetch never connects from NAC to the model-supplied target URL.
-6. **Managed UI, readiness, image, and delivery — pending.**
+6. **Managed UI, readiness, image, and delivery — in progress.** Managed mode
+   now has credential-free `/healthz`, strict `/readyz`, owner-facing status,
+   responsive Projects/Settings onboarding, GitHub device authorization,
+   write-only Secrets, repository/branch selection, visible clone completion
+   and cancellation, and Project-preserving removal copy. Production-embedded
+   journeys cover desktop, exact 390×844 mobile, Exa absent/present request
+   snapshots, and the managed first-run flow. The pinned non-root image,
+   read-only-root smoke, configurable ECR/OIDC workflow, static contract gate,
+   and operator documentation are implemented and awaiting their coherent
+   commit. Docker, Podman, and Buildah are absent on this host, so live image
+   build/smoke remains an exact unexecuted local coverage gap; the GitHub
+   workflow runs it without real provider credentials.
 7. **Integrated exact-candidate acceptance — pending.**
 8. **Single final detached review — pending and unspent.**
 
@@ -238,6 +249,23 @@ redaction. Focused and broad verification before its commit:
 
 Historical `progress.md` and `demo_review.md` remain evidence only and are not
 acceptance authority for these new contracts.
+
+The managed UI/readiness candidate passed:
+
+- `cargo test --locked -p nac-server` — 148 library and 23 binary tests passed.
+- `cargo clippy --locked -p nac-server --lib --bin nac-web -- -D warnings` — passed.
+- `npm --prefix crates/nac-server/web test` — 175 tests passed.
+- Frontend typecheck and lint — passed.
+- Production-embedded `embedded.e2e.ts` plus `managed.e2e.ts` — 14 journeys
+  passed after correcting one test-only root-route assertion. Coverage includes
+  managed desktop/mobile onboarding, clone cancellation, and Exa absent/present
+  capability requests with the canary absent from the provider payload.
+- Production assets were rebuilt from the final UI sources.
+- `sh scripts/test-managed-image-contract.sh` — passed.
+
+Current exact next action: commit the green UI/readiness/assets slice with
+exact-path staging, then commit and statically verify the image/delivery/docs
+slice. After both are immutable, run the required broad candidate gates.
 
 ## External coverage gaps versus product blockers
 

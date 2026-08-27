@@ -32,10 +32,15 @@ type Fixtures = {
   browserDiagnostics: void;
 };
 
-export const test = base.extend<Fixtures>({
-  harness: async ({ request }, use, testInfo) => {
+type Options = {
+  exaCredential: string | undefined;
+};
+
+export const test = base.extend<Fixtures & Options>({
+  exaCredential: [undefined, { option: true }],
+  harness: async ({ request, exaCredential }, use, testInfo) => {
     void request;
-    const running = await startHarness(testInfo);
+    const running = await startHarness(testInfo, exaCredential);
     let useError: unknown;
     try {
       await use(running);
@@ -241,7 +246,10 @@ export async function waitForRunIdle(
     .toBe("idle");
 }
 
-async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
+async function startHarness(
+  testInfo: TestInfo,
+  exaCredential: string | undefined,
+): Promise<RunningHarness> {
   if (process.platform === "win32") {
     throw new Error(
       "production E2E requires POSIX process groups so descendant cleanup can be verified",
@@ -302,6 +310,7 @@ async function startHarness(testInfo: TestInfo): Promise<RunningHarness> {
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
         [cleanupMarkerEnvironment]: cleanupMarker,
+        ...(exaCredential == null ? {} : { EXA_API_KEY: exaCredential }),
       },
     },
   );
