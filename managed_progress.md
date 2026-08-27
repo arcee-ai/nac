@@ -141,15 +141,19 @@ binary. Any branch server must use a different explicit port and store path.
    dispatch passes only the nonsecret store root to the hidden worker CLI so
    worker command processes use the same late snapshot without adding secrets
    to worker argv or NAC's global environment.
-4. **GitHub authorization and repository onboarding — in progress.** The
-   authorization half is implemented: GitHub App device flow, reload-safe
+4. **GitHub authorization and repository onboarding — complete.** GitHub App device flow, reload-safe
    polling/cancellation, owner-only token persistence, cross-process refresh
    serialization and atomic rotation, revocation cleanup, SAML/app-install
    classification, connection metadata, paginated repository/branch discovery,
    command-scoped refreshed `GH_TOKEN`, a GitHub-HTTPS-only credential helper,
    persistent editable Git identity, and nonsecret state-root/client/home
-   transport to worker agents. Transactional clone operations and Project-last
-   publication remain next.
+   transport to worker agents are implemented. Repository onboarding now uses
+   provider-validated repository/branch selection, exact destination
+   reservations, operation-owned staging, live progress/cancellation, safe
+   restart reconciliation, branch-specific clone, atomic publication, and
+   Project-last creation. Existing matching checkouts are identified without
+   accepting credential-bearing remotes; mismatches and collisions are
+   preserved and rejected.
 5. **Native Exa web tools — pending.**
 6. **Managed UI, readiness, image, and delivery — pending.**
 7. **Integrated exact-candidate acceptance — pending.**
@@ -180,10 +184,10 @@ verification before commit:
 - `cargo test --locked -p nac-server openapi_special_wire_schemas_and_docs_are_live -- --nocapture` — 1 passed outside the workspace sandbox because the existing fixture reads user-level NAC configuration.
 - `cargo check --locked -p nac-core -p nac-server` — passed.
 
-Commit `df439b5` contains that command-environment slice. The GitHub managed-auth
-slice now adds its durable credential lifecycle, HTTP surface, repository and
-branch discovery, command/Git credential delivery, and Git identity. Focused
-verification before its commit:
+Commit `df439b5` contains that command-environment slice. Commit `a61a06e`
+contains the GitHub managed-auth slice: its durable credential lifecycle, HTTP
+surface, repository and branch discovery, command/Git credential delivery, and
+Git identity. Focused verification before its commit:
 
 - `cargo test --locked -p nac-core managed_github::tests -- --nocapture` — 3 passed against a loopback fake (device polling, pagination/branches, serialized refresh rotation, revocation, and SAML); local networking required running this fixture outside the workspace sandbox.
 - `cargo test --locked -p nac-core managed_github_token_and_home_are_command_scoped_and_only_the_token_is_redacted -- --nocapture` — 1 passed.
@@ -192,6 +196,20 @@ verification before its commit:
 - `cargo test --locked -p nac-server --bin nac-web` — 23 passed, including the HTTPS/GitHub-only credential helper contract.
 - Both nac-server OpenAPI route/schema contract tests passed outside the workspace sandbox because their existing fixtures read user-level NAC configuration.
 - `cargo check --locked -p nac-core -p nac-server` — passed.
+
+The repository-onboarding slice adds durable filesystem operation records,
+cross-process destination locks, ownership-proven staging cleanup, cancellation
+through NAC's process-tree guard, bounded/redacted progress and errors, atomic
+checkout publication, Project-last creation, and REST/OpenAPI polling and
+cancellation. Focused verification before its commit:
+
+- `cargo test --locked -p nac-core managed_clone::tests -- --nocapture` — 6 passed using local bare repositories and a deterministic fake Git process, covering non-default branches, cancellation, destination races, matching/mismatched existing remotes, traversal/symlinks/collisions, interrupted restart cleanup, and recovery after the Project-last commit boundary.
+- `cargo test --locked -p nac-core store::projects::tests -- --nocapture` — 3 passed, preserving ordinary Project behavior.
+- `cargo test --locked -p nac-server --lib managed_github -- --nocapture` — 2 passed.
+- `cargo test --locked -p nac-server --bin nac-web` — 23 passed.
+- `cargo test --locked -p nac-server openapi_document_matches_the_running_api_router -- --nocapture` — passed outside the workspace sandbox because its existing fixture reads user-level NAC configuration.
+- `cargo clippy --locked -p nac-core -p nac-server --lib -- -D warnings` — passed.
+- `cargo check --locked -p nac-core -p nac-server --all-features` — passed.
 
 Historical `progress.md` and `demo_review.md` remain evidence only and are not
 acceptance authority for these new contracts.
@@ -210,7 +228,7 @@ No product blocker has been found.
 
 ## Exact next action
 
-Commit the audited GitHub managed-auth slice with exact-path staging, then
-implement restart-reconciled operation-owned staging, destination reservations,
-safe branch clone and atomic publication, Project-last creation, progress and
-cancellation APIs, and local-bare-repository acceptance tests.
+Commit the audited repository-onboarding slice with exact-path staging, then
+implement the native Exa request-snapshot capability seam and first-party
+`web_search`/`web_fetch` operations from `tooling.md` without changing worker,
+traditional-child, or Exa-disabled topology.

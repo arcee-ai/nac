@@ -260,6 +260,7 @@ struct SessionManagerInner {
     store_path: PathBuf,
     worker_executable: PathBuf,
     managed_host: Option<nac_core::managed::ManagedHostConfig>,
+    managed_clones: Option<nac_core::managed_clone::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -1464,12 +1465,30 @@ impl SessionManager {
             .transpose()?
             .unwrap_or(std::env::current_exe().context("failed to resolve current executable")?);
 
+        let managed_clones = options
+            .managed_host
+            .as_ref()
+            .map(|managed| {
+                nac_core::managed_clone::ManagedCloneService::new(
+                    &managed.repository_root,
+                    &managed.state_root,
+                    &managed.home_root,
+                    &store_path,
+                    Some(
+                        managed
+                            .github_auth()
+                            .expect("validated managed GitHub configuration"),
+                    ),
+                )
+            })
+            .transpose()?;
         let manager = Self {
             inner: Arc::new(SessionManagerInner {
                 root_cwd,
                 store_path: store_path.clone(),
                 worker_executable,
                 managed_host: options.managed_host,
+                managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
 
                 lifecycle_gates: StdMutex::new(HashMap::new()),
@@ -4937,6 +4956,11 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         ))
         .routes(routes!(managed_github::repositories_handler))
         .routes(routes!(managed_github::branches_handler))
+        .routes(routes!(managed_github::start_clone_handler))
+        .routes(routes!(
+            managed_github::clone_operation_handler,
+            managed_github::cancel_clone_handler
+        ))
         .routes(routes!(
             managed_github::git_identity_handler,
             managed_github::update_git_identity_handler
@@ -7961,6 +7985,7 @@ mod tests {
         ("DELETE", "/auth/{provider}/login/{login_id}"),
         ("DELETE", "/credentials/{name}"),
         ("DELETE", "/managed/github"),
+        ("DELETE", "/managed/github/clone-operations/{operation_id}"),
         ("DELETE", "/managed/github/login/{login_id}"),
         ("DELETE", "/managed/secrets/{name}"),
         ("DELETE", "/mcp_library/servers/{server_name}"),
@@ -7981,6 +8006,7 @@ mod tests {
         ("GET", "/fs/browse"),
         ("GET", "/health"),
         ("GET", "/managed/github"),
+        ("GET", "/managed/github/clone-operations/{operation_id}"),
         ("GET", "/managed/github/git-identity"),
         ("GET", "/managed/github/login/{login_id}"),
         ("GET", "/managed/github/repositories"),
@@ -8035,6 +8061,7 @@ mod tests {
         ("POST", "/auth/{provider}/login"),
         ("POST", "/credentials"),
         ("POST", "/managed/github/login"),
+        ("POST", "/managed/github/clone-operations"),
         ("POST", "/mcp_library/servers"),
         ("POST", "/mcp_library/servers/test"),
         ("POST", "/model-configs"),
@@ -8119,6 +8146,7 @@ mod tests {
             .replace("{login_id}", "missing-login")
             .replace("{owner}", "arcee-ai")
             .replace("{repository}", "missing-repository")
+            .replace("{operation_id}", "0123456789abcdef0123456789abcdef")
             .replace("{name}", "MISSING_CREDENTIAL")
             .replace("{server_name}", "missing-server")
             .replace("{config_id}", "missing-config")
@@ -16883,7 +16911,14 @@ model = "gpt-5.2"
         let _env = ScopedModelEnv::isolated(&nac_home, None);
 
         let unmanaged = router(test_manager(&root));
-        let response = get_response(unmanaged, "/managed/github", None).await;
+        let response = get_response(unmanaged.clone(), "/managed/github", None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = get_response(
+            unmanaged,
+            "/managed/github/clone-operations/0123456789abcdef0123456789abcdef",
+            None,
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let manager = test_managed_manager(&root);
@@ -16895,6 +16930,20 @@ model = "gpt-5.2"
         assert!(body.contains("\"connected\":false"));
         assert!(!body.contains("access_token"));
         assert!(!body.contains("refresh_token"));
+        let invalid_operation = get_response(
+            app.clone(),
+            "/managed/github/clone-operations/not-an-operation",
+            None,
+        )
+        .await;
+        assert_eq!(invalid_operation.status(), StatusCode::BAD_REQUEST);
+        let missing_operation = get_response(
+            app.clone(),
+            "/managed/github/clone-operations/0123456789abcdef0123456789abcdef",
+            None,
+        )
+        .await;
+        assert_eq!(missing_operation.status(), StatusCode::NOT_FOUND);
 
         manager
             .managed_github_auth()

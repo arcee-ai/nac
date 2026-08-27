@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::Json;
+use nac_core::managed_clone::{ManagedCloneOperation, ManagedCloneRequest, ManagedCloneService};
 use nac_core::managed_github::{
     GitHubAuthError, GitHubAuthFailureKind, GitHubConnectionStatus, GitHubRepository,
     ManagedGitHubAuth,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{ApiError, SessionManager};
 
@@ -117,6 +118,17 @@ pub struct GitHubBranchListResponse {
     pub branches: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct StartManagedCloneRequest {
+    pub repository_id: u64,
+    pub repository: String,
+    pub branch: String,
+    #[schema(value_type = String)]
+    pub destination: PathBuf,
+    pub project_name: String,
+    pub project_description: Option<String>,
+}
+
 enum LoginOutcome {
     Pending,
     Complete(GitHubConnectionStatus),
@@ -190,6 +202,13 @@ impl ManagedGitHubLoginRegistry {
 }
 
 impl SessionManager {
+    fn managed_clone_service(&self) -> Result<ManagedCloneService, ApiError> {
+        self.inner.managed_clones.clone().ok_or_else(|| ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: "Managed NAC is not configured".to_string(),
+        })
+    }
+
     pub(crate) fn managed_github_auth(&self) -> Result<ManagedGitHubAuth, ApiError> {
         self.managed_host()
             .ok_or_else(|| ApiError {
@@ -198,6 +217,54 @@ impl SessionManager {
             })?
             .github_auth()
             .map_err(ApiError::from)
+    }
+
+    async fn start_managed_clone(
+        &self,
+        request: StartManagedCloneRequest,
+    ) -> Result<ManagedCloneOperation, ApiError> {
+        let auth = self.managed_github_auth()?;
+        let repository = auth
+            .repositories()
+            .await
+            .map_err(map_github_error)?
+            .into_iter()
+            .find(|candidate| {
+                candidate.id == request.repository_id
+                    && candidate
+                        .full_name
+                        .eq_ignore_ascii_case(&request.repository)
+            })
+            .ok_or_else(|| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: "selected repository is not available through Managed GitHub".to_string(),
+            })?;
+        let (owner, name) = repository
+            .full_name
+            .split_once('/')
+            .ok_or_else(|| ApiError {
+                status: StatusCode::BAD_GATEWAY,
+                message: "GitHub returned an invalid repository identity".to_string(),
+            })?;
+        let branches = auth.branches(owner, name).await.map_err(map_github_error)?;
+        if !branches.iter().any(|branch| branch == &request.branch) {
+            return Err(ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: "selected branch does not exist in the repository".to_string(),
+            });
+        }
+        self.managed_clone_service()?
+            .start(ManagedCloneRequest {
+                repository_id: repository.id,
+                repository: repository.full_name,
+                clone_url: repository.clone_url,
+                branch: request.branch,
+                destination: request.destination,
+                project_id: uuid::Uuid::new_v4().to_string(),
+                project_name: request.project_name,
+                project_description: request.project_description,
+            })
+            .map_err(map_clone_start_error)
     }
 
     async fn start_github_login(&self) -> Result<GitHubLoginStartedResponse, ApiError> {
@@ -432,6 +499,52 @@ pub(crate) fn map_github_error(error: anyhow::Error) -> ApiError {
     }
 }
 
+fn map_clone_start_error(error: anyhow::Error) -> ApiError {
+    let message = error.to_string();
+    if let Some(project_error) = error.downcast_ref::<nac_core::projects::ProjectStoreError>() {
+        let status = match project_error {
+            nac_core::projects::ProjectStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            nac_core::projects::ProjectStoreError::DuplicateLocation
+            | nac_core::projects::ProjectStoreError::Conflict(_) => StatusCode::CONFLICT,
+            nac_core::projects::ProjectStoreError::NotFound(_)
+            | nac_core::projects::ProjectStoreError::ModelConfigurationNotFound(_) => {
+                StatusCode::NOT_FOUND
+            }
+            nac_core::projects::ProjectStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        return ApiError { status, message };
+    }
+    let status = if message.contains("already reserves")
+        || message.contains("already exists")
+        || message.contains("collision")
+        || message.contains("does not contain the requested repository")
+        || message.contains("credential-bearing GitHub remote")
+        || message.contains("unsupported Git remote identity")
+    {
+        StatusCode::CONFLICT
+    } else if message.starts_with("managed repository")
+        || message.starts_with("invalid managed repository")
+        || message.starts_with("managed clone destination")
+        || message.starts_with("managed clone Project")
+        || message.starts_with("managed clone project")
+    {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    ApiError { status, message }
+}
+
+fn map_clone_operation_error(error: anyhow::Error) -> ApiError {
+    let message = error.to_string();
+    let status = if message == "invalid managed clone operation id" {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    ApiError { status, message }
+}
+
 #[utoipa::path(
     get,
     path = "/managed/github",
@@ -559,6 +672,87 @@ pub(crate) async fn branches_handler(
         .await
         .map_err(map_github_error)?;
     Ok(Json(GitHubBranchListResponse { branches }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/managed/github/clone-operations",
+    operation_id = "post_managed_github_clone_operation",
+    tag = "managed",
+    request_body(content = StartManagedCloneRequest, content_type = "application/json"),
+    responses((status = 202, body = ManagedCloneOperation), (status = 400, body = crate::ApiErrorBody), (status = 401, body = crate::ApiErrorBody), (status = 403, body = crate::ApiErrorBody), (status = 404, body = crate::ApiErrorBody), (status = 409, body = crate::ApiErrorBody), (status = 502, body = crate::ApiErrorBody))
+)]
+pub(crate) async fn start_clone_handler(
+    State(manager): State<SessionManager>,
+    Json(request): Json<StartManagedCloneRequest>,
+) -> Result<(StatusCode, Json<ManagedCloneOperation>), ApiError> {
+    let operation = manager.start_managed_clone(request).await?;
+    Ok((StatusCode::ACCEPTED, Json(operation)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/managed/github/clone-operations/{operation_id}",
+    operation_id = "get_managed_github_clone_operation",
+    tag = "managed",
+    params(("operation_id" = String, Path)),
+    responses((status = 200, body = ManagedCloneOperation), (status = 400, body = crate::ApiErrorBody), (status = 404, body = crate::ApiErrorBody))
+)]
+pub(crate) async fn clone_operation_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(operation_id): AxumPath<String>,
+) -> Result<Json<ManagedCloneOperation>, ApiError> {
+    manager
+        .managed_clone_service()?
+        .operation(&operation_id)
+        .map_err(map_clone_operation_error)?
+        .map(Json)
+        .ok_or_else(|| ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: format!("managed clone operation '{operation_id}' was not found"),
+        })
+}
+
+#[utoipa::path(
+    delete,
+    path = "/managed/github/clone-operations/{operation_id}",
+    operation_id = "delete_managed_github_clone_operation",
+    tag = "managed",
+    params(("operation_id" = String, Path)),
+    responses((status = 202, body = ManagedCloneOperation), (status = 400, body = crate::ApiErrorBody), (status = 404, body = crate::ApiErrorBody), (status = 409, body = crate::ApiErrorBody))
+)]
+pub(crate) async fn cancel_clone_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(operation_id): AxumPath<String>,
+) -> Result<(StatusCode, Json<ManagedCloneOperation>), ApiError> {
+    let service = manager.managed_clone_service()?;
+    let operation = service
+        .operation(&operation_id)
+        .map_err(map_clone_operation_error)?
+        .ok_or_else(|| ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: format!("managed clone operation '{operation_id}' was not found"),
+        })?;
+    if operation.status.is_terminal() {
+        return Err(ApiError {
+            status: StatusCode::CONFLICT,
+            message: "managed clone operation is already finished".to_string(),
+        });
+    }
+    if !service
+        .cancel(&operation_id)
+        .map_err(map_clone_operation_error)?
+    {
+        return Err(ApiError {
+            status: StatusCode::CONFLICT,
+            message: "managed clone operation is no longer running in this NAC process".to_string(),
+        });
+    }
+    let operation = service
+        .operation(&operation_id)
+        .map_err(map_clone_operation_error)?
+        .expect("managed clone operation disappeared after cancellation");
+    Ok((StatusCode::ACCEPTED, Json(operation)))
 }
 
 #[utoipa::path(
