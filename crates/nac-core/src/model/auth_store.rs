@@ -84,6 +84,67 @@ pub(crate) fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> 
         .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
 }
 
+/// Read a platform-mounted credential. Kubernetes Secret projections are
+/// commonly root-owned and group-readable through the pod fsGroup, so this
+/// accepts owner/group read bits while still rejecting symlinks, non-regular
+/// files, and any access for other users.
+pub(crate) fn read_managed_auth_string_from_path(path: &Path) -> Result<Option<String>> {
+    const MAX_MANAGED_CREDENTIAL_BYTES: u64 = 64 * 1024;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(anyhow!(
+                "refusing to read symlink credential path {}",
+                path.display()
+            ))
+        }
+        Ok(metadata) if metadata.file_type().is_file() => metadata,
+        Ok(_) => {
+            return Err(anyhow!(
+                "refusing to read non-regular credential path {}",
+                path.display()
+            ))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
+        }
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o007 != 0 {
+            return Err(anyhow!(
+                "refusing to read managed credential file {} accessible by other users",
+                path.display()
+            ));
+        }
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    let file = options
+        .open(path)
+        .with_context(|| format!("failed to open managed credential file {}", path.display()))?;
+    ensure_open_file_is_regular(&file, path, "managed credential file")?;
+    let mut raw = Vec::new();
+    file.take(MAX_MANAGED_CREDENTIAL_BYTES + 1)
+        .read_to_end(&mut raw)
+        .with_context(|| format!("failed to read managed credential file {}", path.display()))?;
+    if raw.len() as u64 > MAX_MANAGED_CREDENTIAL_BYTES {
+        return Err(anyhow!(
+            "managed credential file {} exceeds the size limit",
+            path.display()
+        ));
+    }
+    String::from_utf8(raw)
+        .map(Some)
+        .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
+}
+
 /// A managed credential file whose Unix mode permits group or other access.
 ///
 /// This is a caller-actionable safety/configuration failure rather than a

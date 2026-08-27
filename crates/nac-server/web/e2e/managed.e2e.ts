@@ -20,6 +20,12 @@ const hostStatus = (state: ManagedDoubleState) => ({
   public_hostname: "managed.example.test",
   repository_root: "/repositories",
   model_ready: true,
+  model: {
+    backend: "arcee-api",
+    id: "trinity-large-thinking",
+    endpoint: "https://api.arcee.ai/api/v1",
+    display_name: "Managed Arcee",
+  },
   github_status: state.connected ? "connected" : "disconnected",
   secret_count: state.secrets.length,
   project_count: 0,

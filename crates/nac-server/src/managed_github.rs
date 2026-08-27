@@ -821,6 +821,8 @@ mod tests {
             state_root: root.join("state"),
             home_root: root.join("home"),
             github_client_id: "Iv1.test".to_string(),
+            model_backend: nac_core::model::BackendKind::ArceeApi,
+            model_id: "trinity-large-thinking".to_string(),
             model_endpoint: "https://models.example.test/v1".to_string(),
             model_credential_file: root.join("model-token"),
             model_credential_environment_names: Vec::new(),

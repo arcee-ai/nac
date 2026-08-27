@@ -67,7 +67,7 @@ pub use backend::{
 pub(crate) use catalog::resolve as resolve_model_metadata;
 pub use catalog::{
     api_listing, provider_for_model, spawn_anthropic_model_refresh, spawn_arcee_model_refresh,
-    spawn_overlay_refresh, ModelListing,
+    spawn_overlay_refresh, AuthStatus, ModelListing,
 };
 pub(crate) use catalog::{Compat, CompletionsThinkingFormat, ModelMetadata, ThinkingLevelMap};
 pub use providers::{

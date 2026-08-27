@@ -148,6 +148,9 @@ pub struct EffectiveModelSettings {
     pub(crate) base_url: String,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) api_key_env: Option<String>,
+    /// Trusted operator-mounted credential source. The path is transported to
+    /// workers, while the credential value never enters their argv or env.
+    pub(crate) managed_api_key_file: Option<std::path::PathBuf>,
     pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
     /// Catalog metadata resolved at construction. Drives per-response cost,
     /// effort validation/translation, and api-axis dispatch.
@@ -268,9 +271,31 @@ impl EffectiveModelSettings {
             base_url,
             reasoning_effort,
             api_key_env,
+            managed_api_key_file: None,
             extra_headers,
             resolved,
         })
+    }
+
+    pub(crate) fn with_managed_api_key_file(
+        mut self,
+        path: Option<std::path::PathBuf>,
+    ) -> Result<Self> {
+        if path.is_some() {
+            if !super::provider_uses_api_key(self.backend) {
+                return Err(model_configuration_error(format!(
+                    "invalid model configuration: backend '{}' does not accept a managed API-key file",
+                    self.backend
+                )));
+            }
+            if self.api_key_env.is_some() {
+                return Err(model_configuration_error(
+                    "invalid model configuration: api_key_env and a managed API-key file are mutually exclusive",
+                ));
+            }
+        }
+        self.managed_api_key_file = path;
+        Ok(self)
     }
 
     pub fn from_optional(

@@ -59,6 +59,12 @@ export interface ManagedHostStatus {
   public_hostname: string;
   repository_root: string;
   model_ready: boolean;
+  model: {
+    backend: BackendKind;
+    id: string;
+    endpoint: string;
+    display_name: string;
+  };
   github_status: "connected" | "disconnected" | "reauth-required";
   secret_count: number;
   project_count: number;

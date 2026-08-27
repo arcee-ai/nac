@@ -13,8 +13,10 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::model::auth_store::{
-    read_auth_string_from_path, with_credential_lock, write_auth_string_to_path,
+    read_auth_string_from_path, read_managed_auth_string_from_path, with_credential_lock,
+    write_auth_string_to_path,
 };
+use crate::model::BackendKind;
 
 pub const MANAGED_CONFIG_VERSION: u32 = 1;
 const SECRET_STORE_VERSION: u32 = 1;
@@ -34,6 +36,8 @@ pub struct ManagedHostConfig {
     pub state_root: PathBuf,
     pub home_root: PathBuf,
     pub github_client_id: String,
+    pub model_backend: BackendKind,
+    pub model_id: String,
     pub model_endpoint: String,
     pub model_credential_file: PathBuf,
     #[serde(default)]
@@ -66,6 +70,7 @@ impl ManagedHostConfig {
         validate_nonblank("logical_host_id", &self.logical_host_id)?;
         validate_nonblank("public_hostname", &self.public_hostname)?;
         validate_nonblank("github_client_id", &self.github_client_id)?;
+        validate_nonblank("model_id", &self.model_id)?;
         validate_absolute_path("repository_root", &self.repository_root)?;
         validate_absolute_path("state_root", &self.state_root)?;
         validate_absolute_path("home_root", &self.home_root)?;
@@ -81,6 +86,12 @@ impl ManagedHostConfig {
             .map_err(|_| anyhow!("managed model_endpoint must be a valid HTTPS URL"))?;
         if endpoint.scheme() != "https" || endpoint.host_str().is_none() {
             bail!("managed model_endpoint must be a valid HTTPS URL");
+        }
+        if !crate::model::provider_uses_api_key(self.model_backend) {
+            bail!(
+                "managed model_backend '{}' must use an API-key credential",
+                self.model_backend
+            );
         }
         for name in &self.model_credential_environment_names {
             if !is_valid_environment_name(name) {
@@ -104,6 +115,22 @@ impl ManagedHostConfig {
             self.github_client_id.clone(),
         )
     }
+
+    /// Read the operator-mounted model credential without copying it into NAC
+    /// storage or exporting it to the process/command environment.
+    pub fn model_credential(&self) -> Result<String> {
+        read_model_credential_file(&self.model_credential_file)
+    }
+}
+
+pub(crate) fn read_model_credential_file(path: &Path) -> Result<String> {
+    let value = read_managed_auth_string_from_path(path)?
+        .ok_or_else(|| anyhow!("managed model credential file is unavailable"))?;
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        bail!("managed model credential file is empty or whitespace-only");
+    }
+    Ok(value)
 }
 
 fn validate_nonblank(field: &str, value: &str) -> Result<()> {
@@ -474,6 +501,8 @@ mod tests {
             state_root: root.join("state"),
             home_root: root.join("home"),
             github_client_id: "Iv1.example".to_string(),
+            model_backend: BackendKind::ArceeApi,
+            model_id: "trinity-large-thinking".to_string(),
             model_endpoint: "https://models.example.test/v1".to_string(),
             model_credential_file: root.join("model-token"),
             model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
@@ -492,7 +521,7 @@ mod tests {
         std::fs::write(
             &path,
             format!(
-                "version = 1\nlogical_host_id = \"host-123\"\nowner = \"owner@example.test\"\npublic_hostname = \"nac.example.test\"\nrepository_root = \"{0}/repositories\"\nstate_root = \"{0}/state\"\nhome_root = \"{0}/home\"\ngithub_client_id = \"Iv1.example\"\nmodel_endpoint = \"https://models.example.test/v1\"\nmodel_credential_file = \"{0}/model-token\"\nmodel_credential_environment_names = [\"ARCEE_API_KEY\"]\n",
+                "version = 1\nlogical_host_id = \"host-123\"\nowner = \"owner@example.test\"\npublic_hostname = \"nac.example.test\"\nrepository_root = \"{0}/repositories\"\nstate_root = \"{0}/state\"\nhome_root = \"{0}/home\"\ngithub_client_id = \"Iv1.example\"\nmodel_backend = \"arcee-api\"\nmodel_id = \"trinity-large-thinking\"\nmodel_endpoint = \"https://models.example.test/v1\"\nmodel_credential_file = \"{0}/model-token\"\nmodel_credential_environment_names = [\"ARCEE_API_KEY\"]\n",
                 root.0.display()
             ),
         )

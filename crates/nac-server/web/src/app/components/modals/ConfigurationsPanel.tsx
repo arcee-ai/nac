@@ -30,6 +30,7 @@ import { type CatalogPick, defaultCatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import { useManagedHost } from "@/app/providers/ManagedHostProvider";
 import { useToast } from "@/app/providers/ToastProvider";
 import {
   useDeleteModelConfig,
@@ -120,6 +121,7 @@ export function ConfigurationsPanel({
   children?: React.ReactNode;
 }) {
   const toast = useToast();
+  const managedHost = useManagedHost();
   const { data: saved } = useModelConfigs();
   const catalog = useModelCatalog();
   const deleteConfig = useDeleteModelConfig();
@@ -176,8 +178,17 @@ export function ConfigurationsPanel({
   // that opens — a single click. Derived, so the default settles once the catalog
   // arrives and disappears again the moment another source is chosen.
   const catalogDefault = useMemo(
-    () => (source.kind === "catalog" ? defaultCatalogPick(catalog.data) : null),
-    [source.kind, catalog.data],
+    () =>
+      source.kind !== "catalog"
+        ? null
+        : managedHost.status
+          ? {
+              backend: managedHost.status.model.backend,
+              model: managedHost.status.model.id,
+              baseUrl: managedHost.status.model.endpoint,
+            }
+          : defaultCatalogPick(catalog.data),
+    [source.kind, catalog.data, managedHost.status],
   );
   const catalogPick = pickedModel ?? catalogDefault;
 
@@ -217,16 +228,32 @@ export function ConfigurationsPanel({
   const { signedIn } = useManagedSignIn(backend);
 
   const catalogProvider = catalog.data?.providers.find((entry) => entry.id === backend) ?? null;
+  const managedCatalogProfile = Boolean(
+    source.kind === "catalog" &&
+    catalogPick &&
+    managedHost.status &&
+    catalogPick.backend === managedHost.status.model.backend &&
+    catalogPick.model === managedHost.status.model.id &&
+    catalogPick.baseUrl === managedHost.status.model.endpoint,
+  );
   /**
    * Whether the server can already authenticate as the picked provider. A
    * managed one answers from the live sign-in rather than the catalog snapshot,
    * which still reads `no_credential` for the seconds after a login lands.
    */
-  const catalogCredential = needsKey ? catalogProvider?.auth_status === "ready" : signedIn;
+  const catalogCredential = managedCatalogProfile
+    ? Boolean(managedHost.status?.model_ready)
+    : needsKey
+      ? catalogProvider?.auth_status === "ready"
+      : signedIn;
   // Only an API-key provider can be fixed from here; a managed one needs its
   // browser login, which the sign-in callout below the box owns.
   const catalogNeedsKey =
-    source.kind === "catalog" && Boolean(catalogPick) && needsKey && !catalogCredential;
+    source.kind === "catalog" &&
+    Boolean(catalogPick) &&
+    needsKey &&
+    !managedCatalogProfile &&
+    !catalogCredential;
 
   const validates = (source.kind === "new" && discovers) || catalogNeedsKey;
   const keyQuery = useProviderModels(backend, debouncedKey, null, validates);
@@ -326,6 +353,7 @@ export function ConfigurationsPanel({
 
     if (source.kind === "catalog") {
       if (!catalogPick || !catalogPick.baseUrl) return null;
+      if (managedCatalogProfile && !catalogCredential) return null;
       if (catalogCredential) {
         // The credential is already on the server, so nothing is saved and
         // `api_key_env` stays unset for session resolution to fill in with the
@@ -422,6 +450,7 @@ export function ConfigurationsPanel({
     preservesInitial,
     catalogPick,
     catalogCredential,
+    managedCatalogProfile,
     catalogProvider,
     name,
     apiKey,
@@ -602,7 +631,38 @@ export function ConfigurationsPanel({
                   {needsKey ? (
                     <>
                       <Separator />
-                      {catalogCredential ? (
+                      {managedCatalogProfile ? (
+                        <ConfigRow
+                          label="Credential"
+                          verticalOnMobile
+                          hint="This managed host supplies the credential securely; it is not stored in this configuration or exposed to commands."
+                          control={
+                            <div
+                              className={cn(
+                                "flex items-center gap-1.5 rounded-[4px] py-2 pl-2 pr-4",
+                                catalogCredential ? "bg-success-secondary" : "bg-error-tertiary",
+                              )}
+                            >
+                              <Icon
+                                iconName={
+                                  catalogCredential ? IconName.CheckCircle : IconName.Repair
+                                }
+                                className={
+                                  catalogCredential ? "text-success-primary" : "text-error-primary"
+                                }
+                              />
+                              <span
+                                className={cn(
+                                  "label-small",
+                                  catalogCredential ? "text-success-primary" : "text-error-primary",
+                                )}
+                              >
+                                {catalogCredential ? "Detected" : "Host needs attention"}
+                              </span>
+                            </div>
+                          }
+                        />
+                      ) : catalogCredential ? (
                         <ConfigRow
                           label="Credential"
                           verticalOnMobile

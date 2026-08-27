@@ -89,6 +89,7 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
         api_key_env: None,
+        managed_api_key_file: None,
         extra_headers: std::collections::BTreeMap::from([(
             "hOsT".to_string(),
             address.to_string(),

@@ -350,6 +350,9 @@ pub struct ModelOptions {
     pub api_base_url: Option<String>,
     pub api_model: Option<String>,
     pub api_key_env: OptionalModelOption<String>,
+    /// Trusted operator-mounted credential path. This is never populated from
+    /// CLI/HTTP user input.
+    pub managed_api_key_file: Option<PathBuf>,
     pub extra_headers: Option<BTreeMap<String, String>>,
     /// Optional light worker model; `Some` enables weight-classified
     /// dispatch for the session, `None` keeps single-model behavior.
@@ -763,7 +766,8 @@ pub fn effective_model_settings(
             .extra_headers
             .clone()
             .unwrap_or_else(|| config.model.extra_headers.clone()),
-    )
+    )?
+    .with_managed_api_key_file(model.managed_api_key_file.clone())
 }
 
 /// Resolve and normalize the persisted orchestrator compaction threshold for a
@@ -798,7 +802,8 @@ fn managed_worker_effective_model_settings(model: &ModelOptions) -> Result<Effec
         model.reasoning_effort.snapshot_value(),
         model.api_key_env.snapshot_value(),
         model.extra_headers.clone().unwrap_or_default(),
-    )
+    )?
+    .with_managed_api_key_file(model.managed_api_key_file.clone())
 }
 
 /// Parse the hidden worker header transport as a JSON object.
@@ -1336,6 +1341,7 @@ pub async fn build_resume_config(
         Some(&lease),
         true,
         None,
+        None,
     )
     .await?;
     record_interrupted_run_recovery(&mut run_config, recovery);
@@ -1348,6 +1354,7 @@ pub async fn build_resume_config_for_session(
     config: &NacConfig,
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
+    managed_api_key_file: Option<PathBuf>,
 ) -> Result<OrchestratorRunConfig> {
     let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
     lease.validate(&store_path, session_id)?;
@@ -1362,6 +1369,7 @@ pub async fn build_resume_config_for_session(
         Some(&lease),
         true,
         None,
+        managed_api_key_file,
     )
     .await?;
     record_interrupted_run_recovery(&mut run_config, recovery);
@@ -1374,6 +1382,7 @@ pub async fn build_resume_config_for_session_attachment(
     config: &NacConfig,
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
+    managed_api_key_file: Option<PathBuf>,
 ) -> Result<(
     OrchestratorRunConfig,
     bool,
@@ -1395,6 +1404,7 @@ pub async fn build_resume_config_for_session_attachment(
             None,
             true,
             Some(metadata),
+            managed_api_key_file.clone(),
         )
         .await?;
         return Ok((run_config, true, None));
@@ -1414,6 +1424,7 @@ pub async fn build_resume_config_for_session_attachment(
                 Some(&lease),
                 true,
                 None,
+                managed_api_key_file.clone(),
             )
             .await?;
             record_interrupted_run_recovery(&mut run_config, recovery);
@@ -1429,6 +1440,7 @@ pub async fn build_resume_config_for_session_attachment(
                 None,
                 false,
                 Some(metadata),
+                managed_api_key_file,
             )
             .await?;
             Ok((run_config, false, None))
@@ -1444,6 +1456,7 @@ pub async fn build_resume_config_for_session_with_lease(
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
+    managed_api_key_file: Option<PathBuf>,
 ) -> Result<OrchestratorRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
     let recovery = store::reconcile_active_run(&store_path, session_id)?;
@@ -1457,6 +1470,7 @@ pub async fn build_resume_config_for_session_with_lease(
         Some(operation_lease),
         true,
         None,
+        managed_api_key_file,
     )
     .await?;
     record_interrupted_run_recovery(&mut run_config, recovery);
@@ -1473,6 +1487,7 @@ async fn build_resume_config_from_snapshot(
     operation_lease: Option<&sessions::SessionOperationLease>,
     persist_recovery: bool,
     resolved_metadata: Option<ModelMetadata>,
+    managed_api_key_file: Option<PathBuf>,
 ) -> Result<OrchestratorRunConfig> {
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     let agent_mode = match snapshot.behavior {
@@ -1518,6 +1533,7 @@ async fn build_resume_config_from_snapshot(
         snapshot.extra_headers.clone(),
         metadata,
     )
+    .and_then(|settings| settings.with_managed_api_key_file(managed_api_key_file))
     .map_err(|error| {
         anyhow::anyhow!(
             "stored session model settings are invalid; settings repair required: {}",
@@ -2038,6 +2054,7 @@ mod tests {
             &NacConfig::default(),
             root.to_path_buf(),
             None,
+            None,
         )
         .await
         .unwrap()
@@ -2097,6 +2114,7 @@ mod tests {
             &session_id,
             &NacConfig::default(),
             root.clone(),
+            None,
             None,
         )
         .await
@@ -2270,6 +2288,7 @@ mod tests {
                 api_base_url: Some(" https://explicit.example/v1 ".to_string()),
                 api_model: Some(" explicit-model ".to_string()),
                 api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
+                managed_api_key_file: None,
                 extra_headers: Some(headers.clone()),
                 light_model: None,
             },
@@ -2613,6 +2632,7 @@ mod tests {
             &NacConfig::default(),
             picker.lookup_cwd,
             None,
+            None,
         )
         .await
         {
@@ -2684,6 +2704,7 @@ mod tests {
             "network-free-session",
             &NacConfig::default(),
             picker.lookup_cwd,
+            None,
             None,
         )
         .await
@@ -3306,6 +3327,7 @@ X-Config = "yes"
             None,
             true,
             None,
+            None,
         )
         .await
         {
@@ -3564,6 +3586,7 @@ X-Config = "yes"
             &NacConfig::default(),
             root.clone(),
             None,
+            None,
         )
         .await
         .is_err());
@@ -3581,6 +3604,7 @@ X-Config = "yes"
             root.clone(),
             None,
             &lease,
+            None,
         )
         .await
         .unwrap();
@@ -3626,6 +3650,7 @@ X-Config = "yes"
                     api_base_url: Some("https://snapshot.example/v1".to_string()),
                     api_model: Some("snapshot-model".to_string()),
                     api_key_env: OptionalModelOption::Value(key_name.to_string()),
+                    managed_api_key_file: None,
                     extra_headers: Some(headers.clone()),
                     light_model: None,
                 },
@@ -3927,6 +3952,7 @@ X-Config = "yes"
             None,
             true,
             None,
+            None,
         )
         .await
         {
@@ -3965,6 +3991,7 @@ X-Config = "yes"
             None,
             None,
             true,
+            None,
             None,
         )
         .await
@@ -4285,6 +4312,7 @@ X-Config = "yes"
             &session_id,
             &NacConfig::default(),
             resume_base_cwd,
+            None,
             None,
         )
         .await
