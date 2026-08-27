@@ -183,6 +183,8 @@ pub struct SessionSummary {
     pub total_cost_micros: Option<u64>,
     /// Number of runs ever started in this session.
     pub run_count: u64,
+    /// Present when this chat was forked from another session.
+    pub forked_from: Option<crate::store::SessionForkOrigin>,
 }
 
 #[derive(Debug)]

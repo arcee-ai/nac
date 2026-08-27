@@ -67,6 +67,12 @@ export interface RuntimeState {
   streamStatus: StreamStatus;
   events: RuntimeEvent[];
   threads: Record<string, RuntimeThread>;
+  /**
+   * Orchestrator tool-call ids that have already emitted `tool_call_finished`.
+   * Used by the transcript so a workset badge can leave the pending state
+   * before the DAG batch commits its tool messages.
+   */
+  finishedToolCalls: Record<string, true>;
   /** Prose the current model call has produced so far. */
   streamText: string;
   /** Reasoning the current model call has produced so far. */
@@ -129,6 +135,7 @@ export const runtimeStore = createStore<RuntimeState>(
     streamStatus: "idle",
     events: [],
     threads: {},
+    finishedToolCalls: {},
     streamText: "",
     streamReasoning: "",
     streamSettled: false,
@@ -157,6 +164,7 @@ export function resetRuntime(sessionId: string | null): void {
     streamStatus: sessionId ? "connecting" : "idle",
     events: [],
     threads: {},
+    finishedToolCalls: {},
     streamText: "",
     streamReasoning: "",
     streamSettled: false,
@@ -412,6 +420,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         // Only this run's live delta resets. Session spend lives on the
         // snapshot, including unattributed usage from cancelled or rewound turns.
         runUsage: null,
+        finishedToolCalls: {},
         runStartedAt: event.started_at_epoch_ms,
         lastElapsedMs: null,
         cancelArmed: false,
@@ -495,6 +504,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         streamText: "",
         streamReasoning: "",
         threads: {},
+        finishedToolCalls: {},
       });
       return "replace-snapshot";
     case "agent":
@@ -537,8 +547,17 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
         text: `${failed ? "✕" : "✓"} ${event.name}: ${event.content_preview}`,
         isError: failed,
       });
-      setState((state) => ({ workspaceEpoch: state.workspaceEpoch + 1 }));
-      return "none";
+      const orchestratorCall = !event.thread_name;
+      setState((state) => ({
+        workspaceEpoch: state.workspaceEpoch + 1,
+        ...(orchestratorCall
+          ? { finishedToolCalls: { ...state.finishedToolCalls, [event.call_id]: true as const } }
+          : {}),
+      }));
+      // Worksets land in SQLite as soon as `workset_define` returns, but the
+      // tool message waits for the rest of the DAG batch. Refetch so the
+      // panel and the badge see the saved plan without waiting on threads.
+      return event.name === "workset_define" ? "snapshot" : "none";
     }
     case "token_usage_updated":
       setState((state) => ({
@@ -690,6 +709,7 @@ export const useRunError = () => useStore((s) => s.error);
 export const useLiveEvents = () => useStore((s) => s.events);
 export const useStreamStatus = () => useStore((s) => s.streamStatus);
 export const useLiveThreads = () => useStore((s) => s.threads);
+export const useFinishedToolCalls = () => useStore((s) => s.finishedToolCalls);
 export const useRunUsage = () => useStore((s) => s.runUsage);
 export const useSessionSpend = () => useStore((s) => s.sessionSpend);
 export const useRunStartedAt = () => useStore((s) => s.runStartedAt);

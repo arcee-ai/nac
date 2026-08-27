@@ -73,6 +73,9 @@ pub struct SessionSummarySnapshot {
     /// Runs ever started in this session. Older stored snapshots default to 0.
     #[serde(default)]
     pub run_count: u64,
+    /// Present when this chat was forked from another session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<store::SessionForkOrigin>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -234,6 +237,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             total_tokens: summary.total_tokens,
             total_cost_micros: summary.total_cost_micros,
             run_count: summary.run_count,
+            forked_from: summary.forked_from,
         }
     }
 }

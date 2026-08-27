@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import {
   Fragment,
   useCallback,
@@ -17,9 +18,6 @@ import {
   ChatSessionMessageVariant,
   Icon,
   IconName,
-  MessageBox,
-  MessageBoxSize,
-  MessageBoxVariant,
   ShimmerLoader,
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
@@ -35,7 +33,7 @@ import { RevertModal } from "@/app/components/modals/RevertModal";
 import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
-import type { SessionPanel } from "@/app/lib/routes";
+import { routes, type SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { perfMark, perfRender, perfTime } from "@/app/lib/perfDebug";
 import {
@@ -46,6 +44,8 @@ import {
 } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
+  useDismissSessionFork,
+  useForkSession,
   useLoadOlderMessages,
   useRegenerateRun,
   useSubmitRun,
@@ -66,6 +66,7 @@ import {
   setOptimisticUserPrompt,
   useActivity,
   useCancelArmed,
+  useFinishedToolCalls,
   useLiveThreads,
   useOptimisticUserPrompt,
   useRunError,
@@ -93,15 +94,13 @@ interface TranscriptProps {
 export function TranscriptRecoveryNotice({ warning }: { warning?: string | null }) {
   if (!warning) return null;
   return (
-    <MessageBox
+    <ChatSessionMessage
       role="status"
-      variant={MessageBoxVariant.Info}
-      size={MessageBoxSize.Medium}
+      variant={ChatSessionMessageVariant.Info}
       title="Session recovered"
-      className="mb-4 w-fit max-w-full"
     >
       {warning}
-    </MessageBox>
+    </ChatSessionMessage>
   );
 }
 
@@ -143,6 +142,7 @@ export function Transcript({
   const activity = useActivity();
   const error = useRunError();
   const liveThreads = useLiveThreads();
+  const finishedToolCalls = useFinishedToolCalls();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const optimisticPrompt = useOptimisticUserPrompt();
@@ -151,6 +151,7 @@ export function Transcript({
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const toast = useToast();
+  const navigate = useNavigate();
   const backend = snapshot?.metadata.backend ?? null;
   const toNotice = useErrorNotice(sessionId, backend);
   // Read before the notice is built, since hook order cannot depend on whether
@@ -158,6 +159,8 @@ export function Transcript({
   const authErrorSuppressed = useAuthErrorSuppressed(backend, error);
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
+  const forkSession = useForkSession();
+  const dismissFork = useDismissSessionFork();
   const olderMessages = useLoadOlderMessages(sessionId);
   const { data: revisions } = useWorkspaceRevisions(sessionId);
   const latestRevisionId = revisions?.at(-1)?.id ?? 0;
@@ -205,8 +208,9 @@ export function Transcript({
   // untouched between refetches, and the stream half hands its earlier turns
   // straight back, which is what keeps the memoized rows from re-rendering.
   const snapshotTurns = useMemo(
-    () => perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads)),
-    [snapshot, liveThreads],
+    () =>
+      perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads, finishedToolCalls)),
+    [snapshot, liveThreads, finishedToolCalls],
   );
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
   // Send so the bubble is already above the model pill before the round-trip.
@@ -241,7 +245,8 @@ export function Transcript({
   });
 
   const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
-  const actionsBusy = running || stopping || submitRun.isPending || regenerateRun.isPending;
+  const actionsBusy =
+    running || stopping || submitRun.isPending || regenerateRun.isPending || forkSession.isPending;
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
     prompt: string;
@@ -274,6 +279,44 @@ export function Transcript({
       })();
     },
     [actionsBusy, backend, regenerate, sessionId, toast],
+  );
+
+  const fork = forkSession.mutateAsync;
+  const createFork = useCallback(
+    (messageIdx: number) => {
+      if (actionsBusy) return;
+      void (async () => {
+        try {
+          const response = await fork({ id: sessionId, messageIdx });
+          navigate(routes.session(response.session_id));
+        } catch (err) {
+          toast.error(`Failed to create fork: ${humanErrorText(toRunError(err), backend)}`);
+        }
+      })();
+    },
+    [actionsBusy, backend, fork, navigate, sessionId, toast],
+  );
+
+  const openFork = useCallback(
+    (forkId: string) => {
+      navigate(routes.session(forkId));
+    },
+    [navigate],
+  );
+
+  const removeForkMarker = dismissFork.mutate;
+  const dismissForkMarker = useCallback(
+    (forkId: string) => {
+      removeForkMarker(
+        { id: sessionId, forkId },
+        {
+          onError: (err) => {
+            toast.error(`Failed to dismiss fork: ${humanErrorText(toRunError(err), backend)}`);
+          },
+        },
+      );
+    },
+    [backend, removeForkMarker, sessionId, toast],
   );
 
   const openRevert = useCallback((messageIdx: number, prompt: string) => {
@@ -446,8 +489,6 @@ export function Transcript({
             </div>
           ) : null}
 
-          <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />
-
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
               if (turn.kind === "user") {
@@ -499,6 +540,12 @@ export function Transcript({
                       : null
                   }
                   onRevert={openRevert}
+                  onFork={createFork}
+                  forks={(snapshot?.forks ?? []).filter(
+                    (entry) => entry.source_message_idx === turn.messageIndex,
+                  )}
+                  onOpenFork={openFork}
+                  onDismissFork={dismissForkMarker}
                   snapshotRevision={
                     turn.messageIndex != null
                       ? (turnRevisions.get(turn.messageIndex) ?? null)
@@ -558,6 +605,8 @@ export function Transcript({
               {notice.description}
             </ChatSessionMessage>
           ) : null}
+
+          <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />
         </div>
       </div>
 

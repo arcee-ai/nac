@@ -79,6 +79,7 @@ export function ChatSessionList({
                   title={title}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
+                  forkedFromTitle={entry.summary.forked_from?.title}
                   isMobile={isMobile}
                   onClick={() => onOpen(entry)}
                   actions={
