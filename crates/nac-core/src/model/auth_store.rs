@@ -67,6 +67,10 @@ pub(crate) fn try_acquire_credential_lock(path: &Path) -> Result<Option<FileLock
     FileLock::try_acquire(path)
 }
 
+pub(crate) fn acquire_credential_lock(path: &Path) -> Result<FileLock> {
+    acquire_lock(path)
+}
+
 pub(super) fn read_arcee_auth_string() -> Result<Option<String>> {
     read_auth_string_from_path(&arcee_auth_file_path()?)
 }

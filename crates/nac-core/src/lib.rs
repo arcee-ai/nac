@@ -9,6 +9,7 @@ pub mod events;
 mod goals;
 pub mod light_model;
 pub mod managed;
+pub mod managed_clone;
 pub mod managed_github;
 mod mcp;
 pub mod model;
