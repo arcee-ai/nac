@@ -1,0 +1,12 @@
+.git
+.agents
+.codex
+target
+**/node_modules
+**/test-results
+**/playwright-report
+.DS_Store
+managed_progress.md
+progress.md
+demo_review.md
+manual_todo.md
