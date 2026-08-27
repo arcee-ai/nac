@@ -792,6 +792,14 @@ Rules:
   and all 14 kernel characterizations pass, warning-denied Clippy is green, and
   the tool composition root is 971 lines. The Git prompt loopback case required
   the authorized unsandboxed run.
+- Runtime-defined MCP tools now adapt into an immutable one-capability kernel
+  snapshot. Their dynamic schema is preserved, inputs are decoded before
+  policy, `mcp_call` targets participate in the same broker evaluation and
+  revalidation pipeline, and transport executes only after authorization.
+  Default permission behavior remains allow, preserving existing calls while
+  explicit rules can deny imported capabilities. A regression proves denial
+  occurs before the transport adapter; all 14 kernel characterizations and
+  warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -807,7 +815,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M5 native terminal-tool convergence with exact-path staging. Then
+Commit the M5 MCP prepared-invocation adapter with exact-path staging. Then
 separate capability/registry composition and common invocation routing from
-tool runtime/thread lifecycle ownership, and audit imported MCP invocation so
-dynamic tools traverse the explicit authorization boundary.
+tool runtime/thread lifecycle ownership, and decompose terminal process/
+retention ownership where the current manager still mixes responsibilities.
