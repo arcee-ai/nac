@@ -14,7 +14,9 @@ pub(crate) mod workspace;
 
 /// Application-level tri-state update semantics. Delivery adapters map their
 /// wire representation into this type before invoking a use case.
+#[derive(Default)]
 pub(crate) enum Field<T> {
+    #[default]
     Unchanged,
     Clear,
     Set(T),

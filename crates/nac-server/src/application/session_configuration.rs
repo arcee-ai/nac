@@ -1,15 +1,43 @@
+use std::collections::BTreeMap;
+
 use anyhow::{anyhow, Result};
 use nac_core::{
+    light_model::LightModelSettings,
     model::{validate_model_configuration, EffectiveModelSettings},
     runtime::NacConfig,
     sessions,
 };
 
 use crate::{
-    apply_raw_config_patch, config_replacement_conflict, enforce_trusted_base_url, light_model,
-    parse_prospective_model_config, request_configuration_error, request_configuration_error_from,
-    RequestField, SessionManager, UpdateConfigRequest,
+    application::Field, config_replacement_conflict, enforce_trusted_base_url, light_model,
+    nonblank_request_string, parse_prospective_model_config, request_configuration_error,
+    request_configuration_error_from, validated_compaction_threshold, SessionManager,
 };
+
+#[derive(Default)]
+pub(crate) struct SessionConfigPatch {
+    pub(crate) model: Field<String>,
+    pub(crate) base_url: Field<String>,
+    pub(crate) backend: Field<String>,
+    pub(crate) reasoning_effort: Field<String>,
+    pub(crate) api_key_env: Field<String>,
+    pub(crate) extra_headers: Field<BTreeMap<String, String>>,
+    pub(crate) orchestrator_compaction_threshold: Field<u64>,
+    pub(crate) light_model: Field<LightModelSettings>,
+}
+
+impl SessionConfigPatch {
+    fn is_empty(&self) -> bool {
+        matches!(self.model, Field::Unchanged)
+            && matches!(self.base_url, Field::Unchanged)
+            && matches!(self.backend, Field::Unchanged)
+            && matches!(self.reasoning_effort, Field::Unchanged)
+            && matches!(self.api_key_env, Field::Unchanged)
+            && matches!(self.extra_headers, Field::Unchanged)
+            && matches!(self.orchestrator_compaction_threshold, Field::Unchanged)
+            && matches!(self.light_model, Field::Unchanged)
+    }
+}
 
 /// Transactional session configuration updates.
 ///
@@ -30,7 +58,7 @@ impl<'a> SessionConfigurationApplication<'a> {
     pub async fn update_session_config(
         &self,
         session_id: &str,
-        mut request: UpdateConfigRequest,
+        mut request: SessionConfigPatch,
     ) -> Result<()> {
         let request_empty = request.is_empty();
         if request_empty {
@@ -41,9 +69,9 @@ impl<'a> SessionConfigurationApplication<'a> {
         }
         self.manager.require_primary_operation_session(session_id)?;
 
-        let backend_selected = matches!(&request.backend, RequestField::Value(_));
-        let base_url_omitted = matches!(&request.base_url, RequestField::Omitted);
-        let api_key_env_omitted = matches!(&request.api_key_env, RequestField::Omitted);
+        let backend_selected = matches!(&request.backend, Field::Set(_));
+        let base_url_omitted = matches!(&request.base_url, Field::Unchanged);
+        let api_key_env_omitted = matches!(&request.api_key_env, Field::Unchanged);
 
         // Submission and update both hold this per-session gate. A submission
         // that wins establishes active-run state synchronously before releasing
@@ -80,8 +108,8 @@ impl<'a> SessionConfigurationApplication<'a> {
         // The light model needs the credential destination policy, which the
         // plain field patch does not, so it is settled here instead.
         let light_field = std::mem::take(&mut request.light_model);
-        apply_raw_config_patch(&mut prospective, request)?;
-        if matches!(&light_field, RequestField::Omitted)
+        apply_patch(&mut prospective, request)?;
+        if matches!(&light_field, Field::Unchanged)
             && current.diagnostics.iter().any(|diagnostic| {
                 diagnostic.starts_with(sessions::MALFORMED_LIGHT_MODEL_DIAGNOSTIC)
             })
@@ -97,7 +125,7 @@ impl<'a> SessionConfigurationApplication<'a> {
             api_key_env_omitted,
         )?;
         match light_field {
-            RequestField::Omitted => {
+            Field::Unchanged => {
                 // A key-only patch still moves an inherited light selector
                 // along to the normalized primary selector, including a clear
                 // when the primary switches to managed auth.
@@ -110,8 +138,8 @@ impl<'a> SessionConfigurationApplication<'a> {
                     light_model::rotate_inherited_credential(light, inherited);
                 }
             }
-            RequestField::Null => prospective.light_model = None,
-            RequestField::Value(light) => {
+            Field::Clear => prospective.light_model = None,
+            Field::Set(light) => {
                 // A same-backend light model with no explicit selector
                 // inherits the session's primary one, following it when the
                 // primary selector changes.
@@ -167,4 +195,73 @@ impl<'a> SessionConfigurationApplication<'a> {
         active.remove(session_id);
         Ok(())
     }
+}
+
+fn apply_patch(config: &mut sessions::RawSessionConfig, request: SessionConfigPatch) -> Result<()> {
+    match request.model {
+        Field::Unchanged => {}
+        Field::Clear => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'model' cannot be null",
+            ));
+        }
+        Field::Set(value) => config.model = nonblank_request_string(value, "model")?,
+    }
+    match request.base_url {
+        Field::Unchanged => {}
+        Field::Clear => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'base_url' cannot be null",
+            ));
+        }
+        Field::Set(value) => config.base_url = nonblank_request_string(value, "base_url")?,
+    }
+    match request.backend {
+        Field::Unchanged => {}
+        Field::Clear => {
+            return Err(request_configuration_error(
+                "invalid model configuration: required field 'backend' cannot be null",
+            ));
+        }
+        Field::Set(value) => {
+            config.backend = Some(nonblank_request_string(value, "backend")?);
+        }
+    }
+    match request.reasoning_effort {
+        Field::Unchanged => {}
+        Field::Clear => config.reasoning_effort = None,
+        Field::Set(value) => {
+            config.reasoning_effort = Some(nonblank_request_string(value, "reasoning_effort")?);
+        }
+    }
+    match request.api_key_env {
+        Field::Unchanged => {}
+        Field::Clear => config.api_key_env = None,
+        Field::Set(value) => config.api_key_env = Some(value),
+    }
+    match request.extra_headers {
+        Field::Unchanged => {}
+        Field::Clear => config.extra_headers_json = None,
+        Field::Set(headers) => {
+            config.extra_headers_json = if headers.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(&headers).map_err(|error| {
+                    request_configuration_error(format!(
+                        "invalid model configuration: failed to serialize extra_headers: {error}"
+                    ))
+                })?)
+            };
+        }
+    }
+    match request.orchestrator_compaction_threshold {
+        Field::Unchanged => {}
+        Field::Clear => config.orchestrator_compaction_threshold = None,
+        Field::Set(threshold) => {
+            let threshold = validated_compaction_threshold(threshold)?;
+            config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
+        }
+    }
+    config.diagnostics.clear();
+    Ok(())
 }
