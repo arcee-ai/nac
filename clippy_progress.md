@@ -102,6 +102,9 @@ zero-backlog async guard last.
 - `significant_drop_in_scrutinee`: complete. All three mutex/RwLock-backed
   scrutinees now bind their owned result in a preceding statement or scope, so
   guards drop before cleanup, recovery, or cache-eviction work begins.
+- `trivially_copy_pass_by_ref`: complete. The sole zero-sized `Copy`
+  `SandboxBackendType` string projection now takes `self` by value; callers are
+  source-compatible and copy the enum implicitly.
 
 ## Verification and next action
 
@@ -142,5 +145,9 @@ The `significant_drop_in_scrutinee` slice passes `make format-check`,
 `make lint`, `git diff --check`, and the full Rust workspace suite (including
 1,157 core tests, nine ignored, after the new Unicode regression test).
 
-Next: commit this exact lint boundary, then add `trivially_copy_pass_by_ref`
-and run autofix before any manual repair.
+The `trivially_copy_pass_by_ref` slice passes `make format-check`, `make lint`,
+`git diff --check`, nine focused sandbox tests, and 29 focused persisted-session
+compatibility tests.
+
+Next: commit this exact lint boundary, then add `missing_assert_message` and run
+autofix before any manual repair.
