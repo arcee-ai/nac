@@ -43,18 +43,18 @@ fn parse_options() -> Result<Options> {
             "--input" => {
                 options.input = Some(PathBuf::from(
                     args.next().context("--input requires a file path")?,
-                ))
+                ));
             }
             "--output-dir" => {
                 options.output_dir = Some(PathBuf::from(
                     args.next().context("--output-dir requires a directory")?,
-                ))
+                ));
             }
             "--url" => options.url = Some(args.next().context("--url requires a URL")?),
             "--save-raw" => {
                 options.save_raw = Some(PathBuf::from(
                     args.next().context("--save-raw requires a file path")?,
-                ))
+                ));
             }
             "--help" | "-h" => {
                 println!("{}", env!("CARGO_PKG_DESCRIPTION"));

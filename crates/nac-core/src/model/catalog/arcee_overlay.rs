@@ -71,7 +71,7 @@ fn write_sidecar(path: &Path, sidecar: &ArceeOverlaySidecar) {
             }
         }
         Err(error) => {
-            eprintln!("nac: model catalog: failed to serialize arcee overlay sidecar: {error}")
+            eprintln!("nac: model catalog: failed to serialize arcee overlay sidecar: {error}");
         }
     }
 }

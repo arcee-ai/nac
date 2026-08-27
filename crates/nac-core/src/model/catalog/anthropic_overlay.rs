@@ -83,7 +83,7 @@ fn write_sidecar(path: &Path, sidecar: &AnthropicOverlaySidecar) {
             }
         }
         Err(error) => {
-            eprintln!("nac: model catalog: failed to serialize anthropic overlay sidecar: {error}")
+            eprintln!("nac: model catalog: failed to serialize anthropic overlay sidecar: {error}");
         }
     }
 }
